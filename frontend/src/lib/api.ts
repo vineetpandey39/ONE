@@ -49,7 +49,7 @@ export const getBase = (): string => {
   if (settingsUrl) return settingsUrl;
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
   if (isTauri()) return _tauriApiBase || DESKTOP_API_FALLBACK;
-  return '';
+  return DESKTOP_API_FALLBACK;
 };
 
 // Resolve the local server API key (OPENJARVIS_API_KEY). When `jarvis serve`
@@ -255,7 +255,10 @@ export async function checkHealth(): Promise<boolean> {
       return false;
     }
   };
+  const base = getBase();
+  if (base && await probe(`${base}/health`)) return true;
   if (await probe('/health')) return true;
+  if (base && await probe(`${base}/v1/connectors`)) return true;
   return probe('/v1/connectors');
 }
 
