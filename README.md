@@ -26,6 +26,10 @@ C:\Users\pc\Documents\Codex\2026-06-12\files-mentioned-by-the-user-postforge\wor
 
 Treat `work\one-local\data`, `work\one-local\one.env`, and the Obsidian vault as private runtime state, not GitHub source.
 
+Private runtime backups belong in a separate private repo such as `vineetpandey39/ONE-private`. The local helper `work\one-local\sync-one-private.ps1` copies runtime memory and vault files while blocking raw secret files.
+
 ## Cloud note
 
-The full ONE core depends on local services such as Ollama, native speech, local memory, and long-running workers. Vercel can host a frontend or control surface, but the full autonomous core should run locally or on a persistent server/VPS.
+The full ONE core depends on local services such as Ollama, native speech, local memory, and long-running workers. Vercel hosts the frontend/control surface from `frontend/`; the full autonomous core should run locally or on a persistent server/VPS.
+
+`vercel.json` forces Vercel to build the Vite frontend instead of trying to deploy the Python backend from `pyproject.toml`.
