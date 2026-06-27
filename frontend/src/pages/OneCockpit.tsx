@@ -399,16 +399,14 @@ export function OneCockpit() {
     } catch {
       // Browser capture remains available when native capture is unavailable.
     }
-    // Native capture bypasses Chrome permission problems and already exposes
-    // the physical microphones. Avoid showing browser aliases for them twice.
-    const devices = nativeDevices.length ? nativeDevices : browserDevices;
+    // Keep browser capture as the default path. Native capture is useful as a
+    // fallback, but on some Windows audio stacks PortAudio/WASAPI can fail even
+    // when Chrome can record the same microphone correctly.
+    const devices = [...browserDevices, ...nativeDevices];
     setAudioDevices(devices);
     if (selectedDeviceId && !devices.some((device) => device.deviceId === selectedDeviceId)) {
-      setSelectedDeviceId(nativeDefault);
-      if (nativeDefault) window.localStorage.setItem('one-microphone', nativeDefault);
-    } else if (!selectedDeviceId && nativeDefault) {
-      setSelectedDeviceId(nativeDefault);
-      window.localStorage.setItem('one-microphone', nativeDefault);
+      setSelectedDeviceId('');
+      window.localStorage.removeItem('one-microphone');
     }
   }, [selectedDeviceId]);
 
