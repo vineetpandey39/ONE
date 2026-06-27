@@ -31,6 +31,7 @@ import {
   XCircle,
   type LucideIcon,
 } from 'lucide-react';
+import { getBase } from '../lib/api';
 import './one-cockpit.css';
 
 type Agent = { id: string; name: string; role: string };
@@ -132,6 +133,22 @@ type Line = { role: 'one' | 'user'; text: string };
 type AudioDevice = { deviceId: string; label: string };
 type WakeEvent = { id: number; created_at: string; transcript: string; recognized: number; summary: string };
 
+const coreUrl = (path: string) => `${getBase()}${path}`;
+const coreFetch = (path: string, init?: RequestInit) => fetch(coreUrl(path), init);
+
+function normalizeSpeechText(text: string) {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function isClearOneCommand(text: string) {
+  const normalized = normalizeSpeechText(text);
+  if (!normalized) return false;
+  if (/\b(wake up one|hey one|hi one|hello one|one|jarvis)\b/.test(normalized)) return true;
+  if (/\b(run|activate|start|open|search|scan|find|show|summarize|tell|stop|pause)\b/.test(normalized)
+    && /\b(titan|alfa|alpha|athena|obsidian|memory|agent|lead|postforge)\b/.test(normalized)) return true;
+  return false;
+}
+
 const DEFAULT_STATUS: OneStatus = {
   online: false,
   model: 'qwen3.5:2b',
@@ -172,6 +189,8 @@ export function OneCockpit() {
   const voiceLockedRef = useRef(false);
   const speechQueueRef = useRef<string[]>([]);
   const speechActiveRef = useRef(false);
+  const spokenEchoRef = useRef<string[]>([]);
+  const lastSpeechEndedAtRef = useRef(0);
   const [speaking, setSpeaking] = useState(false);
   // Default view is the orb alone, full screen. Everything else (memory
   // graph, agent roster, live transcript, job/lead results) lives in an
@@ -247,7 +266,7 @@ export function OneCockpit() {
 
   const refreshAlfaOpportunities = useCallback(async () => {
     try {
-      const response = await fetch('/v1/alfa/pipeline?limit=50', { cache: 'no-store' });
+      const response = await coreFetch('/v1/alfa/pipeline?limit=50', { cache: 'no-store' });
       if (!response.ok) throw new Error('offline');
       const data = await response.json();
       setAlfaOpportunities(data.opportunities || []);
@@ -268,7 +287,7 @@ export function OneCockpit() {
     setAlfaActionUrl(url);
     setAlfaMessage('');
     try {
-      const response = await fetch('/v1/alfa/approve', {
+      const response = await coreFetch('/v1/alfa/approve', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
       });
       const payload = await response.json();
@@ -288,7 +307,7 @@ export function OneCockpit() {
     setAlfaActionUrl(url);
     setAlfaMessage('');
     try {
-      const response = await fetch('/v1/alfa/dismiss', {
+      const response = await coreFetch('/v1/alfa/dismiss', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
       });
       if (!response.ok) {
@@ -317,7 +336,7 @@ export function OneCockpit() {
     setAlfaActionUrl(String(body.url || ''));
     setAlfaMessage('');
     try {
-      const response = await fetch(`/v1/alfa/${path}`, {
+      const response = await coreFetch(`/v1/alfa/${path}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const payload = await response.json();
@@ -335,7 +354,7 @@ export function OneCockpit() {
 
   const refreshStatus = useCallback(async () => {
     try {
-      const response = await fetch('/v1/one/status', { cache: 'no-store' });
+      const response = await coreFetch('/v1/one/status', { cache: 'no-store' });
       if (!response.ok) throw new Error('offline');
       const data = await response.json();
       setStatus(data);
@@ -347,7 +366,7 @@ export function OneCockpit() {
 
   const refreshMemoryGraph = useCallback(async () => {
     try {
-      const response = await fetch('/v1/one/memory-graph?limit=95', { cache: 'no-store' });
+      const response = await coreFetch('/v1/one/memory-graph?limit=95', { cache: 'no-store' });
       if (!response.ok) throw new Error('offline');
       const data = await response.json();
       setMemoryGraph({
@@ -389,7 +408,7 @@ export function OneCockpit() {
     let nativeDevices: AudioDevice[] = [];
     let nativeDefault = '';
     try {
-      const response = await fetch('/v1/speech/devices', { cache: 'no-store' });
+      const response = await coreFetch('/v1/speech/devices', { cache: 'no-store' });
       const payload = await response.json();
       nativeDevices = (payload.devices || []).map((device: { index: number; name: string; host_api?: string }) => ({
         deviceId: `native:${device.index}`,
@@ -452,7 +471,10 @@ export function OneCockpit() {
     utterance.onstart = () => setSpeaking(true);
     const finish = () => {
       speechActiveRef.current = false;
-      if (!speechQueueRef.current.length) setSpeaking(false);
+      if (!speechQueueRef.current.length) {
+        lastSpeechEndedAtRef.current = Date.now();
+        setSpeaking(false);
+      }
       window.setTimeout(playNextSpeech, 35);
     };
     utterance.onend = finish;
@@ -488,6 +510,11 @@ export function OneCockpit() {
       .trim()
       .slice(0, 900);
     if (!cleanText) return;
+    spokenEchoRef.current = [
+      normalizeSpeechText(cleanText),
+      ...spokenEchoRef.current,
+    ].filter(Boolean).slice(0, 8);
+    setSpeaking(true);
     if (interrupt) {
       window.speechSynthesis.cancel();
       speechQueueRef.current = [];
@@ -501,7 +528,7 @@ export function OneCockpit() {
     let cancelled = false;
     const pollWakeEvents = async () => {
       try {
-        const response = await fetch('/v1/one/wake-events?limit=3', { cache: 'no-store' });
+        const response = await coreFetch('/v1/one/wake-events?limit=3', { cache: 'no-store' });
         const payload = await response.json();
         const events = (payload.events || []) as WakeEvent[];
         const latest = events[0];
@@ -538,7 +565,7 @@ export function OneCockpit() {
     setBusy(true);
     setLines((current) => [...current.slice(-6), { role: 'user', text }, { role: 'one', text: '' }]);
     try {
-      const response = await fetch('/v1/chat/completions', {
+      const response = await coreFetch('/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -613,7 +640,7 @@ export function OneCockpit() {
         return next;
       });
       if (status.obsidian.connected) {
-        void fetch('/v1/one/memory', {
+        void coreFetch('/v1/one/memory', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ command: text, response: reply }),
         }).then((memoryResponse) => memoryResponse.json()).then((memory) => {
@@ -643,11 +670,12 @@ export function OneCockpit() {
     try {
       const form = new FormData();
       form.append('file', blob, 'one-command.webm');
-      const response = await fetch('/v1/speech/transcribe', { method: 'POST', body: form });
+      const response = await coreFetch('/v1/speech/transcribe', { method: 'POST', body: form });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || 'Local speech recognition is unavailable');
       const text = String(payload.text || '').trim();
       if (!text) throw new Error('I could not hear a clear command.');
+      if (!isClearOneCommand(text)) throw new Error('Wake me with "ONE" or give a clear agent command.');
       setCommand(text);
       await sendCommand(text.replace(/^\s*(hey\s+)?one[,:]?\s*/i, ''));
     } catch (error) {
@@ -666,7 +694,7 @@ export function OneCockpit() {
     setMicLevel(55);
     try {
       const selected = selectedDeviceId.startsWith('native:') ? Number(selectedDeviceId.split(':')[1]) : undefined;
-      const response = await fetch('/v1/speech/native-record', {
+      const response = await coreFetch('/v1/speech/native-record', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ device: deviceOverride ?? selected, duration: silent ? 4 : 5 }),
@@ -684,6 +712,13 @@ export function OneCockpit() {
           ? 'ONE received almost silent audio. Select the WASAPI microphone and speak closer to it.'
           : 'ONE heard sound but not clear speech. Speak after the listening light turns on.');
       }
+      const normalized = normalizeSpeechText(text);
+      const soundsLikeEcho = spokenEchoRef.current.some((spoken) => (
+        spoken.length > 18
+        && (spoken.includes(normalized) || normalized.includes(spoken.slice(0, 90)))
+      ));
+      if (silent && (soundsLikeEcho || !isClearOneCommand(text))) return;
+      if (!silent && soundsLikeEcho) throw new Error('ONE heard its own voice. Try again after it finishes speaking.');
       setCommand(text);
       await sendCommand(text.replace(/^\s*(hey\s+)?one[,:]?\s*/i, ''));
     } catch (error) {
@@ -794,7 +829,10 @@ export function OneCockpit() {
   // the user explicitly turns it off again.
   async function runListenLoop() {
     while (alwaysListeningRef.current) {
-      while (alwaysListeningRef.current && (speakingRef.current || busyRef.current)) {
+      while (
+        alwaysListeningRef.current
+        && (speakingRef.current || busyRef.current || Date.now() - lastSpeechEndedAtRef.current < 1500)
+      ) {
         await new Promise((resolve) => window.setTimeout(resolve, 250));
       }
       if (!alwaysListeningRef.current) break;
@@ -830,7 +868,7 @@ export function OneCockpit() {
   async function connectObsidian() {
     setMemoryMessage('Connecting...');
     try {
-      const response = await fetch('/v1/one/obsidian', {
+      const response = await coreFetch('/v1/one/obsidian', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: vaultPath }),
