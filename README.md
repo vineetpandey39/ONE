@@ -15,12 +15,16 @@ C:\Users\pc\Documents\Codex\2026-06-12\files-mentioned-by-the-user-postforge\wor
 Primary source repo path:
 
 ```text
-C:\Users\pc\Documents\Codex\2026-06-12\files-mentioned-by-the-user-postforge\work\one-local\src
+C:\Users\pc\Documents\Codex\2026-06-12\files-mentioned-by-the-user-postforge\work\ONE
 ```
 
 ## Safe sync
 
 `scripts/one_git_autosync.ps1` only runs when `origin` is `vineetpandey39/ONE`. It blocks `.env`, runtime data, databases, logs, generated audio/video, virtual environments, and node modules.
+
+`work\one-local\start-one.ps1` also runs a guarded clean-repo sync on startup, so source changes in `work\ONE` are pushed before ONE comes online.
+
+Treat `work\one-local\data`, `work\one-local\one.env`, and the Obsidian vault as private runtime state, not GitHub source.
 
 ## Cloud note
 
