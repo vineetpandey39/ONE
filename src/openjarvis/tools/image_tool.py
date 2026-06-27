@@ -1,0 +1,222 @@
+"""Image generation tool — generate images via OpenAI gpt-image-1."""
+
+from __future__ import annotations
+
+import base64
+import os
+from typing import Any
+
+from openjarvis.core.registry import ToolRegistry
+from openjarvis.core.types import ToolResult
+from openjarvis.tools._stubs import BaseTool, ToolSpec
+
+# gpt-image-1 (the only model this tool calls) only accepts these sizes.
+# dall-e-3's "1024x1792"/"1792x1024" portrait/landscape sizes are NOT valid
+# for gpt-image-1 — its equivalents are "1024x1536"/"1536x1024". We accept
+# the old dall-e-3 size strings too and remap them below, so callers built
+# against the previous dall-e-3-based tool keep working unchanged.
+_VALID_SIZES = {"1024x1024", "1024x1792", "1792x1024", "1024x1536", "1536x1024", "auto"}
+
+# dall-e-3 size -> gpt-image-1 equivalent size.
+_SIZE_REMAP = {
+    "1024x1792": "1024x1536",
+    "1792x1024": "1536x1024",
+}
+
+
+@ToolRegistry.register("image_generate")
+class ImageGenerateTool(BaseTool):
+    """Generate images from text descriptions via OpenAI DALL-E."""
+
+    tool_id = "image_generate"
+    is_local = False
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="image_generate",
+            description=(
+                "Generate an image from a text description. Returns the image URL."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "Text description of the image to generate.",
+                    },
+                    "size": {
+                        "type": "string",
+                        "description": (
+                            "Image size: '1024x1024' (square), '1024x1792'"
+                            " (9:16 portrait, for Reels/Shorts), or '1792x1024'"
+                            " (16:9 landscape). Default '1024x1024'."
+                        ),
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Optional file path to save the image to.",
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Image generation provider. Default 'openai'.",
+                    },
+                    "reference_image_path": {
+                        "type": "string",
+                        "description": (
+                            "Optional path to an existing image to edit instead of"
+                            " generating from scratch. When set, this calls the"
+                            " image-edit API with that image as the base, so the"
+                            " camera framing/composition is preserved exactly --"
+                            " use this to keep a sequence of frames visually"
+                            " locked to the same shot."
+                        ),
+                    },
+                },
+                "required": ["prompt"],
+            },
+            category="media",
+            required_capabilities=["network:fetch"],
+            # gpt-image-2 at quality="high" and portrait sizes can sometimes
+            # take a very long time to respond -- 240s and even 300s have
+            # both been observed to time out in production despite being
+            # well above the typical case. Per the user's explicit call:
+            # don't fight this with ever-bigger-but-still-finite numbers --
+            # give it effectively the whole run's budget (30 minutes) so a
+            # slow ChatGPT response never kills the pipeline. The
+            # pipeline-level retry in punarnirman.py still applies on top
+            # of this for genuine errors (not just slowness).
+            timeout_seconds=1800.0,
+        )
+
+    def execute(self, **params: Any) -> ToolResult:
+        prompt = params.get("prompt", "")
+        if not prompt:
+            return ToolResult(
+                tool_name="image_generate",
+                content="No prompt provided.",
+                success=False,
+            )
+
+        size = params.get("size", "1024x1024")
+        if size not in _VALID_SIZES:
+            return ToolResult(
+                tool_name="image_generate",
+                content=(
+                    f"Invalid size '{size}'."
+                    f" Must be one of: {', '.join(sorted(_VALID_SIZES))}."
+                ),
+                success=False,
+            )
+
+        provider = params.get("provider", "openai")
+        output_path = params.get("output_path")
+        reference_image_path = params.get("reference_image_path")
+
+        if provider != "openai":
+            return ToolResult(
+                tool_name="image_generate",
+                content=(
+                    f"Unsupported provider '{provider}'. Only 'openai' is supported."
+                ),
+                success=False,
+            )
+
+        try:
+            import openai
+        except ImportError:
+            return ToolResult(
+                tool_name="image_generate",
+                content=(
+                    "openai package not installed. Install with: pip install openai"
+                ),
+                success=False,
+            )
+
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            return ToolResult(
+                tool_name="image_generate",
+                content="No API key configured. Set OPENAI_API_KEY.",
+                success=False,
+            )
+
+        api_size = _SIZE_REMAP.get(size, size)
+
+        if reference_image_path:
+            from pathlib import Path as _Path
+
+            ref_path = _Path(reference_image_path)
+            if not ref_path.is_file():
+                return ToolResult(
+                    tool_name="image_generate",
+                    content=f"Reference image not found: {reference_image_path}",
+                    success=False,
+                )
+
+        try:
+            client = openai.OpenAI()
+            if reference_image_path:
+                # Edit mode: condition on an existing image so the camera
+                # framing/composition is preserved exactly across a
+                # sequence of frames, instead of each frame being an
+                # independent (and differently-framed) generation.
+                with open(reference_image_path, "rb") as ref_file:
+                    response = client.images.edit(
+                        model="gpt-image-2",
+                        image=ref_file,
+                        prompt=prompt,
+                        size=api_size,
+                        quality="high",
+                        n=1,
+                    )
+            else:
+                response = client.images.generate(
+                    model="gpt-image-2",
+                    prompt=prompt,
+                    size=api_size,
+                    quality="high",
+                    n=1,
+                )
+            b64_data = response.data[0].b64_json
+        except Exception as exc:
+            return ToolResult(
+                tool_name="image_generate",
+                content=f"Image generation error: {exc}",
+                success=False,
+            )
+
+        image_bytes = base64.b64decode(b64_data)
+
+        # Optionally save to file
+        if output_path:
+            try:
+                from pathlib import Path
+
+                Path(output_path).write_bytes(image_bytes)
+            except Exception as exc:
+                return ToolResult(
+                    tool_name="image_generate",
+                    content=f"Image generated but failed to save: {exc}.",
+                    success=False,
+                    metadata={"size": size, "provider": provider},
+                )
+            return ToolResult(
+                tool_name="image_generate",
+                content=output_path,
+                success=True,
+                metadata={"path": output_path, "size": size, "provider": provider},
+            )
+
+        # No output_path requested: return the raw bytes as a data URL so
+        # callers that expect a usable image reference still get one.
+        data_url = f"data:image/png;base64,{b64_data}"
+        return ToolResult(
+            tool_name="image_generate",
+            content=data_url,
+            success=True,
+            metadata={"size": size, "provider": provider},
+        )
+
+
+__all__ = ["ImageGenerateTool"]
