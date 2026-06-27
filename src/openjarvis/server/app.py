@@ -7,7 +7,7 @@ import pathlib
 import time
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -33,6 +33,29 @@ class _PrivateNetworkAccessMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request, call_next):
+        origin = request.headers.get("origin", "")
+        is_allowed_origin = (
+            origin.startswith("http://localhost:")
+            or origin.startswith("http://127.0.0.1:")
+            or origin.endswith(".vercel.app")
+        )
+        if request.method == "OPTIONS" and is_allowed_origin:
+            requested_headers = request.headers.get(
+                "access-control-request-headers",
+                "*",
+            )
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": origin,
+                    "Access-Control-Allow-Credentials": "true",
+                    "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+                    "Access-Control-Allow-Headers": requested_headers,
+                    "Access-Control-Allow-Private-Network": "true",
+                    "Access-Control-Max-Age": "600",
+                    "Vary": "Origin",
+                },
+            )
         response = await call_next(request)
         response.headers["Access-Control-Allow-Private-Network"] = "true"
         return response
