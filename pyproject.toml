@@ -3,18 +3,18 @@ requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
-name = "OpenJarvis"
+name = "one-jarvis"
 dynamic = ["version"]
-description = "OpenJarvis — modular AI assistant backend with composable intelligence primitives"
+description = "ONE - Vineet Pandey's local-first JARVIS command core"
 readme = "README.md"
 # Upper bound: numpy 2.2.x (pinned transitively via datasets/pandas) ships no
 # cp314 Windows wheel, so under Python 3.14 uv would compile numpy from source
 # (Meson) and fail on Windows boxes without a C toolchain (#350). Cap to the
-# range that has prebuilt wheels; matches the classifiers (3.10–3.13).
+# range that has prebuilt wheels; matches the classifiers (3.10-3.13).
 requires-python = ">=3.10,<3.14"
 license = {text = "Apache-2.0"}
 authors = [
-    {name = "Open Jarvis Contributors"},
+    {name = "Vineet Pandey"},
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -146,12 +146,12 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/open-jarvis/OpenJarvis"
-Documentation = "https://open-jarvis.github.io/OpenJarvis/"
-Repository = "https://github.com/open-jarvis/OpenJarvis"
-Issues = "https://github.com/open-jarvis/OpenJarvis/issues"
+Homepage = "https://github.com/vineetpandey39/ONE"
+Repository = "https://github.com/vineetpandey39/ONE"
+Issues = "https://github.com/vineetpandey39/ONE/issues"
 
 [project.scripts]
+one = "openjarvis.cli:main"
 jarvis = "openjarvis.cli:main"
 openjarvis-eval = "openjarvis.evals.cli:main"
 
@@ -216,7 +216,7 @@ select = ["E", "F", "I", "W"]
 "src/openjarvis/evals/datasets/*.py" = ["E501"]
 "src/openjarvis/evals/scorers/*.py" = ["E501"]
 # hybrid/ is research code with long prompt strings and paradigm-specific
-# config dicts — same relaxation as evals research code above. The ``**`` glob
+# config dicts - same relaxation as evals research code above. The ``**`` glob
 # also covers subpackages (e.g. hybrid/skillorchestra/), which the prior
 # ``hybrid/*.py`` glob missed.
 "src/openjarvis/agents/hybrid/**/*.py" = ["E501"]
