@@ -2,7 +2,7 @@
   "version": 2,
   "framework": "vite",
   "installCommand": "cd frontend && npm ci",
-  "buildCommand": "cd frontend && npm run build",
+  "buildCommand": "cd frontend && npx tsc -b && npx vite build --outDir dist",
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
