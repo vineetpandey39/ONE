@@ -9,6 +9,7 @@ import time
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from openjarvis.server.analytics_routes import router as analytics_router
 from openjarvis.server.api_routes import include_all_routes
@@ -21,6 +22,20 @@ from openjarvis.server.routes import router
 from openjarvis.server.upload_router import router as upload_router
 
 logger = logging.getLogger(__name__)
+
+
+class _PrivateNetworkAccessMiddleware(BaseHTTPMiddleware):
+    """Allow the hosted ONE shell to call the local core on 127.0.0.1.
+
+    Chrome's Private Network Access preflight requires this header when an
+    HTTPS public origin reaches a private/local address. Without it the core is
+    healthy, but the browser reports it as unreachable.
+    """
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+        return response
 
 
 def _restore_sendblue_bindings(app: FastAPI) -> None:
@@ -234,6 +249,7 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(_PrivateNetworkAccessMiddleware)
 
     # Store dependencies in app state
     app.state.engine = engine
