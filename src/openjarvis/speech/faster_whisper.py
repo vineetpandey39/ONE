@@ -22,6 +22,15 @@ _ONE_VOCABULARY_PROMPT = (
     "spoken in English, Hindi, or Hinglish."
 )
 
+# Short proper nouns are the words most likely to get mis-heard. `hotwords`
+# biases recognition toward these without changing decoding behavior the way
+# `initial_prompt` does, so it is additive on top of the prompt above rather
+# than a replacement for it.
+_ONE_HOTWORDS = (
+    "ONE, JARVIS, Vineet, ALFA, BETA, TITAN, HERMES, ARES, APOLLO, ATHENA, "
+    "HEPHAISTOS, POSEIDON, ZEUS, JOBHUNT, status, Obsidian, PostForge"
+)
+
 
 @SpeechRegistry.register("faster-whisper")
 class FasterWhisperBackend(SpeechBackend):
@@ -83,6 +92,7 @@ class FasterWhisperBackend(SpeechBackend):
             "condition_on_previous_text": False,
             "word_timestamps": False,
             "initial_prompt": _ONE_VOCABULARY_PROMPT,
+            "hotwords": _ONE_HOTWORDS,
             "vad_filter": True,
             "vad_parameters": {
                 "min_silence_duration_ms": 300,

@@ -155,11 +155,48 @@ def _preferred_device(sd) -> int | None:
         return None
 
 
+def _load_wake_whisper_model():
+    """Load ONE's speech-to-text model, preferring the GPU if available.
+
+    Defaults to ``large-v3-turbo`` on CUDA/float16 — multilingual (keeps
+    Hindi/Hinglish support, unlike the English-only distil-whisper
+    checkpoints) and the closest faster-whisper currently ships to "best in
+    market" while still running comfortably on a single consumer GPU. If
+    CUDA/cuDNN aren't actually usable on this machine, loading raises here
+    rather than mid-listen, so we catch it and fall back to the original
+    CPU/base/int8 setup — the wake listener keeps working either way.
+    All three knobs are env-overridable without a code change.
+    """
+    from openjarvis.speech.faster_whisper import FasterWhisperBackend
+
+    model_size = os.environ.get("ONE_WHISPER_MODEL", "large-v3-turbo")
+    device = os.environ.get("ONE_WHISPER_DEVICE", "cuda")
+    compute_type = os.environ.get("ONE_WHISPER_COMPUTE_TYPE", "float16")
+    try:
+        backend = FasterWhisperBackend(model_size=model_size, device=device, compute_type=compute_type)
+        backend.warmup()
+        print(
+            f"ONE wake listener: loaded Whisper '{model_size}' on {device} ({compute_type}).",
+            flush=True,
+        )
+        return backend
+    except Exception as exc:
+        print(
+            f"ONE wake listener: could not load '{model_size}' on {device} ({exc}); "
+            "falling back to the CPU 'base' model. If you have an NVIDIA GPU, install "
+            "cuBLAS for CUDA 12 and cuDNN 9 to use the upgraded model — see "
+            "ONE Vault/Docs/Whisper Capabilities.md.",
+            flush=True,
+        )
+        fallback = FasterWhisperBackend(model_size="base", device="cpu", compute_type="int8")
+        fallback.warmup()
+        return fallback
+
+
 def run_wake_listener() -> None:
     if os.environ.get("ONE_WAKE_ENABLED", "true").lower() not in {"1", "true", "yes", "on"}:
         return
     import sounddevice as sd
-    from openjarvis.speech.faster_whisper import FasterWhisperBackend
 
     device = _preferred_device(sd)
     info = sd.query_devices(device, "input")
@@ -214,7 +251,7 @@ def run_wake_listener() -> None:
                 wav.setframerate(sample_rate)
                 wav.writeframes(pcm.tobytes())
             if model is None:
-                model = FasterWhisperBackend(model_size="base", device="cpu", compute_type="int8")
+                model = _load_wake_whisper_model()
             try:
                 result = model.transcribe(output.getvalue(), format="wav", language=None)
                 transcript = result.text.strip()

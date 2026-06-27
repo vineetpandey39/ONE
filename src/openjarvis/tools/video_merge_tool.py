@@ -437,11 +437,33 @@ class VideoMergeTool(BaseTool):
 
                     result = None
                     for font_clause in font_attempts:
+                        # Write the filter graph to a script file instead of
+                        # passing it inline via -filter_complex. The inline
+                        # form means this whole multi-stage drawtext chain
+                        # (with spaces from the hook/location text, escaped
+                        # colons from the Windows fontfile drive letter,
+                        # quotes around every text value, etc.) has to
+                        # survive being re-joined into a single Windows
+                        # command-line string by Python's subprocess
+                        # quoting and then re-parsed by ffmpeg's own
+                        # filtergraph tokenizer -- two layers of escaping
+                        # stacked on top of each other. That's what was
+                        # producing "Error parsing a filter description"/
+                        # "Error parsing filterchain" on Windows even though
+                        # the identical string parses fine when fed to
+                        # ffmpeg directly. -filter_complex_script reads the
+                        # graph straight from a file with no command-line
+                        # re-encoding step at all, so it sidesteps that
+                        # entirely while building the exact same filter
+                        # graph (same overlay positions, same hook lines,
+                        # same pin icon, same fonts).
+                        script_path = tmp / f"filter_{font_attempts.index(font_clause)}.txt"
+                        script_path.write_text(_build_filter(font_clause), encoding="utf-8")
                         overlay_cmd = [
                             "ffmpeg", "-y",
                             "-i", str(concatenated),
                             "-i", str(icon_path),
-                            "-filter_complex", _build_filter(font_clause),
+                            "-filter_complex_script", str(script_path),
                             str(output_path),
                         ]
                         result = subprocess.run(

@@ -116,26 +116,59 @@ def _one_agent_command(text: str) -> str | None:
 
     from openjarvis.one_agents.runtime import AGENTS, enqueue_job, list_jobs
 
-    if re.search(r"\balfa\b", lowered) and re.search(r"\b(found|find|result|results|lead|leads|opportunit|achiev|revenue)\w*\b", lowered):
-        alfa_jobs = [job for job in list_jobs(30) if job["agent_id"] == "alfa" and job["status"] == "completed"]
-        if not alfa_jobs:
-            return "ALFA has no completed opportunity scan yet."
+    def _friendly_agent_status(agent_id: str, name: str) -> str:
+        """Phrase one agent's latest run as a plain sentence — never a raw job ID or bare percent."""
+        jobs = [job for job in list_jobs(30) if job["agent_id"] == agent_id]
+        if not jobs:
+            return f"{name} has not run yet."
+        latest = jobs[0]
+        status = latest["status"]
+        if status == "running":
+            return f"{name} is running right now, about {latest['progress']}% through."
+        if status == "queued":
+            return f"{name} is queued and hasn't started running yet."
+        if status == "failed":
+            return f"{name}'s last run failed. I have not retried it automatically — want me to queue it again?"
+        if status != "completed":
+            return f"{name} is currently {status}."
         try:
-            result = json.loads(alfa_jobs[0].get("result") or "{}")
+            result = json.loads(latest.get("result") or "{}")
         except json.JSONDecodeError:
-            return "ALFA completed a scan, but its saved result could not be read."
-        top = result.get("top_opportunities") or []
-        headline = top[0].get("title", "No qualified lead") if top else "No qualified lead"
-        packaged = sum(1 for item in top if item.get("outreach_message"))
-        mrr = result.get("mrr_pipeline_monthly", 0)
-        mrr_part = f" Potential retainer pipeline is ${mrr:,} a month if those convert." if mrr else ""
-        return (
-            f"ALFA scanned {result.get('scanned', 0)} public posts and found {result.get('qualified', 0)} qualified "
-            f"service opportunities. Estimated one-time pipeline is "
-            f"${result.get('estimated_usd_low', 0):,}-${result.get('estimated_usd_high', 0):,}.{mrr_part} "
-            f"{packaged} leads have a service, price, and outreach draft ready in the dashboard. "
-            f"Top lead: {headline}. This is pipeline value, not earned revenue — nothing is sent until you approve it."
-        )
+            return f"{name} completed its last run, but the saved result could not be read."
+        if agent_id == "alfa":
+            top = result.get("top_opportunities") or []
+            headline = top[0].get("title", "No qualified lead") if top else "No qualified lead"
+            packaged = sum(1 for item in top if item.get("outreach_message"))
+            mrr = result.get("mrr_pipeline_monthly", 0)
+            mrr_part = f" Potential retainer pipeline is ${mrr:,} a month if those convert." if mrr else ""
+            return (
+                f"ALFA scanned {result.get('scanned', 0)} public posts and found {result.get('qualified', 0)} qualified "
+                f"service opportunities. Estimated one-time pipeline is "
+                f"${result.get('estimated_usd_low', 0):,}-${result.get('estimated_usd_high', 0):,}.{mrr_part} "
+                f"{packaged} leads have a service, price, and outreach draft ready in the dashboard. "
+                f"Top lead: {headline}. This is pipeline value, not earned revenue — nothing is sent until you approve it."
+            )
+        if agent_id == "jobhunt":
+            new_briefs = result.get("new_briefs", 0)
+            duplicates = result.get("duplicates", 0)
+            skipped_old = result.get("skipped_old", 0)
+            extra = f" and {skipped_old} older posting{'s' if skipped_old != 1 else ''}" if skipped_old else ""
+            return (
+                f"JOBHUNT reviewed the inbox and prepared {new_briefs} new opportunity brief"
+                f"{'s' if new_briefs != 1 else ''}, skipping {duplicates} already-tracked duplicate"
+                f"{'s' if duplicates != 1 else ''}{extra}. "
+                "Everything is waiting in your review folder — nothing was applied or sent on its own."
+            )
+        return f"{name}'s last run completed successfully."
+
+    status_agent = next(
+        (agent_id for agent_id, value in AGENTS.items() if re.search(rf"\b{re.escape(value['name'].lower())}\b", lowered)),
+        None,
+    )
+    if status_agent and re.search(
+        r"\b(status|update|progress|found|find|result|results|lead|leads|opportunit|achiev|revenue)\w*\b", lowered
+    ):
+        return _friendly_agent_status(status_agent, AGENTS[status_agent]["name"])
 
     obsidian_match = re.search(r"\b(?:search|find|look\s+in)\s+(?:my\s+)?obsidian(?:\s+for)?\s+(.+)", lowered)
     if obsidian_match:
@@ -155,9 +188,11 @@ def _one_agent_command(text: str) -> str | None:
         if not jobs:
             return "The ONE agent queue is empty."
         summary = "; ".join(
-            f"{job['id']} is {job['status']} ({job['progress']}%)" for job in jobs
+            f"{AGENTS.get(job['agent_id'], {}).get('name', job['agent_id'])} is {job['status']}"
+            + (f" ({job['progress']}% done)" if job["status"] == "running" else "")
+            for job in jobs
         )
-        return f"Agent queue: {summary}."
+        return f"Here's what's in the queue: {summary}."
 
     if re.search(r"\b(list|show|which)\b.*\bagents?\b", lowered):
         roster = ", ".join(value["name"] for value in AGENTS.values())
@@ -187,6 +222,65 @@ def _one_agent_command(text: str) -> str | None:
         f"{AGENTS[selected]['name']} queued in {mode} mode. "
         f"Job ID: {job['id']}. I will not claim completion until its queue status confirms it."
     )
+
+
+def _save_exchange_to_obsidian(user_text: str, assistant_text: str) -> None:
+    """Best-effort: log a conversational turn into the Obsidian vault.
+
+    This is what lets ONE "remember" Vineet's conversations over time —
+    separate from the sqlite-backed semantic memory used for RAG context.
+    Silent no-op if Obsidian isn't connected or the text is empty; never
+    raises into the request path.
+    """
+    if not user_text.strip() or not assistant_text.strip():
+        return
+    try:
+        from openjarvis.one_agents.obsidian import obsidian_status, remember_exchange
+
+        if obsidian_status().get("connected"):
+            remember_exchange(user_text, assistant_text)
+    except Exception:
+        logging.getLogger("openjarvis.server").debug(
+            "Auto-save exchange to Obsidian failed", exc_info=True
+        )
+
+
+def _extract_response_content(response: Any) -> str:
+    try:
+        return response.choices[0].message.content or ""
+    except Exception:
+        return ""
+
+
+def _wrap_stream_with_memory(response: StreamingResponse, user_text: str) -> StreamingResponse:
+    """Re-emit an SSE stream byte-for-byte, then auto-save the full reply
+    to Obsidian once the stream completes. Buffering happens as a side
+    effect alongside the yield, never delaying or altering what the client
+    receives.
+    """
+    original_iterator = response.body_iterator
+
+    async def generate():
+        collected: list[str] = []
+        async for chunk in original_iterator:
+            yield chunk
+            try:
+                text = chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
+                for line in text.splitlines():
+                    line = line.strip()
+                    if not line.startswith("data: ") or line == "data: [DONE]":
+                        continue
+                    payload = json.loads(line[len("data: "):])
+                    for choice in payload.get("choices", []):
+                        piece = (choice.get("delta") or {}).get("content")
+                        if piece:
+                            collected.append(piece)
+            except Exception:
+                continue
+        _save_exchange_to_obsidian(user_text, "".join(collected))
+
+    response.body_iterator = generate()
+    return response
 
 
 def _one_command_response(model: str, content: str) -> ChatCompletionResponse:
@@ -291,6 +385,7 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     )
     deterministic_reply = _one_agent_command(latest_user_text)
     if deterministic_reply:
+        _save_exchange_to_obsidian(latest_user_text, deterministic_reply)
         if request_body.stream:
             return _one_command_stream(model, deterministic_reply)
         return _one_command_response(model, deterministic_reply)
@@ -348,6 +443,38 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
                 exc_info=True,
             )
 
+    # Also ground replies in Vineet's own Obsidian vault notes — a separate,
+    # keyword-search store from the sqlite semantic memory above. Appended
+    # onto the latest user message's own content (not a new system message)
+    # so this can never suppress `_ensure_identity_prompt`'s grounding the
+    # way an extra system-role message would (see that function's
+    # "no double-prompting" guard).
+    try:
+        from openjarvis.one_agents.obsidian import obsidian_status, search_obsidian
+
+        if latest_user_text and obsidian_status().get("connected"):
+            obsidian_notes = search_obsidian(latest_user_text, limit=3)
+            if obsidian_notes:
+                snippet_lines = [
+                    f"- {note['title']}: {note['snippet'][:220]}" for note in obsidian_notes
+                ]
+                memory_note = (
+                    "\n\n[ONE memory — relevant notes from your Obsidian vault; "
+                    "use naturally, don't cite this like a search result]\n"
+                    + "\n".join(snippet_lines)
+                )
+                for m in reversed(request_body.messages):
+                    if m.role == "user" and m.content:
+                        m.content = m.content + memory_note
+                        break
+    except ValueError:
+        pass
+    except Exception:
+        logging.getLogger("openjarvis.server").debug(
+            "Obsidian context injection failed",
+            exc_info=True,
+        )
+
     # Run complexity analysis on the last user message
     complexity_info = None
     query_text_for_complexity = ""
@@ -392,8 +519,11 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
         # caller's tool_calls were dropped entirely (the streaming analog of
         # #414).
         if request_body.tools:
-            return await _handle_stream_tools(
-                engine, model, request_body, complexity_info, app_config=config
+            return _wrap_stream_with_memory(
+                await _handle_stream_tools(
+                    engine, model, request_body, complexity_info, app_config=config
+                ),
+                latest_user_text,
             )
         # When no client tools were supplied (the desktop chat UI's normal
         # case) and an agent is configured, route through the agent instead
@@ -406,21 +536,27 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
         # `_handle_agent_stream` for the trade-off this implies (no
         # token-by-token typing for agent-routed turns).
         if agent is not None:
-            return await _handle_agent_stream(
-                agent,
+            return _wrap_stream_with_memory(
+                await _handle_agent_stream(
+                    agent,
+                    model,
+                    request_body,
+                    complexity_info,
+                    trace_store=getattr(request.app.state, "trace_store", None),
+                    bus=getattr(request.app.state, "bus", None),
+                ),
+                latest_user_text,
+            )
+        return _wrap_stream_with_memory(
+            await _handle_stream(
+                engine,
                 model,
                 request_body,
                 complexity_info,
                 trace_store=getattr(request.app.state, "trace_store", None),
-                bus=getattr(request.app.state, "bus", None),
-            )
-        return await _handle_stream(
-            engine,
-            model,
-            request_body,
-            complexity_info,
-            trace_store=getattr(request.app.state, "trace_store", None),
-            app_config=config,
+                app_config=config,
+            ),
+            latest_user_text,
         )
 
     # Non-streaming: use agent if available, otherwise direct engine call.
@@ -440,7 +576,7 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     # the agent to execute them), add an explicit opt-in header rather
     # than removing this guard — silent re-routing is what produced #414.
     if agent is not None and not request_body.tools:
-        return _handle_agent(
+        agent_response = _handle_agent(
             agent,
             model,
             request_body,
@@ -448,9 +584,11 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
             trace_store=getattr(request.app.state, "trace_store", None),
             bus=getattr(request.app.state, "bus", None),
         )
+        _save_exchange_to_obsidian(latest_user_text, _extract_response_content(agent_response))
+        return agent_response
 
     bus = getattr(request.app.state, "bus", None)
-    return _handle_direct(
+    direct_response = _handle_direct(
         engine,
         model,
         request_body,
@@ -458,6 +596,8 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
         complexity_info=complexity_info,
         app_config=config,
     )
+    _save_exchange_to_obsidian(latest_user_text, _extract_response_content(direct_response))
+    return direct_response
 
 
 def _handle_direct(

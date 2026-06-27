@@ -17,6 +17,7 @@ import httpx
 AGENTS: dict[str, dict[str, str]] = {
     "titan": {"name": "TITAN", "role": "Instagram and PostForge operator"},
     "alfa": {"name": "ALFA", "role": "Recurring revenue opportunity and service lead scout"},
+    "jobhunt": {"name": "JOBHUNT", "role": "Approval-gated QA/Product job search copilot"},
     "beta": {"name": "BETA", "role": "Freelance opportunity and delivery operator"},
     "hermes": {"name": "HERMES", "role": "KDP research and publishing operator"},
     "ares": {"name": "ARES", "role": "LinkedIn B2B content and leads operator"},
@@ -74,27 +75,46 @@ def _connect() -> sqlite3.Connection:
 
 
 def _enqueue_due_recurring_jobs() -> None:
-    if os.environ.get("ALFA_AUTOSCOUT", "true").lower() not in {"1", "true", "yes", "on"}:
-        return
-    interval = max(900, int(os.environ.get("ALFA_SCAN_INTERVAL_SECONDS", "3600")))
     now_epoch = time.time()
     now = _now()
+    if os.environ.get("ALFA_AUTOSCOUT", "true").lower() in {"1", "true", "yes", "on"}:
+        interval = max(900, int(os.environ.get("ALFA_SCAN_INTERVAL_SECONDS", "3600")))
+        with _connect() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO agent_schedules (agent_id, interval_seconds, next_run_epoch) VALUES ('alfa', ?, 0)",
+                (interval,),
+            )
+            schedule = db.execute("SELECT * FROM agent_schedules WHERE agent_id = 'alfa'").fetchone()
+            if schedule and schedule["enabled"] and schedule["next_run_epoch"] <= now_epoch:
+                job_id = f"alfa-{uuid.uuid4().hex[:12]}"
+                db.execute(
+                    "INSERT INTO jobs (id, agent_id, task, mode, status, created_at, updated_at) VALUES (?, 'alfa', ?, 'execute', 'queued', ?, ?)",
+                    (job_id, "[scheduled] Scan public forums for fresh paid service opportunities", now, now),
+                )
+                db.execute(
+                    "UPDATE agent_schedules SET interval_seconds = ?, next_run_epoch = ? WHERE agent_id = 'alfa'",
+                    (interval, now_epoch + interval),
+                )
+
+    if os.environ.get("JOBHUNT_AUTOSCOUT", "true").lower() not in {"1", "true", "yes", "on"}:
+        return
+    jobhunt_interval = max(3600, int(os.environ.get("JOBHUNT_SCAN_INTERVAL_SECONDS", "86400")))
     with _connect() as db:
         db.execute(
-            "INSERT OR IGNORE INTO agent_schedules (agent_id, interval_seconds, next_run_epoch) VALUES ('alfa', ?, 0)",
-            (interval,),
+            "INSERT OR IGNORE INTO agent_schedules (agent_id, interval_seconds, next_run_epoch) VALUES ('jobhunt', ?, 0)",
+            (jobhunt_interval,),
         )
-        schedule = db.execute("SELECT * FROM agent_schedules WHERE agent_id = 'alfa'").fetchone()
+        schedule = db.execute("SELECT * FROM agent_schedules WHERE agent_id = 'jobhunt'").fetchone()
         if not schedule or not schedule["enabled"] or schedule["next_run_epoch"] > now_epoch:
             return
-        job_id = f"alfa-{uuid.uuid4().hex[:12]}"
+        job_id = f"jobhunt-{uuid.uuid4().hex[:12]}"
         db.execute(
-            "INSERT INTO jobs (id, agent_id, task, mode, status, created_at, updated_at) VALUES (?, 'alfa', ?, 'execute', 'queued', ?, ?)",
-            (job_id, "[scheduled] Scan public forums for fresh paid service opportunities", now, now),
+            "INSERT INTO jobs (id, agent_id, task, mode, status, created_at, updated_at) VALUES (?, 'jobhunt', ?, 'execute', 'queued', ?, ?)",
+            (job_id, "[scheduled] Prepare QA/Product job-search opportunities from local alert inbox", now, now),
         )
         db.execute(
-            "UPDATE agent_schedules SET interval_seconds = ?, next_run_epoch = ? WHERE agent_id = 'alfa'",
-            (interval, now_epoch + interval),
+            "UPDATE agent_schedules SET interval_seconds = ?, next_run_epoch = ? WHERE agent_id = 'jobhunt'",
+            (jobhunt_interval, now_epoch + jobhunt_interval),
         )
 
 
@@ -410,6 +430,10 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         from openjarvis.one_agents.alfa import run_alfa_scan
 
         return run_alfa_scan()
+    if job["agent_id"] == "jobhunt":
+        from openjarvis.one_agents.jobhunt import run_jobhunt_scan
+
+        return run_jobhunt_scan()
     if job["agent_id"] == "beta":
         return _run_beta(job)
     return _local_plan(job)
