@@ -1,31 +1,31 @@
 # Vercel should deploy ONE's hosted shell only.
 # The local Python core runs on the user's machine and is not a serverless
 # FastAPI target for Vercel.
-src
-tests
-examples
-configs
-desktop
-rust
-scripts
-skills
-tools
-deploy
+/src
+/tests
+/examples
+/configs
+/desktop
+/rust
+/scripts
+/skills
+/tools
+/deploy
 
-pyproject.toml
-uv.lock
-.pre-commit-config.yaml
-CHANGELOG.md
-CONTRIBUTING.md
-CODE_OF_CONDUCT.md
-REVIEW.md
+/pyproject.toml
+/uv.lock
+/.pre-commit-config.yaml
+/CHANGELOG.md
+/CONTRIBUTING.md
+/CODE_OF_CONDUCT.md
+/REVIEW.md
 
-data
-ONE Vault
-*.env
-*.log
-*.pid
-*.sqlite*
+/data
+/ONE Vault
+/*.env
+/*.log
+/*.pid
+/*.sqlite*
 **/__pycache__/**
 **/.pytest_cache/**
 **/.venv/**
