@@ -2,7 +2,7 @@
 # install.sh — OpenJarvis curl-pipe-bash installer.
 #
 # Usage:
-#   curl -fsSL https://open-jarvis.github.io/OpenJarvis/install.sh | bash
+#   install from https://github.com/vineetpandey39/ONE
 #
 # Flags (only used in tests / power users):
 #   --no-bg-orchestrator   Skip the detached background orchestrator
@@ -11,7 +11,7 @@
 #
 # Environment overrides:
 #   OPENJARVIS_HOME        Install dir (default: $HOME/.openjarvis)
-#   OPENJARVIS_REPO_URL    git repo URL (default: https://github.com/open-jarvis/OpenJarvis.git)
+#   OPENJARVIS_REPO_URL    git repo URL (default: https://github.com/vineetpandey39/ONE.git)
 #   OPENJARVIS_FORCE_WSL   Set 1 to force WSL detection (testing)
 
 set -euo pipefail
@@ -49,13 +49,13 @@ OpenJarvis runs on Windows via WSL2. Two paths:
 
      Open the Ubuntu shell that gets installed, then re-run:
 
-       curl -fsSL https://open-jarvis.github.io/OpenJarvis/install.sh | bash
+       install from https://github.com/vineetpandey39/ONE
 
   2. Desktop app — download the .exe from the Releases page:
-     https://github.com/open-jarvis/OpenJarvis/releases
+     https://github.com/vineetpandey39/ONE/releases
 
 See the WSL2 install guide for the full walkthrough:
-  https://open-jarvis.github.io/OpenJarvis/getting-started/wsl2/
+  https://github.com/vineetpandey39/ONE
 EOF
         exit 1
         ;;
@@ -148,7 +148,7 @@ Two ways forward:
        Arch:          sudo pacman -S $tool
 
   2. Pre-authenticate sudo before piping (caches credentials for 5 min):
-       sudo -v && curl -fsSL https://open-jarvis.github.io/OpenJarvis/install.sh | bash
+       sudo -v and install from https://github.com/vineetpandey39/ONE
 EOF
         exit 1
     fi
@@ -219,7 +219,7 @@ fi
 # unset, $XDG_DATA_HOME/openjarvis if XDG_DATA_HOME is set). With nothing set
 # the root is ~/.openjarvis, so existing installs are untouched.
 OPENJARVIS_HOME="${OPENJARVIS_HOME:-$HOME/.openjarvis}"
-OPENJARVIS_REPO_URL="${OPENJARVIS_REPO_URL:-https://github.com/open-jarvis/OpenJarvis.git}"
+OPENJARVIS_REPO_URL="${OPENJARVIS_REPO_URL:-https://github.com/vineetpandey39/ONE.git}"
 SRC_DIR="$OPENJARVIS_HOME/src"
 VENV_DIR="$OPENJARVIS_HOME/.venv"
 STATE_DIR="$OPENJARVIS_HOME/.state"
@@ -243,14 +243,14 @@ fi
 # No content, no IPs (handled by PostHog disable_geoip on server),
 # no hardware identifiers — just OS, arch, elapsed time, and stage name.
 #
-ANALYTICS_HOST="${OPENJARVIS_ANALYTICS_HOST:-https://34.231.106.201.sslip.io}"
-ANALYTICS_KEY="${OPENJARVIS_ANALYTICS_KEY:-phc_ysKu72QaxzYNmDpHFcesD2ZZAe68zkdWJEKoYYkc5e3n}"
+ANALYTICS_HOST=""
+ANALYTICS_KEY=""
 ANON_ID_FILE="$OPENJARVIS_HOME/anon_id"
 INSTALL_START_EPOCH="$(date +%s)"
 CURRENT_STAGE=""
 
 analytics_enabled() {
-    return 0
+    return 1
 }
 
 detect_os() {

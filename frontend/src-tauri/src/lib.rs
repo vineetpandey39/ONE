@@ -946,14 +946,14 @@ async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
             return;
         }
 
-        let target_path = std::path::PathBuf::from(home_dir()).join("OpenJarvis");
+        let target_path = std::path::PathBuf::from(home_dir()).join("ONE");
         let clone_target = target_path.display().to_string();
 
         // If the directory exists but is not a valid project, don't overwrite
         if target_path.exists() && !target_path.join("pyproject.toml").exists() {
             let mut s = status.lock().await;
             s.error = Some(format!(
-                "{} exists but is not a valid OpenJarvis project. \
+                "{} exists but is not a valid ONE project. \
                  Remove it and relaunch, or set OPENJARVIS_ROOT to the correct path.",
                 clone_target,
             ));
@@ -962,7 +962,7 @@ async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
 
         {
             let mut s = status.lock().await;
-            s.detail = "Downloading OpenJarvis (first launch)...".into();
+            s.detail = "Downloading ONE (first launch)...".into();
         }
 
         let clone_result = tokio::process::Command::new(&git_bin)
@@ -970,7 +970,7 @@ async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
                 "clone",
                 "--depth",
                 "1",
-                "https://github.com/open-jarvis/OpenJarvis.git",
+                "https://github.com/vineetpandey39/ONE.git",
                 &clone_target,
             ])
             .stdout(std::process::Stdio::null())
@@ -986,8 +986,8 @@ async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     let mut s = status.lock().await;
                     s.error = Some(format!(
-                        "Failed to download OpenJarvis: {}. \
-                         Clone manually: git clone https://github.com/open-jarvis/OpenJarvis.git {}",
+                        "Failed to download ONE: {}. \
+                         Clone manually: git clone https://github.com/vineetpandey39/ONE.git {}",
                         stderr.trim(),
                         clone_target,
                     ));
@@ -996,8 +996,8 @@ async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
                 Err(e) => {
                     let mut s = status.lock().await;
                     s.error = Some(format!(
-                        "Failed to download OpenJarvis: {}. \
-                         Clone manually: git clone https://github.com/open-jarvis/OpenJarvis.git {}",
+                        "Failed to download ONE: {}. \
+                         Clone manually: git clone https://github.com/vineetpandey39/ONE.git {}",
                         e, clone_target,
                     ));
                     return;

@@ -1044,16 +1044,15 @@ class AnalyticsConfig:
 
     Separate concern from :class:`TelemetryConfig`, which stores local
     FLOPs/energy/inference metrics in SQLite. This controls anonymized
-    usage events sent to the OpenJarvis team's PostHog instance to
-    measure setup success, retention, feature usage, and churn.
+    usage events. ONE ships with external analytics disabled.
 
     No chat content, prompts, model outputs, file paths, emails, IPs,
     or hardware identifiers are ever sent. See ``docs/telemetry.md``.
     """
 
-    enabled: bool = True
-    host: str = "https://34.231.106.201.sslip.io"
-    key: str = "phc_ysKu72QaxzYNmDpHFcesD2ZZAe68zkdWJEKoYYkc5e3n"
+    enabled: bool = False
+    host: str = ""
+    key: str = ""
     anon_id_path: str = field(default_factory=lambda: str(get_config_dir() / "anon_id"))
     flush_interval_seconds: int = 30
     flush_at_size: int = 100

@@ -43,6 +43,11 @@ from openjarvis.cli._install_detect import detect_install
     help="Skip the interactive confirmation prompt.",
 )
 def self_update(check: bool, yes: bool) -> None:
+    click.echo(
+        "ONE self-update is disabled. This installation is cut off from the "
+        "upstream OpenJarvis release channel; update only from vineetpandey39/ONE."
+    )
+    return
     info = detect_install()
     current = openjarvis.__version__
 

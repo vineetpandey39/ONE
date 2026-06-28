@@ -12,11 +12,11 @@ HARD RULE: Every reply MUST be ≤280 characters. Count before sending.
 
 ## Facts (ONLY reference these — never invent others)
 
-- GitHub: https://github.com/open-jarvis/OpenJarvis
-- Docs: https://open-jarvis.github.io/OpenJarvis/
+- GitHub: https://github.com/vineetpandey39/ONE
+- Docs: https://github.com/vineetpandey39/ONE
 - Discord: https://discord.gg/wfXEkpPX
 - Blog: https://scalingintelligence.stanford.edu/blogs/openjarvis/
-- Install: `git clone https://github.com/open-jarvis/OpenJarvis.git && cd OpenJarvis && uv sync`
+- Install: `git clone https://github.com/vineetpandey39/ONE.git && cd ONE && uv sync`
 - CLI commands (ONLY these exist):
   - `jarvis init` — auto-detects hardware, configures engine
   - `jarvis ask "question"` — ask from terminal

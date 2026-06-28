@@ -46,4 +46,6 @@ def reset_anon_id(path: Path | str) -> str:
 
 def is_analytics_enabled(cfg: AnalyticsConfig) -> bool:
     """Return True if analytics is enabled in config."""
-    return cfg.enabled
+    # ONE is private/local-first by default. External analytics is hard-disabled
+    # so the server never initialises PostHog or emits usage events upstream.
+    return False

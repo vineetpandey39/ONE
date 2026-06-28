@@ -6,8 +6,8 @@ set -euo pipefail
 # the backend API server and frontend, then opens the browser.
 #
 # Usage:
-#   git clone https://github.com/open-jarvis/OpenJarvis.git
-#   cd OpenJarvis
+#   git clone https://github.com/vineetpandey39/ONE.git
+#   cd ONE
 #   ./scripts/quickstart.sh
 # ──────────────────────────────────────────────────────────────────────
 

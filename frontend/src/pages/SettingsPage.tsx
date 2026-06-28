@@ -352,16 +352,8 @@ export function SettingsPage() {
   }, []);
 
   const handleCheckNow = useCallback(async () => {
-    if (!(window as any).__TAURI_INTERNALS__) return;
-    setUpdateCheckState('checking');
-    try {
-      const { check } = await import('@tauri-apps/plugin-updater');
-      const update = await check();
-      setUpdateCheckState(update ? 'available' : 'latest');
-      setTimeout(() => setUpdateCheckState('idle'), 4000);
-    } catch {
-      setUpdateCheckState('idle');
-    }
+    setUpdateCheckState('latest');
+    setTimeout(() => setUpdateCheckState('idle'), 2500);
   }, []);
 
   const [memoryStats, setMemoryStats] = useState<{ entries: number; backend: string } | null>(null);
@@ -497,7 +489,7 @@ export function SettingsPage() {
         <div className="flex flex-col gap-4">
           {/* Appearance */}
           <Section title="Appearance">
-            <SettingRow label="Theme" description="Choose how OpenJarvis looks">
+            <SettingRow label="Theme" description="Choose how ONE looks">
               <div className="flex gap-1 p-0.5 rounded-lg" style={{ background: 'var(--color-bg-secondary)' }}>
                 {themeOptions.map((opt) => {
                   const isActive = settings.theme === opt.value;
@@ -817,7 +809,6 @@ export function SettingsPage() {
             {!speechBackendAvailable && speechBackendAvailable !== null && (
               <div className="text-xs mt-2 px-1" style={{ color: 'var(--color-text-tertiary)' }}>
                 Set up a speech backend to use voice input.
-                See the <a href="https://open-jarvis.github.io/OpenJarvis/user-guide/tools/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-accent)' }}>documentation</a> for details.
               </div>
             )}
           </Section>
@@ -900,27 +891,27 @@ export function SettingsPage() {
           <Section title="About">
             <div className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               <p className="mb-2">
-                <span className="font-semibold" style={{ color: 'var(--color-text)' }}>OpenJarvis</span> — Programming abstractions for on-device AI.
+                <span className="font-semibold" style={{ color: 'var(--color-text)' }}>ONE</span> — local-first command core for your agents.
               </p>
               <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                Part of Intelligence Per Watt, a research initiative at Stanford SAIL.
+                Private local/cloud control plane connected only to your ONE repositories.
               </p>
               <div className="flex gap-3 mt-3 text-xs">
                 <a
-                  href="https://scalingintelligence.stanford.edu/blogs/openjarvis/"
+                  href="https://github.com/vineetpandey39/ONE"
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ color: 'var(--color-accent)' }}
                 >
-                  Project site
+                  ONE repository
                 </a>
                 <a
-                  href="https://open-jarvis.github.io/OpenJarvis/"
+                  href="https://github.com/vineetpandey39/ONE"
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ color: 'var(--color-accent)' }}
                 >
-                  Documentation
+                  Source
                 </a>
               </div>
             </div>

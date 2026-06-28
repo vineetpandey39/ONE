@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 _CACHE_PATH = get_config_dir() / "version-check.json"
 _CACHE_TTL = 86400  # 24 hours
-_PYPI_API = "https://pypi.org/pypi/openjarvis/json"
+_PYPI_API = ""
 
 
 def _config_path() -> Path:
@@ -105,6 +105,10 @@ def check_for_updates(command_name: str) -> None:
     truthy value (``1``, ``true``, ``yes``, ``on``) disables both the
     PyPI poll and the banner. See ``_check_disabled`` for the full list.
     """
+    # ONE is intentionally cut off from the upstream OpenJarvis/PyPI update
+    # channel. Keep this import-compatible function as a no-op so CLI startup
+    # never makes an external update-check request.
+    return
     if command_name not in _CHECK_COMMANDS:
         return
     if _check_disabled():
