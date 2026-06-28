@@ -11,7 +11,7 @@ is supplied:
     transformation-style prompt produces an unrelated, mostly-static result.
   * Start image + end image + prompt -> ``fal-ai/wan-flf2v`` (Wan 2.1
     First-Last-Frame-to-Video), which actually bridges the two given frames
-    with coherent motion -- this is the mode Punarnirman's continuity clips
+    with coherent motion -- this is the mode IA's continuity clips
     need (same shape as the Leonardo start/end-frame tools). Resolution is
     limited to 480p/720p for this model (no 1080p tier).
 """

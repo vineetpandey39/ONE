@@ -925,6 +925,41 @@ export async function fetchAgentTrace(agentId: string, traceId: string): Promise
 }
 
 // ---------------------------------------------------------------------------
+// Pipeline stats — for deterministic, code-driven agents like IA that don't
+// chat. Each run is one agent_to_user message whose tool_calls payload is
+// tallied server-side into image/video/merge counters (#pipeline-stats).
+// ---------------------------------------------------------------------------
+
+export interface PipelineRunStats {
+  created_at: number;
+  images_generated: number;
+  videos_generated: number;
+  merge_status: 'success' | 'failed' | 'not_run';
+  merge_latency_ms?: number | null;
+  content: string;
+}
+
+export interface PipelineStats {
+  agent_id: string;
+  agent_status: string;
+  total_runs?: number;
+  totals: {
+    images_generated: number;
+    videos_generated: number;
+    merges_succeeded: number;
+    merges_failed: number;
+  };
+  last_run: PipelineRunStats | null;
+  history: PipelineRunStats[];
+}
+
+export async function fetchPipelineStats(agentId: string, limit = 50): Promise<PipelineStats> {
+  const res = await apiFetch(`/v1/managed-agents/${agentId}/pipeline-stats?limit=${limit}`);
+  if (!res.ok) throw new Error(`Failed: ${res.status}`);
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
 // Leaderboard savings submission (Supabase)
 // ---------------------------------------------------------------------------
 

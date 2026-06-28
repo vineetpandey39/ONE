@@ -2087,6 +2087,99 @@ def create_agent_manager_router(
         bus.publish(EventType.AGENT_LEARNING_STARTED, {"agent_id": agent_id})
         return {"status": "triggered"}
 
+    # ── Pipeline stats (deterministic agents like IA) ─────────
+    #
+    # Deterministic, code-driven agents (e.g. IA) don't chat -- each
+    # finished run is recorded as a single agent_to_user message whose
+    # ``tool_calls`` payload is the ordered list of tool invocations for
+    # that run (see ia_dashboard.DashboardRun.finish). This endpoint
+    # tallies those tool_calls into image/video/merge counters so the
+    # dashboard can show holistic pipeline stats without the frontend
+    # needing to know individual tool names.
+
+    _PIPELINE_IMAGE_TOOLS = {"image_generate"}
+    _PIPELINE_VIDEO_TOOLS = {
+        "leonardo_browser_video_generate",
+        "video_generate",
+        "leonardo_video_generate",
+    }
+    _PIPELINE_MERGE_TOOLS = {"video_merge"}
+
+    @agents_router.get("/{agent_id}/pipeline-stats")
+    def get_pipeline_stats(agent_id: str, limit: int = 50):
+        agent = manager.get_agent(agent_id)
+        if agent is None:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        messages = manager.list_messages(agent_id, limit=limit)
+        # list_messages returns newest-first; runs are agent_to_user
+        # messages that carry a tool_calls payload.
+        runs = [
+            m
+            for m in messages
+            if m.get("direction") == "agent_to_user" and m.get("tool_calls")
+        ]
+
+        history = []
+        total_images = 0
+        total_videos = 0
+        total_merge_success = 0
+        total_merge_failed = 0
+
+        for run in runs:
+            calls = run.get("tool_calls") or []
+            images = sum(
+                1
+                for c in calls
+                if c.get("tool") in _PIPELINE_IMAGE_TOOLS and c.get("success")
+            )
+            videos = sum(
+                1
+                for c in calls
+                if c.get("tool") in _PIPELINE_VIDEO_TOOLS and c.get("success")
+            )
+            merge_calls = [c for c in calls if c.get("tool") in _PIPELINE_MERGE_TOOLS]
+            merge_call = merge_calls[-1] if merge_calls else None
+            merge_status = (
+                "not_run"
+                if merge_call is None
+                else ("success" if merge_call.get("success") else "failed")
+            )
+
+            total_images += images
+            total_videos += videos
+            if merge_status == "success":
+                total_merge_success += 1
+            elif merge_status == "failed":
+                total_merge_failed += 1
+
+            history.append(
+                {
+                    "created_at": run.get("created_at"),
+                    "images_generated": images,
+                    "videos_generated": videos,
+                    "merge_status": merge_status,
+                    "merge_latency_ms": (merge_call or {}).get("latency"),
+                    "content": run.get("content"),
+                }
+            )
+
+        last_run = history[0] if history else None
+
+        return {
+            "agent_id": agent_id,
+            "agent_status": agent.get("status"),
+            "total_runs": agent.get("total_runs"),
+            "totals": {
+                "images_generated": total_images,
+                "videos_generated": total_videos,
+                "merges_succeeded": total_merge_success,
+                "merges_failed": total_merge_failed,
+            },
+            "last_run": last_run,
+            "history": history,
+        }
+
     # ── Traces ───────────────────────────────────────────────
 
     @agents_router.get("/{agent_id}/traces")

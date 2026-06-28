@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import json
+import os
 import re
 import uuid
 from typing import Any
@@ -30,20 +31,64 @@ from openjarvis.server.models import (
 router = APIRouter()
 
 
+def _one_model_status(model: str | None = None) -> dict[str, Any]:
+    engine = os.environ.get("ONE_ENGINE", "ollama").strip() or "ollama"
+    router_model = (
+        model
+        or os.environ.get("ONE_ROUTER_MODEL")
+        or os.environ.get("NEMOTRON_MODEL")
+        or "qwen3.5:2b"
+    )
+    nemotron_model = os.environ.get("NEMOTRON_MODEL", "").strip()
+    nvidia_key = os.environ.get("NVIDIA_API_KEY", "").strip()
+    nvidia_host = os.environ.get("NVIDIA_HOST", "https://integrate.api.nvidia.com").strip()
+    nemotron_ready = bool(
+        (engine == "nvidia" or nemotron_model or "nemotron" in router_model.lower())
+        and nvidia_key
+    )
+    route_map = [
+        {"scope": "simple_chat", "model": router_model, "engine": engine},
+        {"scope": "agent_status_and_queue", "model": "deterministic", "engine": "local-python"},
+        {"scope": "alfa_scan", "model": "deterministic + optional local packaging", "engine": "local-python/ollama"},
+        {"scope": "jobhunt", "model": nemotron_model or router_model, "engine": "nvidia" if nemotron_ready else engine},
+        {"scope": "ia_scout_and_metadata", "model": nemotron_model or router_model, "engine": "nvidia" if nemotron_ready else engine},
+        {"scope": "ia_media_generation", "model": "gpt-image-1 + fal/Leonardo + ffmpeg", "engine": "tool-pipeline"},
+    ]
+    return {
+        "engine": engine,
+        "router_model": router_model,
+        "agent": os.environ.get("ONE_AGENT", "react"),
+        "nemotron_model": nemotron_model,
+        "nemotron_ready": nemotron_ready,
+        "nvidia": {
+            "host": nvidia_host,
+            "api_key_configured": bool(nvidia_key),
+        },
+        "route_map": route_map,
+    }
+
+
 @router.get("/v1/one/status")
 async def one_status():
     from openjarvis.one_agents.obsidian import obsidian_status, recent_memories
     from openjarvis.one_agents.runtime import AGENTS, list_jobs
 
+    model_status = _one_model_status()
     return {
         "name": "ONE",
         "online": True,
-        "model": "qwen3.5:2b",
+        "model": model_status["router_model"],
+        "model_status": model_status,
         "agents": [{"id": key, **value} for key, value in AGENTS.items()],
         "jobs": list_jobs(12),
         "obsidian": obsidian_status(),
         "memories": recent_memories(12),
     }
+
+
+@router.get("/v1/one/model-status")
+async def one_model_status():
+    return _one_model_status()
 
 
 @router.get("/v1/one/jobs")
@@ -142,6 +187,12 @@ def _one_agent_command(text: str) -> str | None:
 
     from openjarvis.one_agents.runtime import AGENTS, enqueue_job, list_jobs
 
+    def _match_agent_id(text: str) -> str | None:
+        return next(
+            (agent_id for agent_id, value in AGENTS.items() if re.search(rf"\b{re.escape(value['name'].lower())}\b", text)),
+            None,
+        )
+
     def _friendly_agent_status(agent_id: str, name: str) -> str:
         """Phrase one agent's latest run as a plain sentence — never a raw job ID or bare percent."""
         jobs = [job for job in list_jobs(30) if job["agent_id"] == agent_id]
@@ -187,10 +238,7 @@ def _one_agent_command(text: str) -> str | None:
             )
         return f"{name}'s last run completed successfully."
 
-    status_agent = next(
-        (agent_id for agent_id, value in AGENTS.items() if re.search(rf"\b{re.escape(value['name'].lower())}\b", lowered)),
-        None,
-    )
+    status_agent = _match_agent_id(lowered)
     if status_agent and re.search(
         r"\b(status|update|progress|found|find|result|results|lead|leads|opportunit|achiev|revenue)\w*\b", lowered
     ):
@@ -224,10 +272,7 @@ def _one_agent_command(text: str) -> str | None:
         roster = ", ".join(value["name"] for value in AGENTS.values())
         return f"ONE agent network: {roster}."
 
-    selected = next(
-        (agent_id for agent_id, value in AGENTS.items() if re.search(rf"\b{re.escape(value['name'].lower())}\b", lowered)),
-        None,
-    )
+    selected = _match_agent_id(lowered)
     has_dispatch_verb = bool(
         re.search(r"\b(activate|run|start|dispatch|ask|tell|prepare|plan|create|generate|publish|post)\b", lowered)
     )

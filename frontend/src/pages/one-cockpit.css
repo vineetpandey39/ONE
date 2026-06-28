@@ -13,6 +13,8 @@ body { margin: 0; background: #02060b; }
 .one-status-dot.online { background: #24e6a1; box-shadow: 0 0 16px #24e6a1; }
 .one-header-actions { display: flex; align-items: center; gap: 10px; }
 .one-header-actions > span { color: #58caff; font-size: 11px; letter-spacing: 1.4px; margin-right: 8px; }
+.one-header-actions .one-brain-chip { max-width: 280px; padding: 6px 8px; border: 1px solid #244c67; border-radius: 4px; color: #d7f3ff; background: #061421; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.one-header-actions .one-brain-chip.nemotron { border-color: #2e8f67; color: #b7ffd9; background: #062018; box-shadow: 0 0 14px #1ad68522; }
 .one-header button, .one-header a { width: 38px; height: 38px; display: grid; place-items: center; color: #8eb8d1; background: #07121f; border: 1px solid #1b3b53; border-radius: 6px; cursor: pointer; }
 .one-stage { min-height: 650px; display: grid; grid-template-columns: minmax(560px, 1.45fr) minmax(350px, .75fr); align-items: center; gap: 30px; width: min(1420px, calc(100% - 56px)); margin: 0 auto; position: relative; z-index: 2; }
 .one-memory-universe { width: min(680px, 74vh); aspect-ratio: 1; position: relative; margin: 24px auto; border: 1px solid rgba(71,184,242,.18); border-radius: 50%; box-shadow: inset 0 0 120px rgba(14,105,166,.1), 0 0 140px rgba(20,78,130,.1); isolation: isolate; background: radial-gradient(circle, rgba(12,61,92,.2), rgba(2,8,15,.05) 65%); }
@@ -108,6 +110,13 @@ body { margin: 0; background: #02060b; }
 .one-operations-head { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
 .one-operations-head > div:first-child { display: grid; gap: 5px; }
 .one-operations-head strong { font-size: 19px; font-weight: 500; }
+.one-brain-board { margin-top: 0; }
+.one-brain-grid, .one-route-map { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.one-route-map { gap: 8px; margin-top: 10px; }
+.one-brain-grid > div, .one-route-map article { min-width: 0; border: 1px solid #17384f; border-radius: 6px; background: #050d17cc; padding: 12px; }
+.one-brain-grid span, .one-route-map span { color: #57cfff; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; }
+.one-brain-grid strong, .one-route-map strong { display: block; margin-top: 5px; color: #d3e8f5; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.one-brain-grid small, .one-route-map small { display: block; margin-top: 5px; color: #789caf; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .one-memory-health { display: flex; align-items: center; gap: 8px; color: #789caf; font-size: 11px; }
 .one-memory-health > i { width: 7px; height: 7px; border-radius: 50%; background: #8b3d4b; }
 .one-memory-health > i.online { background: #32dfa2; box-shadow: 0 0 10px #32dfa2; }
@@ -211,7 +220,7 @@ body { margin: 0; background: #02060b; }
 .one-alfa-approve { background: #0e9f6e; color: white; }
 .one-alfa-dismiss { background: #2a1620; color: #ff8795; border: 1px solid #5a2d38; }
 .one-alfa-approve:disabled, .one-alfa-dismiss:disabled { opacity: .45; cursor: not-allowed; }
-@media (max-width: 980px) { .one-stage { grid-template-columns: 1fr; padding: 20px 0; } .one-memory-universe { width: min(600px, 82vw); } .one-agent-node { transform: translate(-50%, -50%) rotate(var(--angle)) translate(calc(min(600px, 82vw) / 2)) rotate(calc(-1 * var(--angle))); } .one-conversation { border-left: 0; border-top: 1px solid #17354b; padding: 24px 0; } .one-job-strip { grid-template-columns: repeat(5, 230px); } .one-agent-execution-grid, .one-jobhunt-list { grid-template-columns: 1fr; } }
+@media (max-width: 980px) { .one-stage { grid-template-columns: 1fr; padding: 20px 0; } .one-memory-universe { width: min(600px, 82vw); } .one-agent-node { transform: translate(-50%, -50%) rotate(var(--angle)) translate(calc(min(600px, 82vw) / 2)) rotate(calc(-1 * var(--angle))); } .one-conversation { border-left: 0; border-top: 1px solid #17354b; padding: 24px 0; } .one-job-strip { grid-template-columns: repeat(5, 230px); } .one-agent-execution-grid, .one-jobhunt-list, .one-brain-grid, .one-route-map { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .one-header { height: 64px; padding: 0 16px; } .one-header-actions > span { display: none; } .one-stage, .one-operations { width: calc(100% - 28px); } .one-memory-universe { width: 86vw; margin-top: 40px; } .one-agent-node { width: 58px; height: 58px; transform: translate(-50%, -50%) rotate(var(--angle)) translate(43vw) rotate(calc(-1 * var(--angle))); } .one-agent-node strong { font-size: 7px; } .one-core { width: 138px; } .one-core svg { width: 38px; } .one-graph-summary, .one-graph-legend { display: none; } .one-memory-inspector { width: 46%; } .one-conversation { min-height: 480px; } .one-alfa-card-head, .one-jobhunt-card-head { flex-direction: column; align-items: flex-start; gap: 6px; } .one-revenue-summary, .one-revenue-form, .one-jobhunt-stages { grid-template-columns: 1fr; } }
 
 /* ---------------------------------------------------------------------- */
@@ -493,8 +502,9 @@ body { margin: 0; background: #02060b; }
 
 /* Results drawer priority: show tracking first when Agents & Results opens. */
 .one-results-drawer .one-header { order: 0; }
-.one-results-drawer > .one-operations:not(.one-jobhunt-board):not(.one-alfa-pipeline) { order: 1; }
-.one-results-drawer > .one-jobhunt-board { order: 2; }
-.one-results-drawer > .one-alfa-pipeline { order: 3; }
-.one-results-drawer > .one-stage { order: 4; }
-.one-results-drawer .one-operations:first-of-type .one-panel-label::after { content: ' / PER-AGENT EXECUTION TRACKING'; color: #f0bd57; }
+.one-results-drawer > .one-brain-board { order: 1; }
+.one-results-drawer > .one-operations:not(.one-brain-board):not(.one-jobhunt-board):not(.one-alfa-pipeline) { order: 2; }
+.one-results-drawer > .one-jobhunt-board { order: 3; }
+.one-results-drawer > .one-alfa-pipeline { order: 4; }
+.one-results-drawer > .one-stage { order: 5; }
+.one-results-drawer .one-agent-operations .one-panel-label::after { content: ' / PER-AGENT EXECUTION TRACKING'; color: #f0bd57; }

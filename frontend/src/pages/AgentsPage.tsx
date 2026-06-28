@@ -31,8 +31,9 @@ import {
   sendblueRegisterWebhook,
   sendblueTest,
   sendblueHealth,
+  fetchPipelineStats,
 } from '../lib/api';
-import type { AgentTask, ChannelBinding, AgentTemplate, ManagedAgent, LearningLogEntry, AgentTrace, AgentTraceDetail, ToolInfo } from '../lib/api';
+import type { AgentTask, ChannelBinding, AgentTemplate, ManagedAgent, LearningLogEntry, AgentTrace, AgentTraceDetail, ToolInfo, PipelineStats } from '../lib/api';
 import { useAgentEvents } from '../lib/useAgentEvents';
 import type { AgentEvent } from '../lib/useAgentEvents';
 import {
@@ -62,6 +63,12 @@ import {
   Check,
   Pencil,
   Loader2,
+  Film,
+  Image as ImageIcon,
+  Video,
+  CheckCircle2,
+  XCircle,
+  Clock,
 } from 'lucide-react';
 import { SOURCE_CATALOG } from '../types/connectors';
 import type { ConnectRequest } from '../types/connectors';
@@ -3140,6 +3147,187 @@ function MessagingTab({ agentId }: { agentId: string }) {
 // Learning tab component
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Pipeline tab component (IA only) — holistic image/video/merge tracking.
+// IA is a deterministic, code-driven pipeline (no chat loop), so this reads
+// the /pipeline-stats endpoint instead of the usual chat/messages view.
+// ---------------------------------------------------------------------------
+
+function PipelineStatCard({
+  icon: Icon,
+  label,
+  value,
+  color,
+}: {
+  icon: typeof ImageIcon;
+  label: string;
+  value: string | number;
+  color?: string;
+}) {
+  return (
+    <div
+      className="flex-1 p-3 rounded-lg flex items-center gap-3"
+      style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
+    >
+      <div
+        className="p-2 rounded-lg flex items-center justify-center"
+        style={{ background: (color || 'var(--color-accent)') + '20', color: color || 'var(--color-accent)' }}
+      >
+        <Icon size={16} />
+      </div>
+      <div>
+        <div className="text-lg font-semibold" style={{ color: 'var(--color-text)' }}>{value}</div>
+        <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{label}</div>
+      </div>
+    </div>
+  );
+}
+
+function MergeStatusBadge({ status }: { status: 'success' | 'failed' | 'not_run' }) {
+  const cfg = {
+    success: { icon: CheckCircle2, color: 'var(--color-success)', label: 'Merged' },
+    failed: { icon: XCircle, color: 'var(--color-error)', label: 'Failed' },
+    not_run: { icon: Clock, color: 'var(--color-text-tertiary)', label: 'Not run' },
+  }[status];
+  const Icon = cfg.icon;
+  return (
+    <span
+      className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full flex-shrink-0"
+      style={{ background: cfg.color + '20', color: cfg.color }}
+    >
+      <Icon size={11} /> {cfg.label}
+    </span>
+  );
+}
+
+function PipelineTab({ agentId }: { agentId: string }) {
+  const [stats, setStats] = useState<PipelineStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = useCallback(() => {
+    fetchPipelineStats(agentId)
+      .then((s) => {
+        setStats(s);
+        setError('');
+      })
+      .catch((err) => setError(err.message || 'Failed to load pipeline stats'))
+      .finally(() => setLoading(false));
+  }, [agentId]);
+
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 8000);
+    return () => clearInterval(interval);
+  }, [load]);
+
+  if (loading) {
+    return (
+      <div className="text-sm text-center py-8" style={{ color: 'var(--color-text-tertiary)' }}>
+        Loading pipeline stats...
+      </div>
+    );
+  }
+
+  if (error || !stats) {
+    return (
+      <div className="text-sm text-center py-8" style={{ color: 'var(--color-text-tertiary)' }}>
+        {error || 'No pipeline stats available yet.'}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Cumulative totals */}
+      <div className="flex gap-3 flex-wrap">
+        <PipelineStatCard icon={ImageIcon} label="Images generated" value={stats.totals.images_generated} />
+        <PipelineStatCard icon={Video} label="Videos generated" value={stats.totals.videos_generated} />
+        <PipelineStatCard
+          icon={CheckCircle2}
+          label="Merges succeeded"
+          value={stats.totals.merges_succeeded}
+          color="var(--color-success)"
+        />
+        {stats.totals.merges_failed > 0 && (
+          <PipelineStatCard
+            icon={XCircle}
+            label="Merges failed"
+            value={stats.totals.merges_failed}
+            color="var(--color-error)"
+          />
+        )}
+      </div>
+
+      {/* Last run highlight */}
+      {stats.last_run && (
+        <div
+          className="p-3 rounded-lg"
+          style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+              Latest run
+            </h3>
+            <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+              {formatRelativeTime(stats.last_run.created_at)}
+            </span>
+          </div>
+          <div className="flex items-center gap-4 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            <span className="flex items-center gap-1"><ImageIcon size={13} /> {stats.last_run.images_generated} images</span>
+            <span className="flex items-center gap-1"><Video size={13} /> {stats.last_run.videos_generated} videos</span>
+            <MergeStatusBadge status={stats.last_run.merge_status} />
+          </div>
+        </div>
+      )}
+
+      {/* Run history */}
+      <div>
+        <h3 className="text-sm font-semibold mb-2" style={{ color: 'var(--color-text)' }}>
+          Run history
+        </h3>
+        {stats.history.length === 0 ? (
+          <div className="text-sm text-center py-8" style={{ color: 'var(--color-text-tertiary)' }}>
+            No completed runs yet. Run the agent to populate this section.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {stats.history.map((run, i) => (
+              <div
+                key={`${run.created_at}-${i}`}
+                className="rounded-lg p-3 text-sm flex items-center justify-between gap-3"
+                style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
+              >
+                <div className="flex items-center gap-4 flex-wrap" style={{ color: 'var(--color-text-secondary)' }}>
+                  <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                    {formatRelativeTime(run.created_at)}
+                  </span>
+                  <span className="flex items-center gap-1"><ImageIcon size={12} /> {run.images_generated}</span>
+                  <span className="flex items-center gap-1"><Video size={12} /> {run.videos_generated}</span>
+                </div>
+                <MergeStatusBadge status={run.merge_status} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Instagram/Facebook draft hint — deferred until Meta credentials are set up */}
+      <div
+        className="flex items-start gap-3 p-3 rounded-lg text-sm"
+        style={{ background: 'var(--color-accent-subtle)', border: '1px solid var(--color-border)' }}
+      >
+        <Clock size={16} style={{ color: 'var(--color-accent)', flexShrink: 0, marginTop: 2 }} />
+        <div style={{ color: 'var(--color-text-secondary)' }}>
+          Instagram/Facebook auto-draft publishing isn't wired up yet — add Meta
+          Graph API credentials in the Credential Wallet to enable saving
+          finished reels as drafts for review.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LearningTab({ agentId, learningEnabled }: { agentId: string; learningEnabled: boolean }) {
   const [logs, setLogs] = useState<LearningLogEntry[]>([]);
   const [triggering, setTriggering] = useState(false);
@@ -3429,7 +3617,7 @@ export function AgentsPage() {
   const [channels, setChannels] = useState<ChannelBinding[]>([]);
   const [templates, setTemplates] = useState<AgentTemplate[]>([]);
   const [showWizard, setShowWizard] = useState(false);
-  const [detailTab, setDetailTab] = useState<'overview' | 'interact' | 'channels' | 'messaging' | 'tasks' | 'memory' | 'learning' | 'logs'>('interact');
+  const [detailTab, setDetailTab] = useState<'overview' | 'interact' | 'channels' | 'messaging' | 'tasks' | 'memory' | 'learning' | 'logs' | 'pipeline'>('interact');
 
   const refresh = useCallback(async () => {
     try {
@@ -3561,9 +3749,15 @@ export function AgentsPage() {
         ? Math.round((tasks.filter((t) => t.status === 'completed').length / tasks.length) * 100)
         : null;
 
+    const isIaAgent = selectedAgent.name === 'IA';
+
     const DETAIL_TABS = [
       { id: 'interact', label: 'Interact', icon: MessageSquare },
       { id: 'overview', label: 'Overview', icon: Activity },
+      // IA is a deterministic, code-driven pipeline (no chat) — give it a
+      // dedicated holistic tracking tab: images/videos generated + the
+      // FFmpeg merge status for each run.
+      ...(isIaAgent ? [{ id: 'pipeline' as const, label: 'Pipeline', icon: Film }] : []),
       { id: 'channels', label: 'Data Sources', icon: Database },
       { id: 'messaging', label: 'Messaging Channels', icon: Wifi },
       { id: 'tasks', label: 'Tasks', icon: ListTodo },
@@ -3828,6 +4022,11 @@ export function AgentsPage() {
 
         {/* Tab: Interact */}
         {detailTab === 'interact' && <InteractTab agentId={selectedAgent.id} agentStatus={selectedAgent.status} onRunStateChange={refresh} />}
+
+        {/* Tab: Pipeline (IA only) — holistic image/video/merge tracking */}
+        {detailTab === 'pipeline' && isIaAgent && (
+          <PipelineTab agentId={selectedAgent.id} />
+        )}
 
         {/* Tab: Channels */}
         {detailTab === 'channels' && (

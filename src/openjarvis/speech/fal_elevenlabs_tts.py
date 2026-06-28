@@ -2,7 +2,7 @@
 
 Runs through fal's hosted ElevenLabs endpoint rather than ElevenLabs' own
 API directly, so this re-uses the FAL_KEY credential the rest of the
-Punarnirman pipeline already authenticates with (video_tool.py,
+IA pipeline already authenticates with (video_tool.py,
 image_tool.py) -- no separate ElevenLabs account/API key needs to be
 configured. Picked over Kokoro/Cartesia specifically for the storytelling
 intro clip because eleven-v3 has materially better Hindi/Hinglish

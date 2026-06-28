@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import {
   BarChart3,
@@ -157,9 +157,20 @@ type JobhuntBoard = {
   applied_counts: Record<string, number>;
   applications: JobhuntApplication[];
 };
+type ModelRoute = { scope: string; model: string; engine: string };
+type ModelStatus = {
+  engine: string;
+  router_model: string;
+  agent: string;
+  nemotron_model: string;
+  nemotron_ready: boolean;
+  nvidia: { host: string; api_key_configured: boolean };
+  route_map: ModelRoute[];
+};
 type OneStatus = {
   online: boolean;
   model: string;
+  model_status?: ModelStatus;
   agents: Agent[];
   jobs: Job[];
   obsidian: { connected: boolean; path: string; notes: number };
@@ -188,6 +199,7 @@ function isClearOneCommand(text: string) {
 const DEFAULT_STATUS: OneStatus = {
   online: false,
   model: 'qwen3.5:2b',
+  model_status: undefined,
   agents: [],
   jobs: [],
   obsidian: { connected: false, path: '', notes: 0 },
@@ -351,7 +363,6 @@ export function OneCockpit() {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || 'Approval failed');
-      setAlfaMessage('Approved â€” handed to BETA for a delivery plan. Outreach still needs to be sent by you.');
       setAlfaMessage('Outreach approved. Nothing was sent automatically; send the reviewed draft, then mark it contacted.');
       void refreshAlfaOpportunities();
       void refreshStatus();
@@ -387,7 +398,7 @@ export function OneCockpit() {
       setAlfaCopiedUrl(url);
       window.setTimeout(() => setAlfaCopiedUrl((current) => (current === url ? null : current)), 1800);
     } catch {
-      setAlfaMessage('Could not copy to clipboard â€” select and copy the draft manually.');
+      setAlfaMessage('Could not copy to clipboard - select and copy the draft manually.');
     }
   }
 
@@ -943,13 +954,14 @@ export function OneCockpit() {
 
   const activeJobs = status.jobs.filter((job) => job.status === 'queued' || job.status === 'running');
   const latestJobs = status.jobs.slice(0, 5);
+  const modelStatus = status.model_status;
   function alfaResult(job: Job) {
     if (job.agent_id !== 'alfa' || !job.result) return null;
     try {
       const result = JSON.parse(job.result);
       const mrr = Number(result.mrr_pipeline_monthly ?? 0);
-      const mrrPart = mrr > 0 ? ` Â· $${mrr.toLocaleString()}/mo MRR pipeline` : '';
-      return `${result.qualified ?? 0} leads Â· $${Number(result.estimated_usd_low ?? 0).toLocaleString()}-$${Number(result.estimated_usd_high ?? 0).toLocaleString()}${mrrPart}`;
+      const mrrPart = mrr > 0 ? ` | $${mrr.toLocaleString()}/mo MRR pipeline` : '';
+      return `${result.qualified ?? 0} leads | $${Number(result.estimated_usd_low ?? 0).toLocaleString()}-$${Number(result.estimated_usd_high ?? 0).toLocaleString()}${mrrPart}`;
     } catch {
       return null;
     }
@@ -964,7 +976,7 @@ export function OneCockpit() {
     try {
       const result = JSON.parse(job.result);
       if (job.agent_id === 'jobhunt') {
-        return `${result.loaded ?? 0} reviewed Â· ${result.new_briefs ?? 0} new briefs Â· ${result.duplicates ?? 0} duplicates`;
+        return `${result.loaded ?? 0} reviewed | ${result.new_briefs ?? 0} new briefs | ${result.duplicates ?? 0} duplicates`;
       }
       if (result.mode) return String(result.mode).replace(/-/g, ' ');
       if (result.content) return String(result.content).slice(0, 120);
@@ -1058,7 +1070,7 @@ export function OneCockpit() {
           disabled={!status.online}
         >
           {alwaysListening ? <Square size={16} fill="currentColor" /> : <Mic size={18} />}
-          <span>{alwaysListening ? 'LISTENING â€” TAP TO STOP' : 'ALWAYS LISTEN'}</span>
+          <span>{alwaysListening ? 'LISTENING - TAP TO STOP' : 'ALWAYS LISTEN'}</span>
         </button>
         {micError && <div className="one-mic-error one-mic-error-floating">{micError}</div>}
       </section>
@@ -1082,6 +1094,9 @@ export function OneCockpit() {
           <div className="one-header-actions">
             <span>CLAP + WAKE ARMED</span>
             <span>{activeJobs.length} ACTIVE</span>
+            <span className={`one-brain-chip ${modelStatus?.nemotron_ready ? 'nemotron' : ''}`}>
+              {(modelStatus?.engine || 'ollama').toUpperCase()} | {status.model}
+            </span>
             <button title={voiceEnabled ? 'Mute ONE' : 'Enable ONE voice'} onClick={() => setVoiceEnabled((value) => !value)}>
               {voiceEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
@@ -1089,6 +1104,41 @@ export function OneCockpit() {
             <a title="Advanced system console" href="/?advanced=1"><Settings2 size={18} /></a>
           </div>
         </header>
+
+        <section className="one-operations one-brain-board">
+          <div className="one-operations-head">
+            <div><div className="one-panel-label">ONE MODEL ROUTING</div><strong>ACTIVE BRAIN AND SPECIALIST BACKENDS</strong></div>
+            <span className="one-alfa-mrr">
+              {modelStatus?.nemotron_ready ? 'Nemotron ready' : 'Local/default brain'} | {modelStatus?.engine || 'ollama'}
+            </span>
+          </div>
+          <div className="one-brain-grid">
+            <div>
+              <span>Router</span>
+              <strong>{modelStatus?.router_model || status.model}</strong>
+              <small>{modelStatus?.engine || 'ollama'} / {modelStatus?.agent || 'react'}</small>
+            </div>
+            <div>
+              <span>Nemotron</span>
+              <strong>{modelStatus?.nemotron_model || 'Not selected'}</strong>
+              <small>{modelStatus?.nvidia?.api_key_configured ? modelStatus.nvidia.host : 'NVIDIA key not configured'}</small>
+            </div>
+            <div>
+              <span>Media</span>
+              <strong>gpt-image-1 + fal/Leonardo</strong>
+              <small>IA tools stay separate from text brain</small>
+            </div>
+          </div>
+          <div className="one-route-map">
+            {(modelStatus?.route_map || []).map((route) => (
+              <article key={route.scope}>
+                <span>{route.scope.replace(/_/g, ' ')}</span>
+                <strong>{route.model}</strong>
+                <small>{route.engine}</small>
+              </article>
+            ))}
+          </div>
+        </section>
 
         <section className="one-stage">
           <div className={`one-memory-universe ${memoryFlash ? 'memory-writing' : ''}`}>
@@ -1235,7 +1285,7 @@ export function OneCockpit() {
           </aside>
         </section>
 
-        <section className="one-operations">
+        <section className="one-operations one-agent-operations">
         <div className="one-operations-head">
           <div><div className="one-panel-label">AGENT OPERATIONS</div><strong>NEURAL ACTIVITY</strong></div>
           <div className="one-memory-health"><Database size={16} /><span>{status.obsidian.notes} permanent memories</span><i className={status.obsidian.connected ? 'online' : ''} /></div>
@@ -1279,7 +1329,7 @@ export function OneCockpit() {
       <section className="one-operations one-jobhunt-board">
         <div className="one-operations-head">
           <div><div className="one-panel-label">JOBHUNT APPLICATION PIPELINE</div><strong>QA / PRODUCT OWNER TRACTION BOARD</strong></div>
-          <span className="one-alfa-mrr">{jobhuntBoard.summary.tracked} tracked Â· {jobhuntBoard.summary.draft_ready} ready for review</span>
+          <span className="one-alfa-mrr">{jobhuntBoard.summary.tracked} tracked | {jobhuntBoard.summary.draft_ready} ready for review</span>
         </div>
         <div className="one-revenue-summary one-jobhunt-summary">
           <div><span>Tracked roles</span><strong>{jobhuntBoard.summary.tracked.toLocaleString()}</strong></div>
@@ -1297,7 +1347,7 @@ export function OneCockpit() {
               <div className="one-jobhunt-card-head">
                 <div>
                   <strong>{item.role || 'Unknown role'}</strong>
-                  <span>{item.company || 'Unknown company'} Â· {item.location || 'Location unknown'} Â· fit {item.fit_score || '0'}/100</span>
+                  <span>{item.company || 'Unknown company'} | {item.location || 'Location unknown'} | fit {item.fit_score || '0'}/100</span>
                 </div>
                 <span>{item.status.replace(/_/g, ' ')}</span>
               </div>
@@ -1320,7 +1370,7 @@ export function OneCockpit() {
       <section className="one-operations one-alfa-pipeline">
         <div className="one-operations-head">
           <div><div className="one-panel-label">ALFA REVENUE PIPELINE</div><strong>LEAD TO CASH OPERATING BOARD</strong></div>
-          <span className="one-alfa-mrr">{alfaOpportunities.length} pending Â· estimates only, nothing is sent without approval</span>
+          <span className="one-alfa-mrr">{alfaOpportunities.length} pending | estimates only, nothing is sent without approval</span>
         </div>
         <div className="one-revenue-summary">
           <div><span>Potential pipeline</span><strong>${alfaSummary.potential_pipeline.toLocaleString()}</strong></div>
@@ -1340,7 +1390,7 @@ export function OneCockpit() {
                 <button className="one-alfa-card-head" onClick={() => setAlfaExpanded(expanded ? null : opportunity.url)}>
                   <div>
                     <strong>{opportunity.title}</strong>
-                    <span>{opportunity.service} Â· fit {opportunity.score}/100 Â· {opportunity.currency} {opportunity.budget_min.toLocaleString()}-{opportunity.budget_max.toLocaleString()}</span>
+                    <span>{opportunity.service} | fit {opportunity.score}/100 | {opportunity.currency} {opportunity.budget_min.toLocaleString()}-{opportunity.budget_max.toLocaleString()}</span>
                   </div>
                   <span className="one-alfa-price">
                     ${opportunity.one_time_price.toLocaleString()}{opportunity.retainer_price ? ` + $${opportunity.retainer_price.toLocaleString()}/mo` : ''}
@@ -1435,6 +1485,3 @@ export function OneCockpit() {
     </main>
   );
 }
-
-
-

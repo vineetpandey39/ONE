@@ -84,7 +84,7 @@ class ImageGenerateTool(BaseTool):
             # don't fight this with ever-bigger-but-still-finite numbers --
             # give it effectively the whole run's budget (30 minutes) so a
             # slow ChatGPT response never kills the pipeline. The
-            # pipeline-level retry in punarnirman.py still applies on top
+            # pipeline-level retry in ia.py still applies on top
             # of this for genuine errors (not just slowness).
             timeout_seconds=1800.0,
         )

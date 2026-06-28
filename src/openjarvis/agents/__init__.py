@@ -85,7 +85,7 @@ except ImportError:
     pass
 
 try:
-    import openjarvis.agents.punarnirman  # noqa: F401
+    import openjarvis.agents.ia  # noqa: F401
 except ImportError:
     pass
 

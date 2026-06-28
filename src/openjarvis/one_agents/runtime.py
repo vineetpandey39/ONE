@@ -26,7 +26,7 @@ AGENTS: dict[str, dict[str, str]] = {
     "hephaistos": {"name": "HEPHAISTOS", "role": "Local system health operator"},
     "poseidon": {"name": "POSEIDON", "role": "Revenue and payout control operator"},
     "zeus": {"name": "ZEUS", "role": "Agent orchestration and escalation operator"},
-    "punarnirman": {"name": "PUNARNIRMAN", "role": "Restoration-reel content operator"},
+    "ia": {"name": "IA", "role": "Restoration-reel content operator"},
 }
 
 
@@ -351,17 +351,17 @@ def _run_titan(job: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _run_punarnirman(job: dict[str, Any]) -> dict[str, Any]:
+def _run_ia(job: dict[str, Any]) -> dict[str, Any]:
     """Run the real restoration-reel pipeline end-to-end: image_generate ->
     leonardo_video_generate -> video_merge, via the deterministic
-    PunarnirmanAgent (not the generic Ollama planner). The agent itself
+    IAAgent (not the generic Ollama planner). The agent itself
     mirrors its own progress into the managed-agent dashboard record
-    (see ``agents/punarnirman_dashboard.py``); this just bridges the ONE
+    (see ``agents/ia_dashboard.py``); this just bridges the ONE
     Cockpit job queue to that same run.
     """
     from pathlib import Path
 
-    from openjarvis.agents.punarnirman import PunarnirmanAgent
+    from openjarvis.agents.ia import IAAgent
     from openjarvis.tools.image_tool import ImageGenerateTool
     from openjarvis.tools.leonardo_browser_video_tool import LeonardoBrowserVideoGenerateTool
     from openjarvis.tools.leonardo_video_tool import LeonardoVideoGenerateTool
@@ -390,7 +390,7 @@ def _run_punarnirman(job: dict[str, Any]) -> dict[str, Any]:
     else:
         video_backend = "api"
 
-    agent = PunarnirmanAgent(
+    agent = IAAgent(
         engine=None,
         model="",
         tools=[
@@ -412,7 +412,7 @@ def _run_punarnirman(job: dict[str, Any]) -> dict[str, Any]:
         # "completed" with a buried error.
         raise RuntimeError(result.content)
     return {
-        "agent": "PUNARNIRMAN",
+        "agent": "IA",
         "mode": job["mode"],
         "content": result.content,
         "run_dir": result.metadata.get("run_dir"),
@@ -424,8 +424,8 @@ def _run_punarnirman(job: dict[str, Any]) -> dict[str, Any]:
 def execute_job(job: dict[str, Any]) -> dict[str, Any]:
     if job["agent_id"] == "titan" and job["mode"] in {"execute", "publish"}:
         return _run_titan(job)
-    if job["agent_id"] == "punarnirman" and job["mode"] in {"execute", "publish"}:
-        return _run_punarnirman(job)
+    if job["agent_id"] == "ia" and job["mode"] in {"execute", "publish"}:
+        return _run_ia(job)
     if job["agent_id"] == "alfa":
         from openjarvis.one_agents.alfa import run_alfa_scan
 
