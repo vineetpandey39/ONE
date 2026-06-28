@@ -110,13 +110,17 @@ def _one_agent_command(text: str) -> str | None:
     # of the general-purpose model so ONE never invents a name, changes tone,
     # or emits internal reasoning for a simple greeting.
     check_in = re.sub(r"[^a-z0-9]+", " ", lowered).strip()
-    check_in = re.sub(r"^(?:hey\s+)?(?:one|jarvis|jervis|jarvish)\s+", "", check_in)
+    check_in = re.sub(r"\b(one|jarvis|jervis|jarvish)\b", " ", check_in)
+    check_in = re.sub(r"\s+", " ", check_in).strip()
     if check_in in {"are you up", "are you there", "you up", "online"}:
         return "Always online, Vineet. What do you need?"
     if check_in in {
         "hi",
         "hello",
         "hey",
+        "hi how are you",
+        "hello how are you",
+        "hey how are you",
         "namaste",
         "how are you",
         "how are you today",
