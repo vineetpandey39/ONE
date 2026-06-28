@@ -113,6 +113,21 @@ def _one_agent_command(text: str) -> str | None:
     check_in = re.sub(r"^(?:hey\s+)?(?:one|jarvis|jervis|jarvish)\s+", "", check_in)
     if check_in in {"are you up", "are you there", "you up", "online"}:
         return "Always online, Vineet. What do you need?"
+    if check_in in {
+        "hi",
+        "hello",
+        "hey",
+        "namaste",
+        "how are you",
+        "how are you today",
+        "kaise ho",
+        "kya haal hai",
+        "kya chal raha hai",
+    }:
+        return (
+            "I am online and steady, Vineet. Local core is listening, memory is active, "
+            "and the agent network is standing by. Tell me which mission to run."
+        )
 
     from openjarvis.one_agents.runtime import AGENTS, enqueue_job, list_jobs
 
