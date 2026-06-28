@@ -258,7 +258,17 @@ def _save_exchange_to_obsidian(user_text: str, assistant_text: str) -> None:
     Silent no-op if Obsidian isn't connected or the text is empty; never
     raises into the request path.
     """
-    if not user_text.strip() or not assistant_text.strip():
+    failure_markers = (
+        "maximum turns reached without a final answer",
+        "expected ':' or ']' after array element",
+        "model did not return valid json",
+    )
+    cleaned_reply = assistant_text.strip()
+    if (
+        not user_text.strip()
+        or not cleaned_reply
+        or any(marker in cleaned_reply.lower() for marker in failure_markers)
+    ):
         return
     try:
         from openjarvis.one_agents.obsidian import obsidian_status, remember_exchange
