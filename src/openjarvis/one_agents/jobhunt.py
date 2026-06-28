@@ -135,6 +135,17 @@ def _write_tracker(rows: list[dict[str, str]]) -> None:
             writer.writerow({column: row.get(column, "") for column in TRACKER_COLUMNS})
 
 
+def _latest_path() -> Path:
+    return _agent_dir() / "latest.json"
+
+
+def _public_path(path: str) -> str:
+    try:
+        return str(Path(path).resolve())
+    except Exception:
+        return path
+
+
 def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:70] or "job"
 
@@ -389,5 +400,56 @@ def run_jobhunt_scan() -> dict[str, Any]:
         "briefs": briefs,
         "inbox": str(_inbox_dir()),
     }
-    (_agent_dir() / "latest.json").write_text(json.dumps(latest, indent=2), encoding="utf-8")
+    _latest_path().write_text(json.dumps(latest, indent=2), encoding="utf-8")
     return latest
+
+
+def jobhunt_board(limit: int = 50) -> dict[str, Any]:
+    """Return dashboard-ready visibility for JOBHUNT."""
+    rows = _read_tracker()
+    rows = list(reversed(rows))[: max(1, min(limit, 200))]
+    latest: dict[str, Any] = {}
+    if _latest_path().exists():
+        try:
+            latest = json.loads(_latest_path().read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            latest = {}
+    status_counts: dict[str, int] = {}
+    email_counts: dict[str, int] = {}
+    applied_counts: dict[str, int] = {}
+    for row in rows:
+        status_counts[row.get("status") or "unknown"] = status_counts.get(row.get("status") or "unknown", 0) + 1
+        email_counts[row.get("email_status") or "unknown"] = email_counts.get(row.get("email_status") or "unknown", 0) + 1
+        applied_counts[row.get("applied_status") or "unknown"] = applied_counts.get(row.get("applied_status") or "unknown", 0) + 1
+    applications = []
+    for row in rows:
+        brief_path = ""
+        resume_path = ""
+        resume_version = row.get("resume_version", "")
+        if resume_version:
+            resume_path = _resume_dir() / resume_version
+            brief_name = resume_version.replace("-resume-notes.md", ".md")
+            brief_path = _briefs_dir() / brief_name
+        applications.append(
+            {
+                **row,
+                "brief_path": _public_path(str(brief_path)) if brief_path else "",
+                "resume_notes_path": _public_path(str(resume_path)) if resume_path else "",
+            }
+        )
+    return {
+        "summary": {
+            "tracked": len(_read_tracker()),
+            "visible": len(applications),
+            "draft_ready": status_counts.get("draft_ready", 0),
+            "email_drafts_ready": email_counts.get("draft_ready_review_required", 0),
+            "not_applied": applied_counts.get("not_applied_review_required", 0),
+            "tracker_csv": _public_path(str(_tracker_path())),
+            "inbox": _public_path(str(_inbox_dir())),
+            "latest_scan": latest,
+        },
+        "status_counts": status_counts,
+        "email_counts": email_counts,
+        "applied_counts": applied_counts,
+        "applications": applications,
+    }

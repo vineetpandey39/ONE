@@ -124,6 +124,38 @@ body { margin: 0; background: #02060b; }
 .one-alfa-result { display: block; margin: 5px 0 8px; color: #62e4ae; font-size: 10px; }
 .one-progress { height: 3px; background: #152737; }
 .one-progress i { display: block; height: 100%; background: #35c8ff; }
+.one-agent-execution-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.one-agent-execution-grid > p { color: #6f8ca0; }
+.one-agent-execution { min-width: 0; border: 1px solid #17384f; border-radius: 6px; background: #050d17cc; padding: 12px; }
+.one-agent-execution-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 9px; border-bottom: 1px solid #102638; }
+.one-agent-execution-head span { color: #57cfff; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+.one-agent-execution-head strong { display: block; margin-top: 3px; color: #9db9c9; font-size: 11px; font-weight: 500; line-height: 1.35; }
+.one-agent-execution-head i { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: #385266; }
+.one-agent-execution-head i.online { background: #32dfa2; box-shadow: 0 0 10px #32dfa2; }
+.one-agent-run { margin-top: 9px; padding-left: 9px; border-left: 2px solid #1d5373; }
+.one-agent-run.running, .one-agent-run.queued { border-color: #35c8ff; }
+.one-agent-run.failed { border-color: #ff8795; }
+.one-agent-run > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.one-agent-run strong { color: #d3e8f5; font-size: 10px; text-transform: uppercase; }
+.one-agent-run span { color: #7693a7; font-size: 9px; text-transform: uppercase; }
+.one-agent-run p { margin: 5px 0; color: #a8c1d1; font-size: 11px; line-height: 1.35; max-height: 30px; overflow: hidden; }
+.one-agent-run small { display: block; color: #62e4ae; font-size: 10px; }
+.one-agent-run em { display: block; color: #ff8795; font-size: 10px; font-style: normal; }
+.one-jobhunt-board { margin-top: 28px; }
+.one-jobhunt-summary strong { color: #71d7ff; }
+.one-jobhunt-note { margin: 10px 0 0; padding: 8px 11px; border-left: 2px solid #f0bd57; color: #d9c79a; font-size: 12px; line-height: 1.45; background: #271b065c; border-radius: 4px; }
+.one-jobhunt-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; max-height: 560px; overflow-y: auto; padding-right: 4px; }
+.one-jobhunt-list > p { color: #6f8ca0; }
+.one-jobhunt-card { min-width: 0; border: 1px solid #17384f; border-radius: 6px; background: #050d17cc; padding: 13px; }
+.one-jobhunt-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.one-jobhunt-card-head strong { display: block; color: #cfeaff; font-size: 13px; line-height: 1.3; }
+.one-jobhunt-card-head span { color: #7693a7; font-size: 10px; line-height: 1.4; text-transform: uppercase; }
+.one-jobhunt-card-head > span { flex: 0 0 auto; padding: 4px 7px; border: 1px solid #22506c; border-radius: 4px; color: #71d7ff; background: #082033; }
+.one-jobhunt-stages { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.one-jobhunt-stages small { min-width: 0; padding: 6px 7px; border: 1px solid #142f43; border-radius: 4px; color: #9db9c9; background: #040d16; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.one-jobhunt-card p { margin: 10px 0; color: #a8c1d1; font-size: 12px; line-height: 1.45; }
+.one-jobhunt-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.one-jobhunt-actions a, .one-jobhunt-actions span { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid #1d4b67; border-radius: 4px; color: #67caee; background: #071724; font-size: 11px; text-decoration: none; }
 .one-modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(0,4,9,.76); backdrop-filter: blur(10px); }
 .one-memory-modal { width: min(480px, calc(100% - 32px)); position: relative; padding: 30px; border: 1px solid #28607f; border-radius: 8px; background: #06111d; box-shadow: 0 20px 90px #000; display: grid; gap: 13px; }
 .one-memory-modal h2 { margin: 0; font-size: 26px; }
@@ -179,8 +211,8 @@ body { margin: 0; background: #02060b; }
 .one-alfa-approve { background: #0e9f6e; color: white; }
 .one-alfa-dismiss { background: #2a1620; color: #ff8795; border: 1px solid #5a2d38; }
 .one-alfa-approve:disabled, .one-alfa-dismiss:disabled { opacity: .45; cursor: not-allowed; }
-@media (max-width: 980px) { .one-stage { grid-template-columns: 1fr; padding: 20px 0; } .one-memory-universe { width: min(600px, 82vw); } .one-agent-node { transform: translate(-50%, -50%) rotate(var(--angle)) translate(calc(min(600px, 82vw) / 2)) rotate(calc(-1 * var(--angle))); } .one-conversation { border-left: 0; border-top: 1px solid #17354b; padding: 24px 0; } .one-job-strip { grid-template-columns: repeat(5, 230px); } }
-@media (max-width: 620px) { .one-header { height: 64px; padding: 0 16px; } .one-header-actions > span { display: none; } .one-stage, .one-operations { width: calc(100% - 28px); } .one-memory-universe { width: 86vw; margin-top: 40px; } .one-agent-node { width: 58px; height: 58px; transform: translate(-50%, -50%) rotate(var(--angle)) translate(43vw) rotate(calc(-1 * var(--angle))); } .one-agent-node strong { font-size: 7px; } .one-core { width: 138px; } .one-core svg { width: 38px; } .one-graph-summary, .one-graph-legend { display: none; } .one-memory-inspector { width: 46%; } .one-conversation { min-height: 480px; } .one-alfa-card-head { flex-direction: column; align-items: flex-start; gap: 6px; } .one-revenue-summary, .one-revenue-form { grid-template-columns: 1fr; } }
+@media (max-width: 980px) { .one-stage { grid-template-columns: 1fr; padding: 20px 0; } .one-memory-universe { width: min(600px, 82vw); } .one-agent-node { transform: translate(-50%, -50%) rotate(var(--angle)) translate(calc(min(600px, 82vw) / 2)) rotate(calc(-1 * var(--angle))); } .one-conversation { border-left: 0; border-top: 1px solid #17354b; padding: 24px 0; } .one-job-strip { grid-template-columns: repeat(5, 230px); } .one-agent-execution-grid, .one-jobhunt-list { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .one-header { height: 64px; padding: 0 16px; } .one-header-actions > span { display: none; } .one-stage, .one-operations { width: calc(100% - 28px); } .one-memory-universe { width: 86vw; margin-top: 40px; } .one-agent-node { width: 58px; height: 58px; transform: translate(-50%, -50%) rotate(var(--angle)) translate(43vw) rotate(calc(-1 * var(--angle))); } .one-agent-node strong { font-size: 7px; } .one-core { width: 138px; } .one-core svg { width: 38px; } .one-graph-summary, .one-graph-legend { display: none; } .one-memory-inspector { width: 46%; } .one-conversation { min-height: 480px; } .one-alfa-card-head, .one-jobhunt-card-head { flex-direction: column; align-items: flex-start; gap: 6px; } .one-revenue-summary, .one-revenue-form, .one-jobhunt-stages { grid-template-columns: 1fr; } }
 
 /* ---------------------------------------------------------------------- */
 /* Focus mode: ONE's orb is the only thing on screen by default, full     */
@@ -458,3 +490,11 @@ body { margin: 0; background: #02060b; }
   .one-drawer-tab span { display: none; }
   .one-results-drawer { height: 94vh; }
 }
+
+/* Results drawer priority: show tracking first when Agents & Results opens. */
+.one-results-drawer .one-header { order: 0; }
+.one-results-drawer > .one-operations:not(.one-jobhunt-board):not(.one-alfa-pipeline) { order: 1; }
+.one-results-drawer > .one-jobhunt-board { order: 2; }
+.one-results-drawer > .one-alfa-pipeline { order: 3; }
+.one-results-drawer > .one-stage { order: 4; }
+.one-results-drawer .one-operations:first-of-type .one-panel-label::after { content: ' / PER-AGENT EXECUTION TRACKING'; color: #f0bd57; }

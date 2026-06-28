@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import {
   BarChart3,
@@ -121,6 +121,42 @@ type RevenueSummary = {
   paid_deals: number;
   open_deals: number;
 };
+type JobhuntApplication = {
+  opportunity_id: string;
+  date_found: string;
+  source: string;
+  company: string;
+  role: string;
+  location: string;
+  job_url: string;
+  posted_date: string;
+  fit_score: string;
+  status: string;
+  resume_version: string;
+  email_status: string;
+  applied_status: string;
+  next_action: string;
+  last_touched: string;
+  notes: string;
+  brief_path: string;
+  resume_notes_path: string;
+};
+type JobhuntBoard = {
+  summary: {
+    tracked: number;
+    visible: number;
+    draft_ready: number;
+    email_drafts_ready: number;
+    not_applied: number;
+    tracker_csv: string;
+    inbox: string;
+    latest_scan?: Record<string, unknown>;
+  };
+  status_counts: Record<string, number>;
+  email_counts: Record<string, number>;
+  applied_counts: Record<string, number>;
+  applications: JobhuntApplication[];
+};
 type OneStatus = {
   online: boolean;
   model: string;
@@ -192,9 +228,8 @@ export function OneCockpit() {
   const spokenEchoRef = useRef<string[]>([]);
   const lastSpeechEndedAtRef = useRef(0);
   const [speaking, setSpeaking] = useState(false);
-  // Default view is the orb alone, full screen. Everything else (memory
-  // graph, agent roster, live transcript, job/lead results) lives in an
-  // overlay drawer that's hidden until the user explicitly pulls it up.
+  // Drawer stays hidden on the orb screen, but opens directly into the
+  // tracking dashboard when the user taps Agents & Results.
   const [drawerOpen, setDrawerOpen] = useState(false);
   // Always-listening mode: a continuous mic loop that replaces click-to-talk
   // until the user explicitly turns it off. Refs mirror the state so the
@@ -260,6 +295,13 @@ export function OneCockpit() {
   const [alfaMessage, setAlfaMessage] = useState('');
   const [alfaSummary, setAlfaSummary] = useState<RevenueSummary>({ potential_pipeline: 0, potential_mrr: 0, earned_revenue: 0, active_mrr: 0, paid_deals: 0, open_deals: 0 });
   const [alfaForm, setAlfaForm] = useState({ clientName: '', clientContact: '', channel: 'Reddit DM', response: '', amount: '', reference: '' });
+  const [jobhuntBoard, setJobhuntBoard] = useState<JobhuntBoard>({
+    summary: { tracked: 0, visible: 0, draft_ready: 0, email_drafts_ready: 0, not_applied: 0, tracker_csv: '', inbox: '' },
+    status_counts: {},
+    email_counts: {},
+    applied_counts: {},
+    applications: [],
+  });
   // The orb stage is fixed full-viewport and the results drawer is its own
   // fixed, internally-scrolling overlay, so the page itself never needs to
   // scroll. No overflow override needed here anymore.
@@ -282,6 +324,23 @@ export function OneCockpit() {
     return () => window.clearInterval(timer);
   }, [refreshAlfaOpportunities]);
 
+  const refreshJobhuntBoard = useCallback(async () => {
+    try {
+      const response = await coreFetch('/v1/jobhunt/board?limit=50', { cache: 'no-store' });
+      if (!response.ok) throw new Error('offline');
+      const data = await response.json();
+      setJobhuntBoard(data);
+    } catch {
+      setJobhuntBoard((current) => current);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshJobhuntBoard();
+    const timer = window.setInterval(refreshJobhuntBoard, 8000);
+    return () => window.clearInterval(timer);
+  }, [refreshJobhuntBoard]);
+
 
   async function approveOpportunity(url: string) {
     setAlfaActionUrl(url);
@@ -292,7 +351,7 @@ export function OneCockpit() {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || 'Approval failed');
-      setAlfaMessage('Approved — handed to BETA for a delivery plan. Outreach still needs to be sent by you.');
+      setAlfaMessage('Approved â€” handed to BETA for a delivery plan. Outreach still needs to be sent by you.');
       setAlfaMessage('Outreach approved. Nothing was sent automatically; send the reviewed draft, then mark it contacted.');
       void refreshAlfaOpportunities();
       void refreshStatus();
@@ -328,7 +387,7 @@ export function OneCockpit() {
       setAlfaCopiedUrl(url);
       window.setTimeout(() => setAlfaCopiedUrl((current) => (current === url ? null : current)), 1800);
     } catch {
-      setAlfaMessage('Could not copy to clipboard — select and copy the draft manually.');
+      setAlfaMessage('Could not copy to clipboard â€” select and copy the draft manually.');
     }
   }
 
@@ -889,8 +948,27 @@ export function OneCockpit() {
     try {
       const result = JSON.parse(job.result);
       const mrr = Number(result.mrr_pipeline_monthly ?? 0);
-      const mrrPart = mrr > 0 ? ` · $${mrr.toLocaleString()}/mo MRR pipeline` : '';
-      return `${result.qualified ?? 0} leads · $${Number(result.estimated_usd_low ?? 0).toLocaleString()}-$${Number(result.estimated_usd_high ?? 0).toLocaleString()}${mrrPart}`;
+      const mrrPart = mrr > 0 ? ` Â· $${mrr.toLocaleString()}/mo MRR pipeline` : '';
+      return `${result.qualified ?? 0} leads Â· $${Number(result.estimated_usd_low ?? 0).toLocaleString()}-$${Number(result.estimated_usd_high ?? 0).toLocaleString()}${mrrPart}`;
+    } catch {
+      return null;
+    }
+  }
+  const agentExecutionSections = useMemo(() => status.agents.map((agent) => ({
+    agent,
+    jobs: status.jobs.filter((job) => job.agent_id === agent.id).slice(0, 3),
+  })).filter((section) => section.jobs.length), [status.agents, status.jobs]);
+  function jobResult(job: Job) {
+    if (job.agent_id === 'alfa') return alfaResult(job);
+    if (!job.result) return null;
+    try {
+      const result = JSON.parse(job.result);
+      if (job.agent_id === 'jobhunt') {
+        return `${result.loaded ?? 0} reviewed Â· ${result.new_briefs ?? 0} new briefs Â· ${result.duplicates ?? 0} duplicates`;
+      }
+      if (result.mode) return String(result.mode).replace(/-/g, ' ');
+      if (result.content) return String(result.content).slice(0, 120);
+      return null;
     } catch {
       return null;
     }
@@ -980,7 +1058,7 @@ export function OneCockpit() {
           disabled={!status.online}
         >
           {alwaysListening ? <Square size={16} fill="currentColor" /> : <Mic size={18} />}
-          <span>{alwaysListening ? 'LISTENING — TAP TO STOP' : 'ALWAYS LISTEN'}</span>
+          <span>{alwaysListening ? 'LISTENING â€” TAP TO STOP' : 'ALWAYS LISTEN'}</span>
         </button>
         {micError && <div className="one-mic-error one-mic-error-floating">{micError}</div>}
       </section>
@@ -988,11 +1066,11 @@ export function OneCockpit() {
       <button
         type="button"
         className={`one-drawer-tab ${drawerOpen ? 'open' : ''}`}
-        title={drawerOpen ? 'Hide agents, memory & results' : 'Pull up agents, memory & results'}
+        title={drawerOpen ? 'Hide tracking dashboard' : 'Open tracking dashboard'}
         onClick={() => setDrawerOpen((value) => !value)}
       >
         <ChevronUp size={16} />
-        <span>{drawerOpen ? 'HIDE' : 'AGENTS & RESULTS'}</span>
+        <span>{drawerOpen ? 'HIDE DASHBOARD' : 'TRACKING DASHBOARD'}</span>
       </button>
 
       <aside className={`one-results-drawer ${drawerOpen ? 'open' : ''}`} aria-hidden={!drawerOpen}>
@@ -1168,9 +1246,72 @@ export function OneCockpit() {
             <article key={job.id} className={job.status}>
               <div><strong>{job.agent_id.toUpperCase()}</strong><span>{job.status}</span></div>
               <p>{job.task}</p>
-              {alfaResult(job) && <small className="one-alfa-result">{alfaResult(job)}</small>}
+              {jobResult(job) && <small className="one-alfa-result">{jobResult(job)}</small>}
               <div className="one-progress"><i style={{ width: `${job.progress}%` }} /></div>
               {job.error && <em>{job.error}</em>}
+            </article>
+          ))}
+        </div>
+        <div className="one-agent-execution-grid">
+          {!agentExecutionSections.length && <p>No agent execution history yet.</p>}
+          {agentExecutionSections.map(({ agent, jobs }) => (
+            <article key={agent.id} className="one-agent-execution">
+              <div className="one-agent-execution-head">
+                <div>
+                  <span>{agent.name}</span>
+                  <strong>{agent.role}</strong>
+                </div>
+                <i className={jobs.some((job) => job.status === 'running' || job.status === 'queued') ? 'online' : ''} />
+              </div>
+              {jobs.map((job) => (
+                <div key={job.id} className={`one-agent-run ${job.status}`}>
+                  <div><strong>{job.mode}</strong><span>{job.status}</span></div>
+                  <p>{job.task}</p>
+                  {jobResult(job) && <small>{jobResult(job)}</small>}
+                  {job.error && <em>{job.error}</em>}
+                </div>
+              ))}
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="one-operations one-jobhunt-board">
+        <div className="one-operations-head">
+          <div><div className="one-panel-label">JOBHUNT APPLICATION PIPELINE</div><strong>QA / PRODUCT OWNER TRACTION BOARD</strong></div>
+          <span className="one-alfa-mrr">{jobhuntBoard.summary.tracked} tracked Â· {jobhuntBoard.summary.draft_ready} ready for review</span>
+        </div>
+        <div className="one-revenue-summary one-jobhunt-summary">
+          <div><span>Tracked roles</span><strong>{jobhuntBoard.summary.tracked.toLocaleString()}</strong></div>
+          <div><span>Resume drafts</span><strong>{jobhuntBoard.summary.draft_ready.toLocaleString()}</strong></div>
+          <div><span>Email drafts</span><strong>{jobhuntBoard.summary.email_drafts_ready.toLocaleString()}</strong></div>
+          <div><span>Apply queue</span><strong>{jobhuntBoard.summary.not_applied.toLocaleString()}</strong></div>
+        </div>
+        <p className="one-jobhunt-note">
+          Autonomous work: ingest alerts/JDs, review fit, create resume notes, prepare outreach, and record audit trail. Apply/send stays review-gated for account safety.
+        </p>
+        <div className="one-jobhunt-list">
+          {!jobhuntBoard.applications.length && <p>No applications tracked yet. Add LinkedIn/Naukri/Gmail alert text into the JOBHUNT inbox, then run JOBHUNT.</p>}
+          {jobhuntBoard.applications.map((item) => (
+            <article key={item.opportunity_id} className="one-jobhunt-card">
+              <div className="one-jobhunt-card-head">
+                <div>
+                  <strong>{item.role || 'Unknown role'}</strong>
+                  <span>{item.company || 'Unknown company'} Â· {item.location || 'Location unknown'} Â· fit {item.fit_score || '0'}/100</span>
+                </div>
+                <span>{item.status.replace(/_/g, ' ')}</span>
+              </div>
+              <div className="one-jobhunt-stages">
+                <small>Resume: {item.resume_version ? 'notes ready' : 'pending'}</small>
+                <small>Email: {item.email_status.replace(/_/g, ' ')}</small>
+                <small>Apply: {item.applied_status.replace(/_/g, ' ')}</small>
+              </div>
+              <p>{item.next_action}</p>
+              <div className="one-jobhunt-actions">
+                {item.job_url && <a href={item.job_url} target="_blank" rel="noreferrer">Open job <ExternalLink size={12} /></a>}
+                {item.brief_path && <span title={item.brief_path}>Brief saved</span>}
+                {item.resume_notes_path && <span title={item.resume_notes_path}>Resume notes saved</span>}
+              </div>
             </article>
           ))}
         </div>
@@ -1179,7 +1320,7 @@ export function OneCockpit() {
       <section className="one-operations one-alfa-pipeline">
         <div className="one-operations-head">
           <div><div className="one-panel-label">ALFA REVENUE PIPELINE</div><strong>LEAD TO CASH OPERATING BOARD</strong></div>
-          <span className="one-alfa-mrr">{alfaOpportunities.length} pending · estimates only, nothing is sent without approval</span>
+          <span className="one-alfa-mrr">{alfaOpportunities.length} pending Â· estimates only, nothing is sent without approval</span>
         </div>
         <div className="one-revenue-summary">
           <div><span>Potential pipeline</span><strong>${alfaSummary.potential_pipeline.toLocaleString()}</strong></div>
@@ -1199,7 +1340,7 @@ export function OneCockpit() {
                 <button className="one-alfa-card-head" onClick={() => setAlfaExpanded(expanded ? null : opportunity.url)}>
                   <div>
                     <strong>{opportunity.title}</strong>
-                    <span>{opportunity.service} · fit {opportunity.score}/100 · {opportunity.currency} {opportunity.budget_min.toLocaleString()}-{opportunity.budget_max.toLocaleString()}</span>
+                    <span>{opportunity.service} Â· fit {opportunity.score}/100 Â· {opportunity.currency} {opportunity.budget_min.toLocaleString()}-{opportunity.budget_max.toLocaleString()}</span>
                   </div>
                   <span className="one-alfa-price">
                     ${opportunity.one_time_price.toLocaleString()}{opportunity.retainer_price ? ` + $${opportunity.retainer_price.toLocaleString()}/mo` : ''}
@@ -1294,3 +1435,6 @@ export function OneCockpit() {
     </main>
   );
 }
+
+
+

@@ -53,6 +53,13 @@ async def one_jobs():
     return {"jobs": list_jobs(30)}
 
 
+@router.get("/v1/jobhunt/board")
+async def jobhunt_board(limit: int = 50):
+    from openjarvis.one_agents.jobhunt import jobhunt_board as build_jobhunt_board
+
+    return build_jobhunt_board(limit)
+
+
 @router.get("/v1/one/wake-events")
 async def one_wake_events(limit: int = 10):
     from openjarvis.one_agents.wake import recent_wake_events
