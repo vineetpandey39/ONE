@@ -216,7 +216,7 @@ def _local_plan(job: dict[str, Any]) -> dict[str, Any]:
     response = httpx.post(
         os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434") + "/api/chat",
         json={
-            "model": os.environ.get("ONE_ROUTER_MODEL", "qwen3.5:2b"),
+            "model": os.environ.get("ONE_ROUTER_MODEL", "llama3.1:8b"),
             "stream": False,
             "think": False,
             "messages": [{"role": "user", "content": prompt}],

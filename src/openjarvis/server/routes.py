@@ -37,7 +37,7 @@ def _one_model_status(model: str | None = None) -> dict[str, Any]:
         model
         or os.environ.get("ONE_ROUTER_MODEL")
         or os.environ.get("NEMOTRON_MODEL")
-        or "qwen3.5:2b"
+        or "llama3.1:8b"
     )
     nemotron_model = os.environ.get("NEMOTRON_MODEL", "").strip()
     nvidia_key = os.environ.get("NVIDIA_API_KEY", "").strip()
