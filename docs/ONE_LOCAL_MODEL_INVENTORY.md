@@ -20,7 +20,7 @@ This inventory tracks which local models and runtimes are installed for ONE on t
 | Reasoning / agent brain | Ollama | llama3.1:8b | Pulled and smoke-tested locally |
 | Fast reasoning fallback | Ollama | qwen3.5:2b | Existing local model |
 | Heavy reasoning | Ollama | qwen3.6:latest | Existing local model; memory-heavy |
-| OCR / document parsing | Python | paddleocr 3.7.0 + paddlepaddle 3.3.1 | Installed in ONE venv; cache redirected to `data/model_cache` and `data/runtime_home` |
+| OCR / document parsing | Python | paddleocr 3.7.0 + paddlepaddle 3.3.1 | Installed in ONE venv; PP-OCRv6 medium detection/recognition weights cached locally |
 | Speech-to-text | Python | faster-whisper | Existing local speech stack |
 
 ## NVIDIA Build Models From The RTX List
@@ -28,7 +28,7 @@ This inventory tracks which local models and runtimes are installed for ONE on t
 | NVIDIA listing | Local status on this machine | Decision |
 | --- | --- | --- |
 | llama-3.1-8b-instruct | Installed via Ollama as `llama3.1:8b` | Use as default ONE brain |
-| paddleocr | Installed via Python package stack | Use for OCR/document parsing |
+| paddleocr | Installed via Python package stack | PP-OCRv6 medium detection and recognition weights cached locally |
 | parakeet-ctc-0.6b-asr | Not installed as NVIDIA package | Keep `faster-whisper` active; Parakeet needs NeMo/Riva/NIM setup |
 | nv-yolox-page-elements-v1 | Not installed | Needs NVIDIA/NGC model package or custom ONNX/TensorRT path |
 | FLUX.1-schnell | Not installed | Feasible only with a dedicated image runner such as ComfyUI/diffusers low-VRAM mode |
