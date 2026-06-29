@@ -439,7 +439,28 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
     return _local_plan(job)
 
 
+def _job_watchdog_seconds() -> float:
+    """Outer, additive safety-net timeout for a *whole* job run.
+
+    This does NOT replace, shorten, or otherwise touch any existing
+    per-call timeout inside individual tools/agents (e.g. image/video
+    generation calls keep their own existing timeouts exactly as-is).
+    It exists only so that if a job hangs somewhere with no internal
+    timeout of its own (e.g. a stuck browser-automation wait), the
+    job-queue row still gets moved out of 'running' instead of staying
+    stuck forever. Configurable via ONE_JOB_WATCHDOG_SECONDS; defaults
+    to 45 minutes, which is generous enough for the slowest known IA
+    image+video+merge pipeline run.
+    """
+    try:
+        return max(60.0, float(os.environ.get("ONE_JOB_WATCHDOG_SECONDS", "2700")))
+    except ValueError:
+        return 2700.0
+
+
 def run_worker(poll_seconds: float = 2.0) -> None:
+    import threading
+
     last_schedule_check = 0.0
     while True:
         if time.time() - last_schedule_check >= 30:
@@ -449,7 +470,41 @@ def run_worker(poll_seconds: float = 2.0) -> None:
         if not job:
             time.sleep(poll_seconds)
             continue
-        try:
-            finish_job(job["id"], execute_job(job))
-        except Exception as exc:
-            fail_job(job["id"], exc)
+
+        outcome: dict[str, Any] = {}
+
+        def _target() -> None:
+            try:
+                outcome["result"] = execute_job(job)
+            except Exception as exc:  # noqa: BLE001 - surfaced via outcome
+                outcome["error"] = exc
+
+        worker_thread = threading.Thread(
+            target=_target, name=f"job-{job['id']}", daemon=True
+        )
+        worker_thread.start()
+        worker_thread.join(timeout=_job_watchdog_seconds())
+
+        if worker_thread.is_alive():
+            # The job is still running past the outer watchdog window.
+            # We cannot forcibly kill a Python thread, so it keeps running
+            # in the background (and will simply be ignored when/if it
+            # eventually finishes), but the queue row itself is freed up
+            # immediately so the dashboard stops showing a permanently
+            # frozen RUNNING card and the worker loop can keep picking up
+            # other queued jobs.
+            fail_job(
+                job["id"],
+                TimeoutError(
+                    f"Job exceeded watchdog timeout of {_job_watchdog_seconds():.0f}s "
+                    "and was marked failed so it would not stay stuck forever. "
+                    "The underlying step may still finish in the background; "
+                    "re-run the task if needed."
+                ),
+            )
+            continue
+
+        if "error" in outcome:
+            fail_job(job["id"], outcome["error"])
+        else:
+            finish_job(job["id"], outcome.get("result", {}))
