@@ -101,6 +101,13 @@ async def one_model_status():
     return _one_model_status()
 
 
+@router.get("/v1/one/credential-vault")
+async def one_credential_vault():
+    from openjarvis.core.credentials import list_credential_vault
+
+    return list_credential_vault()
+
+
 @router.get("/v1/one/jobs")
 async def one_jobs():
     from openjarvis.one_agents.runtime import list_jobs

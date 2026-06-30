@@ -503,8 +503,25 @@ body { margin: 0; background: #02060b; }
 /* Results drawer priority: show tracking first when Agents & Results opens. */
 .one-results-drawer .one-header { order: 0; }
 .one-results-drawer > .one-brain-board { order: 1; }
-.one-results-drawer > .one-operations:not(.one-brain-board):not(.one-jobhunt-board):not(.one-alfa-pipeline) { order: 2; }
-.one-results-drawer > .one-jobhunt-board { order: 3; }
-.one-results-drawer > .one-alfa-pipeline { order: 4; }
-.one-results-drawer > .one-stage { order: 5; }
+.one-results-drawer > .one-credential-vault { order: 2; }
+.one-results-drawer > .one-operations:not(.one-brain-board):not(.one-credential-vault):not(.one-jobhunt-board):not(.one-alfa-pipeline) { order: 3; }
+.one-results-drawer > .one-jobhunt-board { order: 4; }
+.one-results-drawer > .one-alfa-pipeline { order: 5; }
+.one-results-drawer > .one-stage { order: 6; }
 .one-results-drawer .one-agent-operations .one-panel-label::after { content: ' / PER-AGENT EXECUTION TRACKING'; color: #f0bd57; }
+.one-credential-vault { margin-top: 22px; }
+.one-vault-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 11px; padding: 8px 10px; border: 1px solid #17384f; border-radius: 5px; background: #040d16; }
+.one-vault-toolbar span { min-width: 0; color: #9db9c9; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.one-vault-toolbar button { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #1d4b67; border-radius: 4px; background: #071724; color: #67caee; font-size: 11px; padding: 5px 8px; cursor: pointer; }
+.one-vault-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.one-vault-list > p { color: #6f8ca0; }
+.one-vault-list article { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; border: 1px solid #17384f; border-radius: 6px; background: #050d17cc; padding: 10px; }
+.one-vault-list article.active { border-color: #1f6d59; }
+.one-vault-list article > div { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.one-vault-list svg { flex: 0 0 auto; color: #62e4ae; }
+.one-vault-list strong { display: block; color: #d3e8f5; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.one-vault-list span { display: block; margin-top: 2px; color: #789caf; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.one-vault-list code { padding: 4px 7px; border: 1px solid #142f43; border-radius: 4px; color: #9db9c9; background: #020912; font-size: 10px; }
+.one-vault-list button { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #5a2d38; border-radius: 4px; background: #2a1620; color: #ff8795; font-size: 10px; padding: 5px 7px; cursor: pointer; }
+.one-vault-list button:disabled { opacity: .45; cursor: not-allowed; }
+.one-vault-list small { color: #6f8ca0; font-size: 10px; }

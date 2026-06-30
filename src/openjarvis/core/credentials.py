@@ -175,6 +175,36 @@ def list_custom_credentials(*, path: Path | None = None) -> dict[str, bool]:
     return {k: bool(os.environ.get(k) or v) for k, v in section.items()}
 
 
+def list_credential_vault(*, path: Path | None = None) -> dict[str, object]:
+    """Return a masked inventory of the credential vault.
+
+    Values are intentionally never returned. The dashboard only needs to know
+    which keys exist, where they are stored, and whether they are active in the
+    current process.
+    """
+    p = Path(path) if path else _default_path()
+    creds = load_credentials(path=p)
+    entries: list[dict[str, object]] = []
+    for section, kvs in sorted(creds.items()):
+        for key, value in sorted(kvs.items()):
+            entries.append(
+                {
+                    "section": section,
+                    "key": key,
+                    "configured": bool(os.environ.get(key) or value),
+                    "active": bool(os.environ.get(key)),
+                    "deletable": section == _CUSTOM_SECTION,
+                    "masked": "********",
+                }
+            )
+    return {
+        "path": str(p),
+        "exists": p.exists(),
+        "count": len(entries),
+        "entries": entries,
+    }
+
+
 def delete_custom_credential(key: str, *, path: Path | None = None) -> None:
     """Remove a custom credential from credentials.toml (leaves os.environ alone)."""
     p = Path(path) if path else _default_path()

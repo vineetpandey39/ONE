@@ -179,6 +179,20 @@ type OneStatus = {
 type Line = { role: 'one' | 'user'; text: string };
 type AudioDevice = { deviceId: string; label: string };
 type WakeEvent = { id: number; created_at: string; transcript: string; recognized: number; summary: string };
+type CredentialVaultEntry = {
+  section: string;
+  key: string;
+  configured: boolean;
+  active: boolean;
+  deletable: boolean;
+  masked: string;
+};
+type CredentialVault = {
+  path: string;
+  exists: boolean;
+  count: number;
+  entries: CredentialVaultEntry[];
+};
 
 const coreUrl = (path: string) => `${getBase()}${path}`;
 const coreFetch = (path: string, init?: RequestInit) => fetch(coreUrl(path), init);
@@ -204,6 +218,13 @@ const DEFAULT_STATUS: OneStatus = {
   jobs: [],
   obsidian: { connected: false, path: '', notes: 0 },
   memories: [],
+};
+
+const DEFAULT_CREDENTIAL_VAULT: CredentialVault = {
+  path: '',
+  exists: false,
+  count: 0,
+  entries: [],
 };
 
 export function OneCockpit() {
@@ -314,6 +335,9 @@ export function OneCockpit() {
     applied_counts: {},
     applications: [],
   });
+  const [credentialVault, setCredentialVault] = useState<CredentialVault>(DEFAULT_CREDENTIAL_VAULT);
+  const [credentialVaultMessage, setCredentialVaultMessage] = useState('');
+  const [credentialActionKey, setCredentialActionKey] = useState<string | null>(null);
   // The orb stage is fixed full-viewport and the results drawer is its own
   // fixed, internally-scrolling overlay, so the page itself never needs to
   // scroll. No overflow override needed here anymore.
@@ -352,6 +376,43 @@ export function OneCockpit() {
     const timer = window.setInterval(refreshJobhuntBoard, 8000);
     return () => window.clearInterval(timer);
   }, [refreshJobhuntBoard]);
+
+  const refreshCredentialVault = useCallback(async () => {
+    try {
+      const response = await coreFetch('/v1/one/credential-vault', { cache: 'no-store' });
+      if (!response.ok) throw new Error('offline');
+      const data = await response.json();
+      setCredentialVault({
+        path: data.path || '',
+        exists: Boolean(data.exists),
+        count: Number(data.count || 0),
+        entries: data.entries || [],
+      });
+    } catch {
+      setCredentialVault((current) => ({ ...current, exists: false }));
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshCredentialVault();
+    const timer = window.setInterval(refreshCredentialVault, 10000);
+    return () => window.clearInterval(timer);
+  }, [refreshCredentialVault]);
+
+  async function deleteVaultCredential(key: string) {
+    setCredentialActionKey(key);
+    setCredentialVaultMessage('');
+    try {
+      const response = await coreFetch(`/v1/tools/custom-credentials/${encodeURIComponent(key)}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Delete failed');
+      setCredentialVaultMessage(`${key} removed from vault. Restart ONE to clear it from the current process.`);
+      await refreshCredentialVault();
+    } catch (error) {
+      setCredentialVaultMessage(error instanceof Error ? error.message : 'Delete failed.');
+    } finally {
+      setCredentialActionKey(null);
+    }
+  }
 
 
   async function approveOpportunity(url: string) {
@@ -1135,6 +1196,44 @@ export function OneCockpit() {
                 <span>{route.scope.replace(/_/g, ' ')}</span>
                 <strong>{route.model}</strong>
                 <small>{route.engine}</small>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="one-operations one-credential-vault">
+          <div className="one-operations-head">
+            <div><div className="one-panel-label">CREDENTIAL VAULT</div><strong>MASKED LOCAL SECRETS</strong></div>
+            <span className="one-alfa-mrr">{credentialVault.count} saved | values hidden</span>
+          </div>
+          <div className="one-vault-toolbar">
+            <span title={credentialVault.path}>{credentialVault.exists ? 'Vault file active' : 'Vault file not found'}</span>
+            <button onClick={() => void refreshCredentialVault()}><RefreshCw size={13} /> Refresh</button>
+          </div>
+          {credentialVaultMessage && <p className="one-alfa-message">{credentialVaultMessage}</p>}
+          <div className="one-vault-list">
+            {!credentialVault.entries.length && <p>No credentials saved in ONE vault yet.</p>}
+            {credentialVault.entries.map((entry) => (
+              <article key={`${entry.section}-${entry.key}`} className={entry.active ? 'active' : ''}>
+                <div>
+                  <Wallet size={14} />
+                  <div>
+                    <strong>{entry.key}</strong>
+                    <span>{entry.section} | {entry.active ? 'loaded in process' : 'saved, restart may be needed'}</span>
+                  </div>
+                </div>
+                <code>{entry.masked}</code>
+                {entry.deletable ? (
+                  <button
+                    title={`Remove ${entry.key} from the vault`}
+                    disabled={credentialActionKey === entry.key}
+                    onClick={() => void deleteVaultCredential(entry.key)}
+                  >
+                    <XCircle size={13} /> Remove
+                  </button>
+                ) : (
+                  <small>tool-scoped</small>
+                )}
               </article>
             ))}
           </div>
