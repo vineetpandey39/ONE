@@ -3,7 +3,9 @@ $ErrorActionPreference = "Stop"
 $oneRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $sourceRoot = Join-Path $oneRoot "src"
 $dataRoot = Join-Path $oneRoot "data"
-$jarvis = Join-Path $sourceRoot ".venv\Scripts\jarvis.exe"
+$venvPython = Join-Path $sourceRoot ".venv\Scripts\python.exe"
+$basePython = Join-Path $oneRoot ".python\cpython-3.12.13-windows-x86_64-none\python.exe"
+$pythonExe = if (Test-Path $venvPython) { $venvPython } else { $basePython }
 $ollama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
 $pidFile = Join-Path $oneRoot "one-server.pid"
 $workerPidFile = Join-Path $oneRoot "one-worker.pid"
@@ -13,6 +15,9 @@ $workerLogFile = Join-Path $oneRoot "one-worker.log"
 $workerErrorLogFile = Join-Path $oneRoot "one-worker-error.log"
 
 $env:OPENJARVIS_HOME = $dataRoot
+$sourcePythonPath = Join-Path $sourceRoot "src"
+$sitePackagesPath = Join-Path $sourceRoot ".venv\Lib\site-packages"
+$env:PYTHONPATH = "$sourcePythonPath;$sitePackagesPath"
 $modelCacheRoot = Join-Path $dataRoot "model_cache"
 $runtimeHome = Join-Path $dataRoot "runtime_home"
 New-Item -ItemType Directory -Force -Path $modelCacheRoot | Out-Null
@@ -82,8 +87,8 @@ if (Test-Path $pidFile) {
 }
 
 if (-not $running) {
-    $process = Start-Process -FilePath $jarvis `
-        -ArgumentList @("serve", "--host", "127.0.0.1", "--port", "8000", "--engine", $oneEngine, "--model", $oneModel, "--agent", $oneAgent) `
+    $process = Start-Process -FilePath $pythonExe `
+        -ArgumentList @("-m", "openjarvis.cli", "serve", "--host", "127.0.0.1", "--port", "8000", "--engine", $oneEngine, "--model", $oneModel, "--agent", $oneAgent) `
         -WorkingDirectory $sourceRoot `
         -RedirectStandardOutput $logFile `
         -RedirectStandardError $errorLogFile `
@@ -98,7 +103,7 @@ if (Test-Path $workerPidFile) {
     $workerRunning = $null -ne (Get-Process -Id $savedWorkerPid -ErrorAction SilentlyContinue)
 }
 if (-not $workerRunning) {
-    $worker = Start-Process -FilePath (Join-Path $sourceRoot ".venv\Scripts\python.exe") `
+    $worker = Start-Process -FilePath $pythonExe `
         -ArgumentList @((Join-Path $sourceRoot "scripts\one_agent_worker.py")) `
         -WorkingDirectory $sourceRoot `
         -RedirectStandardOutput $workerLogFile `

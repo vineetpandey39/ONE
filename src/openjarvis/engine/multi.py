@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncIterator, Sequence
 from typing import Any, Dict, List
 
@@ -38,6 +39,7 @@ class MultiEngine(InferenceEngine):
                 logger.debug("Failed to list models for %s: %s", _key, exc)
 
     _CLOUD_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "claude-", "gemini-", "openrouter/")
+    _NVIDIA_PREFIXES = ("nvidia/",)
 
     def _engine_for(self, model: str) -> InferenceEngine:
         """Find the engine that owns a model, refreshing the map once if needed."""
@@ -55,6 +57,12 @@ class MultiEngine(InferenceEngine):
             for key, eng in self._engines:
                 if key == "cloud":
                     logger.info("Routing cloud model %r to cloud engine", model)
+                    return eng
+        nemotron_model = os.environ.get("NEMOTRON_MODEL", "")
+        if model == nemotron_model or any(model.startswith(p) for p in self._NVIDIA_PREFIXES):
+            for key, eng in self._engines:
+                if key == "nvidia":
+                    logger.info("Routing NVIDIA model %r to nvidia engine", model)
                     return eng
         # Non-cloud models: do NOT silently fall back to cloud. A transient
         # vLLM outage during a long agentic run would otherwise route every

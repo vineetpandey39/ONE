@@ -37,6 +37,13 @@ class _OpenAICompatibleEngine(InferenceEngine):
     ) -> None:
         import os
 
+        try:
+            from pip_system_certs.wrapt_requests import inject_truststore
+
+            inject_truststore()
+        except Exception:
+            pass
+
         # Sanitize the engine id for env-var lookup ("openai-compat" ->
         # "OPENAI_COMPAT_..."); shells cannot set hyphenated variable names.
         env_prefix = self.engine_id.upper().replace("-", "_")

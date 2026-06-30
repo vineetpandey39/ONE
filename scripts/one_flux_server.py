@@ -31,8 +31,10 @@ def _configure_cache() -> None:
     root = _one_root()
     cache_root = root.parent / "data" / "model_cache"
     runtime_home = root.parent / "data" / "runtime_home"
+    openjarvis_home = root.parent / "data"
     cache_root.mkdir(parents=True, exist_ok=True)
     runtime_home.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("OPENJARVIS_HOME", str(openjarvis_home))
     os.environ.setdefault("HF_HOME", str(cache_root / "huggingface"))
     os.environ.setdefault("TORCH_HOME", str(cache_root / "torch"))
     os.environ.setdefault("XDG_CACHE_HOME", str(cache_root / "xdg"))
@@ -41,6 +43,15 @@ def _configure_cache() -> None:
     hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
     if hf_token:
         os.environ.setdefault("HUGGINGFACE_HUB_TOKEN", hf_token)
+    try:
+        from openjarvis.core.credentials import inject_credentials
+
+        inject_credentials()
+    except Exception:
+        pass
+    hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+    if hf_token:
+        os.environ["HUGGINGFACE_HUB_TOKEN"] = hf_token
 
 
 def _load_pipeline() -> Any:

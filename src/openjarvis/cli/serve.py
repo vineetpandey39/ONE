@@ -228,6 +228,20 @@ def serve(
     for discovered_name, discovered_engine in all_engines:
         if discovered_name != engine_name:
             multi_entries.append((discovered_name, discovered_engine))
+    configured_nemotron = os.environ.get("NEMOTRON_MODEL", "").strip()
+    configured_for_nvidia = (
+        engine_key == "nvidia"
+        or (selection_model or "").startswith("nvidia/")
+        or configured_nemotron.startswith("nvidia/")
+    )
+    if configured_for_nvidia and not any(name == "nvidia" for name, _ in multi_entries):
+        try:
+            from openjarvis.engine.openai_compat_engines import NvidiaNimEngine
+
+            multi_entries.append(("nvidia", NvidiaNimEngine()))
+            logger.info("Added explicit NVIDIA NIM engine for configured model")
+        except Exception as exc:
+            logger.warning("NVIDIA NIM engine could not be added: %s", exc)
     if cloud_engine is not None:
         multi_entries.append(("cloud", cloud_engine))
 

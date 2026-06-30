@@ -11,8 +11,6 @@ if (-not (Test-Path $envFile)) {
 }
 
 $updates = @{
-    "HF_TOKEN" = $Token
-    "HUGGINGFACE_HUB_TOKEN" = $Token
     "ONE_IMAGE_PROVIDER" = "flux"
     "ONE_FLUX_AUTOSTART" = "true"
     "ONE_FLUX_MODEL" = "black-forest-labs/FLUX.1-schnell"
@@ -36,4 +34,11 @@ foreach ($key in $updates.Keys) {
 }
 
 Set-Content -Path $envFile -Value $lines
-Write-Host "FLUX Hugging Face token saved to one.env. Restart FLUX/ONE to activate it." -ForegroundColor Cyan
+
+$env:OPENJARVIS_HOME = Join-Path $oneRoot "data"
+$env:ONE_SECRET_INPUT = $Token
+$python = Join-Path $oneRoot "src\.venv\Scripts\python.exe"
+& $python -c "import os; from openjarvis.core.credentials import save_custom_credential; token=os.environ['ONE_SECRET_INPUT']; save_custom_credential('HF_TOKEN', token); save_custom_credential('HUGGINGFACE_HUB_TOKEN', token); print('FLUX Hugging Face token saved to ONE credential vault')"
+$env:ONE_SECRET_INPUT = ""
+
+Write-Host "FLUX routing saved to one.env; Hugging Face token saved to ONE credential vault. Restart FLUX/ONE to activate it." -ForegroundColor Cyan
