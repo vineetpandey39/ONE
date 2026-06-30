@@ -213,19 +213,64 @@ def _local_plan(job: dict[str, Any]) -> dict[str, Any]:
         "State required approvals and integrations.\n\n"
         f"Task: {job['task']}"
     )
-    response = httpx.post(
-        os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434") + "/api/chat",
-        json={
-            "model": os.environ.get("ONE_ROUTER_MODEL", "llama3.1:8b"),
-            "stream": False,
-            "think": False,
-            "messages": [{"role": "user", "content": prompt}],
-            "options": {"temperature": 0.2, "num_predict": 700},
-        },
-        timeout=180,
-    )
-    response.raise_for_status()
-    content = response.json().get("message", {}).get("content", "").strip()
+    model = os.environ.get("ONE_ROUTER_MODEL") or os.environ.get("NEMOTRON_MODEL") or "llama3.1:8b"
+    engine = os.environ.get("ONE_ENGINE", "ollama").strip().lower()
+    fallback_reason = ""
+    if engine == "nvidia" or model.startswith("nvidia/"):
+        api_key = os.environ.get("NVIDIA_API_KEY", "").strip()
+        if not api_key:
+            fallback_reason = "NVIDIA_API_KEY is missing"
+            content = ""
+        else:
+            try:
+                response = httpx.post(
+                    os.environ.get("NVIDIA_HOST", "https://integrate.api.nvidia.com").rstrip("/") + "/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.2,
+                        "top_p": 0.95,
+                        "max_tokens": 900,
+                    },
+                    timeout=180,
+                )
+                response.raise_for_status()
+                content = response.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            except Exception as exc:  # noqa: BLE001 - fallback is intentional for plan mode
+                fallback_reason = f"NVIDIA planner unavailable: {exc}"
+                content = ""
+    else:
+        try:
+            response = httpx.post(
+                os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434") + "/api/chat",
+                json={
+                    "model": model,
+                    "stream": False,
+                    "think": False,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "options": {"temperature": 0.2, "num_predict": 700},
+                },
+                timeout=180,
+            )
+            response.raise_for_status()
+            content = response.json().get("message", {}).get("content", "").strip()
+        except Exception as exc:  # noqa: BLE001 - fallback is intentional for plan mode
+            fallback_reason = f"Ollama planner unavailable: {exc}"
+            content = ""
+    if not content:
+        content = (
+            f"# {agent['name']} Operational Plan\n\n"
+            f"Task: {job['task']}\n\n"
+            "## Next Actions\n"
+            "- Confirm the intended mode: plan, execute, or publish.\n"
+            "- Check required credentials in the ONE credential vault before running external tools.\n"
+            "- Use deterministic/local steps first, then cloud providers only where configured.\n"
+            "- Save outputs and audit trail under the ONE runtime data folder.\n"
+            "- Do not publish, send, or apply without explicit approval.\n\n"
+            "## Current Runtime Note\n"
+            f"{fallback_reason or 'Planner model returned no text; deterministic fallback plan created locally.'}\n"
+        )
     output_dir = _home() / "agent_outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{job['id']}.md"
