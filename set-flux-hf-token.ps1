@@ -37,7 +37,10 @@ Set-Content -Path $envFile -Value $lines
 
 $env:OPENJARVIS_HOME = Join-Path $oneRoot "data"
 $env:ONE_SECRET_INPUT = $Token
-$python = Join-Path $oneRoot "src\.venv\Scripts\python.exe"
+$venvPython = Join-Path $oneRoot "src\.venv\Scripts\python.exe"
+$basePython = Join-Path $oneRoot ".python\cpython-3.12.13-windows-x86_64-none\python.exe"
+$python = if (Test-Path $venvPython) { $venvPython } else { $basePython }
+$env:PYTHONPATH = "$(Join-Path $oneRoot 'src\src');$(Join-Path $oneRoot 'src\.venv\Lib\site-packages')"
 & $python -c "import os; from openjarvis.core.credentials import save_custom_credential; token=os.environ['ONE_SECRET_INPUT']; save_custom_credential('HF_TOKEN', token); save_custom_credential('HUGGINGFACE_HUB_TOKEN', token); print('FLUX Hugging Face token saved to ONE credential vault')"
 $env:ONE_SECRET_INPUT = ""
 
