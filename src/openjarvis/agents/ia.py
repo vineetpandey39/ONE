@@ -45,6 +45,7 @@ from openjarvis.agents.ia_prompts import (
     build_seo_metadata,
 )
 from openjarvis.agents.ia_scout import record_run_result, scout_location
+from openjarvis.agents.ia_training import load_ia_knowledge_pack
 from openjarvis.core.paths import get_config_dir
 from openjarvis.core.registry import AgentRegistry
 from openjarvis.core.types import ToolCall
@@ -209,6 +210,7 @@ class IAAgent(ToolUsingAgent):
 
         frames = build_frame_prompts(location)
         clips = build_clip_prompts(location)
+        knowledge_pack = load_ia_knowledge_pack()
 
         base_dir = Path(self._output_dir or str(get_config_dir() / "restoration_reels"))
         run_dir = base_dir / f"{location['id']}_{run_id}"
@@ -221,7 +223,19 @@ class IAAgent(ToolUsingAgent):
         dash.log(
             "run_start",
             f"Starting reel for {location.get('area_name', '')}, {location.get('city', '')}",
-            {"location": location, "run_dir": str(run_dir)},
+            {
+                "location": location,
+                "run_dir": str(run_dir),
+                "ia_knowledge_pack": list(knowledge_pack.keys()),
+                "qa_contract": [
+                    "hero visible",
+                    "identity preserved",
+                    "ecosystem restored",
+                    "no side distraction",
+                    "engineering touches hero",
+                    "SEO complete",
+                ],
+            },
         )
 
         tool_results = []
@@ -478,6 +492,8 @@ class IAAgent(ToolUsingAgent):
             # of regenerating it.
             seo_metadata = build_seo_metadata(location)
             record_run_result(run_id, status="completed", video_link=final_path, seo=seo_metadata)
+        else:
+            seo_metadata = build_seo_metadata(location)
 
         return AgentResult(
             content=final_path,
@@ -489,6 +505,8 @@ class IAAgent(ToolUsingAgent):
                 "clip_paths": clip_paths,
                 "final_path": final_path,
                 "location": location,
+                "seo_metadata": seo_metadata,
+                "ia_knowledge_pack": list(knowledge_pack.keys()),
             },
         )
 

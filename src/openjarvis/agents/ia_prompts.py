@@ -17,8 +17,9 @@ the horizon -- not straight-down nadir), fixed camera direction/composition
 across all 5 frames, lighting progression overcast -> golden hour, color
 progression desaturated -> vibrant, photorealistic drone cinematography only
 (never illustrated / cartoon / painted), 9:16 vertical, worker-count arc
-0 -> 400 -> 800 -> 400 -> 0, and -- for the clips -- continuous, gradual,
-labor/machine-driven change only (never an instant "magic" transformation).
+0 -> 250-350 -> 500-600 -> tapering finishing crews -> 0, and -- for the
+clips -- continuous, gradual, labor/machine-driven change only (never an
+instant "magic" transformation).
 Frames 2-4 (and clips A-D) are deliberately written dense with workers, heavy
 machinery, and refinery/processing-plant-style equipment throughout -- a
 sparse-looking crew reads as "nothing is happening" in the final timelapse,
@@ -30,6 +31,8 @@ from __future__ import annotations
 
 import re
 from typing import Any, Dict, List
+
+from openjarvis.agents.ia_training import ia_generation_contract
 
 # Future-locations name pool, used only for the Facebook "vote for next
 # location" pinned-comment formula (see build_pinned_comments below) -- a
@@ -403,6 +406,7 @@ def build_frame_prompts(location: Dict[str, Any]) -> List[Dict[str, Any]]:
     place = f"{location.get('area_name', '')}, {location.get('city', '')}".strip(", ")
     base_rules = _base_rules(location.get("scene", "corridor"))
     descriptor = _location_descriptor(location)
+    contract = ia_generation_contract()
 
     frames = []
     for i in range(1, 6):
@@ -415,9 +419,9 @@ def build_frame_prompts(location: Dict[str, Any]) -> List[Dict[str, Any]]:
         generate_prompt = (
             f"{base_rules} Aerial wide shot over {place}.{descriptor} {content}"
             f"{_GOLDEN_RULES}"
-            f" {_COLOR_GRADE}{_LOCK_NOTE if i == 1 else ''}{_NEGATIVE_IMAGE}"
+            f" {contract} {_COLOR_GRADE}{_LOCK_NOTE if i == 1 else ''}{_NEGATIVE_IMAGE}"
         )
-        edit_prompt = f"{_EDIT_PREFIX}{content}{_GOLDEN_RULES} {_COLOR_GRADE}{_NEGATIVE_IMAGE}"
+        edit_prompt = f"{_EDIT_PREFIX}{content}{_GOLDEN_RULES} {contract} {_COLOR_GRADE}{_NEGATIVE_IMAGE}"
         frames.append(
             {
                 "id": i,
@@ -805,7 +809,9 @@ def build_intro_frame_prompt(location: Dict[str, Any]) -> str:
         " speaking, 2-3 workers in high-visibility vests standing nearby"
         " listening attentively. Natural daylight, realistic skin texture and"
         " clothing detail, candid documentary-photography look -- NOT posed"
-        " or staged-looking. 9:16 vertical composition." + _NEGATIVE_IMAGE
+        " or staged-looking. 9:16 vertical composition."
+        f" {ia_generation_contract()}"
+        + _NEGATIVE_IMAGE
     )
 
 
@@ -1242,6 +1248,7 @@ def build_clip_prompts(location: Dict[str, Any]) -> List[Dict[str, Any]]:
     # the video backend avoid drifting toward a generic look across clips.
     descriptor = _location_descriptor(location)
     descriptor_clause = f"{descriptor} " if descriptor else ""
+    contract = ia_generation_contract()
 
     clips = []
     for clip_id in ("A", "B", "C", "D", "E"):
@@ -1258,7 +1265,7 @@ def build_clip_prompts(location: Dict[str, Any]) -> List[Dict[str, Any]]:
                 # Duration table. ia.py reads this to pass an explicit
                 # ``duration`` override to the video backend.
                 "duration_seconds": _CLIP_DURATION_SECONDS.get(clip_id, 5),
-                "prompt": descriptor_clause + bodies[clip_id] + _clip_suffix(scene, clip_id),
+                "prompt": descriptor_clause + bodies[clip_id] + " " + contract + _clip_suffix(scene, clip_id),
             }
         )
     return clips
