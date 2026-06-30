@@ -503,12 +503,22 @@ body { margin: 0; background: #02060b; }
 /* Results drawer priority: show tracking first when Agents & Results opens. */
 .one-results-drawer .one-header { order: 0; }
 .one-results-drawer > .one-brain-board { order: 1; }
-.one-results-drawer > .one-credential-vault { order: 2; }
-.one-results-drawer > .one-operations:not(.one-brain-board):not(.one-credential-vault):not(.one-jobhunt-board):not(.one-alfa-pipeline) { order: 3; }
+.one-results-drawer > .one-credential-launcher { order: 2; }
+.one-results-drawer > .one-operations:not(.one-brain-board):not(.one-credential-vault):not(.one-credential-launcher):not(.one-jobhunt-board):not(.one-alfa-pipeline) { order: 3; }
 .one-results-drawer > .one-jobhunt-board { order: 4; }
 .one-results-drawer > .one-alfa-pipeline { order: 5; }
 .one-results-drawer > .one-stage { order: 6; }
 .one-results-drawer .one-agent-operations .one-panel-label::after { content: ' / PER-AGENT EXECUTION TRACKING'; color: #f0bd57; }
+.one-credential-launcher { margin-top: 22px; }
+.one-credential-launch-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 11px; padding: 12px; border: 1px solid #17384f; border-radius: 6px; background: #040d16; }
+.one-credential-launch-card > div { min-width: 0; display: flex; align-items: center; gap: 8px; color: #9db9c9; font-size: 12px; }
+.one-credential-launch-card svg { color: #62e4ae; flex: 0 0 auto; }
+.one-credential-launch-card span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.one-credential-launch-card a { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; border: 1px solid #1d4b67; border-radius: 4px; background: #071724; color: #67caee; font-size: 11px; padding: 7px 10px; text-decoration: none; }
+.one-vault-page { min-height: 100vh; overflow: auto; padding: 24px 0 48px; }
+.one-vault-page-panel { margin-top: 0; }
+.one-vault-top-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.one-vault-top-actions a { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #1d4b67; border-radius: 4px; background: #071724; color: #67caee; font-size: 11px; padding: 5px 8px; text-decoration: none; }
 .one-credential-vault { margin-top: 22px; }
 .one-vault-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 11px; padding: 8px 10px; border: 1px solid #17384f; border-radius: 5px; background: #040d16; }
 .one-vault-toolbar span { min-width: 0; color: #9db9c9; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

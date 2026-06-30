@@ -1264,98 +1264,19 @@ export function OneCockpit() {
           </div>
         </section>
 
-        <section className="one-operations one-credential-vault">
+        <section className="one-operations one-credential-launcher">
           <div className="one-operations-head">
-            <div><div className="one-panel-label">CREDENTIAL VAULT</div><strong>MASKED LOCAL SECRETS</strong></div>
+            <div><div className="one-panel-label">CREDENTIALS</div><strong>VAULT MANAGER</strong></div>
             <span className="one-alfa-mrr">{credentialVault.count} saved | values hidden</span>
           </div>
-          <div className="one-vault-toolbar">
-            <span title={credentialVault.path}>{credentialVault.exists ? 'Vault file active' : 'Vault file not found'}</span>
-            <button onClick={() => void refreshCredentialVault()}><RefreshCw size={13} /> Refresh</button>
-          </div>
-          {credentialVaultMessage && <p className="one-alfa-message">{credentialVaultMessage}</p>}
-          <div className="one-vault-shell">
-            <div className="one-vault-list">
-              {!credentialVault.entries.length && <p>No credentials saved in ONE vault yet.</p>}
-              {credentialVault.entries.map((entry) => (
-                <article key={`${entry.section}-${entry.key}`} className={entry.active ? 'active' : ''}>
-                  <div>
-                    <Wallet size={14} />
-                    <div>
-                      <strong>{entry.key}</strong>
-                      <span>{entry.section} | {entry.active ? 'loaded in process' : 'saved, restart may be needed'}</span>
-                    </div>
-                  </div>
-                  <code>{entry.masked}</code>
-                  <div className="one-vault-actions">
-                    <button
-                      title={`Update ${entry.key}`}
-                      disabled={credentialActionKey === entry.key}
-                      onClick={() => editVaultCredential(entry)}
-                    >
-                      <Settings2 size={13} /> Update
-                    </button>
-                    <button
-                      className="danger"
-                      title={`Remove ${entry.key} from the vault`}
-                      disabled={credentialActionKey === entry.key}
-                      onClick={() => void deleteVaultCredential(entry)}
-                    >
-                      <XCircle size={13} /> Remove
-                    </button>
-                  </div>
-                </article>
-              ))}
+          <div className="one-credential-launch-card">
+            <div>
+              <Wallet size={16} />
+              <span title={credentialVault.path}>{credentialVault.exists ? 'Local credential vault active' : 'Credential vault file not found'}</span>
             </div>
-            <aside className="one-connection-rail">
-              <div className="one-panel-label">CONNECTIONS</div>
-              <strong>{selectedConnection.label}</strong>
-              <small>{selectedConnection.note}</small>
-              <div className="one-connection-buttons">
-                {CONNECTION_PRESETS.map((preset) => {
-                  const configured = preset.keys.some((key) => credentialVault.entries.some((entry) => entry.key === key));
-                  return (
-                    <button
-                      key={preset.id}
-                      className={preset.id === selectedConnection.id ? 'selected' : ''}
-                      onClick={() => pickConnection(preset)}
-                    >
-                      <span>{preset.label}</span>
-                      <i className={configured ? 'online' : ''} />
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="one-vault-editor">
-                <select
-                  aria-label="Credential key"
-                  value={credentialForm.key}
-                  onChange={(event) => setCredentialForm((current) => ({ ...current, section: selectedConnection.section, key: event.target.value, value: '' }))}
-                >
-                  {selectedConnection.keys.map((key) => <option key={key} value={key}>{key}</option>)}
-                </select>
-                <input
-                  aria-label="Credential value"
-                  placeholder="Paste new secret value"
-                  type="password"
-                  value={credentialForm.value}
-                  onChange={(event) => setCredentialForm((current) => ({ ...current, section: selectedConnection.section, value: event.target.value }))}
-                />
-                <button
-                  disabled={Boolean(credentialActionKey) || !credentialForm.key.trim() || !credentialForm.value.trim()}
-                  onClick={() => void saveVaultCredential()}
-                >
-                  <Check size={13} /> Save / Update
-                </button>
-                <button
-                  className="ghost"
-                  disabled={!credentialForm.value}
-                  onClick={() => setCredentialForm((current) => ({ ...current, value: '' }))}
-                >
-                  <X size={13} /> Clear
-                </button>
-              </div>
-            </aside>
+            <a href="/credentials" target="_blank" rel="noreferrer">
+              <ExternalLink size={13} /> Open Vault
+            </a>
           </div>
         </section>
 

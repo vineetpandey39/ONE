@@ -17,6 +17,7 @@ import { OptInModal } from './components/OptInModal';
 import { UpdateChecker } from './components/Desktop/UpdateChecker';
 import { track, hashId } from './lib/analytics';
 import { OneCockpit } from './pages/OneCockpit';
+import { CredentialVaultPage } from './pages/CredentialVaultPage';
 
 function AdvancedApp() {
   const [setupDone, setSetupDone] = useState(!isTauri());
@@ -205,6 +206,7 @@ function AdvancedApp() {
 }
 
 export default function App() {
+  if (window.location.pathname === '/credentials') return <CredentialVaultPage />;
   const advanced = new URLSearchParams(window.location.search).get('advanced') === '1';
   return advanced ? <AdvancedApp /> : <OneCockpit />;
 }
