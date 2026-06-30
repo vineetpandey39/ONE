@@ -77,6 +77,27 @@ if (($env:ONE_FLUX_AUTOSTART -eq "true") -or ($env:ONE_IMAGE_PROVIDER -eq "flux"
         } catch {
             Write-Host "ONE FLUX startup skipped: $($_.Exception.Message)" -ForegroundColor DarkYellow
         }
+    } else {
+        try {
+            $fluxPidFile = Join-Path $oneRoot "one-flux.pid"
+            $fluxRunning = $false
+            if (Test-Path $fluxPidFile) {
+                $savedFluxPid = [int](Get-Content $fluxPidFile -Raw)
+                $fluxRunning = $null -ne (Get-Process -Id $savedFluxPid -ErrorAction SilentlyContinue)
+            }
+            if (-not $fluxRunning) {
+                $flux = Start-Process -FilePath $pythonExe `
+                    -ArgumentList @("-m", "uvicorn", "scripts.one_flux_server:app", "--host", "127.0.0.1", "--port", "8188") `
+                    -WorkingDirectory $sourceRoot `
+                    -RedirectStandardOutput (Join-Path $oneRoot "one-flux.log") `
+                    -RedirectStandardError (Join-Path $oneRoot "one-flux-error.log") `
+                    -WindowStyle Hidden `
+                    -PassThru
+                Set-Content -Path $fluxPidFile -Value $flux.Id
+            }
+        } catch {
+            Write-Host "ONE FLUX fallback startup skipped: $($_.Exception.Message)" -ForegroundColor DarkYellow
+        }
     }
 }
 
