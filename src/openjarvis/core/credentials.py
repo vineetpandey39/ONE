@@ -44,6 +44,13 @@ TOOL_CREDENTIALS: dict[str, list[str]] = {
     "telegram": ["TELEGRAM_BOT_TOKEN"],
     "discord": ["DISCORD_BOT_TOKEN"],
     "email": ["EMAIL_USERNAME", "EMAIL_PASSWORD"],
+    "gmail": [
+        "GMAIL_ADDRESS",
+        "GMAIL_APP_PASSWORD",
+        "GMAIL_CLIENT_ID",
+        "GMAIL_CLIENT_SECRET",
+        "GMAIL_REFRESH_TOKEN",
+    ],
     "whatsapp": ["WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID"],
     "signal": ["SIGNAL_CLI_PATH"],
     "google_chat": ["GOOGLE_CHAT_WEBHOOK_URL"],
@@ -193,7 +200,7 @@ def list_credential_vault(*, path: Path | None = None) -> dict[str, object]:
                     "key": key,
                     "configured": bool(os.environ.get(key) or value),
                     "active": bool(os.environ.get(key)),
-                    "deletable": section == _CUSTOM_SECTION,
+                    "deletable": True,
                     "masked": "********",
                 }
             )
@@ -203,6 +210,54 @@ def list_credential_vault(*, path: Path | None = None) -> dict[str, object]:
         "count": len(entries),
         "entries": entries,
     }
+
+
+def save_vault_credential(
+    section: str,
+    key: str,
+    value: str,
+    *,
+    path: Path | None = None,
+) -> None:
+    """Save or update one credential in any vault section.
+
+    Known tool sections still use the tool allowlist. Unknown sections are
+    stored as custom env vars so agents can pick them up from ``os.environ``.
+    """
+    section = section.strip() or _CUSTOM_SECTION
+    if section == _CUSTOM_SECTION or key not in TOOL_CREDENTIALS.get(section, []):
+        save_custom_credential(key, value, path=path)
+        return
+    save_credential(section, key, value, path=path)
+
+
+def delete_vault_credential(section: str, key: str, *, path: Path | None = None) -> None:
+    """Remove a credential from any vault section and current process env."""
+    section = section.strip() or _CUSTOM_SECTION
+    key = key.strip()
+    if not key:
+        raise ValueError("Credential key must not be empty")
+    p = Path(path) if path else _default_path()
+    with _LOCK:
+        creds = load_credentials(path=p)
+        if section in creds:
+            creds[section].pop(key, None)
+            if not creds[section]:
+                creds.pop(section, None)
+
+        p.parent.mkdir(parents=True, exist_ok=True)
+        lines: list[str] = []
+        for sect, kvs in creds.items():
+            if not kvs:
+                continue
+            lines.append(f"[{sect}]")
+            for k, v in kvs.items():
+                lines.append(f'{k} = "{v}"')
+            lines.append("")
+        p.write_text("\n".join(lines))
+        os.chmod(p, 0o600)
+
+    os.environ.pop(key, None)
 
 
 def delete_custom_credential(key: str, *, path: Path | None = None) -> None:

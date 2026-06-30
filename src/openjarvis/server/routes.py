@@ -108,6 +108,34 @@ async def one_credential_vault():
     return list_credential_vault()
 
 
+@router.post("/v1/one/credential-vault")
+async def one_save_credential(request: Request):
+    from openjarvis.core.credentials import save_vault_credential
+
+    payload = await request.json()
+    section = str(payload.get("section") or "custom").strip()
+    key = str(payload.get("key") or "").strip()
+    value = str(payload.get("value") or "")
+    if not key:
+        raise HTTPException(status_code=400, detail="key is required")
+    try:
+        save_vault_credential(section, key, value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"saved": key, "section": section or "custom"}
+
+
+@router.delete("/v1/one/credential-vault/{section}/{key}")
+async def one_delete_credential(section: str, key: str):
+    from openjarvis.core.credentials import delete_vault_credential
+
+    try:
+        delete_vault_credential(section, key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"deleted": key, "section": section}
+
+
 @router.get("/v1/one/jobs")
 async def one_jobs():
     from openjarvis.one_agents.runtime import list_jobs

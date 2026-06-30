@@ -513,7 +513,14 @@ body { margin: 0; background: #02060b; }
 .one-vault-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 11px; padding: 8px 10px; border: 1px solid #17384f; border-radius: 5px; background: #040d16; }
 .one-vault-toolbar span { min-width: 0; color: #9db9c9; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .one-vault-toolbar button { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #1d4b67; border-radius: 4px; background: #071724; color: #67caee; font-size: 11px; padding: 5px 8px; cursor: pointer; }
-.one-vault-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.one-vault-shell { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); align-items: start; gap: 12px; margin-top: 10px; }
+.one-vault-editor { display: grid; grid-template-columns: 1fr; align-items: center; gap: 8px; margin-top: 10px; padding: 9px; border: 1px solid #174456; border-radius: 5px; background: #030b13; }
+.one-vault-editor input, .one-vault-editor select { min-width: 0; width: 100%; height: 34px; border: 1px solid #17384f; border-radius: 4px; background: #06111d; color: #d8edf8; padding: 0 10px; font-size: 11px; letter-spacing: 0; }
+.one-vault-editor input::placeholder { color: #5f7f92; }
+.one-vault-editor button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 34px; border: 1px solid #1f6d59; border-radius: 4px; background: #08221f; color: #72e3bc; font-size: 10px; padding: 0 10px; cursor: pointer; white-space: nowrap; }
+.one-vault-editor button.ghost { border-color: #1d4b67; background: #071724; color: #67caee; }
+.one-vault-editor button:disabled { opacity: .45; cursor: not-allowed; }
+.one-vault-list { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .one-vault-list > p { color: #6f8ca0; }
 .one-vault-list article { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; border: 1px solid #17384f; border-radius: 6px; background: #050d17cc; padding: 10px; }
 .one-vault-list article.active { border-color: #1f6d59; }
@@ -522,6 +529,22 @@ body { margin: 0; background: #02060b; }
 .one-vault-list strong { display: block; color: #d3e8f5; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .one-vault-list span { display: block; margin-top: 2px; color: #789caf; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .one-vault-list code { padding: 4px 7px; border: 1px solid #142f43; border-radius: 4px; color: #9db9c9; background: #020912; font-size: 10px; }
-.one-vault-list button { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #5a2d38; border-radius: 4px; background: #2a1620; color: #ff8795; font-size: 10px; padding: 5px 7px; cursor: pointer; }
+.one-vault-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.one-vault-list button { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #1d4b67; border-radius: 4px; background: #071724; color: #67caee; font-size: 10px; padding: 5px 7px; cursor: pointer; white-space: nowrap; }
+.one-vault-list button.danger { border-color: #5a2d38; background: #2a1620; color: #ff8795; }
 .one-vault-list button:disabled { opacity: .45; cursor: not-allowed; }
 .one-vault-list small { color: #6f8ca0; font-size: 10px; }
+.one-connection-rail { min-width: 0; position: sticky; top: 88px; border: 1px solid #17384f; border-radius: 6px; background: #04101a; padding: 12px; }
+.one-connection-rail > strong { display: block; margin-top: 5px; color: #d3e8f5; font-size: 16px; }
+.one-connection-rail > small { display: block; margin-top: 5px; color: #789caf; font-size: 11px; line-height: 1.4; }
+.one-connection-buttons { display: grid; grid-template-columns: 1fr; gap: 6px; margin-top: 12px; max-height: 320px; overflow-y: auto; padding-right: 3px; }
+.one-connection-buttons button { min-width: 0; height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid #17384f; border-radius: 4px; background: #06111d; color: #9db9c9; padding: 0 9px; font-size: 11px; cursor: pointer; }
+.one-connection-buttons button.selected { border-color: #1f8dbc; color: #d7f6ff; background: #072033; }
+.one-connection-buttons span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.one-connection-buttons i { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: #405466; }
+.one-connection-buttons i.online { background: #32dfa2; box-shadow: 0 0 9px #32dfa2; }
+@media (max-width: 1100px) {
+  .one-vault-shell { grid-template-columns: 1fr; }
+  .one-connection-rail { position: static; }
+  .one-vault-list { grid-template-columns: 1fr; }
+}
