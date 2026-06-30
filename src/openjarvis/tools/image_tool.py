@@ -59,7 +59,10 @@ class ImageGenerateTool(BaseTool):
                     },
                     "provider": {
                         "type": "string",
-                        "description": "Image generation provider. Default 'openai'.",
+                        "description": (
+                            "Image generation provider: 'openai' or 'flux'."
+                            " Defaults to ONE_IMAGE_PROVIDER/openai."
+                        ),
                     },
                     "reference_image_path": {
                         "type": "string",
@@ -109,15 +112,24 @@ class ImageGenerateTool(BaseTool):
                 success=False,
             )
 
-        provider = params.get("provider", "openai")
+        provider = params.get("provider") or os.environ.get("ONE_IMAGE_PROVIDER", "openai")
+        provider = str(provider).strip().lower()
         output_path = params.get("output_path")
         reference_image_path = params.get("reference_image_path")
+
+        if provider == "flux":
+            return self._execute_flux(
+                prompt=prompt,
+                size=size,
+                output_path=output_path,
+                reference_image_path=reference_image_path,
+            )
 
         if provider != "openai":
             return ToolResult(
                 tool_name="image_generate",
                 content=(
-                    f"Unsupported provider '{provider}'. Only 'openai' is supported."
+                    f"Unsupported provider '{provider}'. Supported providers: openai, flux."
                 ),
                 success=False,
             )
@@ -216,6 +228,76 @@ class ImageGenerateTool(BaseTool):
             content=data_url,
             success=True,
             metadata={"size": size, "provider": provider},
+        )
+
+    def _execute_flux(
+        self,
+        *,
+        prompt: str,
+        size: str,
+        output_path: str | None,
+        reference_image_path: str | None,
+    ) -> ToolResult:
+        try:
+            import httpx
+        except ImportError:
+            return ToolResult(
+                tool_name="image_generate",
+                content="httpx package not installed; local FLUX provider cannot call its server.",
+                success=False,
+            )
+
+        endpoint = os.environ.get("ONE_FLUX_URL", "http://127.0.0.1:8188").rstrip("/")
+        payload: dict[str, Any] = {
+            "prompt": prompt,
+            "size": _SIZE_REMAP.get(size, size),
+            "output_path": output_path,
+        }
+        if reference_image_path:
+            payload["reference_image_path"] = reference_image_path
+
+        try:
+            with httpx.Client(timeout=float(os.environ.get("ONE_FLUX_TIMEOUT_SECONDS", "1800"))) as client:
+                response = client.post(f"{endpoint}/v1/images/generate", json=payload)
+                response.raise_for_status()
+                data = response.json()
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text.strip()
+            return ToolResult(
+                tool_name="image_generate",
+                content=(
+                    f"Local FLUX generation error: HTTP {exc.response.status_code}."
+                    f" {detail}"
+                ),
+                success=False,
+                metadata={"provider": "flux", "endpoint": endpoint},
+            )
+        except Exception as exc:
+            return ToolResult(
+                tool_name="image_generate",
+                content=(
+                    f"Local FLUX generation error: {exc}. "
+                    "Start it with start-flux.ps1 or enable ONE_FLUX_AUTOSTART=true."
+                ),
+                success=False,
+                metadata={"provider": "flux", "endpoint": endpoint},
+            )
+
+        saved_path = data.get("path")
+        if saved_path:
+            return ToolResult(
+                tool_name="image_generate",
+                content=str(saved_path),
+                success=True,
+                metadata={**data, "provider": "flux", "endpoint": endpoint},
+            )
+
+        b64_data = data.get("b64_json", "")
+        return ToolResult(
+            tool_name="image_generate",
+            content=f"data:image/png;base64,{b64_data}",
+            success=True,
+            metadata={**data, "provider": "flux", "endpoint": endpoint},
         )
 
 

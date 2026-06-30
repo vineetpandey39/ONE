@@ -42,6 +42,9 @@ def _one_model_status(model: str | None = None) -> dict[str, Any]:
     nemotron_model = os.environ.get("NEMOTRON_MODEL", "").strip()
     nvidia_key = os.environ.get("NVIDIA_API_KEY", "").strip()
     nvidia_host = os.environ.get("NVIDIA_HOST", "https://integrate.api.nvidia.com").strip()
+    image_provider = os.environ.get("ONE_IMAGE_PROVIDER", "openai").strip() or "openai"
+    flux_url = os.environ.get("ONE_FLUX_URL", "http://127.0.0.1:8188").strip()
+    flux_model = os.environ.get("ONE_FLUX_MODEL", "black-forest-labs/FLUX.1-schnell").strip()
     nemotron_ready = bool(
         (engine == "nvidia" or nemotron_model or "nemotron" in router_model.lower())
         and nvidia_key
@@ -52,7 +55,8 @@ def _one_model_status(model: str | None = None) -> dict[str, Any]:
         {"scope": "alfa_scan", "model": "deterministic + optional local packaging", "engine": "local-python/ollama"},
         {"scope": "jobhunt", "model": nemotron_model or router_model, "engine": "nvidia" if nemotron_ready else engine},
         {"scope": "ia_scout_and_metadata", "model": nemotron_model or router_model, "engine": "nvidia" if nemotron_ready else engine},
-        {"scope": "ia_media_generation", "model": "gpt-image-1 + fal/Leonardo + ffmpeg", "engine": "tool-pipeline"},
+        {"scope": "ia_image_generation", "model": flux_model if image_provider == "flux" else "gpt-image-2", "engine": image_provider},
+        {"scope": "ia_video_generation", "model": "fal/Leonardo + ffmpeg", "engine": "tool-pipeline"},
     ]
     return {
         "engine": engine,
@@ -63,6 +67,12 @@ def _one_model_status(model: str | None = None) -> dict[str, Any]:
         "nvidia": {
             "host": nvidia_host,
             "api_key_configured": bool(nvidia_key),
+        },
+        "image_generation": {
+            "provider": image_provider,
+            "flux_url": flux_url,
+            "flux_model": flux_model,
+            "flux_autostart": os.environ.get("ONE_FLUX_AUTOSTART", "false").lower() == "true",
         },
         "route_map": route_map,
     }
