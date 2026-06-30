@@ -28,6 +28,13 @@ def _one_root() -> Path:
 
 
 def _configure_cache() -> None:
+    try:
+        from pip_system_certs.wrapt_requests import inject_truststore
+
+        inject_truststore()
+    except Exception:
+        pass
+
     root = _one_root()
     cache_root = root.parent / "data" / "model_cache"
     runtime_home = root.parent / "data" / "runtime_home"
@@ -115,10 +122,13 @@ def _parse_size(size: str) -> tuple[int, int]:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    _configure_cache()
     return {
         "status": "ok",
         "model": os.environ.get("ONE_FLUX_MODEL", "black-forest-labs/FLUX.1-schnell"),
         "loaded": _PIPELINE is not None,
+        "hf_token_configured": bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")),
+        "hf_home": os.environ.get("HF_HOME", ""),
     }
 
 
@@ -129,10 +139,17 @@ def generate(req: GenerateRequest) -> dict[str, Any]:
         pipe = _load_pipeline()
     except Exception as exc:
         detail = str(exc)
+        if "certificate_verify_failed" in detail.lower() or "ssl" in detail.lower():
+            detail = (
+                "FLUX could not reach Hugging Face because Windows certificate trust "
+                "was not available to the Python process. Restart ONE/FLUX so the "
+                "trust-store injection can take effect."
+            )
         if "gated repo" in detail.lower() or "401" in detail:
             detail = (
                 "FLUX model access is gated. Accept the model license on Hugging Face "
-                "and set HF_TOKEN/HUGGINGFACE_HUB_TOKEN in one.env, then restart FLUX."
+                "and save your Hugging Face token to the ONE credential vault with "
+                "set-flux-hf-token.ps1, then restart ONE/FLUX."
             )
         raise HTTPException(status_code=503, detail=detail) from exc
 

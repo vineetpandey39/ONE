@@ -118,12 +118,19 @@ class ImageGenerateTool(BaseTool):
         reference_image_path = params.get("reference_image_path")
 
         if provider == "flux":
-            return self._execute_flux(
+            flux_result = self._execute_flux(
                 prompt=prompt,
                 size=size,
                 output_path=output_path,
                 reference_image_path=reference_image_path,
             )
+            if flux_result.success:
+                return flux_result
+            if os.environ.get("ONE_IMAGE_FALLBACK_OPENAI", "false").strip().lower() not in {"1", "true", "yes"}:
+                return flux_result
+            if not os.environ.get("OPENAI_API_KEY"):
+                return flux_result
+            provider = "openai"
 
         if provider != "openai":
             return ToolResult(
