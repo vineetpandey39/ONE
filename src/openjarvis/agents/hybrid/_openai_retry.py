@@ -174,6 +174,9 @@ def _is_retryable(exc: BaseException) -> bool:
         import openai
     except ImportError:
         return False
+    text = str(exc).lower()
+    if "certificate_verify_failed" in text or "unable to get local issuer certificate" in text:
+        return False
     if isinstance(exc, (
         openai.RateLimitError,
         openai.APITimeoutError,

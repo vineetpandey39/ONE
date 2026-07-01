@@ -146,6 +146,27 @@ def _norm_key(city: str, state: str, country: str) -> str:
     return f"{(city or '').strip().lower()}|{(state or '').strip().lower()}|{(country or '').strip().lower()}"
 
 
+def _place_key(area_name: str, city: str, state: str, country: str) -> str:
+    """Specific-place key used for IA dedupe.
+
+    City-level dedupe was too broad: after one Mumbai/Delhi/Kolkata run it
+    blocked iconic, high-potential locations in the same city (Gateway of
+    India, CST, Charminar-style precincts). Deduping by specific area keeps
+    exact repeats out without suppressing strong landmarks.
+    """
+    area = (area_name or "").strip().lower()
+    return f"{area}|{_norm_key(city, state, country)}"
+
+
+def _entry_key(entry: Dict[str, Any], country: str = "India") -> str:
+    return _place_key(
+        entry.get("area_name") or entry.get("location") or "",
+        entry.get("city", ""),
+        entry.get("state", ""),
+        entry.get("country", country),
+    )
+
+
 def _upgrade_header(ws) -> None:
     """Extend an older tracker's header row with any new trailing columns
     (e.g. the SEO metadata columns added later) so existing trackers/rows
@@ -192,8 +213,8 @@ def _load_used_keys(path: Optional[Path] = None) -> Set[str]:
         for row in rows:
             if not row or len(row) < 7:
                 continue
-            _, _, _, _, city, state, country = row[:7]
-            used.add(_norm_key(city or "", state or "", country or ""))
+            _, _, _, area_name, city, state, country = row[:7]
+            used.add(_place_key(area_name or "", city or "", state or "", country or ""))
         return used
     except Exception:
         logger.warning("Could not read location tracker at %s; assuming empty.", tpath, exc_info=True)
@@ -393,18 +414,98 @@ def _call_llm_with_retry(fn, *args, **kwargs) -> Optional[Any]:
     return None
 
 
-def _pool_pick(used_keys: Set[str]) -> Optional[Dict[str, str]]:
-    """Return the next not-yet-used entry from
-    ``ia_locations.location_name_pool()`` -- the large (100+) real-place
-    anchor pool -- or ``None`` once every entry in the pool has been used at
-    least once. Pool order is the order the entries are declared in
-    ``ia_locations.LOCATION_NAME_POOL``, so distinct regions/cities get
-    surfaced in turn rather than the same handful of famous names repeating."""
+def _load_recent_profiles(path: Optional[Path] = None, limit: int = 6) -> List[Dict[str, str]]:
+    """Return recent tracker rows for diversity scoring."""
+    tpath = _tracker_path(path)
+    if not tpath.exists():
+        return []
+    try:
+        from openpyxl import load_workbook
+
+        wb = load_workbook(tpath, read_only=True)
+        ws = wb.active
+        headers = [c.value for c in ws[1]]
+        rows = []
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            data = dict(zip(headers, row))
+            if data.get("Area Name") or data.get("City"):
+                rows.append(
+                    {
+                        "area_name": str(data.get("Area Name") or ""),
+                        "city": str(data.get("City") or ""),
+                        "type": str(data.get("Type") or ""),
+                        "scene": str(data.get("Scene") or ""),
+                        "status": str(data.get("Status") or ""),
+                    }
+                )
+        return rows[-limit:]
+    except Exception:
+        logger.warning("Could not read recent IA location history.", exc_info=True)
+        return []
+
+
+def _diversity_score(entry: Dict[str, Any], recent: List[Dict[str, str]]) -> float:
+    """Score candidates so IA does not become a river-only channel."""
+    candidate = dict(entry)
+    candidate["scene"] = _infer_scene_for_location(candidate)
+    loc_type = str(candidate.get("type") or "").lower()
+    scene = str(candidate.get("scene") or "").lower()
+    area = str(candidate.get("area_name") or candidate.get("location") or "").lower()
+
+    score = float(candidate.get("viral_score_100", 0) or 0)
+    if not score:
+        raw = candidate.get("viral_score", 0)
+        try:
+            score = float(raw) * 10 if float(raw) <= 10 else float(raw)
+        except Exception:
+            score = 70.0
+
+    recent_types = [r.get("type", "").lower() for r in recent]
+    recent_scenes = [r.get("scene", "").lower() for r in recent]
+    recent_areas = [r.get("area_name", "").lower() for r in recent]
+    water_corridor_streak = 0
+    for r in reversed(recent):
+        if r.get("type", "").lower() == "water" and r.get("scene", "").lower() == "corridor":
+            water_corridor_streak += 1
+        else:
+            break
+
+    if loc_type == "water" and scene == "corridor":
+        score -= 35 + (25 * water_corridor_streak)
+    if loc_type and recent_types[:3].count(loc_type) >= 2:
+        score -= 25
+    if scene and recent_scenes[:3].count(scene) >= 2:
+        score -= 20
+    if area in recent_areas:
+        score -= 1000
+
+    if scene in {"monument", "infra", "ghat", "lake", "coast"}:
+        score += 30
+    if loc_type == "land":
+        score += 25
+    if any(term in area for term in ("gateway", "cst", "charminar", "station", "bridge", "landfill", "dharavi")):
+        score += 35
+    return score
+
+
+def _pool_pick(used_keys: Set[str], recent: Optional[List[Dict[str, str]]] = None) -> Optional[Dict[str, str]]:
+    """Return the strongest unused entry from the large real-place pool.
+
+    This used to return the first unused item in declaration order, which
+    created river-after-river runs whenever a state block had several water
+    entries in a row. Now it scores all unused candidates against recent
+    history so the series rotates between landmark, landfill/slum, lake,
+    ghat, infra, coast, and plain river/drain ideas.
+    """
+    candidates = []
+    recent = recent or []
     for entry in location_name_pool():
-        key = _norm_key(entry.get("city", ""), entry.get("state", ""), "India")
-        if key not in used_keys:
-            return entry
-    return None
+        if _entry_key(entry, "India") not in used_keys:
+            candidates.append(entry)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: _diversity_score(item, recent), reverse=True)
+    return candidates[0]
 
 
 _HEURISTIC_BEFORE_PHRASES = {
@@ -662,7 +763,7 @@ def _llm_pick_location(
     data.setdefault("state", "")
     data.setdefault("scene", category_scene)
     data["scene"] = _infer_scene_for_location(data)
-    key = _norm_key(data.get("city", ""), data.get("state", ""), data.get("country", ""))
+    key = _entry_key(data, data.get("country", ""))
     if key in used_keys:
         return None
     return data
@@ -675,7 +776,7 @@ def _fallback_rotation_pick(region: str, used_keys: Set[str]) -> Dict[str, Any]:
     locations = active_locations(region=region)
     for loc in locations:
         country = "India" if region == "india" else loc.get("country", "")
-        key = _norm_key(loc.get("city", ""), loc.get("state", ""), country)
+        key = _entry_key(loc, country)
         if key not in used_keys:
             picked = dict(loc)
             picked.setdefault("country", country)
@@ -699,18 +800,22 @@ def _fallback_rotation_pick(region: str, used_keys: Set[str]) -> Dict[str, Any]:
     return picked
 
 
-def _named_kb_pick(used_keys: Set[str]) -> Optional[Dict[str, Any]]:
+def _named_kb_pick(used_keys: Set[str], recent: Optional[List[Dict[str, str]]] = None) -> Optional[Dict[str, Any]]:
     """Try the curated Location Knowledge Base first (04_Location_Knowledge_
     Base.md, see ``ia_locations.named_locations()``), highest viral score
     not yet used. Returns None once every curated entry has been used at
     least once, so callers fall through to the existing LLM/web-search step
     -- this is a pure priority layer added in front of the old pipeline, the
     old pipeline itself is untouched."""
-    for loc in named_locations(sort_by_viral_score=True):
-        key = _norm_key(loc.get("city", ""), loc.get("state", ""), loc.get("country", ""))
-        if key not in used_keys:
-            return dict(loc)
-    return None
+    candidates = [
+        dict(loc)
+        for loc in named_locations(sort_by_viral_score=True)
+        if _entry_key(loc, loc.get("country", "India")) not in used_keys
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: _diversity_score(item, recent or []), reverse=True)
+    return candidates[0]
 
 
 def scout_location(
@@ -727,6 +832,7 @@ def scout_location(
     source_image_query) for the tracker/record.
     """
     used_keys = _load_used_keys(tracker_path)
+    recent_profiles = _load_recent_profiles(tracker_path)
 
     day_index = date.today().toordinal()
     category_type, category_label, category_query_hint, category_scene = _CATEGORIES[
@@ -740,7 +846,7 @@ def scout_location(
     # so use them (highest viral score, not yet used) before inventing a new
     # one. Falls through to the existing LLM/web-search step once all 7 have
     # been used at least once.
-    picked: Optional[Dict[str, Any]] = _named_kb_pick(used_keys)
+    picked: Optional[Dict[str, Any]] = _named_kb_pick(used_keys, recent_profiles)
     if picked is not None:
         picked["scene"] = _infer_scene_for_location(picked)
         try:
@@ -761,7 +867,7 @@ def scout_location(
     # Even if the LLM step fails outright, the heuristic fallback below still
     # grounds the descriptor in the pool entry's own real name, so
     # ia_prompts._location_descriptor() never again sees a blank location.
-    anchor = _pool_pick(used_keys)
+    anchor = _pool_pick(used_keys, recent_profiles)
     if anchor is not None:
         picked = _llm_enrich_anchor(anchor)
         if picked is None:
