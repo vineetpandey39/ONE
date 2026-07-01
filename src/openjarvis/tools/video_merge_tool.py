@@ -329,6 +329,7 @@ class VideoMergeTool(BaseTool):
                     )
 
                 final_src = concatenated
+                overlay_warning = ""
                 if overlay_text or hook_lines:
                     width, height = _probe_dimensions(concatenated)
 
@@ -344,8 +345,24 @@ class VideoMergeTool(BaseTool):
 
                     # --- Pin icon sizing (scales with frame height) ---
                     icon_path = tmp / "pin_icon.png"
-                    _generate_pin_icon(icon_path)
                     icon_h = max(40, int(height * 0.045))
+                    try:
+                        _generate_pin_icon(icon_path)
+                    except Exception as exc:  # noqa: BLE001
+                        overlay_warning = (
+                            f"opening overlay skipped; pin icon generation failed: {exc}"
+                        )
+                        shutil.copyfile(final_src, output_path)
+                        return ToolResult(
+                            tool_name="video_merge",
+                            content=output_path,
+                            success=True,
+                            metadata={
+                                "clip_count": len(clip_paths),
+                                "overlay_text": overlay_text,
+                                "overlay_warning": overlay_warning,
+                            },
+                        )
 
                     # --- Hook block (0 - hook_seconds): the only thing doing
                     # the "stop scrolling" job since these reels have no
@@ -473,11 +490,8 @@ class VideoMergeTool(BaseTool):
                             break
                     if result is None or result.returncode != 0:
                         stderr = result.stderr[-1500:] if result else "no ffmpeg attempt ran"
-                        return ToolResult(
-                            tool_name="video_merge",
-                            content=f"ffmpeg overlay failed: {stderr}",
-                            success=False,
-                        )
+                        overlay_warning = f"ffmpeg overlay failed; exported without overlay: {stderr}"
+                        shutil.copyfile(final_src, output_path)
                 else:
                     shutil.copyfile(final_src, output_path)
         except subprocess.TimeoutExpired:
@@ -497,7 +511,11 @@ class VideoMergeTool(BaseTool):
             tool_name="video_merge",
             content=output_path,
             success=True,
-            metadata={"clip_count": len(clip_paths), "overlay_text": overlay_text},
+            metadata={
+                "clip_count": len(clip_paths),
+                "overlay_text": overlay_text,
+                "overlay_warning": overlay_warning,
+            },
         )
 
 

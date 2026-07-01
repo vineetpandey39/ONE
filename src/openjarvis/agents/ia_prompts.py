@@ -600,38 +600,28 @@ def _clip_suffix(scene: str, clip_id: str = "A") -> str:
         " reference image"
     )
     if clip_id == "E":
-        # Clip E is the dedicated 8-second Hero Reveal finale, shot entirely
-        # AFTER restoration is complete (frame 5 to frame 5 -- nothing about
-        # the restored subject itself changes, only the camera's journey
-        # around it). Implements the literal 4-part, 8-second structure from
-        # 02_Prompt_Templates.md's "Hero Reveal Template" -- generic across
-        # every scene type (corridor/ghat/monument/coast/infra) via
-        # _CLIP_DESCENT_TARGET, never hardcoded to one named place.
+        # Clip E is generated from a single restored keyframe on the fal
+        # backend, so it must be one continuous camera move. Asking a
+        # single-image video model for four different shots in one prompt
+        # (drone descent -> ground tracking -> low tracking -> pullback)
+        # caused reverse/pullback-looking finales. Keep the Bible's "Hero
+        # Reveal" intent, but express it as one unambiguous forward descent.
         target = _CLIP_DESCENT_TARGET.get(scene, _CLIP_DESCENT_TARGET["corridor"])
         movement = (
-            ", and for this entire 8-second clip the camera performs a"
-            " 4-part cinematic Hero Reveal sequence in real-time speed:"
-            f" FIRST 2 SECONDS -- the drone descends {target}, with the hero"
-            " landmark/main subject remaining visible and centered. NEXT 2"
-            " SECONDS -- the shot transitions naturally into a stabilized"
-            " ground-level cinematic tracking shot at human eye level,"
-            " moving through the restored public space, with the landmark"
-            " still visible in the background and people moving naturally."
-            " NEXT 2 SECONDS -- a low tracking shot beside the single most"
-            " beautiful restored area of the scene (waterfront, promenade,"
-            " road, ghat, park, plaza, or pathway), showing real textures,"
-            " people, trees, lighting, water, stone, and benches. FINAL 2"
-            " SECONDS -- the drone rises while pulling backward with a"
-            " gentle cinematic orbit, revealing the complete restored"
-            " subject and its surroundings, ending on a centered hero"
-            " composition and holding that final frame for about half a"
-            " second. This is the only clip in the entire sequence where"
-            " the camera moves -- every other clip (A-D) stays fully"
-            " locked-off; this is the final reveal payoff after restoration"
-            " is already finished. BBC Earth / National Geographic"
-            " documentary quality throughout. No camera shake, no"
-            " teleportation, no morphing, no sudden transitions between the"
-            " four parts -- each part flows smoothly into the next."
+            ", and for this entire finale clip the camera performs ONE"
+            " continuous cinematic drone descent with a gentle forward push-in"
+            f" {target}. Start from the current high oblique aerial frame and"
+            " move lower and closer over the restored subject at real-world"
+            " speed; the final frame must be closer, lower, and more intimate"
+            " than the first frame. The hero/main subject stays visible,"
+            " centered, and stable for the full move. This is NOT a reverse"
+            " shot: never pull backward, never zoom out, never rise away,"
+            " never orbit away from the subject, and never cut to a separate"
+            " ground-level shot. Nothing in the restored scene changes during"
+            " this clip -- only the camera descends and pushes forward. BBC"
+            " Earth / National Geographic documentary quality throughout."
+            " No camera shake, no teleportation, no morphing, no sudden cut,"
+            " no reverse motion."
         )
     else:
         movement = (

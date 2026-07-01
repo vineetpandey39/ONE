@@ -45,7 +45,7 @@ from openjarvis.agents.ia_prompts import (
     build_seo_metadata,
 )
 from openjarvis.agents.ia_scout import record_run_result, scout_location
-from openjarvis.agents.ia_training import load_ia_knowledge_pack
+from openjarvis.agents.ia_training import ia_generation_contract, load_ia_knowledge_pack
 from openjarvis.core.paths import get_config_dir
 from openjarvis.core.registry import AgentRegistry
 from openjarvis.core.types import ToolCall
@@ -64,6 +64,84 @@ def _summarize_tool_calls(tool_results: List[Any]) -> List[Dict[str, Any]]:
         }
         for r in tool_results
     ]
+
+
+def _write_prompt_audit(
+    run_dir: Path,
+    *,
+    location: Dict[str, Any],
+    frames: List[Dict[str, Any]],
+    clips: List[Dict[str, Any]],
+    knowledge_pack: Dict[str, str],
+) -> None:
+    """Persist the exact IA planning inputs used for this render."""
+    knowledge_files = {
+        name: {"chars": len(text), "preview": text[:500]}
+        for name, text in knowledge_pack.items()
+    }
+    manifest = {
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "location": location,
+        "scene": location.get("scene", "corridor"),
+        "knowledge_files": knowledge_files,
+        "generation_contract": ia_generation_contract(),
+        "frames": frames,
+        "clips": clips,
+        "qa_contract": [
+            "hero visible",
+            "identity preserved",
+            "ecosystem restored",
+            "no side distraction",
+            "engineering touches hero",
+            "SEO complete",
+        ],
+    }
+    (run_dir / "ia_prompt_manifest.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    lines = [
+        "# IA Prompt Manifest",
+        "",
+        f"- Location: {location.get('area_name', '')}, {location.get('city', '')}",
+        f"- Scene: {location.get('scene', 'corridor')}",
+        f"- Type: {location.get('type', '')}",
+        f"- Viral angle: {location.get('viral_angle', '')}",
+        f"- Knowledge files: {', '.join(knowledge_pack.keys())}",
+        "",
+        "## Frame Prompts",
+    ]
+    for frame in frames:
+        lines.extend(
+            [
+                "",
+                f"### Frame {frame.get('id')} - {frame.get('label')}",
+                "",
+                "Prompt:",
+                "",
+                str(frame.get("prompt", "")),
+                "",
+                "Edit prompt:",
+                "",
+                str(frame.get("edit_prompt", "")),
+            ]
+        )
+    lines.append("")
+    lines.append("## Clip Prompts")
+    for clip in clips:
+        lines.extend(
+            [
+                "",
+                f"### Clip {clip.get('id')} - {clip.get('label')}",
+                "",
+                f"Frames: {clip.get('from_frame')} -> {clip.get('to_frame')}",
+                f"Duration seconds: {clip.get('duration_seconds')}",
+                "",
+                str(clip.get("prompt", "")),
+            ]
+        )
+    (run_dir / "ia_prompt_manifest.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 @AgentRegistry.register("ia")
@@ -215,6 +293,13 @@ class IAAgent(ToolUsingAgent):
         base_dir = Path(self._output_dir or str(get_config_dir() / "restoration_reels"))
         run_dir = base_dir / f"{location['id']}_{run_id}"
         run_dir.mkdir(parents=True, exist_ok=True)
+        _write_prompt_audit(
+            run_dir,
+            location=location,
+            frames=frames,
+            clips=clips,
+            knowledge_pack=knowledge_pack,
+        )
 
         # Mirror progress into the dashboard's managed-agent record so the
         # run shows up as a card with live status + activity log, even

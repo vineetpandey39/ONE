@@ -421,6 +421,42 @@ _HEURISTIC_BEFORE_PHRASES = {
 }
 
 
+_VALID_SCENES = {"corridor", "ghat", "monument", "coast", "infra", "lake"}
+
+
+def _infer_scene_for_location(location: Dict[str, Any]) -> str:
+    """Infer a safe visual scene from the location itself.
+
+    The day-rotation category is only a discovery hint. It must not be
+    stamped onto a pooled/static location, because that can turn an ordinary
+    river/drain into a fake "monument" reel and make image generation invent
+    heritage architecture that is not part of the place.
+    """
+    current = str(location.get("scene") or "").strip().lower()
+    if current in _VALID_SCENES:
+        return current
+
+    loc_type = str(location.get("type") or "").strip().lower()
+    haystack = " ".join(
+        str(location.get(key) or "")
+        for key in ("area_name", "location", "city", "state", "source_image_query", "hero_object")
+    ).lower()
+
+    if any(term in haystack for term in ("lake", "talab", "reservoir", "jheel")):
+        return "lake"
+    if any(term in haystack for term in ("ghat", "steps", "temple ghat")):
+        return "ghat"
+    if any(term in haystack for term in ("beach", "coast", "shoreline", "seaface", "sea face", "seafront")):
+        return "coast"
+    if any(term in haystack for term in ("bridge", "flyover", "rail", "metro", "underpass")):
+        return "infra"
+    if loc_type == "water":
+        return "corridor"
+    if any(term in haystack for term in ("gateway", "fort", "monument", "heritage", "charminar", "qutub")):
+        return "monument"
+    return "corridor"
+
+
 def _heuristic_enrich_anchor(anchor: Dict[str, str]) -> Dict[str, Any]:
     """Build a non-blank, place-grounded descriptor directly from *anchor*'s
     own name + type, with no LLM/network call at all. This is the
@@ -444,6 +480,7 @@ def _heuristic_enrich_anchor(anchor: Dict[str, str]) -> Dict[str, Any]:
     picked["viral_angle"] = f"{area_name}, {city} gets a second chance"
     picked["viral_score_100"] = 85
     picked["source_image_query"] = f"{area_name} {city} {state} pollution aerial".strip()
+    picked["scene"] = _infer_scene_for_location(picked)
     return picked
 
 
@@ -544,6 +581,7 @@ def _llm_enrich_anchor(anchor: Dict[str, str]) -> Optional[Dict[str, Any]]:
     picked["viral_angle"] = data.get("viral_angle", "") or f"{area_name}, {city} gets a second chance"
     picked["viral_score_100"] = _viral_score_100(data)
     picked["source_image_query"] = data.get("source_image_query") or f"{area_name} {city} pollution aerial"
+    picked["scene"] = _infer_scene_for_location(picked)
     return picked
 
 
@@ -623,6 +661,7 @@ def _llm_pick_location(
         return None
     data.setdefault("state", "")
     data.setdefault("scene", category_scene)
+    data["scene"] = _infer_scene_for_location(data)
     key = _norm_key(data.get("city", ""), data.get("state", ""), data.get("country", ""))
     if key in used_keys:
         return None
@@ -703,7 +742,7 @@ def scout_location(
     # been used at least once.
     picked: Optional[Dict[str, Any]] = _named_kb_pick(used_keys)
     if picked is not None:
-        picked.setdefault("scene", category_scene)
+        picked["scene"] = _infer_scene_for_location(picked)
         try:
             _append_row(_started_tracker_row(run_id, picked), tracker_path)
         except Exception:
@@ -729,7 +768,7 @@ def scout_location(
             picked = _heuristic_enrich_anchor(anchor)
         picked.setdefault("id", re.sub(r"[^a-z0-9]+", "_", picked.get("location", "location").lower()).strip("_"))
         picked.setdefault("country", "India")
-        picked.setdefault("scene", category_scene)
+        picked["scene"] = _infer_scene_for_location(picked)
         try:
             _append_row(_started_tracker_row(run_id, picked), tracker_path)
         except Exception:
@@ -774,7 +813,7 @@ def scout_location(
 
     picked.setdefault("id", re.sub(r"[^a-z0-9]+", "_", picked.get("location", "location").lower()).strip("_"))
     picked.setdefault("country", "India" if region == "india" else "")
-    picked.setdefault("scene", category_scene)
+    picked["scene"] = _infer_scene_for_location(picked)
 
     try:
         _append_row(_started_tracker_row(run_id, picked), tracker_path)
