@@ -213,7 +213,7 @@ def _one_agent_command(text: str) -> str | None:
         "are you up", "are you there", "you up", "online",
         "wake up", "wakeup", "wake", "startup", "start up",
     }:
-        return "Always online, Vineet. What do you need?"
+        return "Always online, Sir. What do you need?"
     if check_in in {
         "hi",
         "hello",
@@ -229,7 +229,7 @@ def _one_agent_command(text: str) -> str | None:
         "kya chal raha hai",
     }:
         return (
-            "I am online and steady, Vineet. Local core is listening, memory is active, "
+            "I am online and steady, Sir. Local core is listening, memory is active, "
             "and the agent network is standing by. Tell me which mission to run."
         )
 

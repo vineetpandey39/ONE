@@ -702,6 +702,16 @@ export function OneCockpit() {
     const cleanText = text
       .replace(/[*_#`]/g, '')
       .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0F]/gu, '')
+      // Remove ISO timestamps (2024-07-08T23:11:45 or 2024-07-08 23:11)
+      .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?/g, '')
+      // Remove short date formats (08-07-2024, 08/07/2024)
+      .replace(/\d{2}[-/]\d{2}[-/]\d{4}/g, '')
+      // Remove agent/job IDs like ALFA-001, JH-2024-08-001, etc.
+      .replace(/\b[A-Z]{2,}-[\dA-Z][\w-]*/g, '')
+      // Expand camelCase so TTS doesn't stutter (JobHunt \u2192 Job Hunt)
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      // Hyphens between word characters \u2192 space (stops "j-o-b" being spelled out)
+      .replace(/(\w)-(\w)/g, '$1 $2')
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, 900);
@@ -760,8 +770,11 @@ export function OneCockpit() {
     setCommand('');
     setBusy(true);
     setLines((current) => [...current.slice(-6), { role: 'user', text }, { role: 'one', text: '' }]);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 28_000);
     try {
       const response = await coreFetch('/v1/chat/completions', {
+        signal: controller.signal,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -857,7 +870,11 @@ export function OneCockpit() {
       }
       void refreshStatus();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'ONE is offline.';
+      const message = error instanceof Error
+        ? (error.name === 'AbortError'
+            ? 'ONE took too long to respond. Try a shorter or more specific question.'
+            : error.message)
+        : 'ONE is offline.';
       setLines((current) => {
         const next = [...current];
         if (next[next.length - 1]?.role === 'one') next[next.length - 1] = { role: 'one', text: message };
@@ -865,6 +882,7 @@ export function OneCockpit() {
         return next;
       });
     } finally {
+      window.clearTimeout(timeoutId);
       setBusy(false);
     }
   }, [busy, command, refreshMemoryGraph, refreshStatus, status.model, status.obsidian.connected, voiceEnabled]);
