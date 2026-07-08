@@ -4,6 +4,21 @@ $oneRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $sourceRepo = Resolve-Path (Join-Path $oneRoot "src")
 $cleanRepo = Resolve-Path (Join-Path $oneRoot "..\ONE")
 
+# ── Git safe.directory: these repos may have been created under a different
+#    Windows user (e.g. CodexSandboxOffline vs pc). Add them as safe so git
+#    doesn't block all operations with "dubious ownership" errors.
+$safeRepos = @(
+    (Join-Path $oneRoot "..\ONE"),
+    (Join-Path $oneRoot "..\ONE-private")
+)
+foreach ($repo in $safeRepos) {
+    $absRepo = [System.IO.Path]::GetFullPath($repo).Replace('\', '/')
+    $current  = git config --global --get-all safe.directory 2>$null | Where-Object { $_ -eq $absRepo }
+    if (-not $current) {
+        git config --global --add safe.directory $absRepo 2>$null
+    }
+}
+
 function Invoke-CleanMirror {
     param(
         [Parameter(Mandatory=$true)][string]$Source,

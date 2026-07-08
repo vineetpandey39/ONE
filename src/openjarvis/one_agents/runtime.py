@@ -23,7 +23,7 @@ AGENTS: dict[str, dict[str, str]] = {
     "ares": {"name": "ARES", "role": "LinkedIn B2B content and leads operator"},
     "apollo": {"name": "APOLLO", "role": "X threads and growth operator"},
     "athena": {"name": "ATHENA", "role": "Research and intelligence operator"},
-    "hephaistos": {"name": "HEPHAISTOS", "role": "Local system health operator"},
+    "hephaistos": {"name": "HEPHAISTOS", "role": "LAO and local automation bot operator"},
     "poseidon": {"name": "POSEIDON", "role": "Revenue and payout control operator"},
     "zeus": {"name": "ZEUS", "role": "Agent orchestration and escalation operator"},
     "ia": {"name": "IA", "role": "Restoration-reel content operator"},
@@ -312,6 +312,52 @@ def _run_beta(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _run_hephaistos(job: dict[str, Any]) -> dict[str, Any]:
+    """Route ONE voice/text commands into LAO's deterministic bot runtime."""
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+
+    task = str(job.get("task") or "")
+    text = task.lower()
+    mode = str(job.get("mode") or "execute").lower()
+
+    action = "start"
+    include_logs = False
+    run_mode = "dry_run"
+
+    if any(word in text for word in ("status", "progress", "result", "kya chal", "logs", "log bata")):
+        action = "status"
+        include_logs = "log" in text
+    elif any(word in text for word in ("stop", "cancel", "rok", "band karo")):
+        action = "stop"
+    elif any(word in text for word in ("list process", "process list", "processes")):
+        action = "list_processes"
+    elif mode == "publish" or any(word in text for word in ("publish", "post kar", "shoot", "live run")):
+        run_mode = "publish"
+    elif any(word in text for word in ("dry", "test", "preview", "without publish", "publish mat")):
+        run_mode = "dry_run"
+
+    result = LaoOrchestratorTool().execute(
+        action=action,
+        mode=run_mode,
+        include_logs=include_logs,
+        confirm_publish=(run_mode == "publish"),
+    )
+    try:
+        lao_payload = json.loads(result.content)
+    except json.JSONDecodeError:
+        lao_payload = {"raw": result.content}
+    if not result.success:
+        raise RuntimeError(result.content)
+    return {
+        "agent": "HEPHAISTOS",
+        "mode": "lao-operator",
+        "command": task,
+        "lao_action": action,
+        "lao_mode": run_mode,
+        "lao": lao_payload,
+    }
+
+
 def _postforge(path: str, payload: dict[str, Any], timeout: float = 300) -> dict[str, Any]:
     base = os.environ.get("POSTFORGE_URL", "https://postforge-ai-one.vercel.app").rstrip("/")
     secret = os.environ.get("POSTFORGE_API_SECRET", "").strip()
@@ -481,6 +527,8 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         return run_jobhunt_scan()
     if job["agent_id"] == "beta":
         return _run_beta(job)
+    if job["agent_id"] == "hephaistos":
+        return _run_hephaistos(job)
     return _local_plan(job)
 
 

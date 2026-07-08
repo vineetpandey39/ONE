@@ -68,6 +68,8 @@ EXPECTED_TOOLS = {
     "kg_add_relation",
     "kg_query",
     "kg_neighbors",
+    # lao_orchestrator.py
+    "lao_orchestrator",
 }
 
 

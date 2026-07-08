@@ -32,6 +32,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { getBase } from '../lib/api';
+import { JarvisCore } from './JarvisCore';
+import type { CoreState } from './JarvisCore';
 import './one-cockpit.css';
 
 type Agent = { id: string; name: string; role: string };
@@ -1155,36 +1157,24 @@ export function OneCockpit() {
       <div className="one-grid" />
 
       <section className="one-focus-stage">
-        <div
-          ref={orbRef}
-          className={`one-core solo hologram ${recording ? 'listening' : ''} ${speaking ? 'speaking' : ''} ${busy || transcribing ? 'thinking' : ''}`}
-          style={{ '--tilt-x': `${orbTilt.x}deg`, '--tilt-y': `${orbTilt.y}deg` } as CSSProperties}
-          onPointerMove={handleOrbPointerMove}
-          onPointerLeave={handleOrbPointerLeave}
-          onPointerDown={handleOrbPointerDown}
-        >
-          <div className="one-core-rings" />
-          <div className="one-hologram-scan" aria-hidden="true" />
-          <div className="one-hologram-grid" aria-hidden="true" />
-          <div className="one-core-heartbeat" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-          <BrainCircuit size={64} strokeWidth={1.1} />
-          <strong>ONE</strong>
-          <span>{recording ? 'LISTENING' : speaking ? 'SPEAKING' : transcribing ? 'TRANSCRIBING' : busy ? 'THINKING' : status.online ? 'AWAKE' : 'OFFLINE'}</span>
-          <small>{status.obsidian.notes} MEMORIES</small>
-          <div className="one-sparkle-field" aria-hidden="true">
-            {sparkles.map((sparkle) => (
-              <span
-                key={sparkle.id}
-                className="one-sparkle"
-                style={{ left: `${sparkle.x}%`, top: `${sparkle.y}%`, '--sparkle-hue': sparkle.hue } as CSSProperties}
-              />
-            ))}
-          </div>
-        </div>
+        {(() => {
+          const coreState: CoreState = !status.online
+            ? 'offline'
+            : recording
+            ? 'listening'
+            : speaking
+            ? 'speaking'
+            : (busy || transcribing)
+            ? 'thinking'
+            : 'awake';
+          return (
+            <JarvisCore
+              state={coreState}
+              memories={status.obsidian.notes}
+              onTap={recording ? stopRecording : startRecording}
+            />
+          );
+        })()}
 
         <button
           type="button"

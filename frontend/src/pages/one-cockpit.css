@@ -239,8 +239,8 @@ body { margin: 0; background: #02060b; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 56px;
-  padding: 24px;
+  gap: 28px;
+  padding: 16px;
   perspective: 1400px;
 }
 
@@ -416,6 +416,175 @@ body { margin: 0; background: #02060b; }
   0%, 100% { box-shadow: 0 0 0 1px #ff5d6c55, 0 6px 26px #4a000ab0; }
   50% { box-shadow: 0 0 0 4px #ff5d6c33, 0 6px 30px #6a0012c0; }
 }
+
+/* ============================================================
+   JarvisCore — 3D holographic AI orb (THREE.js canvas)
+   ============================================================ */
+.jarvis-wrap {
+  position: relative;
+  /* Fill as much of the viewport as possible while leaving room for the
+     ALWAYS LISTEN button (≈42px) + gap (56px) + padding (48px) below. */
+  width:  min(74vh, 74vw, 820px);
+  height: min(74vh, 74vw, 820px);
+  margin: 0 auto;
+  flex-shrink: 0;
+  cursor: grab;
+  user-select: none;
+}
+.jarvis-wrap:active { cursor: grabbing; }
+
+.jarvis-canvas-mount {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  overflow: hidden;
+}
+.jarvis-canvas-mount canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* HUD corner brackets */
+.jarvis-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.jarvis-corner {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-color: #00d4ffaa;
+  border-style: solid;
+  border-width: 0;
+}
+.jarvis-corner-tl { top: 6%; left: 6%; border-top-width: 2px; border-left-width: 2px; border-radius: 2px 0 0 0; }
+.jarvis-corner-tr { top: 6%; right: 6%; border-top-width: 2px; border-right-width: 2px; border-radius: 0 2px 0 0; }
+.jarvis-corner-bl { bottom: 6%; left: 6%; border-bottom-width: 2px; border-left-width: 2px; border-radius: 0 0 0 2px; }
+.jarvis-corner-br { bottom: 6%; right: 6%; border-bottom-width: 2px; border-right-width: 2px; border-radius: 0 0 2px 0; }
+
+/* Scan sweep line */
+.jarvis-scan-line {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  overflow: hidden;
+}
+.jarvis-scan-line::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, #00d4ff44 35%, #00d4ffbb 50%, #00d4ff44 65%, transparent 100%);
+  animation: jarvis-scan 3.8s linear infinite;
+}
+@keyframes jarvis-scan {
+  0%   { top: 0%; opacity: 0; }
+  4%   { opacity: 1; }
+  96%  { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+/* Text overlay — anchored to bottom quarter of wrap */
+.jarvis-text {
+  position: absolute;
+  bottom: 10%;
+  left: 0; right: 0;
+  text-align: center;
+  pointer-events: none;
+  line-height: 1.4;
+}
+.jarvis-tag {
+  font-size: 9px;
+  letter-spacing: 4px;
+  color: #00d4ff77;
+  font-family: 'Courier New', monospace;
+  margin-bottom: 2px;
+}
+.jarvis-name {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 9px;
+  color: #d8f6ff;
+  text-shadow: 0 0 18px #00aaff88;
+}
+.jarvis-status {
+  font-size: 10px;
+  letter-spacing: 2.5px;
+  margin-top: 3px;
+  transition: color .4s;
+}
+.jarvis-status--awake     { color: #00d4ff; }
+.jarvis-status--listening { color: #00ffcc; }
+.jarvis-status--speaking  { color: #ffd700; }
+.jarvis-status--thinking  { color: #aa55ff; }
+.jarvis-status--offline   { color: #445566; }
+.jarvis-mem {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: #4488aa;
+  margin-top: 2px;
+}
+
+/* CSS-only fallback orb (shown while THREE.js loads or if it fails) */
+.jarvis-css-orb {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.jarvis-css-core {
+  position: absolute;
+  width: 22%;
+  height: 22%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 36%, #55aaff, #0033aa 55%, #001155);
+  box-shadow:
+    0 0 30px 8px #0066ffcc,
+    0 0 80px 20px #0044ff66,
+    inset 0 0 20px #88ccff44;
+  animation: jarvis-core-pulse 2.4s ease-in-out infinite;
+}
+@keyframes jarvis-core-pulse {
+  0%, 100% { box-shadow: 0 0 30px 8px #0066ffcc, 0 0 80px 20px #0044ff66, inset 0 0 20px #88ccff44; }
+  50%       { box-shadow: 0 0 50px 16px #00aaff, 0 0 120px 40px #0055ff88, inset 0 0 30px #aaddffaa; }
+}
+.jarvis-css-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid;
+  animation: jarvis-ring-spin linear infinite;
+}
+.jarvis-css-ring-1 {
+  width: 55%; height: 55%;
+  border-color: #00d4ff99;
+  animation-duration: 6s;
+  box-shadow: 0 0 12px #00d4ff66;
+}
+.jarvis-css-ring-2 {
+  width: 72%; height: 72%;
+  border-color: #0088ff77;
+  border-style: dashed;
+  animation-duration: 9s;
+  animation-direction: reverse;
+}
+.jarvis-css-ring-3 {
+  width: 90%; height: 90%;
+  border-color: #00ffcc44;
+  animation-duration: 14s;
+  box-shadow: 0 0 8px #00ffcc33;
+}
+@keyframes jarvis-ring-spin {
+  from { transform: rotate(0deg) rotateX(65deg); }
+  to   { transform: rotate(360deg) rotateX(65deg); }
+}
+/* State-specific glow colour overrides */
+.jarvis-css-orb--listening .jarvis-css-core  { background: radial-gradient(circle at 38% 36%, #55ffcc, #008855 55%, #002211); box-shadow: 0 0 40px 12px #00ffaacc, 0 0 90px 30px #00aa6655; }
+.jarvis-css-orb--speaking  .jarvis-css-core  { background: radial-gradient(circle at 38% 36%, #ffee88, #aa7700 55%, #331100); box-shadow: 0 0 40px 12px #ffd700cc, 0 0 90px 30px #aa880055; }
+.jarvis-css-orb--thinking  .jarvis-css-core  { background: radial-gradient(circle at 38% 36%, #cc88ff, #6622aa 55%, #220044); box-shadow: 0 0 40px 12px #aa55ffcc, 0 0 90px 30px #6622aa55; }
+.jarvis-css-orb--offline   .jarvis-css-core  { background: radial-gradient(circle at 38% 36%, #445566, #223344 55%, #111122); box-shadow: 0 0 10px 3px #334455aa; }
 
 /* Floating mic-error toast: anchored to the focus stage (not inline under
    a command bar, since that bar no longer sits in front of the orb). */
