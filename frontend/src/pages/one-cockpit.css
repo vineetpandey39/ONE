@@ -235,13 +235,146 @@ body { margin: 0; background: #02060b; }
   position: fixed;
   inset: 0;
   z-index: 1;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+}
+
+/* ── Full-screen corner brackets ── */
+.jarvis-pg-corner {
+  position: fixed;
+  width: 40px;
+  height: 40px;
+  border-color: #00d4ff99;
+  border-style: solid;
+  border-width: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+.jarvis-pg-corner-tl { top: 20px; left: 20px; border-top-width: 2px; border-left-width: 2px; }
+.jarvis-pg-corner-tr { top: 20px; right: 20px; border-top-width: 2px; border-right-width: 2px; }
+.jarvis-pg-corner-bl { bottom: 20px; left: 20px; border-bottom-width: 2px; border-left-width: 2px; }
+.jarvis-pg-corner-br { bottom: 20px; right: 20px; border-bottom-width: 2px; border-right-width: 2px; }
+
+/* ── Page header ── */
+.jarvis-pg-header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 72px;
+  font-size: 11px;
+  letter-spacing: 5px;
+  color: #00d4ff66;
+  font-family: 'Courier New', monospace;
+  white-space: nowrap;
+}
+.jarvis-pg-header-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #00d4ff33, #00d4ff66, #00d4ff33, transparent);
+}
+
+/* ── Three-column main layout ── */
+.jarvis-pg-main {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 0 16px;
+  min-height: 0;
+}
+
+/* ── Side panels ── */
+.jarvis-pg-panel {
+  width: 210px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.jarvis-pg-panel--left  { padding-right: 28px; align-items: flex-start; }
+.jarvis-pg-panel--right { padding-left: 28px;  align-items: flex-end; }
+
+/* Left: dot · LABEL  VALUE */
+.jarvis-pg-stat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  letter-spacing: 2px;
+  font-family: 'Courier New', monospace;
+  color: #6699bb;
+}
+.jarvis-pg-stat strong { color: #aaddff; margin-left: 4px; }
+.jarvis-pg-stat--ok  .jarvis-pg-dot { background: #00ffaa; box-shadow: 0 0 6px #00ffaa; }
+.jarvis-pg-stat--dim .jarvis-pg-dot { background: #334455; box-shadow: none; }
+
+/* Right: VALUE LABEL  dot */
+.jarvis-pg-metric {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 2px;
+  font-family: 'Courier New', monospace;
+  color: #6699bb;
+}
+.jarvis-pg-metric strong { color: #aaddff; }
+.jarvis-pg-metric--ok  .jarvis-pg-dot { background: #00ffaa; box-shadow: 0 0 6px #00ffaa; }
+.jarvis-pg-metric--dim .jarvis-pg-dot { background: #334455; box-shadow: none; }
+
+/* Shared dot */
+.jarvis-pg-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #00d4ff;
+  box-shadow: 0 0 6px #00d4ff;
+  transition: background .4s, box-shadow .4s;
+}
+
+/* ── Centre orb wrapper ── */
+.jarvis-pg-orb-wrap {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 28px;
-  padding: 16px;
-  perspective: 1400px;
+  position: relative;
+  min-width: 0;
+}
+.jarvis-pg-core-label {
+  font-size: 9px;
+  letter-spacing: 5px;
+  color: #00d4ff33;
+  font-family: 'Courier New', monospace;
+  margin-bottom: -14px;
+  z-index: 1;
+  pointer-events: none;
+  text-align: center;
+}
+
+/* Orb size is now driven by available space in the flex column */
+.jarvis-pg-orb-wrap .jarvis-wrap {
+  width:  min(58vh, 58vw, 720px);
+  height: min(58vh, 58vw, 720px);
+}
+
+/* ── Footer ── */
+.jarvis-pg-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px 16px;
+}
+.jarvis-pg-hint {
+  font-size: 9px;
+  letter-spacing: 3.5px;
+  color: #00d4ff28;
+  font-family: 'Courier New', monospace;
+  text-align: center;
 }
 
 /* The orb, freed from the radial agent-graph layout, centers itself in

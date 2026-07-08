@@ -1152,41 +1152,102 @@ export function OneCockpit() {
     });
   }, [status.agents]);
 
+  const coreState: CoreState = !status.online
+    ? 'offline'
+    : recording
+    ? 'listening'
+    : speaking
+    ? 'speaking'
+    : busy || transcribing
+    ? 'thinking'
+    : 'awake';
+
+  // Left-panel status rows
+  const leftStats = [
+    { label: 'SYSTEM', value: status.online ? 'NOMINAL' : 'OFFLINE', ok: status.online },
+    { label: 'ALFA',   value: alfaOpportunities.length > 0 ? 'ACTIVE' : 'IDLE', ok: alfaOpportunities.length > 0 },
+    ...status.agents.slice(0, 4).map(a => ({
+      label: a.name.toUpperCase().slice(0, 6),
+      value: 'READY',
+      ok: true,
+    })),
+  ];
+
+  // Right-panel metric rows
+  const rightMetrics = [
+    { label: 'NEURAL',   value: `${Math.min(100, Math.round(status.obsidian.notes / 3))}%`, ok: status.online },
+    { label: 'AGENTS',   value: `${status.agents.length} / ${status.agents.length}`,         ok: status.agents.length > 0 },
+    { label: 'MEMORIES', value: `${status.obsidian.notes}`,                                  ok: status.online },
+    { label: 'LISTEN',   value: alwaysListening ? 'ON' : 'OFF',                              ok: alwaysListening },
+    { label: 'CORE',     value: status.online ? 'ONLINE' : 'OFFLINE',                        ok: status.online },
+  ];
+
   return (
     <main className="one-shell one-focus-mode">
       <div className="one-grid" />
 
       <section className="one-focus-stage">
-        {(() => {
-          const coreState: CoreState = !status.online
-            ? 'offline'
-            : recording
-            ? 'listening'
-            : speaking
-            ? 'speaking'
-            : (busy || transcribing)
-            ? 'thinking'
-            : 'awake';
-          return (
+        {/* ── Full-screen corner brackets ── */}
+        <div className="jarvis-pg-corner jarvis-pg-corner-tl" aria-hidden="true" />
+        <div className="jarvis-pg-corner jarvis-pg-corner-tr" aria-hidden="true" />
+        <div className="jarvis-pg-corner jarvis-pg-corner-bl" aria-hidden="true" />
+        <div className="jarvis-pg-corner jarvis-pg-corner-br" aria-hidden="true" />
+
+        {/* ── Top header ── */}
+        <header className="jarvis-pg-header" aria-hidden="true">
+          <div className="jarvis-pg-header-line" />
+          <span>J · A · R · V · I · S &nbsp;&nbsp; I N T E R F A C E</span>
+          <div className="jarvis-pg-header-line" />
+        </header>
+
+        {/* ── Three-column main ── */}
+        <div className="jarvis-pg-main">
+          {/* Left status panel */}
+          <aside className="jarvis-pg-panel jarvis-pg-panel--left" aria-label="System status">
+            {leftStats.map((item, i) => (
+              <div key={i} className={`jarvis-pg-stat ${item.ok ? 'jarvis-pg-stat--ok' : 'jarvis-pg-stat--dim'}`}>
+                <span className="jarvis-pg-dot" />
+                {item.label} <strong>{item.value}</strong>
+              </div>
+            ))}
+          </aside>
+
+          {/* Centre orb */}
+          <div className="jarvis-pg-orb-wrap">
+            <div className="jarvis-pg-core-label" aria-hidden="true">LOCAL CORE</div>
             <JarvisCore
               state={coreState}
               memories={status.obsidian.notes}
               onTap={recording ? stopRecording : startRecording}
             />
-          );
-        })()}
+          </div>
 
-        <button
-          type="button"
-          className={`one-listen-toggle ${alwaysListening ? 'on' : ''}`}
-          title={alwaysListening ? 'Stop continuous listening' : 'Listen continuously until I turn it off'}
-          onClick={toggleAlwaysListening}
-          disabled={!status.online}
-        >
-          {alwaysListening ? <Square size={16} fill="currentColor" /> : <Mic size={18} />}
-          <span>{alwaysListening ? 'LISTENING - TAP TO STOP' : 'ALWAYS LISTEN'}</span>
-        </button>
-        {micError && <div className="one-mic-error one-mic-error-floating">{micError}</div>}
+          {/* Right metrics panel */}
+          <aside className="jarvis-pg-panel jarvis-pg-panel--right" aria-label="System metrics">
+            {rightMetrics.map((item, i) => (
+              <div key={i} className={`jarvis-pg-metric ${item.ok ? 'jarvis-pg-metric--ok' : 'jarvis-pg-metric--dim'}`}>
+                <strong>{item.value}</strong> {item.label}
+                <span className="jarvis-pg-dot" />
+              </div>
+            ))}
+          </aside>
+        </div>
+
+        {/* ── Footer ── */}
+        <footer className="jarvis-pg-footer">
+          <div className="jarvis-pg-hint" aria-hidden="true">DRAG TO ROTATE · SCROLL TO ZOOM</div>
+          <button
+            type="button"
+            className={`one-listen-toggle ${alwaysListening ? 'on' : ''}`}
+            title={alwaysListening ? 'Stop continuous listening' : 'Listen continuously until I turn it off'}
+            onClick={toggleAlwaysListening}
+            disabled={!status.online}
+          >
+            {alwaysListening ? <Square size={16} fill="currentColor" /> : <Mic size={18} />}
+            <span>{alwaysListening ? 'LISTENING - TAP TO STOP' : 'ALWAYS LISTEN'}</span>
+          </button>
+          {micError && <div className="one-mic-error">{micError}</div>}
+        </footer>
       </section>
 
       <button
