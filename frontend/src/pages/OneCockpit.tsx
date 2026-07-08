@@ -883,7 +883,8 @@ export function OneCockpit() {
       const payload = await response.json();
       const text = String(payload.text || '').trim();
       if (!text) throw new Error('I could not hear a clear command.');
-      if (!isClearOneCommand(text)) throw new Error('Wake me with "ONE" or give a clear agent command.');
+      // No wake-word gate here: the user explicitly pressed the mic button,
+      // so send whatever they said directly to ONE.
       setCommand(text);
       await sendCommand(text.replace(/^\s*(hey\s+)?one[,:]?\s*/i, ''));
     } catch (error) {
