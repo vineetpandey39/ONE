@@ -597,12 +597,13 @@ body { margin: 0; background: #02060b; }
 .jarvis-corner-bl { bottom: 6%; left: 6%; border-bottom-width: 2px; border-left-width: 2px; border-radius: 0 0 0 2px; }
 .jarvis-corner-br { bottom: 6%; right: 6%; border-bottom-width: 2px; border-right-width: 2px; border-radius: 0 0 2px 0; }
 
-/* Scan sweep line */
+/* Scan sweep line — direct child of jarvis-wrap */
 .jarvis-scan-line {
   position: absolute;
   inset: 0;
   border-radius: 50%;
   overflow: hidden;
+  pointer-events: none;
 }
 .jarvis-scan-line::after {
   content: '';

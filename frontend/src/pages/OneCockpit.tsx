@@ -1187,12 +1187,6 @@ export function OneCockpit() {
       <div className="one-grid" />
 
       <section className="one-focus-stage">
-        {/* ── Full-screen corner brackets ── */}
-        <div className="jarvis-pg-corner jarvis-pg-corner-tl" aria-hidden="true" />
-        <div className="jarvis-pg-corner jarvis-pg-corner-tr" aria-hidden="true" />
-        <div className="jarvis-pg-corner jarvis-pg-corner-bl" aria-hidden="true" />
-        <div className="jarvis-pg-corner jarvis-pg-corner-br" aria-hidden="true" />
-
         {/* ── Top header ── */}
         <header className="jarvis-pg-header" aria-hidden="true">
           <div className="jarvis-pg-header-line" />
