@@ -1227,6 +1227,46 @@ export function OneCockpit() {
           </aside>
         </div>
 
+        {/* ── Live response strip — shows ONE's last reply on the landing screen ── */}
+        <div className="jarvis-live-output" aria-live="polite" aria-atomic="false">
+          {transcribing && <div className="jarvis-live-status">◆ TRANSCRIBING...</div>}
+          {busy && !transcribing && <div className="jarvis-live-status">◆ PROCESSING...</div>}
+          {!busy && !transcribing && (() => {
+            const last = [...lines].reverse().find(l => l.role === 'one' && l.text.trim());
+            return last ? <p className="jarvis-live-reply">{last.text}</p> : null;
+          })()}
+        </div>
+
+        {/* ── Inline command bar ── */}
+        <div className="jarvis-cmd-row">
+          <button
+            className={`jarvis-cmd-mic-btn${recording ? ' recording' : ''}`}
+            onClick={recording ? stopRecording : startRecording}
+            disabled={!status.online || transcribing || nativeRecording}
+            title={recording ? 'Stop recording' : 'Tap to speak to ONE'}
+          >
+            {recording ? <Square size={15} fill="currentColor" /> : <Mic size={17} />}
+          </button>
+          <input
+            className="jarvis-cmd-field"
+            value={command}
+            onChange={(e) => setCommand(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void sendCommand(); }}
+            placeholder={status.online ? 'Ask ONE anything...' : 'Start ONE to continue'}
+            disabled={!status.online || busy}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <button
+            className="jarvis-cmd-go"
+            onClick={() => void sendCommand()}
+            disabled={!command.trim() || busy || !status.online}
+            title="Send"
+          >
+            <Send size={15} />
+          </button>
+        </div>
+
         {/* ── Footer ── */}
         <footer className="jarvis-pg-footer">
           <div className="jarvis-pg-hint" aria-hidden="true">DRAG TO ROTATE · SCROLL TO ZOOM</div>

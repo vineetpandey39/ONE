@@ -21,7 +21,7 @@ const STATE_PARAMS: Record<CoreState, {
   awake:     { ringColor: 0x00d4ff, coreEmissive: 0x0055cc, pulseSpeed: 1.8, rotSpeed: 0.003 },
   listening: { ringColor: 0x00ffcc, coreEmissive: 0x00aa66, pulseSpeed: 3.2, rotSpeed: 0.006 },
   speaking:  { ringColor: 0xffd700, coreEmissive: 0xaa6600, pulseSpeed: 5.0, rotSpeed: 0.004 },
-  thinking:  { ringColor: 0xaa55ff, coreEmissive: 0x6622cc, pulseSpeed: 4.2, rotSpeed: 0.008 },
+  thinking:  { ringColor: 0xaa55ff, coreEmissive: 0x6622cc, pulseSpeed: 4.2, rotSpeed: 0.004 },
   offline:   { ringColor: 0x334455, coreEmissive: 0x112233, pulseSpeed: 0.5, rotSpeed: 0.001 },
 };
 
@@ -37,8 +37,13 @@ export function JarvisCore({ state, memories, onTap }: JarvisCoreProps) {
   const mountRef  = useRef<HTMLDivElement>(null);
   const stateRef  = useRef<CoreState>(state);
   const cleanupFn = useRef<(() => void) | null>(null);
+  // Use a ref for onTap so the THREE.js scene is NEVER torn down/rebuilt
+  // when the parent's recording state flips. Rebuilding on every click was
+  // the root cause of the visible "wobble" and the stale-closure mic bug.
+  const onTapRef  = useRef<(() => void) | undefined>(undefined);
 
   useEffect(() => { stateRef.current = state; }, [state]);
+  useEffect(() => { onTapRef.current = onTap; }, [onTap]);
 
   const buildScene = useCallback(() => {
     const mount = mountRef.current;
@@ -167,7 +172,7 @@ export function JarvisCore({ state, memories, onTap }: JarvisCoreProps) {
       dragDist += Math.sqrt(dx*dx + dy*dy);
       lx = e.clientX; ly = e.clientY;
     };
-    const onUp = () => { if (dragDist < 6 && onTap) onTap(); down = false; };
+    const onUp = () => { if (dragDist < 6 && onTapRef.current) onTapRef.current(); down = false; };
 
     const onTouchStart = (e: TouchEvent) => { down = true; dragDist = 0; lx = e.touches[0].clientX; ly = e.touches[0].clientY; };
     const onTouchMove  = (e: TouchEvent) => {
@@ -177,7 +182,7 @@ export function JarvisCore({ state, memories, onTap }: JarvisCoreProps) {
       dragDist += Math.sqrt(dx*dx + dy*dy);
       lx = e.touches[0].clientX; ly = e.touches[0].clientY;
     };
-    const onTouchEnd = () => { if (dragDist < 10 && onTap) onTap(); down = false; };
+    const onTouchEnd = () => { if (dragDist < 10 && onTapRef.current) onTapRef.current(); down = false; };
 
     cvs.addEventListener('mousedown', onDown);
     window.addEventListener('mousemove', onMove);
@@ -263,7 +268,9 @@ export function JarvisCore({ state, memories, onTap }: JarvisCoreProps) {
       renderer.dispose();
       if (mount.contains(cvs)) mount.removeChild(cvs);
     };
-  }, [onTap]);
+  // Empty dep array: scene is built ONCE and never rebuilt.
+  // State changes (recording, speaking, etc.) flow in via stateRef and onTapRef.
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     buildScene();
