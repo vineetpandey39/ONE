@@ -773,8 +773,16 @@ export function OneCockpit() {
         }),
       });
       if (!response.ok) {
-        const payload = await response.json();
-        throw new Error(payload.detail || payload.error || 'Command failed');
+        // Server may return plain-text or HTML on crash (not JSON) — handle both
+        let errorMsg = `ONE backend error (${response.status}). Make sure Ollama is running.`;
+        try {
+          const payload = await response.json();
+          errorMsg = payload.detail || payload.error || errorMsg;
+        } catch {
+          const raw = await response.text().catch(() => '');
+          if (raw.trim()) errorMsg = raw.slice(0, 200).replace(/\s+/g, ' ');
+        }
+        throw new Error(errorMsg);
       }
 
       const reader = response.body?.getReader();
@@ -867,8 +875,12 @@ export function OneCockpit() {
       const form = new FormData();
       form.append('file', blob, 'one-command.webm');
       const response = await coreFetch('/v1/speech/transcribe', { method: 'POST', body: form });
+      if (!response.ok) {
+        let errorMsg = 'Local speech recognition is unavailable';
+        try { const p = await response.json(); errorMsg = p.detail || errorMsg; } catch { /* non-JSON error */ }
+        throw new Error(errorMsg);
+      }
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail || 'Local speech recognition is unavailable');
       const text = String(payload.text || '').trim();
       if (!text) throw new Error('I could not hear a clear command.');
       if (!isClearOneCommand(text)) throw new Error('Wake me with "ONE" or give a clear agent command.');
@@ -1173,6 +1185,9 @@ export function OneCockpit() {
     })),
   ];
 
+  // Last ONE reply shown on the landing screen (avoids IIFE inside JSX)
+  const lastOneReply = [...lines].reverse().find(l => l.role === 'one' && l.text.trim());
+
   // Right-panel metric rows
   const rightMetrics = [
     { label: 'NEURAL',   value: `${Math.min(100, Math.round(status.obsidian.notes / 3))}%`, ok: status.online },
@@ -1231,10 +1246,9 @@ export function OneCockpit() {
         <div className="jarvis-live-output" aria-live="polite" aria-atomic="false">
           {transcribing && <div className="jarvis-live-status">◆ TRANSCRIBING...</div>}
           {busy && !transcribing && <div className="jarvis-live-status">◆ PROCESSING...</div>}
-          {!busy && !transcribing && (() => {
-            const last = [...lines].reverse().find(l => l.role === 'one' && l.text.trim());
-            return last ? <p className="jarvis-live-reply">{last.text}</p> : null;
-          })()}
+          {!busy && !transcribing && lastOneReply && (
+            <p className="jarvis-live-reply">{lastOneReply.text}</p>
+          )}
         </div>
 
         {/* ── Inline command bar ── */}

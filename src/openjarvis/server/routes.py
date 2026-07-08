@@ -209,7 +209,10 @@ def _one_agent_command(text: str) -> str | None:
     check_in = re.sub(r"[^a-z0-9]+", " ", lowered).strip()
     check_in = re.sub(r"\b(one|jarvis|jervis|jarvish)\b", " ", check_in)
     check_in = re.sub(r"\s+", " ", check_in).strip()
-    if check_in in {"are you up", "are you there", "you up", "online"}:
+    if check_in in {
+        "are you up", "are you there", "you up", "online",
+        "wake up", "wakeup", "wake", "startup", "start up",
+    }:
         return "Always online, Vineet. What do you need?"
     if check_in in {
         "hi",
