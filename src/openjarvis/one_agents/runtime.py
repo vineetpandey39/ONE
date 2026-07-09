@@ -323,6 +323,35 @@ def _run_hephaistos(job: dict[str, Any]) -> dict[str, Any]:
     action = "start"
     include_logs = False
     run_mode = "dry_run"
+    publish_negated = bool(
+        any(
+            phrase in text
+            for phrase in (
+                "publish mat",
+                "post mat",
+                "publish nahi",
+                "publish nahin",
+                "post nahi",
+                "post nahin",
+                "publish na",
+                "post na",
+                "without publish",
+                "without posting",
+                "do not publish",
+                "do not post",
+                "don't publish",
+                "dont publish",
+                "don't post",
+                "dont post",
+            )
+        )
+    )
+    dry_requested = publish_negated or any(
+        word in text for word in ("dry", "dry run", "test", "preview", "without publish", "publish mat")
+    )
+    publish_requested = (mode == "publish") or any(
+        phrase in text for phrase in ("publish", "post kar", "post karo", "shoot", "live run", "go live")
+    )
 
     if any(word in text for word in ("status", "progress", "result", "kya chal", "logs", "log bata")):
         action = "status"
@@ -331,10 +360,10 @@ def _run_hephaistos(job: dict[str, Any]) -> dict[str, Any]:
         action = "stop"
     elif any(word in text for word in ("list process", "process list", "processes")):
         action = "list_processes"
-    elif mode == "publish" or any(word in text for word in ("publish", "post kar", "shoot", "live run")):
-        run_mode = "publish"
-    elif any(word in text for word in ("dry", "test", "preview", "without publish", "publish mat")):
+    elif dry_requested:
         run_mode = "dry_run"
+    elif publish_requested and not publish_negated:
+        run_mode = "publish"
 
     result = LaoOrchestratorTool().execute(
         action=action,
