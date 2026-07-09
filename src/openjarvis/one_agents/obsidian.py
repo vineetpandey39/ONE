@@ -208,13 +208,30 @@ def remember_exchange(command: str, response: str) -> dict[str, Any]:
     return {"saved": True, "path": str(path.relative_to(root)), "updated": now.isoformat(timespec="seconds")}
 
 
+_SEARCH_STOPWORDS = {"one", "jarvis", "jervis", "jarvish"}
+
+
 def search_obsidian(query: str, limit: int = 8) -> list[dict[str, Any]]:
     status = obsidian_status()
     if not status["connected"]:
         raise ValueError("Obsidian is not connected")
-    terms = [term.lower() for term in re.findall(r"[A-Za-z0-9_-]+", query) if len(term) > 1]
+    terms = [
+        term.lower()
+        for term in re.findall(r"[A-Za-z0-9_-]+", query)
+        if len(term) > 1 and term.lower() not in _SEARCH_STOPWORDS
+    ]
     if not terms:
         raise ValueError("A search query is required")
+    # Word-boundary matching, not substring counting. Substring counting
+    # matched "tum" inside "momentum" and injected unrelated ALFA retainer
+    # notes into every query containing that fragment (confirmed via a real
+    # garbled voice transcript, "TUM KAYASAYO?", pulling in $2-15k/month
+    # retainer pricing that had nothing to do with the question — the model
+    # then tried to force a connection instead of admitting it didn't
+    # understand). "one" is excluded above for the same reason: it's the
+    # assistant's own name and appears in nearly every journal entry,
+    # so it matched everywhere regardless of actual relevance.
+    term_patterns = [re.compile(r"\b" + re.escape(term) + r"\b") for term in terms]
     root = Path(status["path"])
     matches: list[dict[str, Any]] = []
     for path in root.rglob("*.md"):
@@ -225,10 +242,11 @@ def search_obsidian(query: str, limit: int = 8) -> list[dict[str, Any]]:
         except OSError:
             continue
         haystack = f"{path.stem}\n{content}".lower()
-        score = sum(haystack.count(term) for term in terms)
+        score = sum(len(pattern.findall(haystack)) for pattern in term_patterns)
         if not score:
             continue
-        first = min((haystack.find(term) for term in terms if term in haystack), default=0)
+        first_positions = [m.start() for pattern in term_patterns for m in pattern.finditer(haystack)]
+        first = min(first_positions, default=0)
         start = max(0, first - 100)
         snippet = " ".join(content[start : start + 520].split())
         matches.append({"title": path.stem, "path": str(path.relative_to(root)), "score": score, "snippet": snippet})
