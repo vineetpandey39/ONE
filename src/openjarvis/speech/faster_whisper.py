@@ -88,7 +88,21 @@ class FasterWhisperBackend(SpeechBackend):
         kwargs = {
             "beam_size": 1,
             "best_of": 1,
-            "temperature": 0.0,
+            # A bare 0.0 here (not a list) silently disabled faster-whisper's
+            # own hallucination-recovery mechanism: internally it only
+            # retries at a higher temperature when compression_ratio /
+            # log_prob_threshold flag a bad segment, and it can only do that
+            # if `temperature` is a list with more than one value to fall
+            # back through (see faster_whisper/transcribe.py's `for
+            # temperature in options.temperatures: ... if not needs_fallback:
+            # break / else: return the best of only what was tried`). With a
+            # single float, the thresholds below still correctly *detect* a
+            # repetition-loop hallucination but then return it anyway, since
+            # there's nothing else to fall back to — confirmed via a real
+            # "two, one, two, one, ..." transcript that got returned despite
+            # exceeding compression_ratio_threshold. This is the library's
+            # own documented default fallback ladder, not a guess.
+            "temperature": [0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
             "condition_on_previous_text": False,
             "word_timestamps": False,
             "initial_prompt": _ONE_VOCABULARY_PROMPT,
