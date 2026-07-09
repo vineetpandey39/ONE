@@ -114,6 +114,11 @@ try {
         New-Item -ItemType Directory -Force -Path $cleanDocs | Out-Null
         Copy-Item -Path $sourceInventory -Destination (Join-Path $cleanDocs "ONE_LOCAL_MODEL_INVENTORY.md") -Force
     }
+    $sourceRoadmap = Join-Path $sourceRepo "docs\ROADMAP.md"
+    if (Test-Path $sourceRoadmap) {
+        New-Item -ItemType Directory -Force -Path $cleanDocs | Out-Null
+        Copy-Item -Path $sourceRoadmap -Destination (Join-Path $cleanDocs "ROADMAP.md") -Force
+    }
 
     @(
         ".gitignore",
