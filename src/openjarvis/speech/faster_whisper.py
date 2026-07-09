@@ -98,6 +98,23 @@ class FasterWhisperBackend(SpeechBackend):
                 "min_silence_duration_ms": 300,
                 "speech_pad_ms": 180,
             },
+            # Anti-hallucination decode guards. no_speech_threshold/
+            # log_prob_threshold are faster-whisper's own library defaults,
+            # made explicit here so they're visible and tunable in one place
+            # rather than implicit. compression_ratio_threshold is tightened
+            # from the 2.4 default to 2.2 — the repeated-phrase hallucination
+            # pattern (e.g. a room-noise clip transcribed as the same word
+            # looping) shows up as a high compression ratio, so catching it
+            # earlier trades a slightly higher chance of dropping a genuine
+            # fast/repetitive utterance for a lower chance of ONE inventing
+            # text on a noisy mic. hallucination_silence_threshold actively
+            # zeroes out audio in segments the model flags as likely silence
+            # being hallucinated over — new in this pass, previously unset
+            # (None = disabled).
+            "no_speech_threshold": 0.6,
+            "log_prob_threshold": -1.0,
+            "compression_ratio_threshold": 2.2,
+            "hallucination_silence_threshold": 2.0,
         }
         if language:
             kwargs["language"] = language
