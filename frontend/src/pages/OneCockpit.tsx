@@ -771,7 +771,13 @@ export function OneCockpit() {
     setBusy(true);
     setLines((current) => [...current.slice(-6), { role: 'user', text }, { role: 'one', text: '' }]);
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 28_000);
+    // llama3.1:8b locally is currently landing real responses in 40-80s
+    // (measured via traces.db, not a guess) once its tool-heavy prompt is
+    // accounted for — 28s was aborting genuine in-flight responses right
+    // before they arrived, not catching actually-stuck requests. 120s gives
+    // headroom above the observed range; revisit downward if the backend
+    // gets faster (smaller default model, trimmed tool list).
+    const timeoutId = window.setTimeout(() => controller.abort(), 120_000);
     try {
       const response = await coreFetch('/v1/chat/completions', {
         signal: controller.signal,
