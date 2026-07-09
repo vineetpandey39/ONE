@@ -22,7 +22,9 @@ class AgentNetworkTool(BaseTool):
             name="agent_network",
             description=(
                 "List ONE agents, dispatch a durable agent job, or inspect queue status. "
-                "Use plan by default because it is free/local. Use execute or publish only when the user explicitly requests it."
+                "Use plan by default because it is free/local. Use execute or publish only when the user explicitly requests it. "
+                "Use tier=fast (default, local model) unless the task genuinely needs the heavier cloud model — "
+                "tier=heavy costs NVIDIA NIM credits."
             ),
             parameters={
                 "type": "object",
@@ -31,6 +33,7 @@ class AgentNetworkTool(BaseTool):
                     "agent_id": {"type": "string", "enum": sorted(AGENTS)},
                     "task": {"type": "string"},
                     "mode": {"type": "string", "enum": ["plan", "execute", "publish"]},
+                    "tier": {"type": "string", "enum": ["fast", "heavy"]},
                     "job_id": {"type": "string"},
                 },
                 "required": ["action"],
@@ -50,6 +53,7 @@ class AgentNetworkTool(BaseTool):
                     str(params.get("agent_id", "")),
                     str(params.get("task", "")),
                     str(params.get("mode", "plan")),
+                    str(params.get("tier", "fast")),
                 )
             elif action == "status":
                 content = get_job(str(params.get("job_id", "")))

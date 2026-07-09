@@ -336,10 +336,15 @@ def _one_agent_command(text: str) -> str | None:
     elif re.search(r"\b(execute|generate|create|run)\b", lowered) and not re.search(r"\b(plan|draft|prepare)\b", lowered):
         mode = "execute"
 
-    job = enqueue_job(selected, clean, mode)
+    # Heavy tier is opt-in only — escalating to the cloud Nemotron model costs
+    # NVIDIA NIM credits, so it must be asked for explicitly, not inferred.
+    tier = "heavy" if re.search(r"\b(heavy|deep dive|think hard|escalate|use nemotron)\b", lowered) else "fast"
+
+    job = enqueue_job(selected, clean, mode, tier)
     return (
-        f"{AGENTS[selected]['name']} queued in {mode} mode. "
-        f"Job ID: {job['id']}. I will not claim completion until its queue status confirms it."
+        f"{AGENTS[selected]['name']} queued in {mode} mode"
+        + (" on the heavy model" if tier == "heavy" else "")
+        + f". Job ID: {job['id']}. I will not claim completion until its queue status confirms it."
     )
 
 

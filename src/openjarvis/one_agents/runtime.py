@@ -70,6 +70,12 @@ def _connect() -> sqlite3.Connection:
         )
         """
     )
+    existing_job_cols = {row["name"] for row in connection.execute("PRAGMA table_info(jobs)").fetchall()}
+    if "tier" not in existing_job_cols:
+        try:
+            connection.execute("ALTER TABLE jobs ADD COLUMN tier TEXT NOT NULL DEFAULT 'fast'")
+        except sqlite3.OperationalError:
+            pass  # Another worker already added it.
     connection.commit()
     return connection
 
@@ -126,13 +132,16 @@ def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def enqueue_job(agent_id: str, task: str, mode: str = "plan") -> dict[str, Any]:
+def enqueue_job(agent_id: str, task: str, mode: str = "plan", tier: str = "fast") -> dict[str, Any]:
     agent_id = agent_id.strip().lower()
     if agent_id not in AGENTS:
         raise ValueError(f"Unknown agent: {agent_id}")
     mode = mode.strip().lower()
     if mode not in {"plan", "execute", "publish"}:
         raise ValueError("Mode must be plan, execute, or publish")
+    tier = (tier or "fast").strip().lower()
+    if tier not in {"fast", "heavy"}:
+        raise ValueError("Tier must be fast or heavy")
     task = task.strip()
     if not task:
         raise ValueError("Task is required")
@@ -140,8 +149,9 @@ def enqueue_job(agent_id: str, task: str, mode: str = "plan") -> dict[str, Any]:
     now = _now()
     with _connect() as db:
         db.execute(
-            "INSERT INTO jobs (id, agent_id, task, mode, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'queued', ?, ?)",
-            (job_id, agent_id, task[:4000], mode, now, now),
+            "INSERT INTO jobs (id, agent_id, task, mode, tier, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)",
+            (job_id, agent_id, task[:4000], mode, tier, now, now),
         )
     return get_job(job_id) or {}
 
@@ -205,6 +215,31 @@ def fail_job(job_id: str, error: Exception) -> None:
             pass
 
 
+def _resolve_planner_model(tier: str) -> tuple[str, str]:
+    """Resolve (model, engine) for a planner call.
+
+    'fast' (default) always uses the configured local router (ONE_ENGINE/
+    ONE_ROUTER_MODEL — Ollama unless the operator has deliberately pointed
+    the whole server at NVIDIA). It never silently falls through to
+    NEMOTRON_MODEL, so an unset ONE_ROUTER_MODEL can't accidentally route a
+    "fast" job to a paid cloud model.
+
+    'heavy' escalates on purpose: the configured NVIDIA Nemotron model when
+    an API key is present, otherwise the local heavy model
+    (ONE_HEAVY_LOCAL_MODEL), otherwise the same fast-tier default.
+    """
+    if tier == "heavy":
+        nemotron_model = os.environ.get("NEMOTRON_MODEL", "").strip()
+        if nemotron_model and os.environ.get("NVIDIA_API_KEY", "").strip():
+            return nemotron_model, "nvidia"
+        heavy_local = os.environ.get("ONE_HEAVY_LOCAL_MODEL", "").strip()
+        if heavy_local:
+            return heavy_local, os.environ.get("ONE_ENGINE", "ollama").strip().lower() or "ollama"
+    model = os.environ.get("ONE_ROUTER_MODEL") or "llama3.1:8b"
+    engine = os.environ.get("ONE_ENGINE", "ollama").strip().lower()
+    return model, engine
+
+
 def _local_plan(job: dict[str, Any]) -> dict[str, Any]:
     agent = AGENTS[job["agent_id"]]
     prompt = (
@@ -213,10 +248,10 @@ def _local_plan(job: dict[str, Any]) -> dict[str, Any]:
         "State required approvals and integrations.\n\n"
         f"Task: {job['task']}"
     )
-    model = os.environ.get("ONE_ROUTER_MODEL") or os.environ.get("NEMOTRON_MODEL") or "llama3.1:8b"
-    engine = os.environ.get("ONE_ENGINE", "ollama").strip().lower()
+    tier = (job.get("tier") or "fast").strip().lower()
+    model, engine = _resolve_planner_model(tier)
     fallback_reason = ""
-    if engine == "nvidia" or model.startswith("nvidia/"):
+    if engine == "nvidia":
         api_key = os.environ.get("NVIDIA_API_KEY", "").strip()
         if not api_key:
             fallback_reason = "NVIDIA_API_KEY is missing"
