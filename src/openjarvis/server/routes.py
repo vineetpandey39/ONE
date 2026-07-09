@@ -206,7 +206,16 @@ def _one_agent_command(text: str) -> str | None:
     # A check-in is identity-critical and should feel immediate. Keep it out
     # of the general-purpose model so ONE never invents a name, changes tone,
     # or emits internal reasoning for a simple greeting.
-    check_in = re.sub(r"[^a-z0-9]+", " ", lowered).strip()
+    # The previous [^a-z0-9]+ silently deleted Hindi script entirely before
+    # comparison, so "TUM कैसे हो?" was reduced to just "tum" and could
+    # never match any Hindi greeting no matter what was in the set below.
+    # Explicitly keep the Devanagari block (ऀ-ॿ) alongside ASCII —
+    # note this can't just be \w: Python's \w does NOT include Unicode
+    # combining marks (category Mn/Mc), which is exactly what Devanagari
+    # vowel signs (matras) are, so \w alone silently drops them and mangles
+    # the text (verified: "कैसे" -> "क स" with \w, stays "कैसे" with the
+    # explicit range below).
+    check_in = re.sub(r"[^a-z0-9ऀ-ॿ]+", " ", lowered).strip()
     check_in = re.sub(r"\b(one|jarvis|jervis|jarvish)\b", " ", check_in)
     check_in = re.sub(r"\s+", " ", check_in).strip()
     if check_in in {
@@ -227,6 +236,23 @@ def _one_agent_command(text: str) -> str | None:
         "kaise ho",
         "kya haal hai",
         "kya chal raha hai",
+        "tum kaise ho",
+        "aap kaise ho",
+        "aap kaise hain",
+        # Devanagari script — this is what faster-whisper actually outputs
+        # for Hindi audio (confirmed from a real transcript in traces.db),
+        # not always a Latin transliteration.
+        "कैसे हो",
+        "तुम कैसे हो",
+        "आप कैसे हो",
+        "आप कैसे हैं",
+        "क्या हाल है",
+        "क्या हाल हैं",
+        "नमस्ते",
+        # Mixed script — Whisper sometimes transliterates a pronoun to Latin
+        # while writing the rest in Devanagari, as seen in the real sample.
+        "tum कैसे हो",
+        "aap कैसे हो",
     }:
         return (
             "I am online and steady, Sir. Local core is listening, memory is active, "
