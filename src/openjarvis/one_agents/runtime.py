@@ -353,11 +353,10 @@ def _run_hephaistos(job: dict[str, Any]) -> dict[str, Any]:
 
     task = str(job.get("task") or "")
     text = task.lower()
-    mode = str(job.get("mode") or "execute").lower()
+    mode = str(job.get("mode") or "plan").lower()
 
     action = "start"
     include_logs = False
-    run_mode = "dry_run"
     publish_negated = bool(
         any(
             phrase in text
@@ -395,10 +394,26 @@ def _run_hephaistos(job: dict[str, Any]) -> dict[str, Any]:
         action = "stop"
     elif any(word in text for word in ("list process", "process list", "processes")):
         action = "list_processes"
-    elif dry_requested:
-        run_mode = "dry_run"
-    elif publish_requested and not publish_negated:
-        run_mode = "publish"
+
+    run_mode = "publish" if (publish_requested and not publish_negated) else "dry_run"
+
+    # "start" is the only real, side-effecting action here — unlike TITAN/IA,
+    # which stay side-effect-free in job mode "plan", this used to start a
+    # live LAO job (in dry_run flavor) regardless of mode, so ambiguous
+    # phrasing dispatched with mode="plan" silently ran a real LAO job every
+    # time instead of just describing intent. Gated the same way TITAN/IA
+    # already are: only take the real action on execute/publish.
+    if action == "start" and mode not in {"execute", "publish"}:
+        return {
+            "agent": "HEPHAISTOS",
+            "mode": "lao-operator-plan",
+            "command": task,
+            "content": (
+                f"Plan only — no LAO job started. Would run the LinkedIn posting "
+                f"process in '{run_mode}' mode. Say 'execute' to run it as a dry "
+                f"run, or 'publish' to actually post."
+            ),
+        }
 
     result = LaoOrchestratorTool().execute(
         action=action,
