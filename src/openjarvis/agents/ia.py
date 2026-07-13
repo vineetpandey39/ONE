@@ -417,7 +417,10 @@ class IAAgent(ToolUsingAgent):
                     "start_image_path": frame_paths[start_frame],
                     "end_image_path": frame_paths[end_frame],
                     "prompt": clip["prompt"],
-                    "resolution": "RESOLUTION_1080" if "1080" in str(resolution) else "RESOLUTION_720",
+                    # Production Instagram reels are vertical Full HD in the
+                    # Leonardo UI: 9:16 + 1080x1920. Keep the browser backend
+                    # strict even if older clip templates still say 720p.
+                    "resolution": "RESOLUTION_1080",
                     "orientation": "portrait",
                     "output_path": out_path,
                     # leonardo_browser_video_generate (active backend) accepts

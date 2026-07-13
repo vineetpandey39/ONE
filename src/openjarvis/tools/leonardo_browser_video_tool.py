@@ -43,7 +43,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from openjarvis.core.registry import ToolRegistry
 from openjarvis.core.types import ToolResult
@@ -58,6 +58,7 @@ _GENERATE_URL = (
 _ASPECT_BY_ORIENTATION = {"portrait": "9:16", "landscape": "16:9"}
 _VALID_SIZES = {"RESOLUTION_720", "RESOLUTION_1080"}
 _PENDING_MARKERS = ("pending-loader", "blob:")
+_LAO_PROFILE_DIR = Path.home() / "Documents" / "LAO" / "task-capture-browser-profile-leonardo"
 
 
 class _BrowserAutomationError(RuntimeError):
@@ -68,6 +69,8 @@ def _profile_dir() -> Path:
     configured = os.environ.get("LEONARDO_CHROME_PROFILE_DIR")
     if configured:
         return Path(configured).expanduser()
+    if _LAO_PROFILE_DIR.exists():
+        return _LAO_PROFILE_DIR
     return Path.home() / ".openjarvis" / "leonardo_browser_profile"
 
 
@@ -84,8 +87,72 @@ def _launch_context(playwright: Any, headless: bool):
         str(profile),
         headless=headless,
         channel="chrome",
-        viewport={"width": 1480, "height": 900},
+        viewport={"width": 1920, "height": 1080},
     )
+
+
+def _click_first(page: Any, selectors: Iterable[str], timeout_ms: int = 8000) -> bool:
+    for selector in selectors:
+        try:
+            target = page.locator(selector).first
+            target.click(timeout=timeout_ms)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _ensure_audio_off(page: Any) -> None:
+    """Best-effort: Leonardo keeps changing the switch markup."""
+    candidates = [
+        "[aria-label='Audio']",
+        "[role='switch'][aria-checked='true']",
+        "button:has-text('on')",
+        "text=on",
+    ]
+    for selector in candidates:
+        try:
+            loc = page.locator(selector).first
+            if loc.count() == 0:
+                continue
+            checked = loc.get_attribute("aria-checked")
+            text = ""
+            try:
+                text = loc.inner_text(timeout=1000).strip().lower()
+            except Exception:
+                pass
+            if checked == "true" or text == "on":
+                loc.click(timeout=3000)
+                page.wait_for_timeout(500)
+                return
+        except Exception:
+            continue
+
+
+def _ensure_full_hd(page: Any) -> None:
+    _click_first(
+        page,
+        [
+            "label:has-text('Full HD')",
+            "text=Full HD",
+            "button:has-text('Full HD')",
+        ],
+        timeout_ms=4000,
+    )
+
+
+def _open_reference_controls(page: Any) -> None:
+    _click_first(
+        page,
+        [
+            "[aria-label='Add reference to generation']",
+            "button:has-text('Add reference to generation')",
+            "button:has-text('Add')",
+            "text=Add",
+        ],
+        timeout_ms=5000,
+    )
+    page.wait_for_timeout(700)
 
 
 def _upload_frame(page: Any, button_label_regex: str, image_path: str) -> None:
@@ -95,20 +162,36 @@ def _upload_frame(page: Any, button_label_regex: str, image_path: str) -> None:
     needed); falls back to clicking the labeled button and catching the
     resulting file chooser, in case the input is rendered lazily.
     """
-    file_inputs = page.locator("input[type='file']")
-    count = file_inputs.count()
-    if count > 0:
-        target_index = 0 if "start" in button_label_regex.lower() else min(1, count - 1)
-        try:
-            file_inputs.nth(target_index).set_input_files(image_path)
-            return
-        except Exception:
-            pass
+    for _ in range(2):
+        file_inputs = page.locator("input[type='file']")
+        count = file_inputs.count()
+        if count > 0:
+            target_index = 0 if "start" in button_label_regex.lower() else min(1, count - 1)
+            try:
+                file_inputs.nth(target_index).set_input_files(image_path)
+                return
+            except Exception:
+                pass
+        _open_reference_controls(page)
 
-    button = page.get_by_role("button", name=re.compile(button_label_regex, re.I)).first
-    with page.expect_file_chooser(timeout=15000) as chooser_info:
-        button.click()
-    chooser_info.value.set_files(image_path)
+    button_names = [
+        button_label_regex,
+        r"upload|choose|select.*file|add.*image|image",
+    ]
+    last_error: Optional[Exception] = None
+    for name_pattern in button_names:
+        try:
+            button = page.get_by_role("button", name=re.compile(name_pattern, re.I)).first
+            with page.expect_file_chooser(timeout=15000) as chooser_info:
+                button.click()
+            chooser_info.value.set_files(image_path)
+            return
+        except Exception as exc:
+            last_error = exc
+            continue
+    raise _BrowserAutomationError(
+        f"Could not find a Leonardo file upload control for {button_label_regex}: {last_error}"
+    )
 
 
 def _read_credit_balance(page: Any) -> Optional[int]:
@@ -122,14 +205,19 @@ def _read_credit_balance(page: Any) -> Optional[int]:
         return None
 
 
-def _wait_for_video(page: Any, timeout_seconds: float) -> str:
+def _wait_for_video(page: Any, timeout_seconds: float, existing_sources: Optional[set[str]] = None) -> str:
+    existing_sources = existing_sources or set()
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         videos = page.locator("video")
         n = videos.count()
-        for i in range(n):
+        for i in reversed(range(n)):
             src = videos.nth(i).get_attribute("src") or ""
-            if src and not any(marker in src for marker in _PENDING_MARKERS):
+            if (
+                src
+                and src not in existing_sources
+                and not any(marker in src for marker in _PENDING_MARKERS)
+            ):
                 return src
         page.wait_for_timeout(4000)
     raise _BrowserAutomationError(
@@ -266,20 +354,26 @@ class LeonardoBrowserVideoGenerateTool(BaseTool):
                     )
 
                 credits_before = _read_credit_balance(page)
+                _ensure_full_hd(page)
+                _ensure_audio_off(page)
+                existing_video_sources = {
+                    page.locator("video").nth(i).get_attribute("src") or ""
+                    for i in range(page.locator("video").count())
+                }
 
                 _upload_frame(page, "start", start_image_path)
                 page.wait_for_timeout(1500)
                 _upload_frame(page, "end", end_image_path)
                 page.wait_for_timeout(1500)
 
-                prompt_box = page.get_by_placeholder(re.compile("type a prompt", re.I)).first
+                prompt_box = page.locator("#prompt-textarea, textarea[name='prompt'], textarea[placeholder*='prompt' i]").first
                 prompt_box.click()
                 prompt_box.fill(prompt[:1500])
 
-                generate_button = page.get_by_role("button", name=re.compile("^generate", re.I)).first
+                generate_button = page.locator("button:has-text('Generate')").first
                 generate_button.click()
 
-                video_src = _wait_for_video(page, timeout_seconds)
+                video_src = _wait_for_video(page, timeout_seconds, existing_video_sources)
                 credits_after = _read_credit_balance(page)
 
                 resp = context.request.get(video_src)

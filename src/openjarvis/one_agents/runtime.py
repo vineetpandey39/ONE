@@ -538,25 +538,23 @@ def _run_ia(job: dict[str, Any]) -> dict[str, Any]:
     from openjarvis.tools.video_merge_tool import VideoMergeTool
     from openjarvis.tools.video_tool import VideoGenerateTool
 
-    # Backend preference. "browser" (Leonardo web app, subscription credits)
-    # would be cheapest, but its profile directory exists as soon as the
-    # login script has ever been run -- not proof a *valid* session is saved
-    # -- so an expired/incomplete login silently fails every clip instead of
-    # falling back. Until that profile is confirmed working again, prefer
-    # "fal" (fal.ai's wan-flf2v, real start/end-frame interpolation, no
-    # browser/login needed) whenever FAL_KEY is configured; "browser" is
-    # opt-in via LEONARDO_VIDEO_BACKEND=browser once login is verified, and
-    # "api" (pay-as-you-go REST) is the last-resort fallback either way.
+    # Backend preference. The production IA reel should use the Leonardo web
+    # app first, because that spends subscription creation credits and follows
+    # the exact UI path captured in LAO Task Capture. FAL/API remain fallbacks
+    # only when no logged-in Leonardo profile exists or the backend is forced.
     forced_backend = os.environ.get("LEONARDO_VIDEO_BACKEND")
+    lao_profile_dir = Path.home() / "Documents" / "LAO" / "task-capture-browser-profile-leonardo"
+    legacy_profile_dir = Path.home() / ".openjarvis" / "leonardo_browser_profile"
     profile_dir = os.environ.get("LEONARDO_CHROME_PROFILE_DIR") or str(
-        Path.home() / ".openjarvis" / "leonardo_browser_profile"
+        lao_profile_dir if lao_profile_dir.exists() else legacy_profile_dir
     )
+    os.environ.setdefault("LEONARDO_CHROME_PROFILE_DIR", profile_dir)
     if forced_backend in {"browser", "fal", "api"}:
         video_backend = forced_backend
-    elif os.environ.get("FAL_KEY"):
-        video_backend = "fal"
     elif Path(profile_dir).exists():
         video_backend = "browser"
+    elif os.environ.get("FAL_KEY"):
+        video_backend = "fal"
     else:
         video_backend = "api"
 
