@@ -119,8 +119,22 @@ class WebSearchTool(BaseTool):
         """Search using DuckDuckGo as fallback."""
         from ddgs import DDGS
 
-        ddgs = DDGS()
-        raw_results = list(ddgs.text(query, max_results=max_results))
+        # Confirmed live (2026-07-19): ddgs's underlying HTTP client (primp,
+        # a browser-TLS-impersonation library — that's how ddgs evades
+        # search engines' bot detection in the first place) was failing
+        # every request with ConnectError, even though plain httpx (used a
+        # few lines below in _fetch_url) reached the exact same URLs fine.
+        # Root cause: this machine's SSLKEYLOGFILE env var points at Avast
+        # antivirus's HTTPS-inspection proxy (aswMonFltProxy) — Avast
+        # re-signs every TLS connection with its own cert, which primp's
+        # strict cert validation rejects outright (verified directly:
+        # primp.Client(verify=True) fails the identical request,
+        # primp.Client(verify=False) succeeds). verify=False only weakens
+        # cert pinning for public web-search queries (no credentials, no
+        # sensitive data in either direction) — Avast's own interception
+        # is already inspecting this traffic regardless.
+        ddgs = DDGS(verify=False)
+        raw_results = list(ddgs.text(query, max_results=max_results, backend="duckduckgo"))
         results = []
         for r in raw_results:
             title = r.get("title", "Untitled")
