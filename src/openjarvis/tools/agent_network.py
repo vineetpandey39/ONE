@@ -21,7 +21,12 @@ class AgentNetworkTool(BaseTool):
         return ToolSpec(
             name="agent_network",
             description=(
-                "List ONE agents, dispatch a durable agent job, or inspect queue status. "
+                "List ONE agents, dispatch a durable agent job, inspect queue status, or review "
+                "aggregated per-agent stats (job counts, status breakdown, last run, avg duration). "
+                "Use action=stats -- NOT dispatch -- whenever the user asks how the agents are doing, "
+                "for a status/stats review, or a summary of agent activity; dispatch is only for "
+                "actually starting new agent work, never for reporting on existing history. "
+                "detail=brief gives one line per agent; detail=holistic gives the full breakdown. "
                 "Use plan by default because it is free/local. Use execute or publish only when the user explicitly requests it. "
                 "Use tier=fast (default, local model) unless the task genuinely needs the heavier cloud model — "
                 "tier=heavy costs NVIDIA NIM credits."
