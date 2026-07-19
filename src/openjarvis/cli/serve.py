@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 
 import click
@@ -371,6 +372,46 @@ def serve(
             console.print(f"[yellow]Agent '{agent_key}' failed to load: {exc}[/yellow]")
             traceback.print_exc()
 
+    # Cloud escalation agent — a small, separate NativeReActAgent bound to a
+    # fast cloud model (Claude Haiku, falling back to GPT-4o-mini) with just
+    # web_search + get_current_time. server/routes.py's chat_completions
+    # routes anything that falls through the deterministic fast paths here
+    # instead of the local ReAct loop above, so this needs real-time lookup
+    # ability of its own -- confirmed live (2026-07-19) that a bare
+    # tool-free cloud completion answered "how's the weather" with "I don't
+    # have a weather tool" even though web_search (Tavily, DuckDuckGo
+    # fallback -- ddgs needs no API key) already existed in this codebase,
+    # just never wired to anything reachable from a live chat request.
+    # Deliberately a SEPARATE, smaller toolset from the main `agent` above
+    # (which may carry agent_network, obsidian_memory, etc.) -- Claude
+    # rarely needs more than one web_search call, and a smaller tool list
+    # keeps the prompt (and therefore the round-trip) fast.
+    cloud_escalation_agent = None
+    cloud_escalation_model = None
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        cloud_escalation_model = "claude-haiku-4-5"
+    elif os.environ.get("OPENAI_API_KEY"):
+        cloud_escalation_model = "gpt-4o-mini"
+    if cloud_escalation_model:
+        try:
+            from openjarvis.agents.native_react import NativeReActAgent
+            from openjarvis.tools.datetime_tool import GetCurrentTimeTool
+            from openjarvis.tools.web_search import WebSearchTool
+
+            cloud_escalation_agent = NativeReActAgent(
+                engine,
+                cloud_escalation_model,
+                tools=[WebSearchTool(), GetCurrentTimeTool()],
+                bus=bus,
+                max_turns=4,
+            )
+        except Exception as exc:
+            console.print(
+                f"[yellow]Cloud escalation agent failed to load: {exc}[/yellow]"
+            )
+            cloud_escalation_agent = None
+            cloud_escalation_model = None
+
     # Set up channel backend if enabled
     channel_bridge = None
     if config.channel.enabled and config.channel.default_channel:
@@ -687,6 +728,8 @@ def serve(
         api_key=api_key,
         webhook_config=webhook_config,
         cors_origins=config.server.cors_origins,
+        cloud_escalation_agent=cloud_escalation_agent,
+        cloud_escalation_model=cloud_escalation_model,
     )
 
     console.print(
