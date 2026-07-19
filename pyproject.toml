@@ -33,6 +33,17 @@ dependencies = [
     "ddgs>=9.11.4",
     "httpx>=0.27",
     "openai>=1.30",
+    # Promoted from the inference-cloud extra: /v1/chat/completions now
+    # escalates any query the local ReAct loop doesn't have a deterministic
+    # answer for straight to Claude Haiku (server/routes.py's
+    # cloud_escalation_model) instead of gambling on local-model
+    # hallucination -- confirmed live 2026-07-19 that this was silently
+    # missing on a real deploy (CloudEngine's `import anthropic` inside a
+    # bare `try/except ImportError: pass` left the Anthropic client None
+    # with zero error surfaced, so escalation fell straight through to the
+    # slow/unreliable local path every time). No longer optional now that
+    # core chat quality depends on it, same as openai above.
+    "anthropic>=0.30",
     "openpyxl>=3.1",
     "Pillow>=10",
     "nvidia-ml-py>=12.560.30",
