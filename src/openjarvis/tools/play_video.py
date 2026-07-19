@@ -70,12 +70,39 @@ def _watch_and_skip_ads(page: Any, duration_seconds: float) -> None:
 
 
 class _VideoSession:
-    """Dedicated, VISIBLE Playwright session for video playback."""
+    """Dedicated, VISIBLE, PERSISTENT Playwright session for video playback.
+
+    Confirmed live (2026-07-19): even real Chrome (channel="chrome", not
+    Playwright's bundled Chromium) plus JS-side stealth patches still hit
+    Google's "unusual traffic" CAPTCHA wall on youtube.com/watch pages --
+    including on a video never touched before, and even though the plain
+    youtube.com homepage loaded fine. That rules out per-video or pure
+    fingerprint causes; it's Google flagging this IP for the /watch
+    endpoint specifically, most likely from the sheer volume of automated
+    requests generated while building and testing this tool today.
+    Completing that CAPTCHA programmatically is not something this tool
+    will ever do -- it's explicitly against policy here and against
+    Google's own terms. What IS legitimate: the window is real and visible,
+    so Vineet can solve it himself the one time it appears. A PERSISTENT
+    context (a real profile directory on disk, not a fresh throwaway
+    session per call) means that solve -- and any Google/YouTube login --
+    sticks in cookies for every future call, including across ONE server
+    restarts, instead of needing to be redone constantly.
+    """
 
     def __init__(self) -> None:
         self._playwright = None
-        self._browser = None
+        self._context = None
         self._page = None
+
+    def _profile_dir(self):
+        from pathlib import Path
+
+        from openjarvis.core.paths import get_config_dir
+
+        d = get_config_dir() / "ghost_agent_video_profile"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
 
     def _ensure_browser(self) -> None:
         if self._page is not None and not self._page.is_closed():
@@ -83,8 +110,22 @@ class _VideoSession:
         from playwright.sync_api import sync_playwright
 
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=False)
-        self._page = self._browser.new_page()
+        self._context = self._playwright.chromium.launch_persistent_context(
+            str(self._profile_dir()),
+            headless=False,
+            channel="chrome",
+        )
+        self._page = (
+            self._context.pages[0] if self._context.pages else self._context.new_page()
+        )
+        self._page.add_init_script(
+            """
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            window.chrome = window.chrome || { runtime: {} };
+            """
+        )
 
     @property
     def page(self) -> Any:
