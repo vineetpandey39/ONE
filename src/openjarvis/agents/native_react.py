@@ -93,32 +93,47 @@ class NativeReActAgent(ToolUsingAgent):
         """Parse ReAct structured output."""
         result = {"thought": "", "action": "", "action_input": "", "final_answer": ""}
 
+        # Confirmed live (traces.db trace 4840950fa8824cca, a real "what is
+        # 5+7" request): the un-anchored, case-insensitive "Final Answer:"
+        # regex matched the model's own casual preamble prose -- "2. To give
+        # a final answer:\nThought: ...\nFinal Answer: 12" -- at "final
+        # answer:" inside that sentence, not the properly-formatted line
+        # further down. Because re.search returns the FIRST match, group(1)
+        # then swallowed everything from that false hit onward, including
+        # the real "Thought:"/"Final Answer:" block -- so the raw ReAct
+        # scaffolding leaked into the user-facing reply instead of just "12".
+        # Anchoring to the start of a line (MULTILINE) excludes any
+        # mid-sentence mention like that, since it isn't the first token on
+        # its line.
+
         # Extract Thought
         thought_match = re.search(
-            r"Thought:\s*(.+?)(?=\nAction:|\nFinal Answer:|\Z)",
+            r"^Thought:\s*(.+?)(?=\n^Action:|\n^Final Answer:|\Z)",
             text,
-            re.DOTALL | re.IGNORECASE,
+            re.DOTALL | re.IGNORECASE | re.MULTILINE,
         )
         if thought_match:
             result["thought"] = thought_match.group(1).strip()
 
-        # Check for Final Answer
-        final_match = re.search(
-            r"Final Answer:\s*(.+)", text, re.DOTALL | re.IGNORECASE
-        )
-        if final_match:
-            result["final_answer"] = final_match.group(1).strip()
+        # Check for Final Answer. Take the LAST properly-formatted match
+        # rather than the first, in case the model second-guesses itself
+        # and writes more than one across a longer completion.
+        final_matches = list(re.finditer(
+            r"^Final Answer:\s*(.+)", text, re.DOTALL | re.IGNORECASE | re.MULTILINE
+        ))
+        if final_matches:
+            result["final_answer"] = final_matches[-1].group(1).strip()
             return result
 
         # Extract Action and Action Input
-        action_match = re.search(r"Action:\s*(.+)", text, re.IGNORECASE)
+        action_match = re.search(r"^Action:\s*(.+)", text, re.IGNORECASE | re.MULTILINE)
         if action_match:
             result["action"] = action_match.group(1).strip()
 
         input_match = re.search(
-            r"Action Input:\s*(.+?)(?=\n\n|\nThought:|\Z)",
+            r"^Action Input:\s*(.+?)(?=\n\n|\n^Thought:|\Z)",
             text,
-            re.DOTALL | re.IGNORECASE,
+            re.DOTALL | re.IGNORECASE | re.MULTILINE,
         )
         if input_match:
             result["action_input"] = input_match.group(1).strip()
