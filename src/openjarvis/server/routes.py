@@ -218,42 +218,34 @@ def _one_agent_command(text: str) -> str | None:
     check_in = re.sub(r"[^a-z0-9ऀ-ॿ]+", " ", lowered).strip()
     check_in = re.sub(r"\b(one|jarvis|jervis|jarvish)\b", " ", check_in)
     check_in = re.sub(r"\s+", " ", check_in).strip()
-    if check_in in {
-        "are you up", "are you there", "you up", "online",
-        "wake up", "wakeup", "wake", "startup", "start up",
-    }:
+
+    # Confirmed live (2026-07-19, traces.db trace 1f8824c59abe4edc): Whisper
+    # transcribed a real "Hey ONE, how are you?" as "Hey, when, how are
+    # you?" -- misheard "ONE" as "when". The exact-match set this used to be
+    # (`check_in in {...}`) doesn't match "hey when how are you" at all, so
+    # it fell through to the full ReAct/LLM path, which took 78s and still
+    # failed with "Maximum turns reached". A single STT slip shouldn't ever
+    # cost a minute-plus round trip for a greeting. Switched both checks
+    # from exact-set membership to substring containment: any stray word
+    # Whisper adds or mishears around the core phrase (a wake-word
+    # mis-transcription, "buddy"/"today"/filler words, etc.) no longer
+    # matters as long as the distinctive phrase itself is in there
+    # somewhere. This also makes the greeting recognize things like "so hey
+    # one how are you doing today buddy" without listing every combination.
+    up_phrases = ("are you up", "are you there", "wake up", "wakeup", "startup", "start up")
+    if check_in == "online" or check_in == "you up" or any(p in check_in for p in up_phrases):
         return "Always online, Sir. What do you need?"
-    if check_in in {
-        "hi",
-        "hello",
-        "hey",
-        "hi how are you",
-        "hello how are you",
-        "hey how are you",
-        "namaste",
-        "how are you",
-        "how are you today",
-        "kaise ho",
-        "kya haal hai",
-        "kya chal raha hai",
-        "tum kaise ho",
-        "aap kaise ho",
-        "aap kaise hain",
+
+    greeting_phrases = (
+        "how are you", "how you doing", "how r u", "how s it going", "you good",
+        "kaise ho", "kaise hain", "kya haal", "kya chal raha",
         # Devanagari script — this is what faster-whisper actually outputs
         # for Hindi audio (confirmed from a real transcript in traces.db),
         # not always a Latin transliteration.
-        "कैसे हो",
-        "तुम कैसे हो",
-        "आप कैसे हो",
-        "आप कैसे हैं",
-        "क्या हाल है",
-        "क्या हाल हैं",
-        "नमस्ते",
-        # Mixed script — Whisper sometimes transliterates a pronoun to Latin
-        # while writing the rest in Devanagari, as seen in the real sample.
-        "tum कैसे हो",
-        "aap कैसे हो",
-    }:
+        "कैसे हो", "कैसे हैं", "क्या हाल",
+    )
+    bare_greetings = {"hi", "hello", "hey", "namaste", "नमस्ते"}
+    if check_in in bare_greetings or any(p in check_in for p in greeting_phrases):
         # Shorter on purpose -- this is spoken aloud via TTS on every single
         # greeting, and the original 3-sentence version added several real
         # seconds of speaking time on top of an already-slow voice pipeline.
