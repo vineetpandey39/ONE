@@ -126,7 +126,7 @@ sandbox-docker = ["docker>=7.0"]
 dashboard = ["textual>=0.80"]
 speech = ["faster-whisper>=1.0"]
 vision-ocr = ["paddleocr>=3.7.0", "paddlepaddle>=3.3.1"]
-speech-deepgram = ["deepgram-sdk>=3.0"]
+speech-deepgram = ["deepgram-sdk>=7.0"]  # 3.x's API (PrerecordedOptions) no longer exists; rewritten against 7.5.0
 eval-wandb = ["wandb>=0.17"]
 eval-sheets = ["gspread>=6.0", "google-auth>=2.0"]
 mining-pearl-cpu = [

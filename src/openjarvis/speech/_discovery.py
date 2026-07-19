@@ -9,11 +9,16 @@ if TYPE_CHECKING:
     from openjarvis.core.config import JarvisConfig
     from openjarvis.speech._stubs import SpeechBackend
 
-# Priority order: local first, then cloud
+# 2026-07-19: prefer Deepgram (real cloud streaming-grade STT, no local
+# CPU/VRAM contention) whenever DEEPGRAM_API_KEY is actually set --
+# _create_backend() already returns None for deepgram with no key, so this
+# reorder is safe: no key configured means Deepgram is silently skipped
+# and faster-whisper (always available, no external dependency) is used
+# exactly as before. Only changes behavior once a real key is added.
 DISCOVERY_ORDER = [
+    "deepgram",
     "faster-whisper",
     "openai",
-    "deepgram",
 ]
 
 

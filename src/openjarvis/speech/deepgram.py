@@ -1,4 +1,15 @@
-"""Deepgram speech-to-text backend (cloud)."""
+"""Deepgram speech-to-text backend (cloud).
+
+Confirmed live (2026-07-19): the SDK installed here is deepgram-sdk 7.5.0,
+a ground-up rewrite from the v3.x API this file was originally written
+against. `PrerecordedOptions` no longer exists at all -- the old code
+imported it in the same `try` block as `DeepgramClient`, so that single
+missing name silently disabled the whole backend (both fell back to None)
+even with the SDK installed and a valid key. Rewritten against the real
+7.5.0 surface: `client.listen.v1.media.transcribe_file(request=<bytes>,
+model=..., ...)` takes options as direct keyword arguments now, no
+separate options object.
+"""
 
 from __future__ import annotations
 
@@ -9,15 +20,23 @@ from openjarvis.core.registry import SpeechRegistry
 from openjarvis.speech._stubs import SpeechBackend, TranscriptionResult
 
 try:
-    from deepgram import DeepgramClient, PrerecordedOptions
+    from deepgram import DeepgramClient
 except ImportError:
     DeepgramClient = None  # type: ignore[assignment, misc]
-    PrerecordedOptions = None  # type: ignore[assignment, misc]
+
+# Same purpose as faster_whisper.py's hotwords list: bias recognition
+# toward ONE's own vocabulary. Deepgram's `keywords` param boosts these
+# terms without forcing them -- directly targets the confirmed real
+# failure mode where "ONE" was misheard as "when" (traces.db, 2026-07-19).
+_ONE_KEYWORDS = [
+    "ONE", "JARVIS", "Vineet", "HEPHAISTOS", "TITAN", "ALFA", "BETA",
+    "HERMES", "ARES", "APOLLO", "ATHENA", "POSEIDON", "ZEUS",
+]
 
 
 @SpeechRegistry.register("deepgram")
 class DeepgramSpeechBackend(SpeechBackend):
-    """Cloud speech-to-text using Deepgram API."""
+    """Cloud speech-to-text using Deepgram's REST (prerecorded) API."""
 
     backend_id = "deepgram"
 
@@ -25,7 +44,7 @@ class DeepgramSpeechBackend(SpeechBackend):
         self._api_key = api_key or os.environ.get("DEEPGRAM_API_KEY", "")
         self._client = None
         if self._api_key and DeepgramClient is not None:
-            self._client = DeepgramClient(self._api_key)
+            self._client = DeepgramClient(api_key=self._api_key)
 
     def transcribe(
         self,
@@ -48,39 +67,31 @@ class DeepgramSpeechBackend(SpeechBackend):
         }
         mime_type = mime_map.get(format, "audio/wav")
 
-        options_kwargs: dict = {"model": "nova-2", "smart_format": True}
+        kwargs: dict = {
+            "request": audio,
+            "model": "nova-2",
+            "smart_format": True,
+            "keywords": _ONE_KEYWORDS,
+            "request_options": {"additional_headers": {"Content-Type": mime_type}},
+        }
         if language:
-            options_kwargs["language"] = language
+            kwargs["language"] = language
         else:
-            options_kwargs["detect_language"] = True
+            kwargs["detect_language"] = True
 
-        payload = {"buffer": audio, "mimetype": mime_type}
+        response = self._client.listen.v1.media.transcribe_file(**kwargs)
 
-        if PrerecordedOptions is not None:
-            options = PrerecordedOptions(**options_kwargs)
-        else:
-            options = options_kwargs
-
-        response = self._client.listen.rest.v("1").transcribe_file(
-            payload,
-            options,
-        )
-
-        # Extract transcript from response
-        channels = response.results.channels
+        channels = response.results.channels if response.results else []
         if channels and channels[0].alternatives:
             alt = channels[0].alternatives[0]
-            text = alt.transcript
-            confidence = getattr(alt, "confidence", None)
+            text = alt.transcript or ""
+            confidence = alt.confidence
         else:
             text = ""
             confidence = None
 
-        detected_lang = None
-        if channels:
-            detected_lang = getattr(channels[0], "detected_language", None)
-
-        duration = getattr(response.metadata, "duration", 0.0)
+        detected_lang = channels[0].detected_language if channels else None
+        duration = getattr(response.metadata, "duration", 0.0) if response.metadata else 0.0
 
         return TranscriptionResult(
             text=text,
@@ -95,3 +106,6 @@ class DeepgramSpeechBackend(SpeechBackend):
 
     def supported_formats(self) -> List[str]:
         return ["wav", "mp3", "ogg", "flac", "webm", "m4a"]
+
+
+__all__ = ["DeepgramSpeechBackend"]
