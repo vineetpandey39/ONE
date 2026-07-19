@@ -133,8 +133,20 @@ class WebSearchTool(BaseTool):
         # cert pinning for public web-search queries (no credentials, no
         # sensitive data in either direction) — Avast's own interception
         # is already inspecting this traffic regardless.
+        # Confirmed live (2026-07-19, later same day): pinning to
+        # backend="duckduckgo" specifically was a mistake once verify=False
+        # above was already fixing the real (Avast) problem -- DuckDuckGo's
+        # own site started throttling/blocking this machine after the
+        # volume of automated testing earlier in the session ("No results
+        # found" on every call, while brave/yandex worked fine with
+        # verify=False the whole time). ddgs's "auto" mode already does
+        # exactly the right thing here: try each registered backend and
+        # return the first that actually has results, so a single
+        # engine's block doesn't take web_search down -- confirmed with 3
+        # back-to-back live calls, all successful, silently routing around
+        # duckduckgo/mojeek to brave/yandex/google as needed.
         ddgs = DDGS(verify=False)
-        raw_results = list(ddgs.text(query, max_results=max_results, backend="duckduckgo"))
+        raw_results = list(ddgs.text(query, max_results=max_results, backend="auto"))
         results = []
         for r in raw_results:
             title = r.get("title", "Untitled")
