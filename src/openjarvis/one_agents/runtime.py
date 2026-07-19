@@ -169,6 +169,63 @@ def list_jobs(limit: int = 20) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def agent_stats() -> list[dict[str, Any]]:
+    """Aggregate job history per agent: counts, status breakdown, last run,
+    average duration of completed jobs.
+
+    Previously agent_network's only introspection was ``history`` (raw,
+    un-aggregated job rows, capped at 100) -- answering "how are the agents
+    doing" meant the LLM had to eyeball a wall of individual rows itself.
+    This does the aggregation in code instead, over the FULL job history
+    (not capped like list_jobs), one row per agent, ready to narrate.
+    """
+    with _connect() as db:
+        rows = db.execute("SELECT * FROM jobs").fetchall()
+
+    by_agent: dict[str, list[dict[str, Any]]] = {agent_id: [] for agent_id in AGENTS}
+    for row in rows:
+        job = dict(row)
+        by_agent.setdefault(job["agent_id"], []).append(job)
+
+    stats: list[dict[str, Any]] = []
+    for agent_id, agent_meta in AGENTS.items():
+        jobs = by_agent.get(agent_id, [])
+        status_counts: dict[str, int] = {}
+        for job in jobs:
+            status_counts[job["status"]] = status_counts.get(job["status"], 0) + 1
+
+        durations_seconds: list[float] = []
+        last_run_at = ""
+        for job in jobs:
+            if job["updated_at"] > last_run_at:
+                last_run_at = job["updated_at"]
+            if job["status"] == "completed":
+                try:
+                    started = datetime.fromisoformat(job["created_at"])
+                    finished = datetime.fromisoformat(job["updated_at"])
+                    durations_seconds.append((finished - started).total_seconds())
+                except ValueError:
+                    continue
+
+        avg_duration_seconds = (
+            round(sum(durations_seconds) / len(durations_seconds), 1)
+            if durations_seconds
+            else None
+        )
+
+        stats.append({
+            "agent_id": agent_id,
+            "name": agent_meta["name"],
+            "role": agent_meta["role"],
+            "total_jobs": len(jobs),
+            "status_counts": status_counts,
+            "last_run_at": last_run_at or None,
+            "avg_duration_seconds": avg_duration_seconds,
+        })
+
+    return stats
+
+
 def claim_job() -> dict[str, Any] | None:
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
