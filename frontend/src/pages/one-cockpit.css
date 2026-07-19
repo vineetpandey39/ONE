@@ -296,43 +296,168 @@ body { margin: 0; background: #02060b; }
 .jarvis-pg-panel--left  { padding-right: 28px; align-items: flex-start; }
 .jarvis-pg-panel--right { padding-left: 28px;  align-items: flex-end; }
 
-/* Left: dot · LABEL  VALUE */
-.jarvis-pg-stat {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 10px;
-  letter-spacing: 2px;
+/* Panel section label ("SYSTEM STATUS" / "TELEMETRY") */
+.jarvis-pg-panel-label {
+  font-size: 9px;
+  letter-spacing: 4px;
+  color: #00d4ff88;
   font-family: 'Courier New', monospace;
+  margin-bottom: 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #00d4ff22;
+  width: 100%;
+}
+.jarvis-pg-panel--right .jarvis-pg-panel-label { text-align: right; }
+
+/* Labeled bar-meter rows (System Status / Telemetry panels) */
+.jarvis-pg-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  font-family: 'Courier New', monospace;
+}
+.jarvis-pg-bar-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 9px;
+  letter-spacing: 1.5px;
   color: #6699bb;
 }
-.jarvis-pg-stat strong { color: #aaddff; margin-left: 4px; }
-.jarvis-pg-stat--ok  .jarvis-pg-dot { background: #00ffaa; box-shadow: 0 0 6px #00ffaa; }
-.jarvis-pg-stat--dim .jarvis-pg-dot { background: #334455; box-shadow: none; }
-
-/* Right: VALUE LABEL  dot */
-.jarvis-pg-metric {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10px;
-  letter-spacing: 2px;
-  font-family: 'Courier New', monospace;
-  color: #6699bb;
+.jarvis-pg-bar-row-head strong { color: #aaddff; font-size: 10px; }
+.jarvis-pg-bar-row--right .jarvis-pg-bar-row-head { flex-direction: row-reverse; }
+.jarvis-pg-bar-track {
+  height: 3px;
+  width: 100%;
+  background: #0a2a3a;
+  border-radius: 2px;
+  overflow: hidden;
 }
-.jarvis-pg-metric strong { color: #aaddff; }
-.jarvis-pg-metric--ok  .jarvis-pg-dot { background: #00ffaa; box-shadow: 0 0 6px #00ffaa; }
-.jarvis-pg-metric--dim .jarvis-pg-dot { background: #334455; box-shadow: none; }
+.jarvis-pg-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #0099ff, #00ffcc);
+  box-shadow: 0 0 6px #00d4ff88;
+  transition: width .6s ease;
+}
+.jarvis-pg-bar-row--dim .jarvis-pg-bar-fill {
+  background: #445566;
+  box-shadow: none;
+}
 
-/* Shared dot */
-.jarvis-pg-dot {
-  width: 7px;
-  height: 7px;
+/* Proximity radar (left panel decoration) */
+.jarvis-pg-radar {
+  position: relative;
+  width: 130px;
+  height: 130px;
+  margin-top: 10px;
   border-radius: 50%;
+  border: 1px solid #00d4ff2e;
+  background:
+    radial-gradient(circle, transparent 0%, transparent 60%, #00d4ff14 61%, transparent 62%),
+    radial-gradient(circle, #00d4ff08, transparent 70%);
+}
+.jarvis-pg-radar::before,
+.jarvis-pg-radar::after {
+  content: '';
+  position: absolute;
+  background: #00d4ff20;
+}
+.jarvis-pg-radar::before { top: 50%; left: 0; right: 0; height: 1px; }
+.jarvis-pg-radar::after { left: 50%; top: 0; bottom: 0; width: 1px; }
+.jarvis-pg-radar-sweep {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, #00d4ffaa, transparent 28%);
+  animation: jarvis-radar-spin 3.2s linear infinite;
+  mix-blend-mode: screen;
+}
+@keyframes jarvis-radar-spin { to { transform: rotate(360deg); } }
+.jarvis-pg-radar-blip {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: #00ffaa;
+  box-shadow: 0 0 5px #00ffaa;
+  animation: jarvis-radar-blip 2.4s ease-in-out infinite;
+}
+@keyframes jarvis-radar-blip { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+.jarvis-pg-radar-label {
+  position: absolute;
+  bottom: -16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  letter-spacing: 3px;
+  color: #00d4ff55;
+  font-family: 'Courier New', monospace;
+  white-space: nowrap;
+}
+
+/* Power distribution bars (right panel decoration) */
+.jarvis-pg-power {
+  margin-top: 10px;
+  width: 130px;
+}
+.jarvis-pg-power-label {
+  font-size: 8px;
+  letter-spacing: 3px;
+  color: #00d4ff55;
+  font-family: 'Courier New', monospace;
+  text-align: right;
+  margin-bottom: 6px;
+}
+.jarvis-pg-power-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 2px;
+  height: 32px;
+}
+.jarvis-pg-power-bar {
+  width: 4px;
+  background: linear-gradient(180deg, #00ffcc, #0099ff);
+  border-radius: 1px;
+  opacity: .75;
+  animation: jarvis-power-pulse 1.8s ease-in-out infinite;
+}
+@keyframes jarvis-power-pulse { 0%, 100% { opacity: .45; } 50% { opacity: .9; } }
+
+/* Scrolling telemetry stream ticker, under the three-column main */
+.jarvis-telemetry-stream {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 72px;
+  overflow: hidden;
+  font-family: 'Courier New', monospace;
+}
+.jarvis-telemetry-tag {
+  font-size: 8px;
+  letter-spacing: 3px;
+  color: #00d4ff55;
   flex-shrink: 0;
-  background: #00d4ff;
-  box-shadow: 0 0 6px #00d4ff;
-  transition: background .4s, box-shadow .4s;
+}
+.jarvis-telemetry-track {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+}
+.jarvis-telemetry-track span {
+  display: inline-block;
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: #4a8aa6;
+  animation: jarvis-telemetry-scroll 26s linear infinite;
+}
+@keyframes jarvis-telemetry-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-33.333%); }
 }
 
 /* ── Centre orb wrapper ── */

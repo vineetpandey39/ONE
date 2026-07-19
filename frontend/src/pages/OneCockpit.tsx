@@ -1283,12 +1283,33 @@ export function OneCockpit() {
         <div className="jarvis-pg-main">
           {/* Left status panel */}
           <aside className="jarvis-pg-panel jarvis-pg-panel--left" aria-label="System status">
+            <div className="jarvis-pg-panel-label">SYSTEM STATUS</div>
             {leftStats.map((item, i) => (
-              <div key={i} className={`jarvis-pg-stat ${item.ok ? 'jarvis-pg-stat--ok' : 'jarvis-pg-stat--dim'}`}>
-                <span className="jarvis-pg-dot" />
-                {item.label} <strong>{item.value}</strong>
+              <div key={i} className={`jarvis-pg-bar-row ${item.ok ? 'jarvis-pg-bar-row--ok' : 'jarvis-pg-bar-row--dim'}`}>
+                <div className="jarvis-pg-bar-row-head">
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                </div>
+                <div className="jarvis-pg-bar-track">
+                  <div className="jarvis-pg-bar-fill" style={{ width: `${item.ok ? 88 + (i % 3) * 4 : 14}%` }} />
+                </div>
               </div>
             ))}
+            <div className="jarvis-pg-radar" aria-hidden="true">
+              <div className="jarvis-pg-radar-sweep" />
+              {status.agents.slice(0, 6).map((_, i) => (
+                <span
+                  key={i}
+                  className="jarvis-pg-radar-blip"
+                  style={{
+                    top: `${50 - 36 * Math.sin((i / 6) * Math.PI * 2)}%`,
+                    left: `${50 + 36 * Math.cos((i / 6) * Math.PI * 2)}%`,
+                    animationDelay: `${i * 0.4}s`,
+                  }}
+                />
+              ))}
+              <span className="jarvis-pg-radar-label">PROXIMITY</span>
+            </div>
           </aside>
 
           {/* Centre orb */}
@@ -1303,13 +1324,44 @@ export function OneCockpit() {
 
           {/* Right metrics panel */}
           <aside className="jarvis-pg-panel jarvis-pg-panel--right" aria-label="System metrics">
+            <div className="jarvis-pg-panel-label">TELEMETRY</div>
             {rightMetrics.map((item, i) => (
-              <div key={i} className={`jarvis-pg-metric ${item.ok ? 'jarvis-pg-metric--ok' : 'jarvis-pg-metric--dim'}`}>
-                <strong>{item.value}</strong> {item.label}
-                <span className="jarvis-pg-dot" />
+              <div key={i} className={`jarvis-pg-bar-row jarvis-pg-bar-row--right ${item.ok ? 'jarvis-pg-bar-row--ok' : 'jarvis-pg-bar-row--dim'}`}>
+                <div className="jarvis-pg-bar-row-head">
+                  <strong>{item.value}</strong>
+                  <span>{item.label}</span>
+                </div>
+                <div className="jarvis-pg-bar-track">
+                  <div className="jarvis-pg-bar-fill" style={{ width: `${item.ok ? 90 - (i % 3) * 5 : 12}%` }} />
+                </div>
               </div>
             ))}
+            <div className="jarvis-pg-power" aria-hidden="true">
+              <div className="jarvis-pg-power-label">POWER DISTRIBUTION</div>
+              <div className="jarvis-pg-power-bars">
+                {Array.from({ length: 14 }).map((_, i) => (
+                  <span
+                    key={i}
+                    className="jarvis-pg-power-bar"
+                    style={{
+                      height: `${20 + Math.abs(Math.sin(i * 1.7)) * 70}%`,
+                      animationDelay: `${i * 0.09}s`,
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
           </aside>
+        </div>
+
+        {/* ── Telemetry stream ticker ── */}
+        <div className="jarvis-telemetry-stream" aria-hidden="true">
+          <span className="jarvis-telemetry-tag">TELEMETRY</span>
+          <div className="jarvis-telemetry-track">
+            <span>
+              {`CORE:${status.online ? 'ONLINE' : 'OFFLINE'}  ·  AGENTS:${status.agents.length}  ·  MEMORIES:${status.obsidian.notes}  ·  MODEL:${status.model}  ·  LISTEN:${alwaysListening ? 'ARMED' : 'STANDBY'}  ·  `.repeat(3)}
+            </span>
+          </div>
         </div>
 
         {/* ── Live response strip — shows ONE's last reply on the landing screen ── */}
