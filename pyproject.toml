@@ -31,6 +31,15 @@ dependencies = [
     "click>=8",
     "datasets>=4.5.0",
     "ddgs>=9.11.4",
+    # Promoted from the tools-search extra: the Ghost Agent's web_search
+    # tool tries Tavily first, ddgs (scraping, gets rate-limited by search
+    # engines under real use) only as fallback. Confirmed live 2026-07-19
+    # that this exact silent-ImportError pattern (bare try/except around
+    # `from tavily import TavilyClient`) had already bitten this same
+    # codebase once for anthropic -- a real TAVILY_API_KEY was saved and
+    # active, but every search still silently fell through to ddgs with no
+    # error surfaced, because tavily-python was simply never installed.
+    "tavily-python>=0.3",
     "httpx>=0.27",
     "openai>=1.30",
     # Promoted from the inference-cloud extra: /v1/chat/completions now
