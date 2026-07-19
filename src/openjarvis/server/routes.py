@@ -744,6 +744,30 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
                 exc_info=True,
             )
 
+    # Confirmed live (2026-07-19): general/open-ended queries that fall
+    # through every deterministic fast path above (_one_agent_command) were
+    # landing in the local llama3.1:8b ReAct loop, which either hallucinated
+    # an unrelated answer ("can you build a agent for me?" -> a fabricated
+    # Obsidian vault path) or burned 60-120s before "Maximum turns reached
+    # without a final answer." Per Vineet's explicit instruction: give
+    # anything ONE's local model can't confidently handle a path to a real
+    # cloud model instead of gambling on the local ReAct loop every time.
+    # This is a single-shot completion, no tool loop -- routed through the
+    # exact same model-name dispatch _handle_direct/_handle_stream already
+    # use for cloud models (MultiEngine's model map for non-streaming,
+    # cloud_router.py's is_cloud_model/stream_cloud for streaming) -- that's
+    # what makes it a couple of seconds instead of the local agent's
+    # multi-turn tool-calling attempts. Silently stays on the local agent
+    # path when no cloud key is configured, so an offline-only setup is
+    # unaffected. Haiku over Sonnet/Opus on purpose: this is a latency-first
+    # fallback, not a reasoning-heavy one -- speed matters more than depth
+    # for "the local model didn't understand this."
+    cloud_escalation_model = None
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        cloud_escalation_model = "claude-haiku-4-5"
+    elif os.environ.get("OPENAI_API_KEY"):
+        cloud_escalation_model = "gpt-4o-mini"
+
     if request_body.stream:
         # When the client passes `tools`, stream the model's raw
         # OpenAI-compat function-calling decision directly from the engine
@@ -770,7 +794,7 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
         # unexecuted tool_call the frontend has no way to act on. See
         # `_handle_agent_stream` for the trade-off this implies (no
         # token-by-token typing for agent-routed turns).
-        if agent is not None:
+        if agent is not None and not cloud_escalation_model:
             return _wrap_stream_with_memory(
                 await _handle_agent_stream(
                     agent,
@@ -785,7 +809,7 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
         return _wrap_stream_with_memory(
             await _handle_stream(
                 engine,
-                model,
+                cloud_escalation_model or model,
                 request_body,
                 complexity_info,
                 trace_store=getattr(request.app.state, "trace_store", None),
@@ -794,7 +818,8 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
             latest_user_text,
         )
 
-    # Non-streaming: use agent if available, otherwise direct engine call.
+    # Non-streaming: cloud escalation first (see comment above), then agent
+    # if available, otherwise direct engine call.
     #
     # EXCEPTION: when the client explicitly passed `tools`, they're asking
     # for raw OpenAI-compat function-calling — return the model's
@@ -810,6 +835,25 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     # tools (e.g. injecting MCP tools through this endpoint and wanting
     # the agent to execute them), add an explicit opt-in header rather
     # than removing this guard — silent re-routing is what produced #414.
+    if cloud_escalation_model and not request_body.tools:
+        try:
+            cloud_response = _handle_direct(
+                engine,
+                cloud_escalation_model,
+                request_body,
+                bus=getattr(request.app.state, "bus", None),
+                complexity_info=complexity_info,
+                app_config=config,
+            )
+            _save_exchange_to_obsidian(latest_user_text, _extract_response_content(cloud_response))
+            return cloud_response
+        except Exception:
+            logging.getLogger("openjarvis.server").warning(
+                "Cloud escalation to %s failed, falling back to local agent",
+                cloud_escalation_model,
+                exc_info=True,
+            )
+
     if agent is not None and not request_body.tools:
         agent_response = _handle_agent(
             agent,
