@@ -893,18 +893,63 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     return direct_response
 
 
-def _cloud_escalation_tools():
-    """Tool instances the cloud escalation loop can call.
+_GHOST_AGENT_SYSTEM_PROMPT = """\
+You are ONE's Ghost Agent -- the part of ONE that reaches outside the local \
+model's own knowledge for anything real-time or local-machine-specific: \
+current web/Google information (weather, prices, news, anything needing a \
+live lookup) and Vineet's local computer.
 
-    Deliberately small and separate from the local agent's `[agent] tools`
-    list in config.toml -- Claude/GPT rarely need more than one web_search
-    call for a real-time factual question, and a smaller tool list keeps
-    the round-trip fast.
+Tools available to you:
+- web_search: real-time web/Google lookups. Use it whenever the question \
+needs current information you cannot know from training data.
+- get_current_time: the real current date/time. Never guess it.
+- file_read: read any file on Vineet's computer to inspect its contents. \
+Safe, read-only -- use freely to look something up locally.
+- shell_exec: run a real shell command. THIS ACTUALLY EXECUTES on Vineet's \
+machine -- it is NOT a dry run. Per Vineet's explicit instruction, this \
+agent operates plan-first: describe exactly what command you would run and \
+why, in your reply, and do NOT call shell_exec unless Vineet's message is a \
+direct, explicit confirmation of a specific plan you already described \
+(e.g. he replies "yes", "go ahead", "do it", "execute that"). If you call \
+shell_exec without that confirmation already in place, it will be refused \
+by the system regardless -- there is no interactive confirmation prompt \
+wired up yet, so an unconfirmed call simply fails. Never call shell_exec on \
+the first turn of a request.
+
+Always address Vineet as "Sir". Keep replies short and spoken-friendly -- \
+this is often read aloud over TTS.
+"""
+
+
+def _cloud_escalation_tools():
+    """Tool instances the cloud escalation loop (the Ghost Agent) can call.
+
+    web_search/get_current_time: real-time lookups. file_read/shell_exec:
+    local computer access, per Vineet's explicit request (2026-07-19) for a
+    "ghost agent" that can check things from Google, the local machine, or a
+    browser. shell_exec requires_confirmation=True (its own ToolSpec) and no
+    confirm_callback is wired into this loop's ToolExecutor below, so it is
+    safely refused unless/until real interactive confirmation is built --
+    that's the "plan first, confirm before execute" behavior Vineet chose,
+    enforced by the same requires_confirmation mechanism the codebase
+    already uses for other destructive tools, not new bespoke logic.
+
+    Considered wiring in ClaudeCodeAgent (agents/claude_code.py) instead for
+    richer local coding-agent behavior, but its @anthropic-ai/claude-code
+    npm dependency refuses to install on native Windows ("Claude Code is
+    not supported on Windows... requires macOS or Linux") -- confirmed live
+    via `npm install` in agents/claude_code_runner/, and its dist/ build
+    output doesn't exist in this repo either (only unbuilt TypeScript
+    source), so it's non-functional on this machine regardless. file_read +
+    shell_exec via this same native tool-calling loop already proven
+    working for web_search is the actually-deliverable path here.
     """
     from openjarvis.tools.datetime_tool import GetCurrentTimeTool
+    from openjarvis.tools.file_read import FileReadTool
+    from openjarvis.tools.shell_exec import ShellExecTool
     from openjarvis.tools.web_search import WebSearchTool
 
-    return [WebSearchTool(), GetCurrentTimeTool()]
+    return [WebSearchTool(), GetCurrentTimeTool(), FileReadTool(), ShellExecTool()]
 
 
 def _run_cloud_tool_loop(
@@ -982,6 +1027,22 @@ def _run_cloud_tool_loop(
     return result
 
 
+def _with_ghost_agent_prompt(messages: list[Message]) -> list[Message]:
+    """Append the Ghost Agent's tool-use/safety instructions to the system message.
+
+    Appended to whatever `_ensure_identity_prompt` already produced (ONE's
+    persona) rather than replacing it, so the Ghost Agent still addresses
+    Vineet as Sir and stays in character -- it's an additional capability
+    briefing, not a different identity.
+    """
+    out = list(messages)
+    for i, m in enumerate(out):
+        if m.role == Role.SYSTEM:
+            out[i] = Message(role=Role.SYSTEM, content=m.content + "\n\n" + _GHOST_AGENT_SYSTEM_PROMPT)
+            return out
+    return [Message(role=Role.SYSTEM, content=_GHOST_AGENT_SYSTEM_PROMPT), *out]
+
+
 def _handle_cloud_escalation(
     engine,
     model: str,
@@ -992,6 +1053,7 @@ def _handle_cloud_escalation(
     """Non-streaming cloud escalation: native tool loop, then final answer."""
     messages = _to_messages(req.messages)
     messages = _ensure_identity_prompt(messages, app_config)
+    messages = _with_ghost_agent_prompt(messages)
     result = _run_cloud_tool_loop(
         engine,
         model,
@@ -1036,6 +1098,7 @@ async def _handle_cloud_escalation_stream(
     """
     messages = _to_messages(req.messages)
     messages = _ensure_identity_prompt(messages, app_config)
+    messages = _with_ghost_agent_prompt(messages)
     result = _run_cloud_tool_loop(
         engine,
         model,
