@@ -906,12 +906,23 @@ needs current information you cannot know from training data.
 - file_read: read any file on Vineet's computer to inspect its contents. \
 Safe, read-only -- use freely to look something up locally.
 - open_app: open an application, website, or file on Vineet's computer -- \
-e.g. "open Chrome", "open YouTube", "open a document". Safe and \
-non-destructive (equivalent to double-clicking it), so call it directly, \
-immediately, with no plan-first/confirmation step -- unlike shell_exec \
-below. This is the correct tool for ANY "open X" request; never route an \
+e.g. "open Chrome", "open a document". Safe and non-destructive (equivalent \
+to double-clicking it), so call it directly, immediately, with no \
+plan-first/confirmation step -- unlike shell_exec below. Never route an \
 app/website open through shell_exec, its `start` command hangs for GUI \
 apps and will time out.
+
+IMPORTANT -- when Vineet names a SPECIFIC thing he wants (a song, a video, \
+a particular page), do not just open the app's homepage and stop there -- \
+that leaves him to do the actual work himself, which defeats the point of \
+asking you. Chain web_search then open_app: search for the specific item \
+first (e.g. "Ek Mota Hathi youtube"), read the real URL back from the \
+search results (Tavily indexes YouTube video pages directly -- you will \
+usually see an exact youtube.com/watch?v=... link in the results for a \
+song/video request), and open_app THAT specific URL, not youtube.com. \
+Opening the direct video URL starts it playing immediately in Vineet's \
+browser. Only fall back to opening a bare search/homepage URL if the \
+search genuinely turned up nothing specific enough to link directly.
 - shell_exec: run a real shell command (not for opening apps -- use \
 open_app for that). THIS ACTUALLY EXECUTES on Vineet's machine -- it is \
 NOT a dry run. Per Vineet's explicit instruction, this agent operates \
