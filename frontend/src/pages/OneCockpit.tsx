@@ -325,8 +325,10 @@ export function OneCockpit() {
   const alwaysListeningRef = useRef(false);
   const busyRef = useRef(false);
   const speakingRef = useRef(false);
+  const linesRef = useRef<Line[]>([]);
   useEffect(() => { busyRef.current = busy; }, [busy]);
   useEffect(() => { speakingRef.current = speaking; }, [speaking]);
+  useEffect(() => { linesRef.current = lines; }, [lines]);
   useEffect(() => () => { alwaysListeningRef.current = false; }, []);
   // Holographic orb interaction: a 3D tilt that follows the cursor/finger,
   // and a trail of sparkle particles spawned wherever the orb is touched,
@@ -799,6 +801,22 @@ export function OneCockpit() {
   const sendCommand = useCallback(async (raw?: string) => {
     const text = (raw ?? command).trim();
     if (!text || busy) return;
+    // Confirmed live (2026-07-19): every command was sent as a lone message
+    // with zero prior turns, so ONE (and the Ghost Agent's cloud escalation
+    // especially) had no way to know what it had just said -- asked
+    // permission to run a command, Vineet said "Yes", and the next request
+    // arrived with no memory that a question was ever asked. linesRef holds
+    // the same transcript already rendered on screen; read it BEFORE this
+    // turn's own placeholder lines go in below, so it's exactly the prior
+    // conversation, not including the message being sent right now. Capped
+    // to the last 8 lines (~4 exchanges) -- Obsidian-vault persistence
+    // (already wired via _save_exchange_to_obsidian / the vault search
+    // injected server-side) covers cross-session recall; this is strictly
+    // about not forgetting what was just said two seconds ago.
+    const history = linesRef.current
+      .slice(-8)
+      .filter((line) => line.text.trim())
+      .map((line) => ({ role: line.role === 'one' ? 'assistant' : 'user', content: line.text }));
     setCommand('');
     setBusy(true);
     setLines((current) => [...current.slice(-6), { role: 'user', text }, { role: 'one', text: '' }]);
@@ -817,7 +835,7 @@ export function OneCockpit() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: status.model || 'llama3.1:8b',
-          messages: [{ role: 'user', content: text }],
+          messages: [...history, { role: 'user', content: text }],
           stream: true,
           temperature: 0.25,
           max_tokens: 220,
