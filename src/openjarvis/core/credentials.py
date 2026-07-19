@@ -31,6 +31,7 @@ TOOL_CREDENTIALS: dict[str, list[str]] = {
     "video_generate": ["FAL_KEY"],
     "leonardo_video_generate": ["LEONARDO_API_KEY"],
     "leonardo_browser_video_generate": ["LEONARDO_CHROME_PROFILE_DIR"],
+    "speech_deepgram": ["DEEPGRAM_API_KEY"],
     "instagram_post": ["INSTAGRAM_ACCESS_TOKEN", "INSTAGRAM_BUSINESS_ACCOUNT_ID"],
     "facebook_post": ["FACEBOOK_PAGE_ACCESS_TOKEN", "FACEBOOK_PAGE_ID"],
     "twitter_post": [
