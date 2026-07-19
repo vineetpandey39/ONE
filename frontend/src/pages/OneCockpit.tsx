@@ -210,6 +210,31 @@ function normalizeSpeechText(text: string) {
   return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+// Agent names are stored and displayed in ALL CAPS (AGENTS dict in
+// one_agents/runtime.py) for branding, but browser speechSynthesis engines
+// treat unrecognized ALL-CAPS tokens as initialisms and spell them out
+// letter by letter (confirmed live: "JOBHUNT" -> "J-O-B-H-U-N-T",
+// "HEPHAISTOS" -> letter by letter). Title Case (and splitting JOBHUNT into
+// its two real words) routes them through the engine's normal
+// grapheme-to-phoneme path instead, so they're spoken as names.
+const AGENT_NAME_PRONUNCIATION: Record<string, string> = {
+  TITAN: 'Titan',
+  ALFA: 'Alfa',
+  JOBHUNT: 'Job Hunt',
+  BETA: 'Beta',
+  HERMES: 'Hermes',
+  ARES: 'Ares',
+  APOLLO: 'Apollo',
+  ATHENA: 'Athena',
+  HEPHAISTOS: 'Hephaistos',
+  POSEIDON: 'Poseidon',
+  ZEUS: 'Zeus',
+};
+const AGENT_NAME_PATTERN = new RegExp(
+  `\\b(${Object.keys(AGENT_NAME_PRONUNCIATION).join('|')})\\b`,
+  'g',
+);
+
 function isClearOneCommand(text: string) {
   const normalized = normalizeSpeechText(text);
   if (!normalized) return false;
@@ -706,6 +731,7 @@ export function OneCockpit() {
   function speak(text: string, interrupt = true) {
     if (!voiceEnabled || !('speechSynthesis' in window)) return;
     const cleanText = text
+      .replace(AGENT_NAME_PATTERN, (match) => AGENT_NAME_PRONUNCIATION[match])
       .replace(/[*_#`]/g, '')
       .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0F]/gu, '')
       // Remove ISO timestamps (2024-07-08T23:11:45 or 2024-07-08 23:11)
