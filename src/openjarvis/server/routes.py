@@ -330,6 +330,13 @@ def _one_agent_command(text: str) -> str | None:
         parts = []
         for job in failed[:5]:
             reason = (job.get("error") or "").strip() or "no error detail was recorded"
+            # Some errors (e.g. an ffmpeg filter-graph failure) are raw
+            # multi-line stack dumps -- fine to read on a screen, unbearable
+            # for TTS to speak aloud. First line only, capped, since this
+            # whole response is spoken.
+            reason = reason.split("\n", 1)[0].strip()
+            if len(reason) > 180:
+                reason = reason[:177].rstrip() + "..."
             when = (job.get("updated_at") or "")[:16].replace("T", " ")
             parts.append(f"{when} -- {reason}" if when else reason)
         count_word = "failure" if len(parts) == 1 else "failures"
