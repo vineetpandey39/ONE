@@ -310,6 +310,49 @@ def _one_agent_command(text: str) -> str | None:
     ):
         return _friendly_agent_status(status_agent, AGENTS[status_agent]["name"])
 
+    # Confirmed live (2026-07-19, traces.db traces 1f38a44b0264456c and
+    # 125bd0a4a14b49ee): "How are the agents doing?" has no keyword this
+    # function already checks for (no agent name, no "status"/"queue"/"job"/
+    # "history", no dispatch verb), so it fell through to the full ReAct
+    # loop every time. Direct repro testing (isolated agent.run() calls
+    # against the real llama3.1:8b/Ollama, real tools, real bus) showed the
+    # 8B model is simply unreliable here: sometimes it calls agent_network
+    # stats correctly and narrates the real numbers, but other times -- same
+    # code, same model, just normal LLM sampling variance -- it convinces
+    # itself the tool "reached its polling limit" (a total fabrication; nothing
+    # in this codebase rate-limits tool calls) and burns all 10 turns before
+    # inventing an ungrounded answer. A collective agent-status question is
+    # exactly the kind of deterministic, always-correct-if-computed-in-code
+    # request the greeting fast path above already exists for -- so handle it
+    # the same way instead of gambling on the ReAct loop every time.
+    agents_collective_phrases = (
+        "how are the agents", "how are agents", "how re the agents", "how re agents",
+        "agents doing", "agent stats", "agents stats", "stats review",
+        "agent status", "agents status", "status of the agents", "status of agents",
+    )
+    if not status_agent and any(p in check_in for p in agents_collective_phrases):
+        from openjarvis.one_agents.runtime import agent_stats
+
+        holistic = bool(re.search(r"\b(holistic|detail|deep dive|full|breakdown)\w*\b", lowered))
+        stats = agent_stats()
+        active = [s for s in stats if s["total_jobs"] > 0]
+        idle = [s for s in stats if s["total_jobs"] == 0]
+        if not active:
+            return "No agent activity recorded yet, Sir."
+        parts = []
+        for s in active:
+            common = max(s["status_counts"], key=s["status_counts"].get) if s["status_counts"] else "idle"
+            if holistic:
+                breakdown = ", ".join(f"{v} {k}" for k, v in s["status_counts"].items())
+                duration = f", averaging {s['avg_duration_seconds']:.0f}s per job" if s["avg_duration_seconds"] else ""
+                parts.append(f"{s['name']} has run {s['total_jobs']} jobs ({breakdown}){duration}")
+            else:
+                parts.append(f"{s['name']} is mostly {common} across {s['total_jobs']} jobs")
+        summary = "; ".join(parts)
+        idle_names = ", ".join(s["name"] for s in idle)
+        idle_part = f" {idle_names} {'have' if len(idle) != 1 else 'has'} not run yet." if idle_names else ""
+        return f"Agent status, Sir: {summary}.{idle_part}"
+
     obsidian_match = re.search(r"\b(?:search|find|look\s+in)\s+(?:my\s+)?obsidian(?:\s+for)?\s+(.+)", lowered)
     if obsidian_match:
         from openjarvis.one_agents.obsidian import search_obsidian

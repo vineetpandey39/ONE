@@ -221,7 +221,13 @@ function isClearOneCommand(text: string) {
 
 const DEFAULT_STATUS: OneStatus = {
   online: false,
-  model: 'qwen3.5:2b',
+  // Confirmed live (2026-07-19): the actual multi-engine router only knows
+  // the models one.env's ONE_ROUTER_MODEL registers (llama3.1:8b) --
+  // config.toml's [intelligence] default_model ("qwen3.5:2b") isn't a real
+  // registered model and was never the live path. Sending it as a fallback
+  // model name threw a hard 500 ("Model 'qwen3.5:2b' not found in any
+  // engine") whenever a chat request fired before /v1/status had loaded.
+  model: 'llama3.1:8b',
   model_status: undefined,
   agents: [],
   jobs: [],
@@ -784,7 +790,7 @@ export function OneCockpit() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: status.model || 'qwen3.5:2b',
+          model: status.model || 'llama3.1:8b',
           messages: [{ role: 'user', content: text }],
           stream: true,
           temperature: 0.25,
