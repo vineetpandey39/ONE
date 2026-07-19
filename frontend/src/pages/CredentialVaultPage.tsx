@@ -46,6 +46,7 @@ const CONNECTION_PRESETS: ConnectionPreset[] = [
   { id: 'elevenlabs', label: 'ElevenLabs', section: 'custom', keys: ['ELEVENLABS_API_KEY'], note: 'Voice generation' },
   { id: 'leonardo', label: 'Leonardo', section: 'leonardo_video_generate', keys: ['LEONARDO_API_KEY'], note: 'IA image/video provider' },
   { id: 'deepgram', label: 'Deepgram', section: 'speech_deepgram', keys: ['DEEPGRAM_API_KEY'], note: 'Cloud speech-to-text, preferred over local Whisper when set' },
+  { id: 'tavily', label: 'Tavily', section: 'web_search', keys: ['TAVILY_API_KEY'], note: 'Real search API for the Ghost Agent -- replaces the DuckDuckGo scraper, which gets rate-limited' },
 ];
 
 const coreUrl = (path: string) => `${getBase()}${path}`;
