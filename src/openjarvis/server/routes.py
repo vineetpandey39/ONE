@@ -982,25 +982,34 @@ def _run_cloud_tool_loop(
     tools_schema = [t.to_openai_function() for t in tool_instances]
     # shell_exec's ToolSpec sets requires_confirmation=True; without
     # interactive=True + a confirm_callback, ToolExecutor refuses it
-    # unconditionally -- which is what happened live (2026-07-19): Vineet
-    # asked for a command, the Ghost Agent correctly planned it and waited
-    # for "Yes" (the real safety gate -- _GHOST_AGENT_SYSTEM_PROMPT
-    # instructs it to never call shell_exec without an explicit
-    # confirmation already in the conversation, and it reliably followed
-    # that), got the "Yes", called shell_exec -- and then hit this SECOND,
-    # separate, all-or-nothing gate with no way to ever pass it, so it just
-    # apologized and stopped. Per Vineet's explicit instruction: the Ghost
-    # Agent is meant to accept a command, do the work, and return the
-    # output, not stall behind an unbuildable confirmation UI. The actual
-    # gate that matters is already enforced one level up, by the model
-    # itself only calling this tool once it has seen real confirmation in
-    # the message history -- auto-approving here just lets that already-
-    # gated call through instead of blocking it a second time for no one.
-    executor = ToolExecutor(
-        tools=tool_instances,
-        interactive=True,
-        confirm_callback=lambda _prompt: True,
-    )
+    # unconditionally -- confirmed live (2026-07-19): Vineet asked for a
+    # command, the Ghost Agent correctly planned it and waited for "Yes"
+    # (the real safety gate -- _GHOST_AGENT_SYSTEM_PROMPT instructs it to
+    # never call shell_exec without an explicit confirmation already in the
+    # conversation, and it reliably followed that), got the "Yes", called
+    # shell_exec -- and then hit this SECOND, separate, all-or-nothing gate
+    # with no way to ever pass it, so it just apologized and stopped.
+    #
+    # Per Vineet's explicit instruction the Ghost Agent should complete
+    # that loop -- but per his equally explicit follow-up instruction, the
+    # toggle that does it must never be something GitHub's copy of this
+    # file carries, since anyone with the repo could then reason about (or
+    # extend) how to get a shell command auto-executed. So this reads a
+    # LOCAL-ONLY setting, same trust boundary this project already uses for
+    # data/config.toml and one.env (both deliberately excluded from the
+    # git-tracked clean-repo mirror sync-one-github.ps1 publishes) -- the
+    # *code path* that ships to GitHub always defaults closed (refuses,
+    # exactly like before) unless ONE_GHOST_AGENT_AUTO_EXECUTE=true is set
+    # in Vineet's own one.env, which never leaves this machine.
+    auto_execute = os.environ.get("ONE_GHOST_AGENT_AUTO_EXECUTE", "").strip().lower() == "true"
+    if auto_execute:
+        executor = ToolExecutor(
+            tools=tool_instances,
+            interactive=True,
+            confirm_callback=lambda _prompt: True,
+        )
+    else:
+        executor = ToolExecutor(tools=tool_instances)
 
     msgs = list(messages)
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
