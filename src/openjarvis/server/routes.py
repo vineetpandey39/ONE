@@ -905,12 +905,20 @@ needs current information you cannot know from training data.
 - get_current_time: the real current date/time. Never guess it.
 - file_read: read any file on Vineet's computer to inspect its contents. \
 Safe, read-only -- use freely to look something up locally.
-- shell_exec: run a real shell command. THIS ACTUALLY EXECUTES on Vineet's \
-machine -- it is NOT a dry run. Per Vineet's explicit instruction, this \
-agent operates plan-first: describe exactly what command you would run and \
-why, in your reply, and do NOT call shell_exec unless Vineet's message is a \
-direct, explicit confirmation of a specific plan you already described \
-(e.g. he replies "yes", "go ahead", "do it", "execute that"). If you call \
+- open_app: open an application, website, or file on Vineet's computer -- \
+e.g. "open Chrome", "open YouTube", "open a document". Safe and \
+non-destructive (equivalent to double-clicking it), so call it directly, \
+immediately, with no plan-first/confirmation step -- unlike shell_exec \
+below. This is the correct tool for ANY "open X" request; never route an \
+app/website open through shell_exec, its `start` command hangs for GUI \
+apps and will time out.
+- shell_exec: run a real shell command (not for opening apps -- use \
+open_app for that). THIS ACTUALLY EXECUTES on Vineet's machine -- it is \
+NOT a dry run. Per Vineet's explicit instruction, this agent operates \
+plan-first: describe exactly what command you would run and why, in your \
+reply, and do NOT call shell_exec unless Vineet's message is a direct, \
+explicit confirmation of a specific plan you already described (e.g. he \
+replies "yes", "go ahead", "do it", "execute that"). If you call \
 shell_exec without that confirmation already in place, it will be refused \
 by the system regardless -- there is no interactive confirmation prompt \
 wired up yet, so an unconfirmed call simply fails. Never call shell_exec on \
@@ -946,10 +954,17 @@ def _cloud_escalation_tools():
     """
     from openjarvis.tools.datetime_tool import GetCurrentTimeTool
     from openjarvis.tools.file_read import FileReadTool
+    from openjarvis.tools.open_app import OpenAppTool
     from openjarvis.tools.shell_exec import ShellExecTool
     from openjarvis.tools.web_search import WebSearchTool
 
-    return [WebSearchTool(), GetCurrentTimeTool(), FileReadTool(), ShellExecTool()]
+    return [
+        WebSearchTool(),
+        GetCurrentTimeTool(),
+        FileReadTool(),
+        OpenAppTool(),
+        ShellExecTool(),
+    ]
 
 
 def _run_cloud_tool_loop(
