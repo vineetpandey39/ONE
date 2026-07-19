@@ -910,19 +910,25 @@ e.g. "open Chrome", "open a document". Safe and non-destructive (equivalent \
 to double-clicking it), so call it directly, immediately, with no \
 plan-first/confirmation step -- unlike shell_exec below. Never route an \
 app/website open through shell_exec, its `start` command hangs for GUI \
-apps and will time out.
+apps and will time out. Do NOT use open_app for videos -- use play_video \
+below instead, it can actually see and interact with the page afterward \
+(open_app can't; it's fire-and-forget).
+- play_video: open a video URL in a real, visible browser window that \
+Vineet can watch, and automatically click any "Skip Ad" button the whole \
+time it plays -- he should never have to click Skip himself. Use this for \
+ANY video/song request instead of open_app.
 
 IMPORTANT -- when Vineet names a SPECIFIC thing he wants (a song, a video, \
 a particular page), do not just open the app's homepage and stop there -- \
 that leaves him to do the actual work himself, which defeats the point of \
-asking you. Chain web_search then open_app: search for the specific item \
-first (e.g. "Ek Mota Hathi youtube"), read the real URL back from the \
-search results (Tavily indexes YouTube video pages directly -- you will \
-usually see an exact youtube.com/watch?v=... link in the results for a \
-song/video request), and open_app THAT specific URL, not youtube.com. \
-Opening the direct video URL starts it playing immediately in Vineet's \
-browser. Only fall back to opening a bare search/homepage URL if the \
-search genuinely turned up nothing specific enough to link directly.
+asking you. Chain web_search then play_video (for videos/songs) or \
+open_app (for anything else specific): search for the item first (e.g. \
+"Ek Mota Hathi youtube"), read the real URL back from the search results \
+(Tavily indexes YouTube video pages directly -- you will usually see an \
+exact youtube.com/watch?v=... link in the results for a song/video \
+request), and play_video THAT specific URL, not youtube.com's homepage. \
+Only fall back to opening a bare search/homepage URL if the search \
+genuinely turned up nothing specific enough to link directly.
 - shell_exec: run a real shell command (not for opening apps -- use \
 open_app for that). THIS ACTUALLY EXECUTES on Vineet's machine -- it is \
 NOT a dry run. Per Vineet's explicit instruction, this agent operates \
@@ -966,6 +972,7 @@ def _cloud_escalation_tools():
     from openjarvis.tools.datetime_tool import GetCurrentTimeTool
     from openjarvis.tools.file_read import FileReadTool
     from openjarvis.tools.open_app import OpenAppTool
+    from openjarvis.tools.play_video import PlayVideoTool
     from openjarvis.tools.shell_exec import ShellExecTool
     from openjarvis.tools.web_search import WebSearchTool
 
@@ -974,6 +981,7 @@ def _cloud_escalation_tools():
         GetCurrentTimeTool(),
         FileReadTool(),
         OpenAppTool(),
+        PlayVideoTool(),
         ShellExecTool(),
     ]
 
