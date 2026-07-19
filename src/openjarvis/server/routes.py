@@ -980,7 +980,27 @@ def _run_cloud_tool_loop(
 
     tool_instances = _cloud_escalation_tools()
     tools_schema = [t.to_openai_function() for t in tool_instances]
-    executor = ToolExecutor(tools=tool_instances)
+    # shell_exec's ToolSpec sets requires_confirmation=True; without
+    # interactive=True + a confirm_callback, ToolExecutor refuses it
+    # unconditionally -- which is what happened live (2026-07-19): Vineet
+    # asked for a command, the Ghost Agent correctly planned it and waited
+    # for "Yes" (the real safety gate -- _GHOST_AGENT_SYSTEM_PROMPT
+    # instructs it to never call shell_exec without an explicit
+    # confirmation already in the conversation, and it reliably followed
+    # that), got the "Yes", called shell_exec -- and then hit this SECOND,
+    # separate, all-or-nothing gate with no way to ever pass it, so it just
+    # apologized and stopped. Per Vineet's explicit instruction: the Ghost
+    # Agent is meant to accept a command, do the work, and return the
+    # output, not stall behind an unbuildable confirmation UI. The actual
+    # gate that matters is already enforced one level up, by the model
+    # itself only calling this tool once it has seen real confirmation in
+    # the message history -- auto-approving here just lets that already-
+    # gated call through instead of blocking it a second time for no one.
+    executor = ToolExecutor(
+        tools=tool_instances,
+        interactive=True,
+        confirm_callback=lambda _prompt: True,
+    )
 
     msgs = list(messages)
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
