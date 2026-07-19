@@ -195,7 +195,6 @@ def create_app(
     api_key: str = "",
     webhook_config: dict | None = None,
     cors_origins: list[str] | None = None,
-    cloud_escalation_agent=None,
     cloud_escalation_model: str | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
@@ -291,7 +290,6 @@ def create_app(
     app.state.speech_backend = speech_backend
     app.state.agent_manager = agent_manager
     app.state.agent_scheduler = agent_scheduler
-    app.state.cloud_escalation_agent = cloud_escalation_agent
     app.state.cloud_escalation_model = cloud_escalation_model
     app.state.session_start = time.time()
     # Exposed so WebSocket handlers can authenticate the handshake (the HTTP

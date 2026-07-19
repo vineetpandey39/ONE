@@ -372,45 +372,25 @@ def serve(
             console.print(f"[yellow]Agent '{agent_key}' failed to load: {exc}[/yellow]")
             traceback.print_exc()
 
-    # Cloud escalation agent — a small, separate NativeReActAgent bound to a
-    # fast cloud model (Claude Haiku, falling back to GPT-4o-mini) with just
-    # web_search + get_current_time. server/routes.py's chat_completions
-    # routes anything that falls through the deterministic fast paths here
-    # instead of the local ReAct loop above, so this needs real-time lookup
-    # ability of its own -- confirmed live (2026-07-19) that a bare
-    # tool-free cloud completion answered "how's the weather" with "I don't
-    # have a weather tool" even though web_search (Tavily, DuckDuckGo
-    # fallback -- ddgs needs no API key) already existed in this codebase,
-    # just never wired to anything reachable from a live chat request.
-    # Deliberately a SEPARATE, smaller toolset from the main `agent` above
-    # (which may carry agent_network, obsidian_memory, etc.) -- Claude
-    # rarely needs more than one web_search call, and a smaller tool list
-    # keeps the prompt (and therefore the round-trip) fast.
-    cloud_escalation_agent = None
+    # Cloud escalation model — server/routes.py's chat_completions routes
+    # anything that falls through the deterministic fast paths and the local
+    # ReAct loop above to this model instead, via a small native
+    # function-calling tool loop (server/routes.py's _run_cloud_tool_loop),
+    # NOT a NativeReActAgent. Confirmed live (2026-07-19) that Claude Haiku
+    # does not reliably follow NativeReActAgent's text-based
+    # Thought/Action/Action-Input scaffolding (designed for local models
+    # without native function calling) -- it emitted its own
+    # "<function_calls>...</function_calls>" pseudo-text instead, which the
+    # ReAct parser never recognized as an action, so the tool never actually
+    # executed and the raw scaffolding leaked into the reply. Claude/GPT
+    # both have real native tool-calling support already wired in
+    # engine/cloud.py (_convert_tools_to_anthropic, tool_use blocks) --
+    # _run_cloud_tool_loop uses that directly instead.
     cloud_escalation_model = None
     if os.environ.get("ANTHROPIC_API_KEY"):
         cloud_escalation_model = "claude-haiku-4-5"
     elif os.environ.get("OPENAI_API_KEY"):
         cloud_escalation_model = "gpt-4o-mini"
-    if cloud_escalation_model:
-        try:
-            from openjarvis.agents.native_react import NativeReActAgent
-            from openjarvis.tools.datetime_tool import GetCurrentTimeTool
-            from openjarvis.tools.web_search import WebSearchTool
-
-            cloud_escalation_agent = NativeReActAgent(
-                engine,
-                cloud_escalation_model,
-                tools=[WebSearchTool(), GetCurrentTimeTool()],
-                bus=bus,
-                max_turns=4,
-            )
-        except Exception as exc:
-            console.print(
-                f"[yellow]Cloud escalation agent failed to load: {exc}[/yellow]"
-            )
-            cloud_escalation_agent = None
-            cloud_escalation_model = None
 
     # Set up channel backend if enabled
     channel_bridge = None
@@ -728,7 +708,6 @@ def serve(
         api_key=api_key,
         webhook_config=webhook_config,
         cors_origins=config.server.cors_origins,
-        cloud_escalation_agent=cloud_escalation_agent,
         cloud_escalation_model=cloud_escalation_model,
     )
 

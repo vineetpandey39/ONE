@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from openjarvis.core.paths import get_config_dir
-from openjarvis.core.types import Message, Role
+from openjarvis.core.types import Message, Role, ToolCall
 from openjarvis.server.models import (
     ChatCompletionChunk,
     ChatCompletionRequest,
@@ -752,20 +752,17 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     # without a final answer." Per Vineet's explicit instruction: give
     # anything ONE's local model can't confidently handle a path to a real
     # cloud model instead of gambling on the local ReAct loop every time.
-    # cloud_escalation_agent (built once at server startup -- cli/serve.py)
-    # is a small NativeReActAgent bound to a fast cloud model (Claude Haiku,
-    # falling back to GPT-4o-mini) with web_search + get_current_time, so it
-    # can actually answer real-time/factual questions ("how's the weather")
-    # instead of just replying faster with the same "I don't have a tool for
-    # that" the local model gives. Routed through the exact same
-    # _handle_agent/_handle_agent_stream the local agent uses -- reuses all
-    # existing tool-execution, tracing, and streaming machinery, just
-    # pointed at a different agent instance. Falls back to the local agent
-    # path on any failure (network down, rate limited, etc.), and stays on
-    # the local agent entirely when no cloud key is configured, so an
-    # offline-only setup is unaffected. Haiku over Sonnet/Opus on purpose:
-    # latency-first fallback, not a reasoning-heavy one.
-    cloud_escalation_agent = getattr(request.app.state, "cloud_escalation_agent", None)
+    # cloud_escalation_model (set once at server startup -- cli/serve.py) is
+    # a fast cloud model (Claude Haiku, falling back to GPT-4o-mini). Routed
+    # through _run_cloud_tool_loop's native function-calling (web_search +
+    # get_current_time) so it can actually answer real-time/factual
+    # questions ("how's the weather") instead of just replying faster with
+    # the same "I don't have a tool for that" the local model gives. Falls
+    # back to the local agent path on any failure (network down, rate
+    # limited, etc.), and stays on the local agent entirely when no cloud
+    # key is configured, so an offline-only setup is unaffected. Haiku over
+    # Sonnet/Opus on purpose: latency-first fallback, not a reasoning-heavy
+    # one.
     cloud_escalation_model = getattr(request.app.state, "cloud_escalation_model", None)
 
     if request_body.stream:
@@ -784,6 +781,24 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
                 ),
                 latest_user_text,
             )
+        if cloud_escalation_model:
+            try:
+                return _wrap_stream_with_memory(
+                    await _handle_cloud_escalation_stream(
+                        engine,
+                        cloud_escalation_model,
+                        request_body,
+                        complexity_info,
+                        app_config=config,
+                    ),
+                    latest_user_text,
+                )
+            except Exception:
+                logging.getLogger("openjarvis.server").warning(
+                    "Cloud escalation stream to %s failed, falling back to local agent",
+                    cloud_escalation_model,
+                    exc_info=True,
+                )
         # When no client tools were supplied (the desktop chat UI's normal
         # case) and an agent is configured, route through the agent instead
         # of the bare engine. The agent runs the real tool-execution loop
@@ -794,7 +809,7 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
         # unexecuted tool_call the frontend has no way to act on. See
         # `_handle_agent_stream` for the trade-off this implies (no
         # token-by-token typing for agent-routed turns).
-        if agent is not None and not cloud_escalation_agent:
+        if agent is not None:
             return _wrap_stream_with_memory(
                 await _handle_agent_stream(
                     agent,
@@ -806,37 +821,6 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
                 ),
                 latest_user_text,
             )
-        if cloud_escalation_agent is not None:
-            try:
-                return _wrap_stream_with_memory(
-                    await _handle_agent_stream(
-                        cloud_escalation_agent,
-                        cloud_escalation_model,
-                        request_body,
-                        complexity_info,
-                        trace_store=getattr(request.app.state, "trace_store", None),
-                        bus=getattr(request.app.state, "bus", None),
-                    ),
-                    latest_user_text,
-                )
-            except Exception:
-                logging.getLogger("openjarvis.server").warning(
-                    "Cloud escalation stream to %s failed, falling back to local agent",
-                    cloud_escalation_model,
-                    exc_info=True,
-                )
-                if agent is not None:
-                    return _wrap_stream_with_memory(
-                        await _handle_agent_stream(
-                            agent,
-                            model,
-                            request_body,
-                            complexity_info,
-                            trace_store=getattr(request.app.state, "trace_store", None),
-                            bus=getattr(request.app.state, "bus", None),
-                        ),
-                        latest_user_text,
-                    )
         return _wrap_stream_with_memory(
             await _handle_stream(
                 engine,
@@ -866,15 +850,14 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     # tools (e.g. injecting MCP tools through this endpoint and wanting
     # the agent to execute them), add an explicit opt-in header rather
     # than removing this guard — silent re-routing is what produced #414.
-    if cloud_escalation_agent is not None and not request_body.tools:
+    if cloud_escalation_model and not request_body.tools:
         try:
-            cloud_response = _handle_agent(
-                cloud_escalation_agent,
+            cloud_response = _handle_cloud_escalation(
+                engine,
                 cloud_escalation_model,
                 request_body,
                 complexity_info,
-                trace_store=getattr(request.app.state, "trace_store", None),
-                bus=getattr(request.app.state, "bus", None),
+                app_config=config,
             )
             _save_exchange_to_obsidian(latest_user_text, _extract_response_content(cloud_response))
             return cloud_response
@@ -908,6 +891,177 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     )
     _save_exchange_to_obsidian(latest_user_text, _extract_response_content(direct_response))
     return direct_response
+
+
+def _cloud_escalation_tools():
+    """Tool instances the cloud escalation loop can call.
+
+    Deliberately small and separate from the local agent's `[agent] tools`
+    list in config.toml -- Claude/GPT rarely need more than one web_search
+    call for a real-time factual question, and a smaller tool list keeps
+    the round-trip fast.
+    """
+    from openjarvis.tools.datetime_tool import GetCurrentTimeTool
+    from openjarvis.tools.web_search import WebSearchTool
+
+    return [WebSearchTool(), GetCurrentTimeTool()]
+
+
+def _run_cloud_tool_loop(
+    engine,
+    model: str,
+    messages: list[Message],
+    *,
+    temperature: float,
+    max_tokens: int,
+    max_rounds: int = 3,
+) -> dict[str, Any]:
+    """Native function-calling loop for the cloud escalation model.
+
+    NOT NativeReActAgent's text-based Thought/Action/Action-Input protocol.
+    Confirmed live (2026-07-19) that Claude Haiku does not reliably follow
+    that scaffolding -- it emitted its own "<function_calls>...
+    </function_calls>" pseudo-text instead, which the ReAct parser never
+    recognized as an action, so web_search never actually ran and the raw
+    scaffolding leaked into the reply verbatim. Claude/GPT both have real
+    native tool-calling already wired in engine/cloud.py
+    (_convert_tools_to_anthropic converts OpenAI-format tool schemas to
+    Anthropic's tool_use format, and _prepare_anthropic_messages round-trips
+    tool_use/tool_result blocks correctly) -- this uses that directly via
+    `engine.generate(messages, tools=...)`, the same mechanism
+    `_handle_direct` already uses for client-supplied tools.
+    """
+    from openjarvis.tools._stubs import ToolExecutor
+
+    tool_instances = _cloud_escalation_tools()
+    tools_schema = [t.to_openai_function() for t in tool_instances]
+    executor = ToolExecutor(tools=tool_instances)
+
+    msgs = list(messages)
+    total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    result: dict[str, Any] = {}
+    for _round in range(max_rounds):
+        result = engine.generate(
+            msgs,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools_schema,
+        )
+        usage = result.get("usage", {})
+        for k in total_usage:
+            total_usage[k] += usage.get(k, 0)
+
+        tool_calls = result.get("tool_calls") or []
+        if not tool_calls:
+            break
+
+        msgs.append(
+            Message(
+                role=Role.ASSISTANT,
+                content=result.get("content", ""),
+                tool_calls=[
+                    ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
+                    for tc in tool_calls
+                ],
+            )
+        )
+        for tc in tool_calls:
+            tool_result = executor.execute(
+                ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
+            )
+            msgs.append(
+                Message(
+                    role=Role.TOOL,
+                    content=(tool_result.content or "")[:4000],
+                    tool_call_id=tc["id"],
+                )
+            )
+
+    result["usage"] = total_usage
+    return result
+
+
+def _handle_cloud_escalation(
+    engine,
+    model: str,
+    req: ChatCompletionRequest,
+    complexity_info=None,
+    app_config=None,
+) -> ChatCompletionResponse:
+    """Non-streaming cloud escalation: native tool loop, then final answer."""
+    messages = _to_messages(req.messages)
+    messages = _ensure_identity_prompt(messages, app_config)
+    result = _run_cloud_tool_loop(
+        engine,
+        model,
+        messages,
+        temperature=req.temperature,
+        max_tokens=req.max_tokens,
+    )
+    usage = result.get("usage", {})
+    return ChatCompletionResponse(
+        model=model,
+        choices=[
+            Choice(
+                message=ChoiceMessage(role="assistant", content=result.get("content", "")),
+                finish_reason=result.get("finish_reason", "stop"),
+            )
+        ],
+        usage=UsageInfo(
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+            total_tokens=usage.get("total_tokens", 0),
+        ),
+        complexity=complexity_info,
+    )
+
+
+async def _handle_cloud_escalation_stream(
+    engine,
+    model: str,
+    req: ChatCompletionRequest,
+    complexity_info=None,
+    app_config=None,
+) -> StreamingResponse:
+    """Streaming cloud escalation.
+
+    The tool loop itself (0-2 rounds of a blocking `engine.generate` call)
+    isn't token-streamed -- it resolves fully server-side first, same as
+    the deterministic command replies below. Only the final answer is
+    emitted as a single SSE chunk. True token-by-token streaming through a
+    multi-turn native tool-calling loop is real added complexity for a
+    result that, per the numbers already measured this session (a couple
+    seconds end to end), the user won't perceive as non-streamed anyway.
+    """
+    messages = _to_messages(req.messages)
+    messages = _ensure_identity_prompt(messages, app_config)
+    result = _run_cloud_tool_loop(
+        engine,
+        model,
+        messages,
+        temperature=req.temperature,
+        max_tokens=req.max_tokens,
+    )
+    content = result.get("content", "")
+
+    async def generate():
+        chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        first = ChatCompletionChunk(
+            id=chunk_id,
+            model=model,
+            choices=[StreamChoice(delta=DeltaMessage(role="assistant", content=content))],
+        )
+        final = ChatCompletionChunk(
+            id=chunk_id,
+            model=model,
+            choices=[StreamChoice(delta=DeltaMessage(), finish_reason="stop")],
+        )
+        yield f"data: {json.dumps(first.model_dump())}\n\n"
+        yield f"data: {json.dumps(final.model_dump())}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 def _handle_direct(
