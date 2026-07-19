@@ -1434,6 +1434,7 @@ class SpeechConfig:
     language: str = ""  # Empty = auto-detect
     device: str = "auto"  # "auto", "cpu", "cuda"
     compute_type: str = "float16"  # "float16", "int8", "float32"
+    cpu_threads: int = 0  # 0 = faster-whisper's own default; only used when device="cpu"
 
 
 @dataclass(slots=True)

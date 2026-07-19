@@ -916,6 +916,8 @@ speech_router = APIRouter(prefix="/v1/speech", tags=["speech"])
 @speech_router.post("/transcribe")
 async def transcribe_speech(request: Request):
     """Transcribe uploaded audio to text."""
+    from fastapi.concurrency import run_in_threadpool
+
     backend = getattr(request.app.state, "speech_backend", None)
     if backend is None:
         raise HTTPException(status_code=501, detail="Speech backend not configured")
@@ -933,7 +935,15 @@ async def transcribe_speech(request: Request):
     ext = filename.rsplit(".", 1)[-1] if "." in filename else "wav"
 
     try:
-        result = backend.transcribe(audio_bytes, format=ext, language=language or None)
+        # Confirmed: this call previously ran synchronously inside an async
+        # handler, blocking FastAPI's entire event loop (single worker, per
+        # config.toml) for the full duration of a CPU-bound Whisper call --
+        # every other request (status polls, wake events, other users'
+        # transcriptions) stalled behind it. /native-record already used
+        # run_in_threadpool correctly; this brings /transcribe in line.
+        result = await run_in_threadpool(
+            backend.transcribe, audio_bytes, format=ext, language=language or None
+        )
     except Exception as exc:
         logger.exception("Local speech transcription failed")
         raise HTTPException(status_code=422, detail=f"Local transcription failed: {type(exc).__name__}") from exc

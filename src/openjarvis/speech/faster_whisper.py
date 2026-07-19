@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
 from typing import List, Optional
 
 from openjarvis.core.registry import SpeechRegistry
@@ -43,11 +44,20 @@ class FasterWhisperBackend(SpeechBackend):
         model_size: str = "base",
         device: str = "auto",
         compute_type: str = "float16",
+        cpu_threads: int = 0,
     ) -> None:
         self._model_size = model_size
         self._device = device
         self._compute_type = compute_type
+        self._cpu_threads = cpu_threads
         self._model: Optional[WhisperModel] = None
+        # /transcribe now runs off the event loop via run_in_threadpool, and
+        # /native-record already did -- both can genuinely overlap now (e.g. a
+        # button-press command arriving while an always-listening window is
+        # still transcribing). CTranslate2 model instances aren't documented
+        # as safe for concurrent .transcribe() calls from multiple threads;
+        # serialize access rather than risk interleaved/corrupted output.
+        self._lock = threading.Lock()
 
     def _ensure_model(self) -> WhisperModel:
         """Lazy-load the Whisper model on first use."""
@@ -57,11 +67,16 @@ class FasterWhisperBackend(SpeechBackend):
                     "faster-whisper is not installed. "
                     "Install with: uv sync --extra speech"
                 )
-            self._model = WhisperModel(
-                self._model_size,
-                device=self._device,
-                compute_type=self._compute_type,
-            )
+            kwargs: dict = {
+                "device": self._device,
+                "compute_type": self._compute_type,
+            }
+            # Only pass cpu_threads when explicitly set (>0) -- 0 means "let
+            # faster-whisper pick its own default", and it errors if given 0
+            # directly. Irrelevant on GPU, but harmless to include either way.
+            if self._cpu_threads > 0:
+                kwargs["cpu_threads"] = self._cpu_threads
+            self._model = WhisperModel(self._model_size, **kwargs)
         return self._model
 
     def transcribe(
@@ -134,8 +149,9 @@ class FasterWhisperBackend(SpeechBackend):
             kwargs["language"] = language
 
         try:
-            segments_iter, info = model.transcribe(temp_path, **kwargs)
-            segments_list = list(segments_iter)
+            with self._lock:
+                segments_iter, info = model.transcribe(temp_path, **kwargs)
+                segments_list = list(segments_iter)
         finally:
             try:
                 os.unlink(temp_path)

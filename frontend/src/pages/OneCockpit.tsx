@@ -895,10 +895,18 @@ export function OneCockpit() {
 
   async function transcribe(blob: Blob) {
     setTranscribing(true);
+    const controller = new AbortController();
+    // GPU Whisper (large-v3-turbo/float16) transcribes a short command clip in
+    // a few seconds under normal conditions. 25s gives headroom above that
+    // while still failing fast instead of hanging the mic UI indefinitely --
+    // this fetch previously had no timeout at all, unlike sendCommand's chat
+    // call, which is why a stuck backend read as a silent, unrecoverable hang
+    // rather than a clear timeout.
+    const timeoutId = window.setTimeout(() => controller.abort(), 25_000);
     try {
       const form = new FormData();
       form.append('file', blob, 'one-command.webm');
-      const response = await coreFetch('/v1/speech/transcribe', { method: 'POST', body: form });
+      const response = await coreFetch('/v1/speech/transcribe', { method: 'POST', body: form, signal: controller.signal });
       if (!response.ok) {
         let errorMsg = 'Local speech recognition is unavailable';
         try { const p = await response.json(); errorMsg = p.detail || errorMsg; } catch { /* non-JSON error */ }
@@ -907,14 +915,28 @@ export function OneCockpit() {
       const payload = await response.json();
       const text = String(payload.text || '').trim();
       if (!text) throw new Error('I could not hear a clear command.');
+      // Whisper's own language_probability -- low-confidence transcripts are
+      // more likely to be noise/misheard words than a real command. Ask to
+      // repeat instead of forwarding a guess to the LLM: previously this
+      // field was returned by the backend but never read anywhere, so
+      // hallucination filtering was 100% delegated to a prompt instruction
+      // the model wasn't guaranteed to follow.
+      const confidence = Number(payload.confidence);
+      if (Number.isFinite(confidence) && confidence < 0.5) {
+        setLines((current) => [...current.slice(-7), { role: 'one', text: "I didn't catch that clearly, Sir. Could you repeat it?" }]);
+        return;
+      }
       // No wake-word gate here: the user explicitly pressed the mic button,
       // so send whatever they said directly to ONE.
       setCommand(text);
       await sendCommand(text.replace(/^\s*(hey\s+)?one[,:]?\s*/i, ''));
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Transcription failed.';
+      const message = error instanceof Error
+        ? (error.name === 'AbortError' ? 'Local speech recognition took too long, Sir. Please try again.' : error.message)
+        : 'Transcription failed.';
       setLines((current) => [...current.slice(-7), { role: 'one', text: message }]);
     } finally {
+      window.clearTimeout(timeoutId);
       setTranscribing(false);
     }
   }
@@ -925,12 +947,18 @@ export function OneCockpit() {
     setNativeRecording(true);
     setRecording(true);
     setMicLevel(55);
+    const controller = new AbortController();
+    // Same reasoning as transcribe(): this fetch previously had no timeout at
+    // all. The server-side capture window itself is 4-8s, so 25s leaves
+    // healthy room for capture + transcription before treating it as stuck.
+    const timeoutId = window.setTimeout(() => controller.abort(), 25_000);
     try {
       const selected = selectedDeviceId.startsWith('native:') ? Number(selectedDeviceId.split(':')[1]) : undefined;
       const response = await coreFetch('/v1/speech/native-record', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ device: deviceOverride ?? selected, duration: silent ? 4 : 5 }),
+        signal: controller.signal,
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || 'Native microphone capture failed.');
@@ -945,6 +973,20 @@ export function OneCockpit() {
           ? 'ONE received almost silent audio. Select the WASAPI microphone and speak closer to it.'
           : 'ONE heard sound but not clear speech. Speak after the listening light turns on.');
       }
+      // Whisper's own language_probability -- see transcribe() for why this
+      // is checked in code now instead of only via a prompt instruction.
+      const confidence = Number(payload.confidence);
+      if (Number.isFinite(confidence) && confidence < 0.5) {
+        // Silent (always-listening) windows treat low confidence the same as
+        // ambient noise -- don't interrupt every few seconds. An explicit
+        // command (button press) gets a clear "please repeat" instead of
+        // being forwarded to the LLM as a guess.
+        if (silent) return;
+        const retryMessage = "I didn't catch that clearly, Sir. Could you repeat it?";
+        setMicError(retryMessage);
+        setLines((current) => [...current.slice(-7), { role: 'one', text: retryMessage }]);
+        return;
+      }
       const normalized = normalizeSpeechText(text);
       const soundsLikeEcho = spokenEchoRef.current.some((spoken) => (
         spoken.length > 18
@@ -956,10 +998,13 @@ export function OneCockpit() {
       await sendCommand(text.replace(/^\s*(hey\s+)?one[,:]?\s*/i, ''));
     } catch (error) {
       if (silent) return;
-      const message = error instanceof Error ? error.message : 'Native microphone capture failed.';
+      const message = error instanceof Error
+        ? (error.name === 'AbortError' ? 'Native microphone capture took too long, Sir. Please try again.' : error.message)
+        : 'Native microphone capture failed.';
       setMicError(message);
       setLines((current) => [...current.slice(-7), { role: 'one', text: message }]);
     } finally {
+      window.clearTimeout(timeoutId);
       setRecording(false);
       setNativeRecording(false);
       setMicLevel(0);
