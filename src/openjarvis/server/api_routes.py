@@ -1078,6 +1078,7 @@ async def native_record(request: Request):
 
     def capture_and_transcribe():
         import io
+        import math
         import time
         import wave
 
@@ -1087,16 +1088,56 @@ async def native_record(request: Request):
         from openjarvis.one_agents.wake import pause_wake_listener, resume_wake_listener
 
         def open_capture(target_device):
+            # Confirmed live (2026-07-19): a plain blocking sd.rec() for the
+            # full fixed `duration` was the single biggest latency source in
+            # the whole voice pipeline -- a 2-second "Hey ONE, how are you"
+            # still made the user wait out the entire 5s window before
+            # transcription even started, on top of STT + TTS time. Stream
+            # in small blocks instead (same technique wake.py's clap
+            # detector already uses) and stop as soon as sustained silence
+            # follows real speech, so a short command finishes in ~1-2s
+            # instead of always paying the full ceiling. `duration` remains
+            # a hard safety-net ceiling for longer commands.
             info = sd.query_devices(target_device, "input")
             sample_rate = int(info.get("default_samplerate", 44100))
-            raw = sd.rec(
-                int(duration * sample_rate),
-                samplerate=sample_rate,
-                channels=1,
-                dtype="float32",
-                device=target_device,
-                blocking=True,
-            )
+            blocksize = max(256, int(sample_rate * 0.05))  # ~50ms blocks
+            silence_hang_blocks = max(1, int(0.7 / 0.05))  # ~700ms of silence to stop
+            max_blocks = max(1, int(duration / 0.05))
+
+            chunks: list[np.ndarray] = []
+            noise_floor = 0.01
+            speech_started = False
+            silence_run = 0
+            calibration_blocks = 4  # ~200ms to estimate the room's noise floor
+
+            with sd.InputStream(
+                device=target_device, samplerate=sample_rate, channels=1,
+                dtype="float32", blocksize=blocksize,
+            ) as stream:
+                for i in range(max_blocks):
+                    frame, _overflowed = stream.read(blocksize)
+                    mono = frame[:, 0]
+                    chunks.append(mono.copy())
+                    rms = float(math.sqrt(float(np.mean(mono * mono)) + 1e-12))
+
+                    if i < calibration_blocks:
+                        noise_floor = noise_floor * 0.5 + rms * 0.5
+                        continue
+
+                    speech_threshold = max(0.018, noise_floor * 4.0)
+                    if rms >= speech_threshold:
+                        speech_started = True
+                        silence_run = 0
+                    elif speech_started:
+                        silence_run += 1
+                        if silence_run >= silence_hang_blocks:
+                            break
+                    else:
+                        # Still waiting for speech to start -- let the noise
+                        # floor drift slowly in case ambient level changes.
+                        noise_floor = noise_floor * 0.98 + rms * 0.02
+
+            raw = np.concatenate(chunks).reshape(-1, 1) if chunks else np.zeros((0, 1), dtype=np.float32)
             return raw, sample_rate
 
         pause_wake_listener()

@@ -254,10 +254,10 @@ def _one_agent_command(text: str) -> str | None:
         "tum कैसे हो",
         "aap कैसे हो",
     }:
-        return (
-            "I am online and steady, Sir. Local core is listening, memory is active, "
-            "and the agent network is standing by. Tell me which mission to run."
-        )
+        # Shorter on purpose -- this is spoken aloud via TTS on every single
+        # greeting, and the original 3-sentence version added several real
+        # seconds of speaking time on top of an already-slow voice pipeline.
+        return "Online and steady, Sir. What can I do for you?"
 
     from openjarvis.one_agents.runtime import AGENTS, enqueue_job, list_jobs
 
