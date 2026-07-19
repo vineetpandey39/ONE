@@ -305,6 +305,39 @@ def _one_agent_command(text: str) -> str | None:
         return f"{name}'s last run completed successfully."
 
     status_agent = _match_agent_id(lowered)
+
+    # Confirmed live (2026-07-19): "Why IA got failed?" named the agent but
+    # used none of the keywords the status branch below checks for
+    # ("fail"/"why"/"wrong"/"error"/"issue"/"problem" aren't status/update/
+    # progress/etc), so it fell through the ReAct loop and hallucinated "the
+    # memory backend is not configured" -- a real limitation elsewhere in
+    # the system, but not the actual reason anything failed, and not
+    # grounded in this agent's real job history at all. Every failed job
+    # already has a real reason recorded (fail_job() writes it to the
+    # `error` column) -- this answers directly from that instead of asking
+    # the LLM to guess. Uses list_agent_jobs(), not list_jobs(), because a
+    # busy agent (ALFA at 352+ jobs) crowds a quieter agent's failures clean
+    # out of list_jobs()'s global recent-N window.
+    failure_phrases = ("fail", "wrong", "error", "issue", "problem", "why")
+    if status_agent and any(p in lowered for p in failure_phrases):
+        from openjarvis.one_agents.runtime import list_agent_jobs
+
+        name = AGENTS[status_agent]["name"]
+        agent_jobs = list_agent_jobs(status_agent, 20)
+        failed = [job for job in agent_jobs if job["status"] == "failed"]
+        if not failed:
+            return f"{name} has no failed runs on record, Sir."
+        parts = []
+        for job in failed[:5]:
+            reason = (job.get("error") or "").strip() or "no error detail was recorded"
+            when = (job.get("updated_at") or "")[:16].replace("T", " ")
+            parts.append(f"{when} -- {reason}" if when else reason)
+        count_word = "failure" if len(parts) == 1 else "failures"
+        return (
+            f"{name}'s last {len(parts)} {count_word}, most recent first, Sir: "
+            + "; then before that, ".join(parts)
+        )
+
     if status_agent and re.search(
         r"\b(status|update|progress|found|find|result|results|lead|leads|opportunit|achiev|revenue)\w*\b", lowered
     ):

@@ -161,6 +161,25 @@ def get_job(job_id: str) -> dict[str, Any] | None:
         return _row(db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone())
 
 
+def list_agent_jobs(agent_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    """All jobs for one specific agent, most recent first.
+
+    Confirmed live (2026-07-19): ``list_jobs()`` is a global recent-N window
+    across every agent -- a busy agent (ALFA, 352+ jobs) crowds a quieter
+    agent's own history out of that window entirely, so filtering
+    ``list_jobs()``'s results down to one agent_id can silently return far
+    fewer rows than that agent actually has. Querying by agent_id directly
+    is the only way to reliably answer "why did IA fail" with its own real
+    history instead of whatever happened to survive the global limit.
+    """
+    with _connect() as db:
+        rows = db.execute(
+            "SELECT * FROM jobs WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?",
+            (agent_id, max(1, min(limit, 100))),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def list_jobs(limit: int = 20) -> list[dict[str, Any]]:
     with _connect() as db:
         rows = db.execute(
