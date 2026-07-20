@@ -157,7 +157,23 @@ class PlayVideoTool(BaseTool):
             browser = playwright.chromium.launch(
                 headless=False,
                 channel="chrome",
-                args=["--start-maximized"],
+                args=[
+                    "--start-maximized",
+                    # This machine has a real GPU (confirmed elsewhere in
+                    # this project -- an RTX 3070 Ti already used for
+                    # Ollama). Playwright's default launch args always
+                    # include --enable-unsafe-swiftshader, which forces
+                    # software-only rendering (SwiftShader) regardless --
+                    # normally there for headless CI environments with no
+                    # real GPU. Confirmed live (2026-07-20) that with it
+                    # present, the page itself loads fine but YouTube's
+                    # video player throws "Something went wrong" after a
+                    # few seconds -- a classic symptom of failed
+                    # hardware-accelerated video decode under forced
+                    # software rendering. Excluding it lets Chrome use the
+                    # real GPU.
+                ],
+                ignore_default_args=["--enable-unsafe-swiftshader"],
             )
             context = browser.new_context(no_viewport=True)
             page = context.new_page()
