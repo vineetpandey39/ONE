@@ -5,22 +5,39 @@ runs headless=True (invisible, for research/search where nobody needs to
 see the page). Video playback needs a visible window, since the whole
 point is Vineet actually watching/hearing it -- open_app (os.startfile)
 can open the URL but has no way to see or interact with the page
-afterward, so it can never click a Skip Ad button. This tool opens the
-page and runs a background watcher for the life of the video, clicking
-any Skip Ad button the instant it becomes clickable.
+afterward, so it can never click a Skip Ad button. This tool keeps a
+handle to the page and runs a background watcher for the life of the
+video, clicking any Skip Ad button the instant it becomes clickable.
 
-Confirmed live (2026-07-20): an earlier version of this tool used a
-PERSISTENT Chrome profile (launch_persistent_context against a saved
-directory) specifically so a manually-solved Google CAPTCHA would stick
-across calls. In practice this caused more problems than it solved --
-several ad-hoc test invocations during development each tried to open the
-SAME profile directory at once, and Chrome's own SingletonLock only allows
-one process per profile: the result was a stuck, half-rendered window
-sitting on about:blank and YouTube's "Something went wrong" error. Per
-Vineet's own suggestion, switched to a fresh, isolated context per call
-(the same idea as an incognito window) -- no shared profile, no lock
-contention, no cross-call corruption. Trade-off: a solved CAPTCHA no
-longer persists between calls, but reliability wins over that.
+Design history (2026-07-19/20), each fix confirmed live before moving on:
+1. Started with a PERSISTENT Chrome profile so a manually-solved CAPTCHA
+   would stick. Broke because several ad-hoc STANDALONE TEST SCRIPTS (each
+   its own Python process, run directly by hand during development, not
+   through the real server) opened the same profile directory at once --
+   Chrome's SingletonLock allows one process per profile, so they fought
+   each other: a stuck window on about:blank, YouTube's "Something went
+   wrong".
+2. Switched to a fresh/incognito-style context per call to kill that class
+   of bug outright. Fixed the corruption, but a fresh profile has zero
+   provisioned components every single time -- see next.
+3. Root-caused "Something went wrong" (a DIFFERENT instance of it, on a
+   real DRM video this time) to two of Playwright's default launch args:
+   --enable-unsafe-swiftshader forces software rendering despite this
+   machine's real GPU, and --disable-component-update blocks the Widevine
+   CDM (DRM module most commercial/label content needs) from ever being
+   fetched -- confirmed directly via chrome://components showing no
+   Widevine entry with the flag present, a real one (4.10.3050.0) with it
+   excluded.
+4. Widevine has to be fetched over the network once it's allowed to be --
+   doing that from a blank profile on every single call means re-fetching
+   it (and racing the video's own load) every time. So: back to a
+   PERSISTENT profile for Widevine/cookies to actually stick, but this
+   time as a proper in-process singleton, reused across calls within one
+   server run instead of re-launched -- which is what actually caused
+   step 1's conflict (concurrent SEPARATE PROCESSES each launching fresh,
+   not the persistence itself). As long as nothing outside this module
+   opens the same profile directory concurrently, there's exactly one
+   process holding the lock at a time.
 """
 
 from __future__ import annotations
@@ -53,6 +70,13 @@ Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
 Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
 window.chrome = window.chrome || { runtime: {} };
 """
+
+# Playwright's default launch args target headless CI environments and
+# actively break real video playback -- see module docstring point 3.
+_IGNORED_DEFAULT_ARGS = [
+    "--enable-unsafe-swiftshader",
+    "--disable-component-update",
+]
 
 
 def _try_skip_once(page: Any) -> bool:
@@ -89,6 +113,61 @@ def _watch_and_skip_ads(page: Any, duration_seconds: float) -> None:
         time.sleep(_POLL_INTERVAL_SECONDS)
 
 
+class _VideoSession:
+    """Dedicated, VISIBLE, PERSISTENT Playwright session for video playback.
+
+    A module-level singleton -- reused across every play_video call within
+    one running ONE server process. Never launch a second one against the
+    same profile directory from anywhere else (a standalone test script,
+    a second tool, etc.) -- that reintroduces the SingletonLock conflict
+    documented in the module docstring.
+    """
+
+    def __init__(self) -> None:
+        self._playwright = None
+        self._context = None
+        self._page = None
+
+    def _profile_dir(self):
+        from openjarvis.core.paths import get_config_dir
+
+        d = get_config_dir() / "ghost_agent_video_profile"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _ensure_browser(self) -> None:
+        if self._page is not None and not self._page.is_closed():
+            return
+        from playwright.sync_api import sync_playwright
+
+        self._playwright = sync_playwright().start()
+        self._context = self._playwright.chromium.launch_persistent_context(
+            str(self._profile_dir()),
+            headless=False,
+            channel="chrome",
+            # --start-maximized + no_viewport=True together make the page
+            # use the real (maximized) window size instead of Playwright's
+            # default fixed 1280x720 viewport -- the fixed viewport
+            # rendered inside a maximized window is what produced the
+            # "half screen" look.
+            args=["--start-maximized"],
+            no_viewport=True,
+            ignore_default_args=_IGNORED_DEFAULT_ARGS,
+        )
+        self._page = (
+            self._context.pages[0] if self._context.pages else self._context.new_page()
+        )
+        self._page.add_init_script(_STEALTH_INIT_SCRIPT)
+
+    @property
+    def page(self) -> Any:
+        self._ensure_browser()
+        return self._page
+
+
+_video_session = _VideoSession()
+
+
 @ToolRegistry.register("play_video")
 class PlayVideoTool(BaseTool):
     """Open a video URL in a real visible browser and auto-skip ads."""
@@ -107,10 +186,11 @@ class PlayVideoTool(BaseTool):
                 "for as long as the video plays -- Vineet should never need "
                 "to click Skip himself. Use this INSTEAD of open_app "
                 "whenever the target is a video you want actually playing "
-                "(not just any page you want opened). Each call opens a "
-                "fresh, isolated window (like incognito) -- if Google shows "
-                "a CAPTCHA, Vineet needs to solve it himself in that window; "
-                "this tool will never attempt to solve it."
+                "(not just any page you want opened). Reuses the same "
+                "browser session across calls -- if Google shows a "
+                "CAPTCHA, Vineet needs to solve it himself in that window "
+                "the first time; this tool will never attempt to solve it, "
+                "but the solve then sticks for future calls."
             ),
             parameters={
                 "type": "object",
@@ -146,38 +226,7 @@ class PlayVideoTool(BaseTool):
             )
 
         try:
-            from playwright.sync_api import sync_playwright
-
-            playwright = sync_playwright().start()
-            # --start-maximized + no_viewport=True together make the page
-            # use the browser window's real (maximized) size instead of
-            # Playwright's default fixed 1280x720 viewport -- the fixed
-            # viewport rendered inside a maximized window is what produced
-            # the "half screen" look Vineet reported.
-            browser = playwright.chromium.launch(
-                headless=False,
-                channel="chrome",
-                args=[
-                    "--start-maximized",
-                    # This machine has a real GPU (confirmed elsewhere in
-                    # this project -- an RTX 3070 Ti already used for
-                    # Ollama). Playwright's default launch args always
-                    # include --enable-unsafe-swiftshader, which forces
-                    # software-only rendering (SwiftShader) regardless --
-                    # normally there for headless CI environments with no
-                    # real GPU. Confirmed live (2026-07-20) that with it
-                    # present, the page itself loads fine but YouTube's
-                    # video player throws "Something went wrong" after a
-                    # few seconds -- a classic symptom of failed
-                    # hardware-accelerated video decode under forced
-                    # software rendering. Excluding it lets Chrome use the
-                    # real GPU.
-                ],
-                ignore_default_args=["--enable-unsafe-swiftshader"],
-            )
-            context = browser.new_context(no_viewport=True)
-            page = context.new_page()
-            page.add_init_script(_STEALTH_INIT_SCRIPT)
+            page = _video_session.page
             page.goto(url, wait_until="domcontentloaded", timeout=15000)
         except ImportError:
             return ToolResult(
