@@ -73,9 +73,19 @@ window.chrome = window.chrome || { runtime: {} };
 
 # Playwright's default launch args target headless CI environments and
 # actively break real video playback -- see module docstring point 3.
+# --no-sandbox added 2026-07-20: confirmed live via Chrome's own banner
+# ("You are using an unsupported command-line flag: --no-sandbox.
+# Stability and security will suffer.") on a SECOND, different video
+# (not the same DRM-specific one Widevine fixed) -- "Something went
+# wrong" recurred there too, meaning it was never purely a Widevine
+# issue, it's general renderer/GPU-process instability from running
+# unsandboxed. --no-sandbox exists in Playwright's defaults for Linux
+# CI/root environments where the sandbox often can't initialize at all;
+# this is a normal Windows user session, which doesn't need it.
 _IGNORED_DEFAULT_ARGS = [
     "--enable-unsafe-swiftshader",
     "--disable-component-update",
+    "--no-sandbox",
 ]
 
 
