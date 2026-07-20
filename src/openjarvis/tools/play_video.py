@@ -5,9 +5,22 @@ runs headless=True (invisible, for research/search where nobody needs to
 see the page). Video playback needs a visible window, since the whole
 point is Vineet actually watching/hearing it -- open_app (os.startfile)
 can open the URL but has no way to see or interact with the page
-afterward, so it can never click a Skip Ad button. This tool keeps a
-handle to the page and runs a background watcher for the life of the
-video, clicking any Skip Ad button the instant it becomes clickable.
+afterward, so it can never click a Skip Ad button. This tool opens the
+page and runs a background watcher for the life of the video, clicking
+any Skip Ad button the instant it becomes clickable.
+
+Confirmed live (2026-07-20): an earlier version of this tool used a
+PERSISTENT Chrome profile (launch_persistent_context against a saved
+directory) specifically so a manually-solved Google CAPTCHA would stick
+across calls. In practice this caused more problems than it solved --
+several ad-hoc test invocations during development each tried to open the
+SAME profile directory at once, and Chrome's own SingletonLock only allows
+one process per profile: the result was a stuck, half-rendered window
+sitting on about:blank and YouTube's "Something went wrong" error. Per
+Vineet's own suggestion, switched to a fresh, isolated context per call
+(the same idea as an incognito window) -- no shared profile, no lock
+contention, no cross-call corruption. Trade-off: a solved CAPTCHA no
+longer persists between calls, but reliability wins over that.
 """
 
 from __future__ import annotations
@@ -33,6 +46,13 @@ _SKIP_AD_TEXT_PATTERNS = ["Skip Ad", "Skip Ads", "Skip ad", "Skip ads"]
 
 _POLL_INTERVAL_SECONDS = 1.5
 _WATCH_DURATION_SECONDS = 900  # 15 minutes -- covers most videos' ad windows
+
+_STEALTH_INIT_SCRIPT = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+window.chrome = window.chrome || { runtime: {} };
+"""
 
 
 def _try_skip_once(page: Any) -> bool:
@@ -69,73 +89,6 @@ def _watch_and_skip_ads(page: Any, duration_seconds: float) -> None:
         time.sleep(_POLL_INTERVAL_SECONDS)
 
 
-class _VideoSession:
-    """Dedicated, VISIBLE, PERSISTENT Playwright session for video playback.
-
-    Confirmed live (2026-07-19): even real Chrome (channel="chrome", not
-    Playwright's bundled Chromium) plus JS-side stealth patches still hit
-    Google's "unusual traffic" CAPTCHA wall on youtube.com/watch pages --
-    including on a video never touched before, and even though the plain
-    youtube.com homepage loaded fine. That rules out per-video or pure
-    fingerprint causes; it's Google flagging this IP for the /watch
-    endpoint specifically, most likely from the sheer volume of automated
-    requests generated while building and testing this tool today.
-    Completing that CAPTCHA programmatically is not something this tool
-    will ever do -- it's explicitly against policy here and against
-    Google's own terms. What IS legitimate: the window is real and visible,
-    so Vineet can solve it himself the one time it appears. A PERSISTENT
-    context (a real profile directory on disk, not a fresh throwaway
-    session per call) means that solve -- and any Google/YouTube login --
-    sticks in cookies for every future call, including across ONE server
-    restarts, instead of needing to be redone constantly.
-    """
-
-    def __init__(self) -> None:
-        self._playwright = None
-        self._context = None
-        self._page = None
-
-    def _profile_dir(self):
-        from pathlib import Path
-
-        from openjarvis.core.paths import get_config_dir
-
-        d = get_config_dir() / "ghost_agent_video_profile"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
-    def _ensure_browser(self) -> None:
-        if self._page is not None and not self._page.is_closed():
-            return
-        from playwright.sync_api import sync_playwright
-
-        self._playwright = sync_playwright().start()
-        self._context = self._playwright.chromium.launch_persistent_context(
-            str(self._profile_dir()),
-            headless=False,
-            channel="chrome",
-        )
-        self._page = (
-            self._context.pages[0] if self._context.pages else self._context.new_page()
-        )
-        self._page.add_init_script(
-            """
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-            window.chrome = window.chrome || { runtime: {} };
-            """
-        )
-
-    @property
-    def page(self) -> Any:
-        self._ensure_browser()
-        return self._page
-
-
-_video_session = _VideoSession()
-
-
 @ToolRegistry.register("play_video")
 class PlayVideoTool(BaseTool):
     """Open a video URL in a real visible browser and auto-skip ads."""
@@ -149,12 +102,15 @@ class PlayVideoTool(BaseTool):
             name="play_video",
             description=(
                 "Open a video (e.g. a specific YouTube watch URL found via "
-                "web_search) in a real, visible browser window, and "
-                "automatically click any 'Skip Ad' button that appears for as "
-                "long as the video plays -- Vineet should never need to click "
-                "Skip himself. Use this INSTEAD of open_app whenever the "
-                "target is a video you want actually playing (not just any "
-                "page you want opened)."
+                "web_search) in a real, visible, maximized browser window, "
+                "and automatically click any 'Skip Ad' button that appears "
+                "for as long as the video plays -- Vineet should never need "
+                "to click Skip himself. Use this INSTEAD of open_app "
+                "whenever the target is a video you want actually playing "
+                "(not just any page you want opened). Each call opens a "
+                "fresh, isolated window (like incognito) -- if Google shows "
+                "a CAPTCHA, Vineet needs to solve it himself in that window; "
+                "this tool will never attempt to solve it."
             ),
             parameters={
                 "type": "object",
@@ -190,7 +146,22 @@ class PlayVideoTool(BaseTool):
             )
 
         try:
-            page = _video_session.page
+            from playwright.sync_api import sync_playwright
+
+            playwright = sync_playwright().start()
+            # --start-maximized + no_viewport=True together make the page
+            # use the browser window's real (maximized) size instead of
+            # Playwright's default fixed 1280x720 viewport -- the fixed
+            # viewport rendered inside a maximized window is what produced
+            # the "half screen" look Vineet reported.
+            browser = playwright.chromium.launch(
+                headless=False,
+                channel="chrome",
+                args=["--start-maximized"],
+            )
+            context = browser.new_context(no_viewport=True)
+            page = context.new_page()
+            page.add_init_script(_STEALTH_INIT_SCRIPT)
             page.goto(url, wait_until="domcontentloaded", timeout=15000)
         except ImportError:
             return ToolResult(
