@@ -110,10 +110,26 @@ def _try_skip_once(page: Any) -> bool:
     return False
 
 
-def _watch_and_skip_ads(page: Any, duration_seconds: float) -> None:
-    """Background loop: click any skip-ad button that appears, for a while."""
+def _watch_and_skip_ads(page: Any, duration_seconds: float, stop_event: threading.Event) -> None:
+    """Background loop: click any skip-ad button that appears, for a while.
+
+    stop_event lets a NEWER call cancel an OLDER call's still-running
+    watcher. Confirmed live (2026-07-20): the page object is reused across
+    play_video calls (see _VideoSession below), but each call used to spawn
+    its own independent 15-minute watcher thread with no way to stop the
+    previous one -- playing a second video while the first's watcher was
+    still active meant two threads calling Playwright's sync API on the
+    SAME page concurrently. That API is not safe to call from multiple
+    threads at once; this is the most likely real cause of the
+    intermittent "Something went wrong" crashes that kept recurring after
+    every Chrome-launch-flag fix (swiftshader, component-update,
+    sandbox) -- those were all real, individually confirmed issues, but
+    apparently not the only one.
+    """
     deadline = time.time() + duration_seconds
     while time.time() < deadline:
+        if stop_event.is_set():
+            return
         try:
             if page.is_closed():
                 return
@@ -137,6 +153,31 @@ class _VideoSession:
         self._playwright = None
         self._context = None
         self._page = None
+        # Stop-signal for whichever ad-skip watcher thread is currently
+        # active on self._page, if any -- see _watch_and_skip_ads.
+        self._watcher_stop_event: threading.Event | None = None
+
+    def cancel_watcher(self) -> None:
+        """Signal any currently-running ad-skip watcher thread to stop.
+
+        Must be called before starting a new one against the reused page --
+        otherwise two watcher threads end up calling Playwright's sync API
+        on the same page concurrently, which is not safe.
+        """
+        if self._watcher_stop_event is not None:
+            self._watcher_stop_event.set()
+
+    def start_watcher(self, duration_seconds: float) -> None:
+        """Cancel any previous watcher, then start a fresh one on self._page."""
+        self.cancel_watcher()
+        stop_event = threading.Event()
+        self._watcher_stop_event = stop_event
+        threading.Thread(
+            target=_watch_and_skip_ads,
+            args=(self._page, duration_seconds, stop_event),
+            daemon=True,
+            name="ghost-agent-ad-skip-watcher",
+        ).start()
 
     def _profile_dir(self):
         from openjarvis.core.paths import get_config_dir
@@ -220,6 +261,57 @@ class PlayVideoTool(BaseTool):
             timeout_seconds=20,
         )
 
+    def _try_via_extension(self, url: str) -> ToolResult | None:
+        """Try opening the video through the ONE Ghost Agent Chrome
+        extension in Vineet's own real browser, if it's connected.
+
+        Confirmed root cause (2026-07-20) of most of this tool's crash
+        history: the Playwright path below opens a separate, cookie-less,
+        unauthenticated automation Chrome profile, which YouTube/Google
+        treats very differently from Vineet's real logged-in session
+        (CAPTCHA challenges the real browser never sees), on top of a long
+        tail of separate-process issues (SingletonLock conflicts, orphaned
+        processes, the whole automation window dying whenever the ONE
+        server process itself restarts). Per Vineet's own suggestion, the
+        extension controls tabs in his REAL browser instead -- same model
+        as Anthropic's own "Claude in Chrome". Returns None (not a
+        ToolResult) when the extension isn't connected, so the caller falls
+        through to the Playwright path unchanged -- this is purely
+        additive, zero risk if Vineet hasn't loaded the extension yet.
+        """
+        from openjarvis.server.ghost_extension_bridge import (
+            enqueue_open_video,
+            extension_is_live,
+            pop_result,
+        )
+
+        if not extension_is_live():
+            return None
+
+        command_id = enqueue_open_video(url)
+        deadline = time.time() + 12.0
+        while time.time() < deadline:
+            result = pop_result(command_id)
+            if result is not None:
+                if result["success"]:
+                    return ToolResult(
+                        tool_name=self.tool_id,
+                        content=(
+                            f"Opened {url} in your browser, Sir. The ONE "
+                            "extension will auto-skip any ads."
+                        ),
+                        success=True,
+                        metadata={"url": url, "via": "extension"},
+                    )
+                # Extension picked up the command but failed to act on it
+                # (e.g. chrome.tabs.create threw) -- fall back to Playwright
+                # rather than surfacing a hard failure to Vineet.
+                return None
+            time.sleep(0.2)
+        # Extension claimed to be live but never answered -- fall back
+        # rather than leaving Vineet with neither path having worked.
+        return None
+
     def execute(self, **params: Any) -> ToolResult:
         url = str(params.get("url", "")).strip()
         if not url:
@@ -235,7 +327,18 @@ class PlayVideoTool(BaseTool):
                 success=False,
             )
 
+        extension_result = self._try_via_extension(url)
+        if extension_result is not None:
+            return extension_result
+
         try:
+            # Cancel any watcher left over from a PREVIOUS play_video call
+            # before touching the (reused) page at all -- see
+            # _watch_and_skip_ads's docstring for why this matters: two
+            # watcher threads calling Playwright's sync API on the same
+            # page concurrently is a real, confirmed cause of intermittent
+            # crashes here.
+            _video_session.cancel_watcher()
             page = _video_session.page
             page.goto(url, wait_until="domcontentloaded", timeout=15000)
         except ImportError:
@@ -260,12 +363,7 @@ class PlayVideoTool(BaseTool):
         except Exception:
             pass
 
-        threading.Thread(
-            target=_watch_and_skip_ads,
-            args=(page, _WATCH_DURATION_SECONDS),
-            daemon=True,
-            name="ghost-agent-ad-skip-watcher",
-        ).start()
+        _video_session.start_watcher(_WATCH_DURATION_SECONDS)
 
         return ToolResult(
             tool_name=self.tool_id,

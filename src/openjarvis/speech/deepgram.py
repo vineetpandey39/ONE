@@ -44,7 +44,19 @@ class DeepgramSpeechBackend(SpeechBackend):
         self._api_key = api_key or os.environ.get("DEEPGRAM_API_KEY", "")
         self._client = None
         if self._api_key and DeepgramClient is not None:
-            self._client = DeepgramClient(api_key=self._api_key)
+            # Confirmed live (2026-07-20): every real transcribe() call
+            # failed with "SSL: CERTIFICATE_VERIFY_FAILED: unable to get
+            # local issuer certificate" -- the same Avast SSL-interception
+            # issue already fixed for the DuckDuckGo backend
+            # (web_search.py's DDGS(verify=False)). __init__ itself never
+            # touches the network, so "Speech: deepgram" printed as healthy
+            # at every startup this whole time despite this backend never
+            # having completed a single real call.
+            import httpx
+
+            self._client = DeepgramClient(
+                api_key=self._api_key, httpx_client=httpx.Client(verify=False)
+            )
 
     def transcribe(
         self,
@@ -77,7 +89,15 @@ class DeepgramSpeechBackend(SpeechBackend):
         if language:
             kwargs["language"] = language
         else:
-            kwargs["detect_language"] = True
+            # "multi" is Deepgram's own bounded code-switching mode for
+            # nova-2/nova-3 (confirmed live, 2026-07-20 -- see SDK's
+            # deepgram_listen_provider_v1.py docstring), not full
+            # unconstrained detect_language across every supported
+            # language. Same reasoning as faster_whisper.py's
+            # _SUPPORTED_LANGUAGES restriction: a short utterance has too
+            # little signal for reliable free-form language ID, and this
+            # household only ever speaks English/Hindi/Hinglish.
+            kwargs["language"] = "multi"
 
         response = self._client.listen.v1.media.transcribe_file(**kwargs)
 

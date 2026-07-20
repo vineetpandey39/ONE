@@ -12,8 +12,19 @@ from openjarvis.speech._stubs import Segment, SpeechBackend, TranscriptionResult
 
 try:
     from faster_whisper import WhisperModel
+    from faster_whisper.audio import decode_audio
 except ImportError:
     WhisperModel = None  # type: ignore[assignment, misc]
+    decode_audio = None  # type: ignore[assignment, misc]
+
+# Confirmed live (2026-07-20): unconstrained language auto-detect
+# misclassified a short, clear English phrase ("How are you JARVIS?") as
+# Turkish -- a well-known Whisper failure mode on short audio (too little
+# phonetic evidence for reliable language ID across the model's 90+
+# languages). Vineet's household only ever speaks English/Hindi/Hinglish,
+# so when no language is pinned in config.toml, restrict auto-detect's
+# choice to just these two instead of the full set.
+_SUPPORTED_LANGUAGES = ("en", "hi")
 
 
 _ONE_VOCABULARY_PROMPT = (
@@ -89,14 +100,24 @@ class FasterWhisperBackend(SpeechBackend):
         """Transcribe audio bytes using Faster-Whisper."""
         model = self._ensure_model()
 
-        # Write audio to a temp file (faster-whisper needs a file path)
+        # Write audio to a temp file (faster-whisper/PyAV needs a file path
+        # to decode from), then decode it once up front into a raw array so
+        # it can be reused for both language detection and the real
+        # transcription pass below without decoding twice.
         suffix = f".{format}" if not format.startswith(".") else format
         # Windows locks an open NamedTemporaryFile, so PyAV cannot reopen it.
-        # Close the file before transcription and remove it explicitly after.
+        # Close the file before decoding and remove it explicitly after.
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(audio)
             tmp.flush()
             temp_path = tmp.name
+        try:
+            audio_array = decode_audio(temp_path)
+        finally:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
         # Voice commands are short. Greedy decoding and VAD preserve command
         # accuracy while avoiding the slower multi-beam search path.
@@ -147,16 +168,26 @@ class FasterWhisperBackend(SpeechBackend):
         }
         if language:
             kwargs["language"] = language
-
-        try:
-            with self._lock:
-                segments_iter, info = model.transcribe(temp_path, **kwargs)
-                segments_list = list(segments_iter)
-        finally:
+        else:
+            # No language pinned in config.toml -- restrict auto-detect to
+            # English/Hindi (see _SUPPORTED_LANGUAGES above) instead of
+            # trusting Whisper's single top guess across its full language
+            # set, which is what produced the Turkish misfire.
             try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
+                with self._lock:
+                    _, _, all_probs = model.detect_language(
+                        audio=audio_array,
+                        vad_filter=True,
+                        vad_parameters=kwargs["vad_parameters"],
+                    )
+                probs = dict(all_probs)
+                kwargs["language"] = max(_SUPPORTED_LANGUAGES, key=lambda lang: probs.get(lang, 0.0))
+            except Exception:
+                pass  # fall through to full auto-detect if detection itself fails
+
+        with self._lock:
+            segments_iter, info = model.transcribe(audio_array, **kwargs)
+            segments_list = list(segments_iter)
 
         # Build result
         text = "".join(seg.text for seg in segments_list).strip()

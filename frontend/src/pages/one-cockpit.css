@@ -779,7 +779,7 @@ body { margin: 0; background: #02060b; }
 }
 
 /* ============================================================
-   JarvisCore — 3D holographic AI orb (THREE.js canvas)
+   JarvisCore — circular JARVIS-style HUD ring (SVG + CSS)
    ============================================================ */
 .jarvis-wrap {
   position: relative;
@@ -789,21 +789,105 @@ body { margin: 0; background: #02060b; }
   height: min(74vh, 74vw, 820px);
   margin: 0 auto;
   flex-shrink: 0;
-  cursor: grab;
+  cursor: pointer;
   user-select: none;
-}
-.jarvis-wrap:active { cursor: grabbing; }
 
-.jarvis-canvas-mount {
+  --jarvis-accent:     #00d4ff;
+  --jarvis-accent-dim: #00d4ff55;
+  --jarvis-arc-duration: 22s;
+}
+.jarvis-wrap--listening { --jarvis-accent: #00ffcc; --jarvis-accent-dim: #00ffcc55; --jarvis-arc-duration: 14s; }
+.jarvis-wrap--speaking  { --jarvis-accent: #ffd700; --jarvis-accent-dim: #ffd70055; --jarvis-arc-duration: 10s; }
+.jarvis-wrap--thinking  { --jarvis-accent: #aa55ff; --jarvis-accent-dim: #aa55ff55; --jarvis-arc-duration: 7s;  }
+.jarvis-wrap--offline   { --jarvis-accent: #445566; --jarvis-accent-dim: #44556655; --jarvis-arc-duration: 60s; }
+
+/* Static radial glow behind the ring -- a plain gradient, not a filter, so
+   it costs nothing per animation frame regardless of what's animating
+   inside the SVG on top of it. */
+.jarvis-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 8%;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--jarvis-accent-dim) 0%, transparent 70%);
+  opacity: 0.5;
+  pointer-events: none;
+  transition: background 0.4s;
+}
+
+/* Heartbeat wobble -- only while actually in a discussion (listening,
+   thinking, or speaking), not on idle "awake" or "offline". Two-beat
+   "lub-dub" scale pattern rather than a plain sine pulse. */
+.jarvis-wrap--discussing {
+  animation: jarvis-heartbeat 1.1s ease-in-out infinite;
+}
+@keyframes jarvis-heartbeat {
+  0%   { transform: scale(1);     }
+  10%  { transform: scale(1.05);  }
+  20%  { transform: scale(0.99);  }
+  32%  { transform: scale(1.035); }
+  46%  { transform: scale(1);     }
+  100% { transform: scale(1);     }
+}
+
+.jarvis-ring-svg {
   position: absolute;
   inset: 0;
-  border-radius: 50%;
-  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  /* A blurred drop-shadow filter recomputed every animation frame across
+     70+ animating SVG elements is expensive (real jank risk, not just a
+     preview-tool quirk) -- the static radial glow below gives the same
+     "HUD glow" read far more cheaply. */
 }
-.jarvis-canvas-mount canvas {
-  display: block;
-  width: 100% !important;
-  height: 100% !important;
+
+.jarvis-ring-outer,
+.jarvis-ring-mid,
+.jarvis-ring-inner {
+  fill: none;
+  stroke: var(--jarvis-accent-dim);
+  transition: stroke 0.4s;
+}
+.jarvis-ring-outer { stroke-width: 1.5; }
+.jarvis-ring-mid   { stroke-width: 2.5; stroke: var(--jarvis-accent); opacity: 0.75; }
+.jarvis-ring-inner { stroke-width: 1;   opacity: 0.5; }
+
+.jarvis-tick {
+  stroke: var(--jarvis-accent-dim);
+  stroke-width: 1.5;
+  transition: stroke 0.4s;
+}
+.jarvis-tick--major {
+  stroke: var(--jarvis-accent);
+  stroke-width: 2.5;
+  opacity: 0.85;
+}
+
+.jarvis-arc {
+  fill: none;
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+.jarvis-arc--accent { stroke: var(--jarvis-accent); opacity: 0.9; }
+.jarvis-arc--gold   { stroke: #ffd700; opacity: 0.85; }
+.jarvis-arc-spin {
+  transform-origin: 200px 200px;
+  animation: jarvis-arc-rotate var(--jarvis-arc-duration) linear infinite;
+}
+@keyframes jarvis-arc-rotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.jarvis-marker {
+  fill: var(--jarvis-accent);
+  animation: jarvis-marker-blink 2.4s ease-in-out infinite;
+}
+.jarvis-marker--gold { fill: #ffd700; animation-delay: 1.1s; }
+@keyframes jarvis-marker-blink {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1;   }
 }
 
 /* HUD corner brackets */
@@ -848,11 +932,12 @@ body { margin: 0; background: #02060b; }
   100% { top: 100%; opacity: 0; }
 }
 
-/* Text overlay — anchored to bottom quarter of wrap */
+/* Text overlay — dead-centered in the ring, matching the reference */
 .jarvis-text {
   position: absolute;
-  bottom: 10%;
+  top: 50%;
   left: 0; right: 0;
+  transform: translateY(-50%);
   text-align: center;
   pointer-events: none;
   line-height: 1.4;
@@ -860,16 +945,18 @@ body { margin: 0; background: #02060b; }
 .jarvis-tag {
   font-size: 9px;
   letter-spacing: 4px;
-  color: #00d4ff77;
+  color: var(--jarvis-accent-dim, #00d4ff77);
   font-family: 'Courier New', monospace;
   margin-bottom: 2px;
+  transition: color 0.4s;
 }
 .jarvis-name {
-  font-size: 24px;
+  font-size: 34px;
   font-weight: 700;
   letter-spacing: 9px;
   color: #d8f6ff;
-  text-shadow: 0 0 18px #00aaff88;
+  text-shadow: 0 0 18px var(--jarvis-accent-dim, #00aaff88);
+  transition: text-shadow 0.4s;
 }
 .jarvis-status {
   font-size: 10px;

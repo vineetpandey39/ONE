@@ -1455,7 +1455,7 @@ export function OneCockpit() {
 
         {/* ── Footer ── */}
         <footer className="jarvis-pg-footer">
-          <div className="jarvis-pg-hint" aria-hidden="true">DRAG TO ROTATE · SCROLL TO ZOOM</div>
+          <div className="jarvis-pg-hint" aria-hidden="true">TAP CORE TO SPEAK</div>
           <button
             type="button"
             className={`one-listen-toggle ${alwaysListening ? 'on' : ''}`}

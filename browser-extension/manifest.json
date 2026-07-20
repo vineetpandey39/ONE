@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "ONE Ghost Agent",
+  "version": "1.0.0",
+  "description": "Lets ONE's Ghost Agent open and manage videos in your real Chrome session. Talks only to your local ONE server at 127.0.0.1 -- nothing remote.",
+  "permissions": ["tabs", "bookmarks"],
+  "host_permissions": [
+    "http://127.0.0.1:8000/*",
+    "*://*.youtube.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content_script.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

@@ -94,7 +94,7 @@ try {
         exit 0
     }
 
-    $mirrorDirs = @("frontend", "src", "configs", "scripts", "skills", "tools", "deploy", "desktop", "examples", "tests", "rust")
+    $mirrorDirs = @("frontend", "src", "configs", "scripts", "skills", "tools", "deploy", "desktop", "examples", "tests", "rust", "browser-extension")
     foreach ($dir in $mirrorDirs) {
         $sourceDir = Join-Path $sourceRepo $dir
         if (Test-Path $sourceDir) {

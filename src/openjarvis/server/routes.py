@@ -6,6 +6,7 @@ import logging
 import json
 import os
 import re
+import time
 import uuid
 from typing import Any
 
@@ -406,14 +407,38 @@ def _one_agent_command(text: str) -> str | None:
         lines = [f"{item['title']}: {item['snippet'][:140]}" for item in findings]
         return "Obsidian memory found:\n" + "\n".join(lines)
 
-    if re.search(r"\b(queue|job|history|status)\b", lowered):
+    # Confirmed live (2026-07-20): bare "status" here used to hijack anything
+    # containing that extremely common word, including totally unrelated
+    # Ghost Agent requests like "open instagram and get the status of my
+    # last post" -- that request got a job-queue dump instead of ever
+    # reaching the Ghost Agent. Specific per-agent status (line ~349) and
+    # "how are the agents doing" (line ~369) are already handled above this
+    # point, so this catch-all only needs to fire for requests actually
+    # naming ONE's own queue/jobs, not any message that merely contains the
+    # word "status".
+    if re.search(r"\b(queue|job)\b", lowered):
         jobs = list_jobs(8)
         if not jobs:
             return "The ONE agent queue is empty."
-        summary = "; ".join(
+        entries = [
             f"{AGENTS.get(job['agent_id'], {}).get('name', job['agent_id'])} is {job['status']}"
             + (f" ({job['progress']}% done)" if job["status"] == "running" else "")
             for job in jobs
+        ]
+        # Confirmed live (2026-07-20): 7 of the last 8 rows were separate,
+        # genuinely distinct completed ALFA jobs, but with no per-job detail
+        # in this phrasing they all render as the identical string --
+        # "ALFA is completed" repeated 7 times reads as a bug even though
+        # the underlying data is correct. Collapse identical entries into a
+        # single "(xN)" count instead of listing each occurrence.
+        counts: dict[str, int] = {}
+        order: list[str] = []
+        for entry in entries:
+            if entry not in counts:
+                order.append(entry)
+            counts[entry] = counts.get(entry, 0) + 1
+        summary = "; ".join(
+            f"{entry} (x{counts[entry]})" if counts[entry] > 1 else entry for entry in order
         )
         return f"Here's what's in the queue: {summary}."
 
@@ -893,6 +918,90 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     return direct_response
 
 
+@router.get("/v1/ghost-agent/extension/poll")
+async def ghost_agent_extension_poll():
+    """Long-polled by the ONE Ghost Agent Chrome extension's background
+    worker running in Vineet's real browser (browser-extension/ in this
+    repo). Blocks briefly (checking every 200ms) so a queued command is
+    delivered close to instantly instead of waiting for the next fixed
+    poll interval -- async/await here, not time.sleep, so this never blocks
+    the server's event loop for other requests while waiting (the same
+    class of bug Phase A fixed for /transcribe).
+    """
+    import asyncio
+
+    from openjarvis.server.ghost_extension_bridge import (
+        has_pending,
+        mark_polled,
+        take_pending,
+    )
+
+    mark_polled()
+    deadline = time.time() + 20.0
+    while time.time() < deadline:
+        if has_pending():
+            break
+        await asyncio.sleep(0.2)
+    return {"commands": take_pending()}
+
+
+@router.post("/v1/ghost-agent/extension/result")
+async def ghost_agent_extension_result(request: Request):
+    """The extension reports back whether a command it ran actually worked."""
+    from openjarvis.server.ghost_extension_bridge import report_result
+
+    payload = await request.json()
+    report_result(
+        str(payload.get("id", "")),
+        bool(payload.get("success")),
+        str(payload.get("detail", "")),
+    )
+    return {"ok": True}
+
+
+@router.post("/v1/ghost-agent/extension/bookmark")
+async def ghost_agent_extension_bookmark(request: Request):
+    """Save a bookmark in Vineet's real Chrome via the Ghost Agent extension.
+
+    Synchronous from the caller's point of view: enqueues the command, then
+    waits (async, non-blocking) for the extension to report back or times
+    out -- same pattern as play_video.py's _try_via_extension, just exposed
+    as its own endpoint since this isn't a Ghost Agent LLM tool call, it's
+    invoked directly.
+    """
+    import asyncio
+
+    from openjarvis.server.ghost_extension_bridge import (
+        enqueue_bookmark,
+        extension_is_live,
+        pop_result,
+    )
+
+    payload = await request.json()
+    url = str(payload.get("url", "")).strip()
+    title = str(payload.get("title", "")).strip() or url
+    if not url:
+        raise HTTPException(status_code=400, detail="Missing 'url'")
+
+    if not extension_is_live():
+        raise HTTPException(
+            status_code=503,
+            detail="ONE Ghost Agent extension isn't connected -- open chrome://extensions, "
+            "reload it (bookmarks permission was just added), and make sure Chrome is running.",
+        )
+
+    command_id = enqueue_bookmark(url, title)
+    deadline = time.time() + 8.0
+    while time.time() < deadline:
+        result = pop_result(command_id)
+        if result is not None:
+            if result["success"]:
+                return {"ok": True, "url": url, "title": title}
+            raise HTTPException(status_code=500, detail=f"Extension failed: {result['detail']}")
+        await asyncio.sleep(0.2)
+    raise HTTPException(status_code=504, detail="Extension didn't respond in time")
+
+
 _GHOST_AGENT_SYSTEM_PROMPT = """\
 You are ONE's Ghost Agent -- the part of ONE that reaches outside the local \
 model's own knowledge for anything real-time or local-machine-specific: \
@@ -993,7 +1102,7 @@ def _run_cloud_tool_loop(
     *,
     temperature: float,
     max_tokens: int,
-    max_rounds: int = 3,
+    max_rounds: int = 6,
 ) -> dict[str, Any]:
     """Native function-calling loop for the cloud escalation model.
 
@@ -1045,9 +1154,17 @@ def _run_cloud_tool_loop(
     else:
         executor = ToolExecutor(tools=tool_instances)
 
+    # Ghost Agent tool activity bypasses TraceCollector entirely (it calls
+    # engine.generate() directly, not through the traced agent path), so
+    # traces.db has zero record of what it actually did. This INFO-level
+    # logging is the only visibility into it anywhere -- confirmed useful
+    # live (2026-07-20) diagnosing a case where the final reply claimed
+    # success ("playing now, Sir") but no tool had actually run that round.
+    logger = logging.getLogger("openjarvis.server")
     msgs = list(messages)
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     result: dict[str, Any] = {}
+    ran_out_of_rounds = True
     for _round in range(max_rounds):
         result = engine.generate(
             msgs,
@@ -1062,7 +1179,19 @@ def _run_cloud_tool_loop(
 
         tool_calls = result.get("tool_calls") or []
         if not tool_calls:
+            logger.info(
+                "ghost_agent round=%d: no tool calls, final content=%r",
+                _round,
+                (result.get("content") or "")[:200],
+            )
+            ran_out_of_rounds = False
             break
+
+        logger.info(
+            "ghost_agent round=%d: requested tool_calls=%s",
+            _round,
+            [(tc["name"], tc["arguments"]) for tc in tool_calls],
+        )
 
         msgs.append(
             Message(
@@ -1078,6 +1207,13 @@ def _run_cloud_tool_loop(
             tool_result = executor.execute(
                 ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
             )
+            logger.info(
+                "ghost_agent round=%d: tool=%s success=%s content=%r",
+                _round,
+                tc["name"],
+                tool_result.success,
+                (tool_result.content or "")[:300],
+            )
             msgs.append(
                 Message(
                     role=Role.TOOL,
@@ -1085,6 +1221,25 @@ def _run_cloud_tool_loop(
                     tool_call_id=tc["id"],
                 )
             )
+
+    if ran_out_of_rounds:
+        # The last round still wanted to call a tool when the round budget
+        # ran out -- confirmed live (2026-07-20): this used to return that
+        # round's raw response as-is, a dangling "let me try the alternate
+        # version, Sir" with an intent that was never actually carried out
+        # (its tool_calls are dropped on the floor, not executed), leaving
+        # Vineet with a reply that promises an action that never happens.
+        # One last no-tools call forces a real wrap-up sentence from
+        # whatever's already in msgs (including every tool result so far).
+        result = engine.generate(
+            msgs,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        usage = result.get("usage", {})
+        for k in total_usage:
+            total_usage[k] += usage.get(k, 0)
 
     result["usage"] = total_usage
     return result
