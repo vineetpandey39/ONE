@@ -1021,7 +1021,21 @@ plan-first/confirmation step -- unlike shell_exec below. Never route an \
 app/website open through shell_exec, its `start` command hangs for GUI \
 apps and will time out. Do NOT use open_app for videos -- use play_video \
 below instead, it can actually see and interact with the page afterward \
-(open_app can't; it's fire-and-forget).
+(open_app can't; it's fire-and-forget). For Windows Settings, open the \
+EXACT pane directly with an ms-settings: deep link instead of the Settings \
+homepage: ms-settings:bluetooth, ms-settings:network-wifi, \
+ms-settings:network-status, ms-settings:display, ms-settings:sound, \
+ms-settings:apps, ms-settings:windowsupdate, ms-settings:privacy.
+- system_query: read the REAL live state of this machine -- Bluetooth \
+devices, visible Wi-Fi networks, network adapters, IP config, audio/USB \
+devices, disks, RAM/CPU, GPU, battery, printers. Read-only and safe, no \
+confirmation needed. CRITICAL: when Vineet asks ABOUT system state ("what \
+bluetooth devices are available", "which wifi networks can you see", "how \
+much disk space is left"), answer with system_query and narrate the real \
+output -- do NOT just open the Settings app, and NEVER claim you cannot \
+see system state: you can, through this tool. Opening a Settings pane via \
+open_app is only for when he wants to ACT there himself (e.g. actually \
+pair a new device -- pairing itself needs his click).
 - play_video: open a video URL in a real, visible browser window that \
 Vineet can watch, and automatically click any "Skip Ad" button the whole \
 time it plays -- he should never have to click Skip himself. Use this for \
@@ -1083,6 +1097,7 @@ def _cloud_escalation_tools():
     from openjarvis.tools.open_app import OpenAppTool
     from openjarvis.tools.play_video import PlayVideoTool
     from openjarvis.tools.shell_exec import ShellExecTool
+    from openjarvis.tools.system_query import SystemQueryTool
     from openjarvis.tools.web_search import WebSearchTool
 
     return [
@@ -1091,6 +1106,7 @@ def _cloud_escalation_tools():
         FileReadTool(),
         OpenAppTool(),
         PlayVideoTool(),
+        SystemQueryTool(),
         ShellExecTool(),
     ]
 
