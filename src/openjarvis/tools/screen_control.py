@@ -53,6 +53,39 @@ _CAPTURE_DIRNAME = "screen_captures"
 _CURSOR_MOVE_SECONDS = 0.55
 
 
+def _flash_click_point(x: int, y: int, radius: int = 46, duration: float = 0.45) -> None:
+    """Briefly flash a cyan ring at (x, y) so Vineet sees exactly where the
+    click is about to land, before it happens. Pure stdlib Tkinter overlay,
+    on-screen only. Cosmetic and best-effort -- any failure is swallowed so
+    it can NEVER block or delay the real click."""
+    try:
+        import tkinter as tk
+
+        margin = 5
+        size = radius * 2 + margin * 2
+        trans = "magenta"  # color key rendered fully transparent
+        root = tk.Tk()
+        root.overrideredirect(True)
+        root.attributes("-topmost", True)
+        try:
+            root.attributes("-transparentcolor", trans)
+        except tk.TclError:
+            pass
+        root.configure(bg=trans)
+        root.geometry(f"{size}x{size}+{int(x - size / 2)}+{int(y - size / 2)}")
+        cv = tk.Canvas(root, width=size, height=size, bg=trans, highlightthickness=0)
+        cv.pack()
+        cv.create_oval(margin, margin, size - margin, size - margin,
+                       outline="#00e5ff", width=5)
+        cv.create_oval(size / 2 - 8, size / 2 - 8, size / 2 + 8, size / 2 + 8,
+                       outline="#00e5ff", width=2)
+        root.update()
+        time.sleep(duration)
+        root.destroy()
+    except Exception:
+        pass
+
+
 def _top_window(auto, ctrl):
     """Climb from a control to its top-level Window/Pane."""
     top = ctrl
@@ -291,6 +324,7 @@ class ScreenControlTool(BaseTool):
                 # cursor slowly enough for Vineet to watch it land.
                 win = _bring_to_front(auto, auto.GetForegroundControl())
                 pyautogui.moveTo(x, y, duration=_CURSOR_MOVE_SECONDS)
+                _flash_click_point(x, y)  # show the exact spot before clicking
                 if action == "click":
                     pyautogui.click()
                 elif action == "double_click":
