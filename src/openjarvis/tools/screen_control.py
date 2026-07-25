@@ -45,6 +45,51 @@ _INTERACTIVE_TYPES = {
 _MAX_ELEMENTS = 60      # cap the list so a huge window stays LLM-sized
 _MAX_DEPTH = 14         # how deep to walk the control tree
 _CAPTURE_DIRNAME = "screen_captures"
+# Vineet's explicit requirement (2026-07-25): every click/keystroke must
+# happen in plain sight on the real screen -- never a hidden background
+# operation. So before acting we bring the target window to the front and
+# un-minimize it, and the cursor travels slowly enough to follow with the
+# eye rather than teleporting.
+_CURSOR_MOVE_SECONDS = 0.55
+
+
+def _top_window(auto, ctrl):
+    """Climb from a control to its top-level Window/Pane."""
+    top = ctrl
+    try:
+        while top.GetParentControl() is not None and top.ControlTypeName not in (
+            "WindowControl", "PaneControl"
+        ):
+            top = top.GetParentControl()
+    except Exception:
+        return ctrl
+    return top
+
+
+def _bring_to_front(auto, ctrl) -> str:
+    """Un-minimize + foreground the window we're about to act on, so the
+    action is visible to Vineet. Returns the window title (best effort)."""
+    top = _top_window(auto, ctrl)
+    title = ""
+    try:
+        title = top.Name or ""
+    except Exception:
+        pass
+    # Restore if minimized.
+    try:
+        wp = top.GetWindowPattern()
+        if wp and wp.WindowVisualState == auto.WindowVisualState.Minimized:
+            wp.SetWindowVisualState(auto.WindowVisualState.Normal)
+            time.sleep(0.3)
+    except Exception:
+        pass
+    # Bring to foreground (SetForegroundWindow under the hood).
+    try:
+        top.SetActive()
+        time.sleep(0.2)
+    except Exception:
+        pass
+    return title
 
 
 def _capture_dir():
@@ -242,7 +287,10 @@ class ScreenControlTool(BaseTool):
                         success=False,
                     )
                 x, y = int(x), int(y)
-                pyautogui.moveTo(x, y, duration=0.15)
+                # Make it visible: foreground the window, then move the
+                # cursor slowly enough for Vineet to watch it land.
+                win = _bring_to_front(auto, auto.GetForegroundControl())
+                pyautogui.moveTo(x, y, duration=_CURSOR_MOVE_SECONDS)
                 if action == "click":
                     pyautogui.click()
                 elif action == "double_click":
@@ -252,19 +300,23 @@ class ScreenControlTool(BaseTool):
                 time.sleep(0.4)  # let the UI react before the next describe
                 return ToolResult(
                     tool_name=self.tool_id,
-                    content=f"{action} at ({x}, {y}) done. Call describe_screen to see the result.",
+                    content=f"{action} at ({x}, {y}) in '{win}' (done in front of you). "
+                            "Call describe_screen to see the result.",
                     success=True,
-                    metadata={"x": x, "y": y},
+                    metadata={"x": x, "y": y, "window": win},
                 )
 
             if action == "type_text":
                 text = str(params.get("text", ""))
                 if not text:
                     return ToolResult(tool_name=self.tool_id, content="No text to type.", success=False)
-                pyautogui.typewrite(text, interval=0.02)
+                _bring_to_front(auto, auto.GetForegroundControl())
+                # Slightly slower than instant so the typing is visibly
+                # happening on screen, not injected silently.
+                pyautogui.typewrite(text, interval=0.03)
                 return ToolResult(
                     tool_name=self.tool_id,
-                    content=f"Typed {len(text)} characters into the focused field.",
+                    content=f"Typed {len(text)} characters into the focused field (visible on screen).",
                     success=True,
                 )
 
