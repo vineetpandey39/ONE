@@ -1173,28 +1173,49 @@ export function OneCockpit() {
   // the user explicitly turns it off again.
   async function runListenLoop() {
     while (alwaysListeningRef.current) {
+      // Hold off while ONE is thinking/speaking so it doesn't listen over
+      // its own voice or a command in flight.
       while (
         alwaysListeningRef.current
-        && (speakingRef.current || busyRef.current || Date.now() - lastSpeechEndedAtRef.current < 1500)
+        && (speakingRef.current || busyRef.current || Date.now() - lastSpeechEndedAtRef.current < 1000)
       ) {
-        await new Promise((resolve) => window.setTimeout(resolve, 250));
+        await new Promise((resolve) => window.setTimeout(resolve, 200));
       }
       if (!alwaysListeningRef.current) break;
       // Drop into quiet sleep after a long stretch with no command -- ONE
       // keeps listening locally for the wake word but stops actively
-      // engaging, and wakes on the next "hey ONE".
+      // engaging, and wakes on the next "hey Jarvis".
       if (!asleepRef.current && Date.now() - lastWakeAtRef.current > SLEEP_AFTER_MS) {
         setAsleep(true);
       }
       try {
-        await nativeRecord(undefined, { silent: true });
+        // Long-poll the LOCAL wake-word gate. It blocks on-machine listening
+        // for "hey Jarvis" and only then transcribes the following command
+        // via Deepgram -- private talk never reaches the cloud. Returns
+        // {detected:false} when the window elapsed with no wake word.
+        const nativeDev = selectedDeviceId.startsWith('native:')
+          ? Number(selectedDeviceId.split(':')[1]) : undefined;
+        const response = await coreFetch('/v1/speech/wake-and-command', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device: nativeDev, wake_timeout: 25 }),
+        });
+        const payload = await response.json();
+        if (response.ok && payload.detected) {
+          const heard = String(payload.text || '').trim();
+          // Strip the wake word; what's left is the actual command.
+          const cmd = heard.replace(/^\s*(hey\s+)?(jarvis|one)[,:]?\s*/i, '').trim();
+          lastWakeAtRef.current = Date.now();
+          if (asleepRef.current) setAsleep(false);
+          if (cmd) {
+            setCommand(heard);
+            await sendCommand(cmd);
+          }
+        }
       } catch {
-        // Always-listening tolerates noisy/empty windows silently.
+        // Tolerate transient failures; brief pause before re-polling.
+        await new Promise((resolve) => window.setTimeout(resolve, 800));
       }
-      if (!alwaysListeningRef.current) break;
-      // While asleep, poll a little less often to save resources -- still
-      // frequent enough to catch the wake word promptly.
-      await new Promise((resolve) => window.setTimeout(resolve, asleepRef.current ? 900 : 350));
     }
   }
 

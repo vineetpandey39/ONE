@@ -21,7 +21,7 @@ const STATUS_LABELS: Record<CoreState, string> = {
   speaking:  '◆ SPEAKING',
   thinking:  '● PROCESSING',
   offline:   'OFFLINE',
-  sleeping:  '· LISTENING · SAY "HEY ONE"',
+  sleeping:  '· LISTENING · SAY "HEY JARVIS"',
 };
 
 // Heartbeat only while an actual exchange is happening -- idle "awake" and

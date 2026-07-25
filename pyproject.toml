@@ -63,6 +63,15 @@ dependencies = [
     # hand 2026-07-25 and would otherwise vanish on `uv sync`.
     "uiautomation>=2.0; sys_platform == 'win32'",
     "pyautogui>=0.9.54",
+    # Local wake-word gate for always-listening ("hey jarvis") -- speech/
+    # wake_word.py. openwakeword runs a small CPU model so ONE only streams
+    # to Deepgram once actually addressed; scipy/scikit-learn are its import
+    # deps, onnxruntime its runtime. Declared so a venv rebuild restores them
+    # (hand-installed 2026-07-26).
+    "openwakeword>=0.6",
+    "onnxruntime>=1.17",
+    "scipy>=1.11",
+    "scikit-learn>=1.3",
     "nvidia-ml-py>=12.560.30",
     "posthog>=3.0",
     "python-telegram-bot>=22.6",
