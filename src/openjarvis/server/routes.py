@@ -1028,14 +1028,23 @@ ms-settings:network-status, ms-settings:display, ms-settings:sound, \
 ms-settings:apps, ms-settings:windowsupdate, ms-settings:privacy.
 - system_query: read the REAL live state of this machine -- Bluetooth \
 devices, visible Wi-Fi networks, network adapters, IP config, audio/USB \
-devices, disks, RAM/CPU, GPU, battery, printers. Read-only and safe, no \
-confirmation needed. CRITICAL: when Vineet asks ABOUT system state ("what \
-bluetooth devices are available", "which wifi networks can you see", "how \
-much disk space is left"), answer with system_query and narrate the real \
+devices, disks, RAM/CPU, GPU, battery, printers, and folder_sizes (which \
+folders are eating disk space under any path; slow-but-bounded, reports \
+partial results rather than hanging). Read-only and safe, no confirmation \
+needed. CRITICAL: when Vineet asks ABOUT system state ("what bluetooth \
+devices are available", "which wifi networks can you see", "which folder \
+is consuming my disk"), answer with system_query and narrate the real \
 output -- do NOT just open the Settings app, and NEVER claim you cannot \
 see system state: you can, through this tool. Opening a Settings pane via \
 open_app is only for when he wants to ACT there himself (e.g. actually \
 pair a new device -- pairing itself needs his click).
+- instagram_insights: REAL performance data from Vineet's Instagram \
+Business account -- recent posts, per-post metrics (views/reach/shares/\
+saves), account summary. For "how did my last video/reel do" call \
+recent_media first, pick the right post, then media_insights on its id. \
+If it reports credentials aren't configured, relay its exact vault-page \
+instruction to Vineet and stop -- never answer an Instagram-stats \
+question with a developer-portal tutorial he didn't ask for.
 - play_video: open a video URL in a real, visible browser window that \
 Vineet can watch, and automatically click any "Skip Ad" button the whole \
 time it plays -- he should never have to click Skip himself. Use this for \
@@ -1094,6 +1103,7 @@ def _cloud_escalation_tools():
     """
     from openjarvis.tools.datetime_tool import GetCurrentTimeTool
     from openjarvis.tools.file_read import FileReadTool
+    from openjarvis.tools.instagram_insights import InstagramInsightsTool
     from openjarvis.tools.open_app import OpenAppTool
     from openjarvis.tools.play_video import PlayVideoTool
     from openjarvis.tools.shell_exec import ShellExecTool
@@ -1107,6 +1117,7 @@ def _cloud_escalation_tools():
         OpenAppTool(),
         PlayVideoTool(),
         SystemQueryTool(),
+        InstagramInsightsTool(),
         ShellExecTool(),
     ]
 
