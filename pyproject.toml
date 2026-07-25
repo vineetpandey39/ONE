@@ -55,6 +55,14 @@ dependencies = [
     "anthropic>=0.30",
     "openpyxl>=3.1",
     "Pillow>=10",
+    # Local screen control for the Ghost Agent (tools/screen_control.py):
+    # uiautomation reads the Windows accessibility tree as text (so the
+    # cloud brain can choose what to click without any screenshot leaving
+    # the machine), pyautogui does the local click/type/scroll. Declared
+    # here so a venv rebuild restores them -- they were pip-installed by
+    # hand 2026-07-25 and would otherwise vanish on `uv sync`.
+    "uiautomation>=2.0; sys_platform == 'win32'",
+    "pyautogui>=0.9.54",
     "nvidia-ml-py>=12.560.30",
     "posthog>=3.0",
     "python-telegram-bot>=22.6",

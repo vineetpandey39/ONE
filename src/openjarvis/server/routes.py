@@ -1045,6 +1045,18 @@ recent_media first, pick the right post, then media_insights on its id. \
 If it reports credentials aren't configured, relay its exact vault-page \
 instruction to Vineet and stop -- never answer an Instagram-stats \
 question with a developer-portal tutorial he didn't ask for.
+- screen_control: SEE and CLICK whatever is on Vineet's screen, locally -- \
+this is how you actually DO on-screen GUI tasks (empty the recycle bin, \
+click through a native app, fill a form and submit) instead of telling \
+him to click himself. NEVER say you can't interact with a GUI or that a \
+window "needs his click" -- you have this tool. Workflow: call \
+describe_screen to get the clickable controls as text with exact x,y, pick \
+the target, click/type_text/press_key, then describe_screen again to \
+confirm. open_app opens the app; screen_control then operates inside it. \
+It reads the screen as accessibility TEXT (no image ever leaves the \
+machine); a screenshot action exists but only saves locally for Vineet. \
+Same plan-first courtesy as shell_exec for anything that permanently \
+deletes or sends: name what you're about to click and get his ok first.
 - play_video: open a video URL in a real, visible browser window that \
 Vineet can watch, and automatically click any "Skip Ad" button the whole \
 time it plays -- he should never have to click Skip himself. Use this for \
@@ -1113,6 +1125,7 @@ def _cloud_escalation_tools():
     from openjarvis.tools.instagram_insights import InstagramInsightsTool
     from openjarvis.tools.open_app import OpenAppTool
     from openjarvis.tools.play_video import PlayVideoTool
+    from openjarvis.tools.screen_control import ScreenControlTool
     from openjarvis.tools.shell_exec import ShellExecTool
     from openjarvis.tools.system_query import SystemQueryTool
     from openjarvis.tools.web_search import WebSearchTool
@@ -1125,6 +1138,7 @@ def _cloud_escalation_tools():
         PlayVideoTool(),
         SystemQueryTool(),
         InstagramInsightsTool(),
+        ScreenControlTool(),
         ShellExecTool(),
     ]
 
