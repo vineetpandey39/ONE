@@ -1046,17 +1046,29 @@ If it reports credentials aren't configured, relay its exact vault-page \
 instruction to Vineet and stop -- never answer an Instagram-stats \
 question with a developer-portal tutorial he didn't ask for.
 - screen_control: SEE and CLICK whatever is on Vineet's screen, locally -- \
-this is how you actually DO on-screen GUI tasks (empty the recycle bin, \
-click through a native app, fill a form and submit) instead of telling \
-him to click himself. NEVER say you can't interact with a GUI or that a \
-window "needs his click" -- you have this tool. Workflow: call \
-describe_screen to get the clickable controls as text with exact x,y, pick \
-the target, click/type_text/press_key, then describe_screen again to \
-confirm. open_app opens the app; screen_control then operates inside it. \
-It reads the screen as accessibility TEXT (no image ever leaves the \
-machine); a screenshot action exists but only saves locally for Vineet. \
-Same plan-first courtesy as shell_exec for anything that permanently \
-deletes or sends: name what you're about to click and get his ok first.
+this is how you actually DO on-screen GUI tasks (click through a native \
+app, fill a form and submit) instead of telling him to click himself. \
+NEVER say you can't interact with a GUI or that a window "needs his \
+click" -- you have this tool. Workflow: describe_screen -> pick the \
+target from the list -> click/type_text/press_key -> describe_screen \
+again to confirm. open_app opens the app; screen_control operates inside \
+it. To click a DESKTOP icon (Recycle Bin, This PC, a shortcut): call \
+show_desktop first, then describe_screen with target='desktop' to get the \
+icon's x,y, then double_click it. Never assume an icon's coordinates -- \
+always read them from describe_screen. It reads the screen as \
+accessibility TEXT (no image leaves the machine); the screenshot action \
+only saves locally. Plan-first (like shell_exec) for anything that \
+permanently deletes or sends: name what you're about to do and get his ok. \
+IMPORTANT for "empty the recycle bin": do it with shell_exec 'powershell \
+Clear-RecycleBin -Force' -- ONE line, actually empties it. Reply exactly \
+like: "I'll empty your recycle bin with Clear-RecycleBin -Force -- this \
+permanently deletes everything in it. Confirm?" and run it the moment he \
+says yes. Do NOT open File Explorer / the recycle bin folder and then tell \
+Vineet to right-click and empty it himself -- that hand-off is exactly the \
+failure he's complaining about. If he ALSO asked to see the icon clicked, \
+you may show_desktop + double_click the Recycle Bin icon first to open it \
+(so he sees it), but the actual emptying is still Clear-RecycleBin, not a \
+hand-off.
 - play_video: open a video URL in a real, visible browser window that \
 Vineet can watch, and automatically click any "Skip Ad" button the whole \
 time it plays -- he should never have to click Skip himself. Use this for \
@@ -1270,24 +1282,43 @@ def _run_cloud_tool_loop(
                 )
             )
 
+    # A no-tools wrap-up that asks for a STATUS, not a next action -- so the
+    # final reply is never a dangling "Let me open File Explorer:" fragment
+    # (confirmed live 2026-07-25) nor empty (which the frontend renders as
+    # the useless "Command received."). Reused for both the ran-out-of-rounds
+    # case and the empty-content case.
+    def _forced_summary() -> dict[str, Any]:
+        nudge = Message(
+            role=Role.USER,
+            content=(
+                "In one or two short sentences addressed to Vineet as Sir, "
+                "tell him what you actually did and the current result. If a "
+                "step is still needed from him, say exactly what. Do NOT begin "
+                "a new action and do NOT end mid-sentence."
+            ),
+        )
+        return engine.generate(
+            [*msgs, nudge], model=model, temperature=temperature, max_tokens=max_tokens
+        )
+
     if ran_out_of_rounds:
         # The last round still wanted to call a tool when the round budget
-        # ran out -- confirmed live (2026-07-20): this used to return that
-        # round's raw response as-is, a dangling "let me try the alternate
-        # version, Sir" with an intent that was never actually carried out
-        # (its tool_calls are dropped on the floor, not executed), leaving
-        # Vineet with a reply that promises an action that never happens.
-        # One last no-tools call forces a real wrap-up sentence from
-        # whatever's already in msgs (including every tool result so far).
-        result = engine.generate(
-            msgs,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        usage = result.get("usage", {})
+        # ran out -- its tool_calls are dropped, not executed, so returning
+        # that round's raw text would promise an action that never happens.
+        forced = _forced_summary()
+        if (forced.get("content") or "").strip():
+            result = forced
+        usage = forced.get("usage", {})
         for k in total_usage:
             total_usage[k] += usage.get(k, 0)
+
+    if not (result.get("content") or "").strip():
+        forced = _forced_summary()
+        if (forced.get("content") or "").strip():
+            result["content"] = forced["content"]
+            usage = forced.get("usage", {})
+            for k in total_usage:
+                total_usage[k] += usage.get(k, 0)
 
     result["usage"] = total_usage
     return result

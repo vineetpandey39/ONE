@@ -201,6 +201,62 @@ def _enumerate_foreground(auto) -> tuple[str, list[dict[str, Any]]]:
     return title, elements
 
 
+def _enumerate_desktop(auto) -> tuple[str, list[dict[str, Any]]]:
+    """Read the desktop ICONS (Recycle Bin, This PC, shortcuts) as a text
+    list with coordinates. Confirmed live (2026-07-25): the Ghost Agent was
+    asked to click the Recycle Bin on the desktop, minimized everything to
+    'see' it, but describe_screen only reads the FOREGROUND window -- after
+    minimizing, that's the taskbar, not the desktop -- so it never found
+    the icon and stalled. Desktop icons live in Progman/WorkerW ->
+    SHELLDLL_DefView -> SysListView32 (the 'FolderView' list); walk to it
+    directly regardless of what's foreground."""
+    root = auto.GetRootControl()
+
+    def find_folderview(ctrl, depth=0):
+        if depth > 4:
+            return None
+        try:
+            children = ctrl.GetChildren()
+        except Exception:
+            return None
+        for c in children:
+            try:
+                if c.ControlTypeName == "ListControl" and (
+                    "FolderView" in (c.Name or "") or c.ClassName == "SysListView32"
+                ):
+                    return c
+            except Exception:
+                pass
+            r = find_folderview(c, depth + 1)
+            if r:
+                return r
+        return None
+
+    elements: list[dict[str, Any]] = []
+    for pane in root.GetChildren():
+        try:
+            cn = pane.ClassName
+        except Exception:
+            cn = ""
+        if cn in ("Progman", "WorkerW"):
+            lv = find_folderview(pane)
+            if lv:
+                for it in lv.GetChildren():
+                    center = _rect_center(it)
+                    if center:
+                        try:
+                            name = (it.Name or "").strip()
+                        except Exception:
+                            name = ""
+                        if name:
+                            elements.append({"name": name, "type": "DesktopIcon",
+                                             "x": center[0], "y": center[1]})
+                    if len(elements) >= _MAX_ELEMENTS:
+                        break
+                break
+    return "Desktop", elements
+
+
 @ToolRegistry.register("screen_control")
 class ScreenControlTool(BaseTool):
     """See on-screen UI as text and click/type it -- fully local."""
@@ -235,10 +291,20 @@ class ScreenControlTool(BaseTool):
                     "action": {
                         "type": "string",
                         "enum": [
-                            "describe_screen", "click", "double_click",
-                            "right_click", "type_text", "press_key",
-                            "scroll", "screenshot",
+                            "describe_screen", "show_desktop", "click",
+                            "double_click", "right_click", "type_text",
+                            "press_key", "scroll", "screenshot",
                         ],
+                    },
+                    "target": {
+                        "type": "string",
+                        "enum": ["foreground", "desktop"],
+                        "description": (
+                            "describe_screen only: 'foreground' (default) reads the "
+                            "active window; 'desktop' reads the desktop icons "
+                            "(Recycle Bin, This PC, shortcuts). To CLICK a desktop "
+                            "icon, call show_desktop first so it's not covered."
+                        ),
                     },
                     "x": {"type": "integer", "description": "click X (screen pixel)"},
                     "y": {"type": "integer", "description": "click Y (screen pixel)"},
@@ -284,7 +350,33 @@ class ScreenControlTool(BaseTool):
         action = str(params.get("action", "")).strip()
 
         try:
+            if action == "show_desktop":
+                # Win+D so desktop icons are visible/clickable (nothing covering them).
+                pyautogui.hotkey("win", "d")
+                time.sleep(0.7)
+                return ToolResult(
+                    tool_name=self.tool_id,
+                    content="Showed the desktop. Call describe_screen with target='desktop' to list the icons.",
+                    success=True,
+                )
+
             if action == "describe_screen":
+                target = str(params.get("target", "foreground")).strip() or "foreground"
+                if target == "desktop":
+                    title, elements = _enumerate_desktop(auto)
+                    if not elements:
+                        return ToolResult(
+                            tool_name=self.tool_id,
+                            content="Could not read desktop icons. Try show_desktop first.",
+                            success=False,
+                        )
+                    lines = [f"{title} icons (double_click to open, by x,y):"]
+                    for e in elements:
+                        lines.append(f"  \"{e['name']}\" -> x={e['x']}, y={e['y']}")
+                    return ToolResult(
+                        tool_name=self.tool_id, content="\n".join(lines),
+                        success=True, metadata={"window": title, "count": len(elements)},
+                    )
                 title, elements = _enumerate_foreground(auto)
                 if not elements:
                     return ToolResult(
