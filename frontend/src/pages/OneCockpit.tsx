@@ -326,9 +326,18 @@ export function OneCockpit() {
   const busyRef = useRef(false);
   const speakingRef = useRef(false);
   const linesRef = useRef<Line[]>([]);
+  // Sleep-on-silence: while always-listening, if no command is addressed to
+  // ONE for a while it drops into a quiet "asleep" state (still listening
+  // locally for the wake word, just not actively engaged) and wakes the
+  // moment it hears "hey ONE" again -- the JARVIS "silent listener" behavior.
+  const [asleep, setAsleep] = useState(false);
+  const asleepRef = useRef(false);
+  const lastWakeAtRef = useRef(Date.now());
+  const SLEEP_AFTER_MS = 180_000; // 3 min of no wake word -> sleep
   useEffect(() => { busyRef.current = busy; }, [busy]);
   useEffect(() => { speakingRef.current = speaking; }, [speaking]);
   useEffect(() => { linesRef.current = lines; }, [lines]);
+  useEffect(() => { asleepRef.current = asleep; }, [asleep]);
   useEffect(() => () => { alwaysListeningRef.current = false; }, []);
   // Holographic orb interaction: a 3D tilt that follows the cursor/finger,
   // and a trail of sparkle particles spawned wherever the orb is touched,
@@ -1007,7 +1016,11 @@ export function OneCockpit() {
       const response = await coreFetch('/v1/speech/native-record', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device: deviceOverride ?? selected, duration: silent ? 4 : 5 }),
+        // wake_scan on the silent (always-listening) path forces the server
+        // to transcribe LOCALLY -- ambient audio, including private talk, is
+        // never sent to Deepgram. Only an explicit mic press (silent=false)
+        // uses the cloud STT, and even then only that one command.
+        body: JSON.stringify({ device: deviceOverride ?? selected, duration: silent ? 4 : 5, wake_scan: silent }),
         signal: controller.signal,
       });
       const payload = await response.json();
@@ -1044,6 +1057,9 @@ export function OneCockpit() {
       ));
       if (silent && (soundsLikeEcho || !isClearOneCommand(text))) return;
       if (!silent && soundsLikeEcho) throw new Error('ONE heard its own voice. Try again after it finishes speaking.');
+      // A real command addressed to ONE -- wake up and reset the sleep timer.
+      lastWakeAtRef.current = Date.now();
+      if (asleepRef.current) setAsleep(false);
       setCommand(text);
       await sendCommand(text.replace(/^\s*(hey\s+)?one[,:]?\s*/i, ''));
     } catch (error) {
@@ -1164,13 +1180,21 @@ export function OneCockpit() {
         await new Promise((resolve) => window.setTimeout(resolve, 250));
       }
       if (!alwaysListeningRef.current) break;
+      // Drop into quiet sleep after a long stretch with no command -- ONE
+      // keeps listening locally for the wake word but stops actively
+      // engaging, and wakes on the next "hey ONE".
+      if (!asleepRef.current && Date.now() - lastWakeAtRef.current > SLEEP_AFTER_MS) {
+        setAsleep(true);
+      }
       try {
         await nativeRecord(undefined, { silent: true });
       } catch {
         // Always-listening tolerates noisy/empty windows silently.
       }
       if (!alwaysListeningRef.current) break;
-      await new Promise((resolve) => window.setTimeout(resolve, 350));
+      // While asleep, poll a little less often to save resources -- still
+      // frequent enough to catch the wake word promptly.
+      await new Promise((resolve) => window.setTimeout(resolve, asleepRef.current ? 900 : 350));
     }
   }
 
@@ -1292,6 +1316,8 @@ export function OneCockpit() {
     ? 'speaking'
     : busy || transcribing
     ? 'thinking'
+    : alwaysListening && asleep
+    ? 'sleeping'
     : 'awake';
 
   // Left-panel status rows

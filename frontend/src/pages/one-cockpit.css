@@ -800,6 +800,13 @@ body { margin: 0; background: #02060b; }
 .jarvis-wrap--speaking  { --jarvis-accent: #ffd700; --jarvis-accent-dim: #ffd70055; --jarvis-arc-duration: 10s; }
 .jarvis-wrap--thinking  { --jarvis-accent: #aa55ff; --jarvis-accent-dim: #aa55ff55; --jarvis-arc-duration: 7s;  }
 .jarvis-wrap--offline   { --jarvis-accent: #445566; --jarvis-accent-dim: #44556655; --jarvis-arc-duration: 60s; }
+.jarvis-wrap--sleeping  { --jarvis-accent: #3d6a80; --jarvis-accent-dim: #3d6a8044; --jarvis-arc-duration: 48s; }
+/* Sleeping: dim + a slow calm breathing pulse (not the discussing heartbeat) */
+.jarvis-wrap--sleeping { animation: jarvis-breathe 5.5s ease-in-out infinite; opacity: 0.72; }
+@keyframes jarvis-breathe {
+  0%, 100% { opacity: 0.6;  }
+  50%      { opacity: 0.85; }
+}
 
 /* Static radial glow behind the ring -- a plain gradient, not a filter, so
    it costs nothing per animation frame regardless of what's animating
@@ -969,6 +976,7 @@ body { margin: 0; background: #02060b; }
 .jarvis-status--speaking  { color: #ffd700; }
 .jarvis-status--thinking  { color: #aa55ff; }
 .jarvis-status--offline   { color: #445566; }
+.jarvis-status--sleeping  { color: #6fa5c0; }
 .jarvis-mem {
   font-size: 9px;
   letter-spacing: 2px;

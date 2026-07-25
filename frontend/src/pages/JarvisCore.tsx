@@ -7,7 +7,7 @@
  */
 import { useMemo } from 'react';
 
-export type CoreState = 'awake' | 'listening' | 'speaking' | 'thinking' | 'offline';
+export type CoreState = 'awake' | 'listening' | 'speaking' | 'thinking' | 'offline' | 'sleeping';
 
 interface JarvisCoreProps {
   state: CoreState;
@@ -21,6 +21,7 @@ const STATUS_LABELS: Record<CoreState, string> = {
   speaking:  '◆ SPEAKING',
   thinking:  '● PROCESSING',
   offline:   'OFFLINE',
+  sleeping:  '· LISTENING · SAY "HEY ONE"',
 };
 
 // Heartbeat only while an actual exchange is happening -- idle "awake" and
@@ -28,6 +29,7 @@ const STATUS_LABELS: Record<CoreState, string> = {
 // decorative noise.
 const DISCUSSING: Record<CoreState, boolean> = {
   awake: false, offline: false, listening: true, speaking: true, thinking: true,
+  sleeping: false,
 };
 
 const CX = 200;

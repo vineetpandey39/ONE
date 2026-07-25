@@ -1063,15 +1063,47 @@ async def speech_devices():
     return {"devices": devices, "default_device": int(default_device)}
 
 
+def _local_speech_backend(request: Request):
+    """Lazily build+cache a LOCAL faster-whisper backend, separate from the
+    configured (possibly cloud) one. Used for always-listening/wake scanning
+    so ambient audio -- including private conversation -- is transcribed on
+    this machine and never sent to Deepgram or any cloud STT. Only a real
+    command (after the wake word) ever leaves, and only as text to the brain."""
+    existing = getattr(request.app.state, "local_speech_backend", None)
+    if existing is not None:
+        return existing
+    backend = None
+    try:
+        from openjarvis.speech._discovery import _create_backend
+
+        config = getattr(request.app.state, "config", None)
+        if config is not None:
+            backend = _create_backend("faster-whisper", config)
+    except Exception:
+        backend = None
+    request.app.state.local_speech_backend = backend
+    return backend
+
+
 @speech_router.post("/native-record")
 async def native_record(request: Request):
     """Capture one command, stopping shortly after the speaker goes quiet."""
     from fastapi.concurrency import run_in_threadpool
 
+    payload = await request.json()
+    # wake_scan: always-listening ambient capture. Force the LOCAL backend so
+    # nothing spoken while just listening is ever uploaded -- privacy gate for
+    # the "ONE listens all the time" mode Vineet asked for (2026-07-25).
+    wake_scan = bool(payload.get("wake_scan"))
     backend = getattr(request.app.state, "speech_backend", None)
+    stayed_local = False
+    if wake_scan:
+        local = _local_speech_backend(request)
+        if local is not None:
+            backend = local
+            stayed_local = True
     if backend is None:
         raise HTTPException(status_code=501, detail="Speech backend not configured")
-    payload = await request.json()
     duration = max(3.0, min(float(payload.get("duration", 5.0)), 8.0))
     device = payload.get("device")
     device = int(device) if device is not None else None
@@ -1190,16 +1222,42 @@ async def native_record(request: Request):
     except Exception as exc:
         logger.exception("Native microphone capture failed")
         raise HTTPException(status_code=422, detail=f"Native microphone failed: {type(exc).__name__}") from exc
-    return {
+    # Coerce to plain Python types. The local faster-whisper backend
+    # (used on the wake_scan path) can hand back numpy scalars for
+    # language_probability/duration, which FastAPI's JSON encoder chokes on
+    # ("vars() argument must have __dict__") -- the cloud Deepgram path
+    # returned plain floats so this only surfaced once wake_scan forced the
+    # local backend (2026-07-25).
+    def _f(v):
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    raw = {
         "text": normalize_one_transcript(result.text),
-        "language": result.language,
-        "confidence": result.confidence,
-        "duration_seconds": result.duration_seconds,
+        "language": str(result.language) if result.language else None,
+        "confidence": _f(result.confidence),
+        "duration_seconds": _f(result.duration_seconds),
         "captured_seconds": round(captured_seconds, 3),
         "transcription_ms": round(transcription_ms, 1),
         "max_rms": round(max_rms, 5),
         "max_peak": round(max_peak, 5),
+        "local_only": bool(stayed_local),
     }
+    # Bulletproof against a non-JSON value slipping into the response (a
+    # threading.Lock leaked here once, 2026-07-25, 500-ing serialization and
+    # -- because the always-listen loop swallows errors silently -- going
+    # unnoticed). Anything that isn't a plain JSON scalar is stringified,
+    # and the offending field is logged so it can be traced.
+    safe: dict[str, Any] = {}
+    for k, v in raw.items():
+        if v is None or isinstance(v, (str, int, float, bool)):
+            safe[k] = v
+        else:
+            logger.warning("native_record: non-JSON field %r=%r (%s)", k, v, type(v).__name__)
+            safe[k] = str(v)
+    return safe
 
 
 # ---- Feedback routes ----
