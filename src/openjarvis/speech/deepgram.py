@@ -54,8 +54,17 @@ class DeepgramSpeechBackend(SpeechBackend):
             # having completed a single real call.
             import httpx
 
+            # httpx.Client defaults to a 5s timeout on every phase, so a
+            # slightly longer clip or a momentarily slow network trips
+            # ReadTimeout ("Local transcription failed: ReadTimeout",
+            # confirmed 2026-07-26). Give the connect/read phases real room;
+            # transcription is a short upload+response, not a stream.
             self._client = DeepgramClient(
-                api_key=self._api_key, httpx_client=httpx.Client(verify=False)
+                api_key=self._api_key,
+                httpx_client=httpx.Client(
+                    verify=False,
+                    timeout=httpx.Timeout(30.0, connect=10.0),
+                ),
             )
 
     def transcribe(

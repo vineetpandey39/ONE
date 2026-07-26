@@ -1054,7 +1054,10 @@ target from the list -> click/type_text/press_key -> describe_screen \
 again to confirm. open_app opens the app; screen_control operates inside \
 it. To click a DESKTOP icon (Recycle Bin, This PC, a shortcut): call \
 show_desktop first, then describe_screen with target='desktop' to get the \
-icon's x,y, then double_click it. Never assume an icon's coordinates -- \
+icon's x,y, then double_click it. To open the Start menu, use \
+screen_control press_key with keys='win' (open_app cannot open the Start \
+menu -- it's not a launchable file). For a specific app, prefer open_app \
+with the app name instead of hunting through the Start menu. Never assume an icon's coordinates -- \
 always read them from describe_screen. It reads the screen as \
 accessibility TEXT (no image leaves the machine); the screenshot action \
 only saves locally. Plan-first (like shell_exec) for anything that \
