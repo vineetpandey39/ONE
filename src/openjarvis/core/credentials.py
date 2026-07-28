@@ -282,6 +282,89 @@ def delete_custom_credential(key: str, *, path: Path | None = None) -> None:
         os.chmod(p, 0o600)
 
 
+def _persist(p: Path, creds: dict[str, dict[str, str]]) -> None:
+    """Serialise the whole vault back to disk in the flat [section] format,
+    dropping empty sections, and lock down permissions. Shared writer so every
+    save/delete path produces byte-compatible output."""
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    for sect, kvs in creds.items():
+        if not kvs:
+            continue
+        lines.append(f"[{sect}]")
+        for k, v in kvs.items():
+            lines.append(f'{k} = "{v}"')
+        lines.append("")
+    p.write_text("\n".join(lines))
+    os.chmod(p, 0o600)
+
+
+def _is_bare_key(s: str) -> bool:
+    """True if s is a TOML bare-key-safe identifier (our flat writer emits
+    section/key names unquoted, so they must match [A-Za-z0-9_-]+)."""
+    return bool(s) and all(c.isalnum() or c in "_-" for c in s)
+
+
+def save_section_credential(
+    section: str,
+    key: str,
+    value: str,
+    *,
+    allowed: list[str] | None = None,
+    set_env: bool = False,
+    path: Path | None = None,
+) -> None:
+    """Save one credential into an arbitrary vault section WITHOUT touching
+    os.environ by default.
+
+    This is the multi-account-safe writer: because several channels reuse the
+    same key names (e.g. two INSTAGRAM_ACCESS_TOKENs, one per brand), injecting
+    them into os.environ under a shared key would let one channel's token
+    overwrite another's. Callers that need per-channel isolation read back via
+    get_tool_credential(section, key) — straight from the TOML, no env — so the
+    values never collide. set_env stays False for that reason; pass True only
+    for a genuine single-global credential.
+    """
+    if not _is_bare_key(section):
+        raise ValueError(f"Invalid vault section name '{section}' (use letters, digits, _ or -)")
+    if not _is_bare_key(key):
+        raise ValueError(f"Invalid credential key '{key}' (use letters, digits, _ or -)")
+    if allowed is not None and key not in allowed:
+        raise ValueError(f"Key '{key}' is not allowed in section '{section}'")
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError("Credential value must not be empty")
+
+    p = Path(path) if path else _default_path()
+    with _LOCK:
+        creds = load_credentials(path=p)
+        creds.setdefault(section, {})[key] = stripped
+        _persist(p, creds)
+    if set_env:
+        os.environ[key] = stripped
+
+
+def delete_section_credential(section: str, key: str, *, path: Path | None = None) -> None:
+    """Remove one key from a vault section (leaves os.environ untouched, since
+    section credentials are never injected there)."""
+    p = Path(path) if path else _default_path()
+    with _LOCK:
+        creds = load_credentials(path=p)
+        if section in creds:
+            creds[section].pop(key, None)
+            if not creds[section]:
+                creds.pop(section, None)
+        _persist(p, creds)
+
+
+def get_section_credential(section: str, key: str, *, path: Path | None = None) -> str | None:
+    """Read one credential straight from a vault section in the TOML file,
+    without consulting or polluting os.environ. This is what makes multiple
+    same-key accounts (one per channel) coexist safely."""
+    creds = load_credentials(path=path)
+    return creds.get(section, {}).get(key) or None
+
+
 def get_tool_credential(
     tool_name: str,
     key: str,
