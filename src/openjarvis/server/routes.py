@@ -53,6 +53,7 @@ def _one_model_status(model: str | None = None) -> dict[str, Any]:
     route_map = [
         {"scope": "simple_chat", "model": router_model, "engine": engine},
         {"scope": "agent_status_and_queue", "model": "deterministic", "engine": "local-python"},
+        {"scope": "alfa_scan", "model": "deterministic + optional local packaging", "engine": "local-python/ollama"},
         {"scope": "jobhunt", "model": nemotron_model or router_model, "engine": "nvidia" if nemotron_ready else engine},
         {"scope": "ia_scout_and_metadata", "model": nemotron_model or router_model, "engine": "nvidia" if nemotron_ready else engine},
         {"scope": "ia_image_generation", "model": flux_model if image_provider == "flux" else "gpt-image-2", "engine": image_provider},
@@ -278,6 +279,19 @@ def _one_agent_command(text: str) -> str | None:
             result = json.loads(latest.get("result") or "{}")
         except json.JSONDecodeError:
             return f"{name} completed its last run, but the saved result could not be read."
+        if agent_id == "alfa":
+            top = result.get("top_opportunities") or []
+            headline = top[0].get("title", "No qualified lead") if top else "No qualified lead"
+            packaged = sum(1 for item in top if item.get("outreach_message"))
+            mrr = result.get("mrr_pipeline_monthly", 0)
+            mrr_part = f" Potential retainer pipeline is ${mrr:,} a month if those convert." if mrr else ""
+            return (
+                f"ALFA scanned {result.get('scanned', 0)} public posts and found {result.get('qualified', 0)} qualified "
+                f"service opportunities. Estimated one-time pipeline is "
+                f"${result.get('estimated_usd_low', 0):,}-${result.get('estimated_usd_high', 0):,}.{mrr_part} "
+                f"{packaged} leads have a service, price, and outreach draft ready in the dashboard. "
+                f"Top lead: {headline}. This is pipeline value, not earned revenue — nothing is sent until you approve it."
+            )
         if agent_id == "jobhunt":
             new_briefs = result.get("new_briefs", 0)
             duplicates = result.get("duplicates", 0)

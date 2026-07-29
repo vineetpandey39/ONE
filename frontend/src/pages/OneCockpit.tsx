@@ -219,6 +219,7 @@ function normalizeSpeechText(text: string) {
 // grapheme-to-phoneme path instead, so they're spoken as names.
 const AGENT_NAME_PRONUNCIATION: Record<string, string> = {
   TITAN: 'Titan',
+  ALFA: 'Alfa',
   JOBHUNT: 'Job Hunt',
   BETA: 'Beta',
   HERMES: 'Hermes',
@@ -239,7 +240,7 @@ function isClearOneCommand(text: string) {
   if (!normalized) return false;
   if (/\b(wake up one|hey one|hi one|hello one|one|jarvis)\b/.test(normalized)) return true;
   if (/\b(run|activate|start|open|search|scan|find|show|summarize|tell|stop|pause)\b/.test(normalized)
-    && /\b(titan|alpha|athena|obsidian|memory|agent|lead|postforge)\b/.test(normalized)) return true;
+    && /\b(titan|alfa|alpha|athena|obsidian|memory|agent|lead|postforge)\b/.test(normalized)) return true;
   return false;
 }
 
@@ -384,6 +385,13 @@ export function OneCockpit() {
     }
   }, [spawnSparkle]);
 
+  const [alfaOpportunities, setAlfaOpportunities] = useState<Opportunity[]>([]);
+  const [alfaExpanded, setAlfaExpanded] = useState<string | null>(null);
+  const [alfaActionUrl, setAlfaActionUrl] = useState<string | null>(null);
+  const [alfaCopiedUrl, setAlfaCopiedUrl] = useState<string | null>(null);
+  const [alfaMessage, setAlfaMessage] = useState('');
+  const [alfaSummary, setAlfaSummary] = useState<RevenueSummary>({ potential_pipeline: 0, potential_mrr: 0, earned_revenue: 0, active_mrr: 0, paid_deals: 0, open_deals: 0 });
+  const [alfaForm, setAlfaForm] = useState({ clientName: '', clientContact: '', channel: 'Reddit DM', response: '', amount: '', reference: '' });
   const [jobhuntBoard, setJobhuntBoard] = useState<JobhuntBoard>({
     summary: { tracked: 0, visible: 0, draft_ready: 0, email_drafts_ready: 0, not_applied: 0, tracker_csv: '', inbox: '' },
     status_counts: {},
@@ -400,6 +408,24 @@ export function OneCockpit() {
   // The orb stage is fixed full-viewport and the results drawer is its own
   // fixed, internally-scrolling overlay, so the page itself never needs to
   // scroll. No overflow override needed here anymore.
+
+  const refreshAlfaOpportunities = useCallback(async () => {
+    try {
+      const response = await coreFetch('/v1/alfa/pipeline?limit=50', { cache: 'no-store' });
+      if (!response.ok) throw new Error('offline');
+      const data = await response.json();
+      setAlfaOpportunities(data.opportunities || []);
+      if (data.summary) setAlfaSummary(data.summary);
+    } catch {
+      // ALFA's table may not exist yet (no scan has run); leave the list as-is.
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAlfaOpportunities();
+    const timer = window.setInterval(refreshAlfaOpportunities, 8000);
+    return () => window.clearInterval(timer);
+  }, [refreshAlfaOpportunities]);
 
   const refreshJobhuntBoard = useCallback(async () => {
     try {
@@ -495,6 +521,74 @@ export function OneCockpit() {
     setCredentialVaultMessage('');
   }
 
+
+  async function approveOpportunity(url: string) {
+    setAlfaActionUrl(url);
+    setAlfaMessage('');
+    try {
+      const response = await coreFetch('/v1/alfa/approve', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || 'Approval failed');
+      setAlfaMessage('Outreach approved. Nothing was sent automatically; send the reviewed draft, then mark it contacted.');
+      void refreshAlfaOpportunities();
+      void refreshStatus();
+    } catch (error) {
+      setAlfaMessage(error instanceof Error ? error.message : 'Approval failed.');
+    } finally {
+      setAlfaActionUrl(null);
+    }
+  }
+
+  async function dismissOpportunity(url: string) {
+    setAlfaActionUrl(url);
+    setAlfaMessage('');
+    try {
+      const response = await coreFetch('/v1/alfa/dismiss', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+      });
+      if (!response.ok) {
+        const payload = await response.json();
+        throw new Error(payload.detail || 'Dismiss failed');
+      }
+      setAlfaOpportunities((current) => current.filter((item) => item.url !== url));
+    } catch (error) {
+      setAlfaMessage(error instanceof Error ? error.message : 'Dismiss failed.');
+    } finally {
+      setAlfaActionUrl(null);
+    }
+  }
+
+  async function copyOutreach(url: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setAlfaCopiedUrl(url);
+      window.setTimeout(() => setAlfaCopiedUrl((current) => (current === url ? null : current)), 1800);
+    } catch {
+      setAlfaMessage('Could not copy to clipboard - select and copy the draft manually.');
+    }
+  }
+
+  async function alfaAction(path: string, body: Record<string, unknown>, success: string) {
+    setAlfaActionUrl(String(body.url || ''));
+    setAlfaMessage('');
+    try {
+      const response = await coreFetch(`/v1/alfa/${path}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || 'Action failed');
+      setAlfaMessage(success);
+      setAlfaForm({ clientName: '', clientContact: '', channel: 'Reddit DM', response: '', amount: '', reference: '' });
+      void refreshAlfaOpportunities();
+      void refreshStatus();
+    } catch (error) {
+      setAlfaMessage(error instanceof Error ? error.message : 'Action failed.');
+    } finally {
+      setAlfaActionUrl(null);
+    }
+  }
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -1164,11 +1258,23 @@ export function OneCockpit() {
   const activeJobs = status.jobs.filter((job) => job.status === 'queued' || job.status === 'running');
   const latestJobs = status.jobs.slice(0, 5);
   const modelStatus = status.model_status;
+  function alfaResult(job: Job) {
+    if (job.agent_id !== 'alfa' || !job.result) return null;
+    try {
+      const result = JSON.parse(job.result);
+      const mrr = Number(result.mrr_pipeline_monthly ?? 0);
+      const mrrPart = mrr > 0 ? ` | $${mrr.toLocaleString()}/mo MRR pipeline` : '';
+      return `${result.qualified ?? 0} leads | $${Number(result.estimated_usd_low ?? 0).toLocaleString()}-$${Number(result.estimated_usd_high ?? 0).toLocaleString()}${mrrPart}`;
+    } catch {
+      return null;
+    }
+  }
   const agentExecutionSections = useMemo(() => status.agents.map((agent) => ({
     agent,
     jobs: status.jobs.filter((job) => job.agent_id === agent.id).slice(0, 3),
   })).filter((section) => section.jobs.length), [status.agents, status.jobs]);
   function jobResult(job: Job) {
+    if (job.agent_id === 'alfa') return alfaResult(job);
     if (!job.result) return null;
     try {
       const result = JSON.parse(job.result);
@@ -1238,6 +1344,7 @@ export function OneCockpit() {
   // Left-panel status rows
   const leftStats = [
     { label: 'SYSTEM', value: status.online ? 'NOMINAL' : 'OFFLINE', ok: status.online },
+    { label: 'ALFA',   value: alfaOpportunities.length > 0 ? 'ACTIVE' : 'IDLE', ok: alfaOpportunities.length > 0 },
     ...status.agents.slice(0, 4).map(a => ({
       label: a.name.toUpperCase().slice(0, 6),
       value: 'READY',
@@ -1718,6 +1825,103 @@ export function OneCockpit() {
         </div>
       </section>
 
+      <section className="one-operations one-alfa-pipeline">
+        <div className="one-operations-head">
+          <div><div className="one-panel-label">ALFA REVENUE PIPELINE</div><strong>LEAD TO CASH OPERATING BOARD</strong></div>
+          <span className="one-alfa-mrr">{alfaOpportunities.length} pending | estimates only, nothing is sent without approval</span>
+        </div>
+        <div className="one-revenue-summary">
+          <div><span>Potential pipeline</span><strong>${alfaSummary.potential_pipeline.toLocaleString()}</strong></div>
+          <div><span>Potential MRR</span><strong>${alfaSummary.potential_mrr.toLocaleString()}</strong></div>
+          <div className="earned"><span>Collected revenue</span><strong>${alfaSummary.earned_revenue.toLocaleString()}</strong></div>
+          <div className="earned"><span>Active MRR</span><strong>${alfaSummary.active_mrr.toLocaleString()}</strong></div>
+        </div>
+        {alfaMessage && <p className="one-alfa-message">{alfaMessage}</p>}
+        <div className="one-alfa-list">
+          {!alfaOpportunities.length && <p>No packaged leads waiting right now. Run ALFA to scan for new ones.</p>}
+          {alfaOpportunities.map((opportunity) => {
+            const expanded = alfaExpanded === opportunity.url;
+            const busyOnThis = alfaActionUrl === opportunity.url;
+            const stage = opportunity.pipeline_stage || (opportunity.approval_status === 'approved' ? 'outreach_approved' : 'qualified');
+            return (
+              <article key={opportunity.url} className={`one-alfa-card ${expanded ? 'expanded' : ''}`}>
+                <button className="one-alfa-card-head" onClick={() => setAlfaExpanded(expanded ? null : opportunity.url)}>
+                  <div>
+                    <strong>{opportunity.title}</strong>
+                    <span>{opportunity.service} | fit {opportunity.score}/100 | {opportunity.currency} {opportunity.budget_min.toLocaleString()}-{opportunity.budget_max.toLocaleString()}</span>
+                  </div>
+                  <span className="one-alfa-price">
+                    ${opportunity.one_time_price.toLocaleString()}{opportunity.retainer_price ? ` + $${opportunity.retainer_price.toLocaleString()}/mo` : ''}
+                  </span>
+                </button>
+                {expanded && (
+                  <div className="one-alfa-card-body">
+                    {opportunity.service_definition && <p className="one-alfa-offer">{opportunity.service_definition}</p>}
+                    {!!opportunity.build_steps?.length && (
+                      <ol className="one-alfa-steps">
+                        {opportunity.build_steps.map((step, index) => <li key={index}>{step}</li>)}
+                      </ol>
+                    )}
+                    {opportunity.retainer_pitch && <p className="one-alfa-retainer">{opportunity.retainer_pitch}</p>}
+                    <p className="one-stage-badge">Stage: {stage.replace(/_/g, ' ')}</p>
+                    {(stage === 'outreach_approved' || stage === 'contacted') && (
+                      <div className="one-revenue-form">
+                        <input placeholder="Client name (optional)" value={alfaForm.clientName} onChange={(event) => setAlfaForm({ ...alfaForm, clientName: event.target.value })} />
+                        <input placeholder="Contact or username" value={alfaForm.clientContact} onChange={(event) => setAlfaForm({ ...alfaForm, clientContact: event.target.value })} />
+                        <input placeholder="Channel, e.g. Reddit DM" value={alfaForm.channel} onChange={(event) => setAlfaForm({ ...alfaForm, channel: event.target.value })} />
+                      </div>
+                    )}
+                    {stage === 'contacted' && (
+                      <div className="one-revenue-form">
+                        <textarea placeholder="Paste the client's response. Positive replies automatically create the deal documents." value={alfaForm.response} onChange={(event) => setAlfaForm({ ...alfaForm, response: event.target.value })} />
+                      </div>
+                    )}
+                    {['replied', 'proposal_ready', 'payment_pending'].includes(stage) && (
+                      <div className="one-revenue-form">
+                        <input type="number" min="1" placeholder={`Amount received (suggested ${opportunity.one_time_price})`} value={alfaForm.amount} onChange={(event) => setAlfaForm({ ...alfaForm, amount: event.target.value })} />
+                        <input placeholder="Payment transaction/reference ID" value={alfaForm.reference} onChange={(event) => setAlfaForm({ ...alfaForm, reference: event.target.value })} />
+                        {(opportunity.proposal_path || opportunity.agreement_path || opportunity.invoice_path) && (
+                          <div className="one-deal-links">
+                            {opportunity.proposal_path && <a href={`/v1/alfa/artifact?kind=proposal&url=${encodeURIComponent(opportunity.url)}`} target="_blank" rel="noreferrer">Proposal</a>}
+                            {opportunity.agreement_path && <a href={`/v1/alfa/artifact?kind=agreement&url=${encodeURIComponent(opportunity.url)}`} target="_blank" rel="noreferrer">Agreement draft</a>}
+                            {opportunity.invoice_path && <a href={`/v1/alfa/artifact?kind=invoice&url=${encodeURIComponent(opportunity.url)}`} target="_blank" rel="noreferrer">Invoice draft</a>}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {opportunity.outreach_message && (
+                      <div className="one-alfa-outreach">
+                        <div className="one-alfa-outreach-head">
+                          <span>Draft outreach (review before sending)</span>
+                          <button onClick={() => void copyOutreach(opportunity.url, opportunity.outreach_message)}>
+                            {alfaCopiedUrl === opportunity.url ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
+                          </button>
+                        </div>
+                        <p>{opportunity.outreach_message}</p>
+                      </div>
+                    )}
+                    <div className="one-alfa-actions">
+                      <a href={opportunity.url} target="_blank" rel="noreferrer" className="one-alfa-source">
+                        View source post <ExternalLink size={13} />
+                      </a>
+                      {stage === 'qualified' && <button className="one-alfa-approve" disabled={busyOnThis} onClick={() => void approveOpportunity(opportunity.url)}><Check size={14} /> Approve outreach</button>}
+                      {stage === 'outreach_approved' && <button className="one-alfa-approve" disabled={busyOnThis} onClick={() => void alfaAction('outreach-sent', { url: opportunity.url, channel: alfaForm.channel, client_contact: alfaForm.clientContact, client_name: alfaForm.clientName }, 'Contact recorded. Waiting for the client response.')}>Mark outreach sent</button>}
+                      {stage === 'contacted' && <button className="one-alfa-approve" disabled={busyOnThis || !alfaForm.response.trim()} onClick={() => void alfaAction('response', { url: opportunity.url, response_text: alfaForm.response }, 'Response recorded. Positive replies create proposal, agreement, and invoice drafts.')}>Save client response</button>}
+                      {['replied', 'proposal_ready', 'payment_pending'].includes(stage) && <button className="one-alfa-approve" disabled={busyOnThis || !alfaForm.amount || !alfaForm.reference.trim()} onClick={() => void alfaAction('payment', { url: opportunity.url, amount: Number(alfaForm.amount), reference: alfaForm.reference }, 'Payment recorded as collected. BETA delivery has been queued.')}>Confirm payment & start BETA</button>}
+                      {['delivery_queued', 'delivering'].includes(stage) && <button className="one-alfa-approve" disabled={busyOnThis} onClick={() => void alfaAction('complete', { url: opportunity.url, activate_retainer: false }, 'Delivery marked complete. Retainer remains proposed.')}>Mark delivered</button>}
+                      {!['paid', 'delivery_queued', 'delivering', 'delivered', 'retainer'].includes(stage) && (
+                        <button className="one-alfa-dismiss" disabled={busyOnThis} onClick={() => void dismissOpportunity(opportunity.url)}>
+                          <XCircle size={14} /> Dismiss
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      </section>
       </aside>
       {memoryOpen && (
         <div className="one-modal-backdrop" onMouseDown={() => setMemoryOpen(false)}>
