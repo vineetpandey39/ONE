@@ -29,7 +29,7 @@ except ImportError:
 # terms without forcing them -- directly targets the confirmed real
 # failure mode where "ONE" was misheard as "when" (traces.db, 2026-07-19).
 _ONE_KEYWORDS = [
-    "ONE", "JARVIS", "Vineet", "HEPHAISTOS", "TITAN", "ALFA", "BETA",
+    "ONE", "JARVIS", "Vineet", "HEPHAISTOS", "TITAN", "BETA",
     "HERMES", "ARES", "APOLLO", "ATHENA", "POSEIDON", "ZEUS",
 ]
 

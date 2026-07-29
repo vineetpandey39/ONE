@@ -74,16 +74,6 @@ def _daily_summary() -> str:
     active = [job for job in jobs if job["status"] in {"queued", "running"}]
     agents = sorted({job["agent_id"].upper() for job in completed})
     details = []
-    alfa = next((job for job in completed if job["agent_id"] == "alfa" and job.get("result")), None)
-    if alfa:
-        try:
-            result = json.loads(alfa["result"])
-            details.append(
-                f"ALFA scanned {result.get('scanned', 0)} public posts and retained {result.get('qualified', 0)} qualified lead, "
-                f"with an estimated pipeline of {result.get('estimated_usd_low', 0)} to {result.get('estimated_usd_high', 0)} US dollars."
-            )
-        except json.JSONDecodeError:
-            pass
     try:
         from openjarvis.one_agents.obsidian import obsidian_status
 

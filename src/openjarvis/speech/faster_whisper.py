@@ -29,7 +29,7 @@ _SUPPORTED_LANGUAGES = ("en", "hi")
 
 _ONE_VOCABULARY_PROMPT = (
     "The wake name ONE is pronounced one and must be written ONE, never 1. "
-    "JARVIS, Vineet, PostForge, Obsidian, TITAN, ALFA, BETA, HERMES, "
+    "JARVIS, Vineet, PostForge, Obsidian, TITAN, BETA, HERMES, "
     "ARES, APOLLO, ATHENA, HEPHAISTOS, POSEIDON, and ZEUS. Commands may be "
     "spoken in English, Hindi, or Hinglish."
 )
@@ -39,7 +39,7 @@ _ONE_VOCABULARY_PROMPT = (
 # `initial_prompt` does, so it is additive on top of the prompt above rather
 # than a replacement for it.
 _ONE_HOTWORDS = (
-    "ONE, JARVIS, Vineet, ALFA, BETA, TITAN, HERMES, ARES, APOLLO, ATHENA, "
+    "ONE, JARVIS, Vineet, BETA, TITAN, HERMES, ARES, APOLLO, ATHENA, "
     "HEPHAISTOS, POSEIDON, ZEUS, JOBHUNT, status, Obsidian, PostForge"
 )
 

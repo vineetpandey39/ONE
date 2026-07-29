@@ -63,39 +63,6 @@ class OptimizeRunRequest(BaseModel):
     max_samples: int = 50
 
 
-class AlfaOpportunityActionRequest(BaseModel):
-    url: str
-
-
-class AlfaOutreachRequest(BaseModel):
-    url: str
-    channel: str = "manual"
-    client_contact: str = ""
-    client_name: str = ""
-
-
-class AlfaResponseRequest(BaseModel):
-    url: str
-    response_text: str
-
-
-class AlfaPaymentRequest(BaseModel):
-    url: str
-    amount: int
-    reference: str
-    payment_link: str = ""
-
-
-class AlfaDeliveryRequest(BaseModel):
-    url: str
-    allow_unpaid: bool = False
-
-
-class AlfaCompleteRequest(BaseModel):
-    url: str
-    activate_retainer: bool = False
-
-
 # ---- Agent routes ----
 
 agents_router = APIRouter(prefix="/v1/agents", tags=["agents"])
@@ -1396,167 +1363,6 @@ async def start_optimize_run(req: OptimizeRunRequest, request: Request):
     return {"status": "started", "run_id": "placeholder"}
 
 
-# ---- ALFA revenue-opportunity routes ----
-
-alfa_router = APIRouter(prefix="/v1/alfa", tags=["alfa"])
-
-
-@alfa_router.get("")
-async def list_alfa_opportunities(status: str | None = None, limit: int = 20):
-    """List ALFA's packaged leads (service definition, pricing, outreach draft).
-
-    `status` filters by approval_status: pending_review | approved | dismissed.
-    Omit to get everything, newest/highest-scoring first.
-    """
-    from openjarvis.one_agents.alfa import list_opportunities
-
-    try:
-        opportunities = list_opportunities(status=status, limit=limit)
-        return {"opportunities": opportunities, "count": len(opportunities)}
-    except Exception as exc:
-        logger.warning("Failed to list ALFA opportunities: %s", exc)
-        return {"opportunities": [], "count": 0}
-
-
-@alfa_router.get("/pipeline")
-async def alfa_pipeline(stage: str | None = None, limit: int = 50):
-    """Return the complete lead-to-revenue pipeline and honest totals."""
-    from openjarvis.one_agents.revenue import list_pipeline
-
-    return list_pipeline(stage=stage, limit=limit)
-
-
-@alfa_router.get("/artifact")
-async def alfa_artifact(url: str, kind: str):
-    from openjarvis.one_agents.revenue import get_artifact
-
-    try:
-        path = get_artifact(url, kind)
-        return FileResponse(path, media_type="text/markdown", filename=path.name)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@alfa_router.post("/approve")
-async def approve_alfa_opportunity(req: AlfaOpportunityActionRequest):
-    """Approve a packaged lead. This does NOT send the outreach message —
-    it only confirms the offer/pricing and hands the lead to BETA to produce
-    a concrete delivery plan. The outreach draft still needs to be copied
-    and sent by Vineet.
-    """
-    from openjarvis.one_agents.revenue import approve_outreach
-
-    try:
-        opportunity = approve_outreach(req.url)
-        return {"status": "outreach_approved", "opportunity": opportunity}
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.warning("Failed to approve ALFA opportunity %s: %s", req.url, exc)
-        raise HTTPException(status_code=500, detail="Failed to approve opportunity") from exc
-
-
-@alfa_router.post("/dismiss")
-async def dismiss_alfa_opportunity(req: AlfaOpportunityActionRequest):
-    """Dismiss a lead ALFA surfaced (not worth pursuing)."""
-    from openjarvis.one_agents.revenue import mark_lost
-
-    try:
-        updated = mark_lost(req.url)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Opportunity not found")
-    return {"status": "dismissed", "opportunity": updated}
-
-
-@alfa_router.post("/outreach-sent")
-async def alfa_outreach_sent(req: AlfaOutreachRequest):
-    from openjarvis.one_agents.revenue import record_outreach
-
-    try:
-        opportunity = record_outreach(req.url, req.channel, req.client_contact, req.client_name)
-        return {"status": "contacted", "opportunity": opportunity}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@alfa_router.post("/response")
-async def alfa_record_response(req: AlfaResponseRequest):
-    from openjarvis.one_agents.revenue import record_response
-
-    try:
-        opportunity = record_response(req.url, req.response_text)
-        return {"status": opportunity["pipeline_stage"], "opportunity": opportunity}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@alfa_router.post("/prepare-deal")
-async def alfa_prepare_deal(req: AlfaOpportunityActionRequest):
-    from openjarvis.one_agents.revenue import prepare_deal
-
-    try:
-        opportunity = prepare_deal(req.url)
-        return {"status": "proposal_ready", "opportunity": opportunity}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@alfa_router.post("/payment")
-async def alfa_record_payment(req: AlfaPaymentRequest):
-    """Record verified payment, then queue BETA delivery automatically."""
-    from openjarvis.one_agents.revenue import record_payment
-
-    try:
-        result = record_payment(req.url, req.amount, req.reference, req.payment_link)
-        return {"status": "delivery_queued", **result}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@alfa_router.post("/payment-webhook")
-async def alfa_payment_webhook(request: Request):
-    """Provider-neutral signed hook for n8n or a payment-provider adapter."""
-    secret = os.environ.get("ALFA_PAYMENT_WEBHOOK_SECRET", "").strip()
-    if not secret:
-        raise HTTPException(status_code=503, detail="ALFA_PAYMENT_WEBHOOK_SECRET is not configured")
-    body = await request.body()
-    supplied = request.headers.get("x-one-signature", "")
-    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(supplied, expected):
-        raise HTTPException(status_code=401, detail="Invalid payment webhook signature")
-    try:
-        payload = json.loads(body)
-        from openjarvis.one_agents.revenue import record_payment
-
-        result = record_payment(
-            str(payload["url"]), int(payload["amount"]), str(payload["reference"]), str(payload.get("payment_link", ""))
-        )
-        return {"status": "delivery_queued", **result}
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@alfa_router.post("/start-delivery")
-async def alfa_start_delivery(req: AlfaDeliveryRequest):
-    from openjarvis.one_agents.revenue import start_delivery
-
-    try:
-        return {"status": "delivery_queued", **start_delivery(req.url, req.allow_unpaid)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@alfa_router.post("/complete")
-async def alfa_complete_delivery(req: AlfaCompleteRequest):
-    from openjarvis.one_agents.revenue import complete_delivery
-
-    try:
-        opportunity = complete_delivery(req.url, req.activate_retainer)
-        return {"status": opportunity["pipeline_stage"], "opportunity": opportunity}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
 def include_all_routes(app) -> None:
     """Include all extended API routers in a FastAPI app."""
     from openjarvis.server.approval_routes import (
@@ -1577,7 +1383,6 @@ def include_all_routes(app) -> None:
     app.include_router(speech_router)
     app.include_router(feedback_router)
     app.include_router(optimize_router)
-    app.include_router(alfa_router)
 
     # Agent Manager routes (if available)
     try:
@@ -1627,5 +1432,4 @@ __all__ = [
     "speech_router",
     "feedback_router",
     "optimize_router",
-    "alfa_router",
 ]
