@@ -12,6 +12,7 @@ import {
   Database,
   DollarSign,
   ExternalLink,
+  GitCompare,
   HardDrive,
   Mail,
   Mic,
@@ -279,6 +280,116 @@ const CONNECTION_PRESETS: ConnectionPreset[] = [
   { id: 'elevenlabs', label: 'ElevenLabs', section: 'custom', keys: ['ELEVENLABS_API_KEY'], note: 'Voice generation' },
   { id: 'leonardo', label: 'Leonardo', section: 'leonardo_video_generate', keys: ['LEONARDO_API_KEY'], note: 'IA image/video provider' },
 ];
+
+const IA_SOURCE_COMPARISON = {
+  active: {
+    name: 'LAO ImagineIndia v1.14.0',
+    status: 'Active source',
+    bible: 'IA_Bible.md v12.0',
+    path: 'C:\\Users\\pc\\Documents\\LAO\\imagineindia\\IA_Bible.md',
+    flow: 'Pinned ChatGPT brief -> LAO package -> Leonardo/Kling clips -> ffmpeg merge',
+  },
+  secondary: {
+    name: 'ONE IA knowledge pack',
+    status: 'Reference only',
+    bible: '5 MD files / v4 pack',
+    path: 'one-local\\src\\src\\openjarvis\\agents\\ia_knowledge',
+    flow: 'ONE can trigger jobs, but LAO owns the production workflow right now',
+  },
+  currentRun: {
+    location: 'Backwaters jetty, Kerala',
+    package: 'imagineindia-instagram-reel',
+    version: '1.14.0',
+    output: '6 hero-first frames, 5 motion clips, local reel for manual review',
+  },
+  gaps: [
+    {
+      level: 'Critical',
+      title: 'Punarnirman still appears in LAO Bible',
+      detail: 'v12.0 mandates "ImagineIndia - Project Punarnirman" branding. This conflicts with IA-only cleanup.',
+    },
+    {
+      level: 'High',
+      title: 'Sacred-place preservation is not a hard rule',
+      detail: 'Gateway/Haji Ali learning exists, but it is not enforced as a mandatory rejection gate.',
+    },
+    {
+      level: 'High',
+      title: 'Location picker is coverage-first',
+      detail: 'Zone rotation can pick rivers/backwaters repeatedly instead of highest-potential landmarks first.',
+    },
+    {
+      level: 'Medium',
+      title: 'ONE pack can confuse audits',
+      detail: 'ONE still has IA knowledge, but LAO v1.14.0 is what generated the latest production jobs.',
+    },
+  ],
+  actions: [
+    'Remove Punarnirman from LAO Bible and workflow prompts',
+    'Promote sacred/heritage preservation to mandatory law',
+    'Add viral-first override for iconic locations',
+  ],
+};
+
+function IaSourceComparisonWidget() {
+  const sources = [IA_SOURCE_COMPARISON.active, IA_SOURCE_COMPARISON.secondary];
+
+  return (
+    <section className="one-operations one-ia-comparison">
+      <div className="one-operations-head">
+        <div>
+          <div className="one-panel-label">IA SOURCE COMPARISON</div>
+          <strong>LAO VS ONE GENERATION BIBLE</strong>
+        </div>
+        <span className="one-ia-verdict"><GitCompare size={13} /> LAO is active</span>
+      </div>
+
+      <div className="one-ia-current-run">
+        <div>
+          <span>Latest LAO run</span>
+          <strong>{IA_SOURCE_COMPARISON.currentRun.location}</strong>
+          <small>{IA_SOURCE_COMPARISON.currentRun.package} {IA_SOURCE_COMPARISON.currentRun.version}</small>
+        </div>
+        <p>{IA_SOURCE_COMPARISON.currentRun.output}</p>
+      </div>
+
+      <div className="one-ia-source-grid">
+        {sources.map((source) => (
+          <article key={source.name} className="one-ia-source-card">
+            <div className="one-ia-source-head">
+              <div>
+                <span>{source.status}</span>
+                <strong>{source.name}</strong>
+              </div>
+              {source.status === 'Active source' ? <Check size={15} /> : <Database size={15} />}
+            </div>
+            <p>{source.bible}</p>
+            <small title={source.path}>{source.path}</small>
+            <em>{source.flow}</em>
+          </article>
+        ))}
+      </div>
+
+      <div className="one-ia-gap-grid">
+        <div className="one-ia-gap-list">
+          {IA_SOURCE_COMPARISON.gaps.map((gap) => (
+            <article key={gap.title} className={`one-ia-gap ${gap.level.toLowerCase()}`}>
+              <span>{gap.level}</span>
+              <strong>{gap.title}</strong>
+              <p>{gap.detail}</p>
+            </article>
+          ))}
+        </div>
+        <div className="one-ia-action-list">
+          <span>Next fixes</span>
+          {IA_SOURCE_COMPARISON.actions.map((action) => (
+            <div key={action}><Target size={13} /> {action}</div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export function OneCockpit() {
   const [status, setStatus] = useState<OneStatus>(DEFAULT_STATUS);
@@ -1806,6 +1917,8 @@ export function OneCockpit() {
           ))}
         </div>
       </section>
+
+      <IaSourceComparisonWidget />
 
       <section className="one-operations one-jobhunt-board">
         <div className="one-operations-head">
