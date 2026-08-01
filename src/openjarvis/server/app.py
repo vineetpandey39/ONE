@@ -369,6 +369,26 @@ def create_app(
     app.include_router(analytics_router)
     include_all_routes(app)
 
+    # Reliability mechanism #3: run canary self-tests just after startup so a
+    # regression (e.g. the fast-path hijacking ordinary questions) shows up in
+    # the logs the moment ONE boots, instead of when Sir hits it. Runs in a
+    # daemon thread so it never delays boot and can never crash startup.
+    @app.on_event("startup")
+    async def _run_startup_canaries():  # noqa: ANN202
+        import threading
+
+        def _go():
+            try:
+                from openjarvis.reliability.canary import run_canaries
+
+                summary = run_canaries()
+                level = logger.info if summary["ok"] else logger.warning
+                level("Startup canaries: %d/%d passed", summary["passed"], summary["total"])
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Startup canaries skipped: %s", exc)
+
+        threading.Thread(target=_go, name="one-startup-canaries", daemon=True).start()
+
     # Restore SendBlue channel bindings from database on startup
     _restore_sendblue_bindings(app)
 

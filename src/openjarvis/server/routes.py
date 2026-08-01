@@ -97,6 +97,25 @@ async def one_status():
     }
 
 
+@router.get("/v1/one/health")
+async def one_health():
+    """Supervisor snapshot: STT, model, queue, disk — with remediation hints.
+    Reliability mechanism #3 (health). Never raises."""
+    from openjarvis.reliability.health import system_health
+
+    return system_health()
+
+
+@router.get("/v1/one/canary")
+async def one_canary():
+    """Run the synthetic self-tests on demand. Reliability mechanism #3.
+    The router canary guards the exact 'agent questions get hijacked'
+    regression class. Never raises."""
+    from openjarvis.reliability.canary import run_canaries
+
+    return run_canaries()
+
+
 @router.get("/v1/one/model-status")
 async def one_model_status():
     return _one_model_status()
@@ -233,8 +252,19 @@ def _one_agent_command(text: str) -> str | None:
     # matters as long as the distinctive phrase itself is in there
     # somewhere. This also makes the greeting recognize things like "so hey
     # one how are you doing today buddy" without listing every combination.
+    # Smart-routing guard (reliability #1): the substring match above tolerates
+    # STT slop around a *short* greeting, but that same substring rule used to
+    # hijack real questions that merely contain the phrase — "how are you going
+    # to fix the agents that keep failing" matched "how are you" and got a
+    # canned greeting instead of a real answer. Bound the fuzzy match by length:
+    # a greeting (even with mis-heard filler) stays short; a genuine question
+    # runs long and must fall through to the Ghost Agent. Exact bare greetings
+    # are always allowed. 8 words keeps "so hey one how are you doing today
+    # buddy" working while deferring anything longer.
+    is_short = len(check_in.split()) <= 8
+
     up_phrases = ("are you up", "are you there", "wake up", "wakeup", "startup", "start up")
-    if check_in == "online" or check_in == "you up" or any(p in check_in for p in up_phrases):
+    if check_in == "online" or check_in == "you up" or (is_short and any(p in check_in for p in up_phrases)):
         return "Always online, Sir. What do you need?"
 
     greeting_phrases = (
@@ -246,7 +276,7 @@ def _one_agent_command(text: str) -> str | None:
         "कैसे हो", "कैसे हैं", "क्या हाल",
     )
     bare_greetings = {"hi", "hello", "hey", "namaste", "नमस्ते"}
-    if check_in in bare_greetings or any(p in check_in for p in greeting_phrases):
+    if check_in in bare_greetings or (is_short and any(p in check_in for p in greeting_phrases)):
         # Shorter on purpose -- this is spoken aloud via TTS on every single
         # greeting, and the original 3-sentence version added several real
         # seconds of speaking time on top of an already-slow voice pipeline.
