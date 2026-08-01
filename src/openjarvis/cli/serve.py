@@ -125,6 +125,23 @@ def serve(
 
     config = load_config()
 
+    # Inject saved vault credentials into the environment BEFORE any backend is
+    # built. Fixes a real ordering bug: the cloud-escalation-model gate and the
+    # Deepgram speech backend below both read their API keys from os.environ,
+    # but credentials.toml was only injected later (inside create_app). On a
+    # fresh shell where the keys aren't already exported, both were therefore
+    # built DEAD -- the Ghost Agent silently fell back to the weak local model
+    # (producing off-topic replies) and STT fell back to slow local whisper
+    # ("didn't catch that" / timeouts). Injecting here makes ONE self-sufficient
+    # from its own vault regardless of how it was launched. Idempotent: only
+    # fills keys not already present, and never blocks startup.
+    try:
+        from openjarvis.core.credentials import inject_credentials
+
+        inject_credentials()
+    except Exception:  # noqa: BLE001
+        pass
+
     # Resolve host/port from CLI args or config
     bind_host = host or config.server.host
     bind_port = port or config.server.port

@@ -1443,6 +1443,10 @@ async def start_optimize_run(req: OptimizeRunRequest, request: Request):
 alfa_router = APIRouter(prefix="/v1/alfa", tags=["alfa"])
 
 
+def _alfa_legacy_enabled() -> bool:
+    return os.environ.get("ALFA_AUTOSCOUT", "false").lower() in {"1", "true", "yes", "on"}
+
+
 @alfa_router.get("")
 async def list_alfa_opportunities(status: str | None = None, limit: int = 20):
     """List ALFA's packaged leads (service definition, pricing, outreach draft).
@@ -1450,6 +1454,9 @@ async def list_alfa_opportunities(status: str | None = None, limit: int = 20):
     `status` filters by approval_status: pending_review | approved | dismissed.
     Omit to get everything, newest/highest-scoring first.
     """
+    if not _alfa_legacy_enabled():
+        return {"opportunities": [], "count": 0, "disabled": True}
+
     from openjarvis.one_agents.alfa import list_opportunities
 
     try:
@@ -1463,6 +1470,20 @@ async def list_alfa_opportunities(status: str | None = None, limit: int = 20):
 @alfa_router.get("/pipeline")
 async def alfa_pipeline(stage: str | None = None, limit: int = 50):
     """Return the complete lead-to-revenue pipeline and honest totals."""
+    if not _alfa_legacy_enabled():
+        return {
+            "opportunities": [],
+            "summary": {
+                "potential_pipeline": 0,
+                "potential_mrr": 0,
+                "earned_revenue": 0,
+                "active_mrr": 0,
+                "paid_deals": 0,
+                "open_deals": 0,
+            },
+            "disabled": True,
+        }
+
     from openjarvis.one_agents.revenue import list_pipeline
 
     return list_pipeline(stage=stage, limit=limit)

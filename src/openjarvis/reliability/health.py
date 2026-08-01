@@ -36,11 +36,28 @@ def _home() -> Path:
     return Path(os.environ.get("OPENJARVIS_HOME", Path.home() / ".openjarvis"))
 
 
-def check_stt() -> dict[str, Any]:
-    """Is at least one speech backend usable? Deepgram (key present) or the
-    local faster-whisper import."""
+def check_stt(backend: Any = None) -> dict[str, Any]:
+    """Is a speech backend actually usable? When the live backend is passed in,
+    call its real ``health()`` — an env key being present is NOT proof the
+    client initialised (a real failure: the Deepgram client was built before
+    the vault key was injected, so the key was in os.environ but the client was
+    dead). Falls back to a presence check only when no backend is available."""
+    if backend is not None:
+        try:
+            if backend.health():
+                return _probe("stt", True, f"{getattr(backend, 'backend_id', 'speech')} backend live.")
+            return _probe(
+                "stt", False,
+                f"{getattr(backend, 'backend_id', 'speech')} backend built but NOT usable "
+                f"(client failed to initialise — likely no API key at build time).",
+                severity="crit",
+                remediation="Restart ONE so credentials inject before the backend is built (see serve.py inject_credentials).",
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _probe("stt", False, f"speech backend health() raised: {exc}", severity="crit",
+                          remediation="Restart ONE; check the speech backend init.")
     if os.environ.get("DEEPGRAM_API_KEY", "").strip():
-        return _probe("stt", True, "Deepgram configured (cloud, primary).")
+        return _probe("stt", True, "Deepgram key present (backend not passed for live check).")
     try:
         import faster_whisper  # noqa: F401
         return _probe("stt", True, "faster-whisper available (local fallback).")
@@ -121,13 +138,38 @@ def check_disk() -> dict[str, Any]:
         return _probe("disk", True, f"Disk check skipped: {exc}")
 
 
-_PROBES = (check_stt, check_model, check_queue, check_disk)
+def check_ghost_agent(app: Any = None) -> dict[str, Any]:
+    """Is the cloud Ghost Agent actually wired? If cloud_escalation_model is
+    None, ONE silently falls back to the weak local model for anything the fast
+    path doesn't handle — the real cause of off-topic replies. Only meaningful
+    when the live app is passed."""
+    if app is None:
+        return _probe("ghost_agent", True, "not checked (no app context).")
+    model = getattr(getattr(app, "state", None), "cloud_escalation_model", None)
+    if model:
+        return _probe("ghost_agent", True, f"cloud escalation active ({model}).")
+    return _probe(
+        "ghost_agent", False,
+        "Cloud Ghost Agent NOT wired — falling back to the local model for everything.",
+        severity="crit",
+        remediation="Ensure ANTHROPIC_API_KEY (or OPENAI_API_KEY) is injected from the vault before startup, then restart.",
+    )
 
 
-def system_health() -> dict[str, Any]:
-    """Run every probe and roll up an overall status. Never raises."""
+def system_health(app: Any = None) -> dict[str, Any]:
+    """Run every probe and roll up an overall status. Never raises.
+    Pass the live FastAPI ``app`` for honest STT + Ghost Agent checks."""
+    backend = getattr(getattr(app, "state", None), "speech_backend", None) if app is not None else None
     probes = []
-    for fn in _PROBES:
+    try:
+        probes.append(check_stt(backend))
+    except Exception as exc:  # noqa: BLE001
+        probes.append(_probe("stt", False, f"probe crashed: {exc}"))
+    try:
+        probes.append(check_ghost_agent(app))
+    except Exception as exc:  # noqa: BLE001
+        probes.append(_probe("ghost_agent", False, f"probe crashed: {exc}"))
+    for fn in (check_model, check_queue, check_disk):
         try:
             probes.append(fn())
         except Exception as exc:  # noqa: BLE001

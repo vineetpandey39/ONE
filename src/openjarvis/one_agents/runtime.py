@@ -83,7 +83,7 @@ def _connect() -> sqlite3.Connection:
 def _enqueue_due_recurring_jobs() -> None:
     now_epoch = time.time()
     now = _now()
-    if os.environ.get("ALFA_AUTOSCOUT", "true").lower() in {"1", "true", "yes", "on"}:
+    if os.environ.get("ALFA_AUTOSCOUT", "false").lower() in {"1", "true", "yes", "on"}:
         interval = max(900, int(os.environ.get("ALFA_SCAN_INTERVAL_SECONDS", "3600")))
         with _connect() as db:
             db.execute(

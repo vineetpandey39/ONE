@@ -53,7 +53,6 @@ def _one_model_status(model: str | None = None) -> dict[str, Any]:
     route_map = [
         {"scope": "simple_chat", "model": router_model, "engine": engine},
         {"scope": "agent_status_and_queue", "model": "deterministic", "engine": "local-python"},
-        {"scope": "alfa_scan", "model": "deterministic + optional local packaging", "engine": "local-python/ollama"},
         {"scope": "jobhunt", "model": nemotron_model or router_model, "engine": "nvidia" if nemotron_ready else engine},
         {"scope": "ia_scout_and_metadata", "model": nemotron_model or router_model, "engine": "nvidia" if nemotron_ready else engine},
         {"scope": "ia_image_generation", "model": flux_model if image_provider == "flux" else "gpt-image-2", "engine": image_provider},
@@ -98,12 +97,12 @@ async def one_status():
 
 
 @router.get("/v1/one/health")
-async def one_health():
-    """Supervisor snapshot: STT, model, queue, disk — with remediation hints.
-    Reliability mechanism #3 (health). Never raises."""
+async def one_health(request: Request):
+    """Supervisor snapshot: STT (live), Ghost Agent, model, queue, disk — with
+    remediation hints. Reliability mechanism #3 (health). Never raises."""
     from openjarvis.reliability.health import system_health
 
-    return system_health()
+    return system_health(request.app)
 
 
 @router.get("/v1/one/canary")
@@ -117,13 +116,13 @@ async def one_canary():
 
 
 @router.get("/v1/one/self-diagnosis")
-async def one_self_diagnosis():
-    """ONE reviews its own state (health + canaries + agent failure rates) and
-    returns a prioritised list of problems with a suggested fix for each.
+async def one_self_diagnosis(request: Request):
+    """ONE reviews its own state (live health + canaries + agent failure rates)
+    and returns a prioritised list of problems with a suggested fix for each.
     Reliability mechanism ★ (self-diagnosis). Never raises."""
     from openjarvis.reliability.diagnose import self_diagnose
 
-    return self_diagnose()
+    return self_diagnose(request.app)
 
 
 @router.get("/v1/one/model-status")

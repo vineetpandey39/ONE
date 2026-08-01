@@ -77,10 +77,10 @@ def _canary_issues() -> list[dict[str, Any]]:
     return out
 
 
-def _health_issues() -> list[dict[str, Any]]:
+def _health_issues(app: Any = None) -> list[dict[str, Any]]:
     try:
         from openjarvis.reliability.health import system_health
-        h = system_health()
+        h = system_health(app)
     except Exception as exc:  # noqa: BLE001
         return [_issue("warn", "Health probes could not run", str(exc), "Check reliability.health.")]
     out = []
@@ -95,10 +95,15 @@ def _health_issues() -> list[dict[str, Any]]:
     return out
 
 
-def self_diagnose() -> dict[str, Any]:
-    """Full self-review. Returns a prioritised issue list. Never raises."""
+def self_diagnose(app: Any = None) -> dict[str, Any]:
+    """Full self-review. Returns a prioritised issue list. Never raises.
+    Pass the live FastAPI ``app`` for honest STT + Ghost Agent checks."""
     issues: list[dict[str, Any]] = []
-    for fn in (_health_issues, _canary_issues, _agent_failure_issues):
+    try:
+        issues.extend(_health_issues(app))
+    except Exception:  # noqa: BLE001
+        pass
+    for fn in (_canary_issues, _agent_failure_issues):
         try:
             issues.extend(fn())
         except Exception:  # noqa: BLE001
