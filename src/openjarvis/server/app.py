@@ -387,6 +387,28 @@ def create_app(
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Startup canaries skipped: %s", exc)
 
+            # Regression guard: run the full self-diagnosis WITH app context
+            # (real STT + Ghost Agent liveness, not env-presence) and log LOUDLY
+            # on anything critical. This is what turns "a fix silently regressed"
+            # into an immediate, visible startup alarm — e.g. today's dead
+            # Deepgram / unwired Ghost Agent would scream here instead of only
+            # surfacing when Sir hit a broken command.
+            try:
+                from openjarvis.reliability.diagnose import self_diagnose
+
+                d = self_diagnose(app)
+                if d["status"] == "critical":
+                    logger.error("STARTUP SELF-DIAGNOSIS CRITICAL: %s", d["headline"])
+                    for issue in d["issues"]:
+                        if issue["severity"] == "critical":
+                            logger.error("  ! %s — %s (fix: %s)", issue["title"], issue["detail"], issue["suggestion"])
+                elif d["issue_count"]:
+                    logger.warning("Startup self-diagnosis: %s", d["headline"])
+                else:
+                    logger.info("Startup self-diagnosis: all clear.")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Startup self-diagnosis skipped: %s", exc)
+
         threading.Thread(target=_go, name="one-startup-canaries", daemon=True).start()
 
     # Restore SendBlue channel bindings from database on startup

@@ -43,29 +43,32 @@ class DeepgramSpeechBackend(SpeechBackend):
     def __init__(self, api_key: Optional[str] = None) -> None:
         self._api_key = api_key or os.environ.get("DEEPGRAM_API_KEY", "")
         self._client = None
-        if self._api_key and DeepgramClient is not None:
-            # Confirmed live (2026-07-20): every real transcribe() call
-            # failed with "SSL: CERTIFICATE_VERIFY_FAILED: unable to get
-            # local issuer certificate" -- the same Avast SSL-interception
-            # issue already fixed for the DuckDuckGo backend
-            # (web_search.py's DDGS(verify=False)). __init__ itself never
-            # touches the network, so "Speech: deepgram" printed as healthy
-            # at every startup this whole time despite this backend never
-            # having completed a single real call.
-            import httpx
+        self._ensure_client()
 
-            # httpx.Client defaults to a 5s timeout on every phase, so a
-            # slightly longer clip or a momentarily slow network trips
-            # ReadTimeout ("Local transcription failed: ReadTimeout",
-            # confirmed 2026-07-26). Give the connect/read phases real room;
-            # transcription is a short upload+response, not a stream.
-            self._client = DeepgramClient(
-                api_key=self._api_key,
-                httpx_client=httpx.Client(
-                    verify=False,
-                    timeout=httpx.Timeout(30.0, connect=10.0),
-                ),
-            )
+    def _ensure_client(self) -> None:
+        """Build the Deepgram client, re-reading the key from the environment if
+        we don't have one yet. Belt-and-suspenders self-heal: even if this
+        backend was constructed before the vault key was injected (the real
+        ordering bug that left it dead), the next call picks the key up and
+        comes alive instead of failing forever. Idempotent and cheap.
+        """
+        if self._client is not None:
+            return
+        if not self._api_key:
+            self._api_key = os.environ.get("DEEPGRAM_API_KEY", "")
+        if not (self._api_key and DeepgramClient is not None):
+            return
+        # verify=False: Avast SSL-interception workaround (same as web_search).
+        # 30s timeout: default 5s tripped ReadTimeout on slightly longer clips.
+        import httpx
+
+        self._client = DeepgramClient(
+            api_key=self._api_key,
+            httpx_client=httpx.Client(
+                verify=False,
+                timeout=httpx.Timeout(30.0, connect=10.0),
+            ),
+        )
 
     def transcribe(
         self,
@@ -75,6 +78,7 @@ class DeepgramSpeechBackend(SpeechBackend):
         language: Optional[str] = None,
     ) -> TranscriptionResult:
         """Transcribe audio using Deepgram's API."""
+        self._ensure_client()
         if self._client is None:
             raise RuntimeError("Deepgram client not initialized (missing API key?)")
 
@@ -131,6 +135,7 @@ class DeepgramSpeechBackend(SpeechBackend):
         )
 
     def health(self) -> bool:
+        self._ensure_client()
         return self._client is not None and bool(self._api_key)
 
     def supported_formats(self) -> List[str]:

@@ -843,6 +843,23 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     # Sonnet/Opus on purpose: latency-first fallback, not a reasoning-heavy
     # one.
     cloud_escalation_model = getattr(request.app.state, "cloud_escalation_model", None)
+    if not cloud_escalation_model:
+        # Belt-and-suspenders: if the vault key was injected after startup (so
+        # the Ghost Agent was wired off), pick it up now rather than falling
+        # back to the weak local model forever. This is the request-time twin
+        # of serve.py's early inject_credentials().
+        import os as _os
+
+        if _os.environ.get("ANTHROPIC_API_KEY"):
+            cloud_escalation_model = "claude-haiku-4-5"
+        elif _os.environ.get("OPENAI_API_KEY"):
+            cloud_escalation_model = "gpt-4o-mini"
+        if cloud_escalation_model:
+            request.app.state.cloud_escalation_model = cloud_escalation_model
+            logging.getLogger("openjarvis.server").info(
+                "Ghost Agent wired lazily to %s (key became available post-startup)",
+                cloud_escalation_model,
+            )
 
     if request_body.stream:
         # When the client passes `tools`, stream the model's raw
