@@ -399,6 +399,7 @@ export function OneCockpit() {
     applied_counts: {},
     applications: [],
   });
+  const [health, setHealth] = useState<{ status: string; issues: number }>({ status: 'unknown', issues: 0 });
   const [credentialVault, setCredentialVault] = useState<CredentialVault>(DEFAULT_CREDENTIAL_VAULT);
   const [credentialVaultMessage, setCredentialVaultMessage] = useState('');
   const [credentialActionKey, setCredentialActionKey] = useState<string | null>(null);
@@ -623,6 +624,24 @@ export function OneCockpit() {
     const timer = window.setInterval(refreshStatus, 3000);
     return () => window.clearInterval(timer);
   }, [refreshStatus]);
+
+  // Reliability: poll ONE's self-diagnosis so the HEALTH tile reflects the
+  // supervisor + canaries at a glance (green = healthy, else issue count).
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const r = await coreFetch('/v1/one/self-diagnosis', { cache: 'no-store' });
+        if (!r.ok) return;
+        const d = await r.json();
+        setHealth({ status: d.status || 'unknown', issues: d.issue_count || 0 });
+      } catch {
+        // best-effort; the tile just shows unknown if this is unreachable.
+      }
+    };
+    void load();
+    const t = window.setInterval(load, 20000);
+    return () => window.clearInterval(t);
+  }, []);
 
   useEffect(() => {
     void refreshMemoryGraph();
@@ -1361,6 +1380,10 @@ export function OneCockpit() {
     { label: 'AGENTS',   value: `${status.agents.length} / ${status.agents.length}`,         ok: status.agents.length > 0 },
     { label: 'MEMORIES', value: `${status.obsidian.notes}`,                                  ok: status.online },
     { label: 'LISTEN',   value: alwaysListening ? 'ON' : 'OFF',                              ok: alwaysListening },
+    { label: 'HEALTH',   value: health.status === 'healthy' ? 'OK'
+                              : health.status === 'attention' ? `${health.issues} ISSUE${health.issues === 1 ? '' : 'S'}`
+                              : health.status === 'critical' ? 'CRITICAL' : '—',
+                         ok: health.status === 'healthy' },
     { label: 'CORE',     value: status.online ? 'ONLINE' : 'OFFLINE',                        ok: status.online },
   ];
 

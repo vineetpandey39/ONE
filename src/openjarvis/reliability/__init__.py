@@ -17,5 +17,12 @@ against regressions.
 from openjarvis.reliability.self_heal import RecoveryError, run_with_recovery
 from openjarvis.reliability.health import system_health
 from openjarvis.reliability.canary import run_canaries
+from openjarvis.reliability.diagnose import self_diagnose
 
-__all__ = ["run_with_recovery", "RecoveryError", "system_health", "run_canaries"]
+__all__ = [
+    "run_with_recovery",
+    "RecoveryError",
+    "system_health",
+    "run_canaries",
+    "self_diagnose",
+]

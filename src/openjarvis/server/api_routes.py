@@ -913,6 +913,54 @@ async def learning_policy(request: Request):
 speech_router = APIRouter(prefix="/v1/speech", tags=["speech"])
 
 
+def _transcribe_with_failover(app, audio_bytes: bytes, ext: str, language):
+    """Reliability #1/#2: transcribe with graceful STT failover.
+
+    Primary backend (Deepgram) → local faster-whisper fallback → an empty
+    "please repeat" result — instead of hard-failing the whole turn when the
+    cloud STT has an SSL/timeout blip (a real recurring failure). Uses the
+    shared closed-loop wrapper: each attempt advances to the next backend; a
+    successful transcription (even empty = silence) verifies and returns.
+    """
+    from openjarvis.reliability.self_heal import run_with_recovery
+
+    primary = getattr(app.state, "speech_backend", None)
+    idx = {"i": 0}
+
+    def _fallback_backend():
+        fb = getattr(app.state, "_stt_fallback_backend", None)
+        if fb is None:
+            from openjarvis.speech.faster_whisper import FasterWhisperBackend
+
+            fb = FasterWhisperBackend(model_size="base", device="cpu", compute_type="int8")
+            app.state._stt_fallback_backend = fb
+        return fb
+
+    def _action():
+        be = primary if idx["i"] == 0 and primary is not None else _fallback_backend()
+        return be.transcribe(audio_bytes, format=ext, language=language or None)
+
+    def _advance(attempt, last):
+        idx["i"] = attempt - 1  # next attempt uses the fallback backend
+
+    def _give_up(last, err):
+        # Both backends failed — return an empty result the client renders as
+        # "I didn't catch that", never a 500 that drops the command silently.
+        from openjarvis.speech._stubs import TranscriptionResult
+
+        logger.warning("STT failover exhausted (%s); asking to repeat", err)
+        return TranscriptionResult(text="", language=None, confidence=0.0, duration_seconds=0.0, segments=[])
+
+    return run_with_recovery(
+        _action,
+        verify=lambda r: r is not None,
+        correct=_advance,
+        escalate=_give_up,
+        max_attempts=2,
+        label="stt",
+    )
+
+
 @speech_router.post("/transcribe")
 async def transcribe_speech(request: Request):
     """Transcribe uploaded audio to text."""
@@ -934,19 +982,13 @@ async def transcribe_speech(request: Request):
     filename = getattr(audio_file, "filename", "audio.wav")
     ext = filename.rsplit(".", 1)[-1] if "." in filename else "wav"
 
-    try:
-        # Confirmed: this call previously ran synchronously inside an async
-        # handler, blocking FastAPI's entire event loop (single worker, per
-        # config.toml) for the full duration of a CPU-bound Whisper call --
-        # every other request (status polls, wake events, other users'
-        # transcriptions) stalled behind it. /native-record already used
-        # run_in_threadpool correctly; this brings /transcribe in line.
-        result = await run_in_threadpool(
-            backend.transcribe, audio_bytes, format=ext, language=language or None
-        )
-    except Exception as exc:
-        logger.exception("Local speech transcription failed")
-        raise HTTPException(status_code=422, detail=f"Local transcription failed: {type(exc).__name__}") from exc
+    # Runs off the event loop (run_in_threadpool) — this call is CPU-bound for
+    # local Whisper and would otherwise block FastAPI's single worker. The
+    # failover helper adds graceful degradation: Deepgram → local whisper →
+    # "please repeat", so a cloud STT blip never hard-fails the command.
+    result = await run_in_threadpool(
+        _transcribe_with_failover, request.app, audio_bytes, ext, language
+    )
     return {
         "text": normalize_one_transcript(result.text),
         "language": result.language,

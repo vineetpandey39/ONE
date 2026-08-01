@@ -116,6 +116,16 @@ async def one_canary():
     return run_canaries()
 
 
+@router.get("/v1/one/self-diagnosis")
+async def one_self_diagnosis():
+    """ONE reviews its own state (health + canaries + agent failure rates) and
+    returns a prioritised list of problems with a suggested fix for each.
+    Reliability mechanism ★ (self-diagnosis). Never raises."""
+    from openjarvis.reliability.diagnose import self_diagnose
+
+    return self_diagnose()
+
+
 @router.get("/v1/one/model-status")
 async def one_model_status():
     return _one_model_status()
@@ -922,18 +932,31 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     # than removing this guard — silent re-routing is what produced #414.
     if cloud_escalation_model and not request_body.tools:
         try:
-            cloud_response = _handle_cloud_escalation(
-                engine,
-                cloud_escalation_model,
-                request_body,
-                complexity_info,
-                app_config=config,
+            # Reliability #2: retry a transient cloud blip once (rate-limit,
+            # dropped connection) via the shared closed-loop wrapper BEFORE
+            # dropping to the weaker local model. A real outage still raises
+            # after the retries and falls through to the local agent below, so
+            # an offline setup is unaffected.
+            from openjarvis.reliability.self_heal import run_with_recovery
+
+            cloud_response = run_with_recovery(
+                lambda: _handle_cloud_escalation(
+                    engine,
+                    cloud_escalation_model,
+                    request_body,
+                    complexity_info,
+                    app_config=config,
+                ),
+                verify=lambda r: r is not None,
+                max_attempts=2,
+                backoff_seconds=0.4,
+                label="cloud_escalation",
             )
             _save_exchange_to_obsidian(latest_user_text, _extract_response_content(cloud_response))
             return cloud_response
         except Exception:
             logging.getLogger("openjarvis.server").warning(
-                "Cloud escalation to %s failed, falling back to local agent",
+                "Cloud escalation to %s failed after retry, falling back to local agent",
                 cloud_escalation_model,
                 exc_info=True,
             )
