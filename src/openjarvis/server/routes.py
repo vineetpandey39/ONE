@@ -442,9 +442,24 @@ def _one_agent_command(text: str) -> str | None:
         )
         return f"Here's what's in the queue: {summary}."
 
-    if re.search(r"\b(list|show|which)\b.*\bagents?\b", lowered):
-        roster = ", ".join(value["name"] for value in AGENTS.values())
-        return f"ONE agent network: {roster}."
+    if re.search(r"\b(list|show|which|what)\b.*\bagents?\b", lowered) or re.search(
+        r"\bagents?\b.*\b(free|available|idle|use|ready|doing)\b", lowered
+    ):
+        # A bare list of names was unhelpful -- "which agents are free to use"
+        # should say what each one does and whether it's busy right now. Pull
+        # live queue state so "free" reflects reality (an agent with a queued
+        # or running job is busy). Richer, open-ended questions like "what can
+        # TITAN do for my launch" don't hit this (no plural "agents"/free-word)
+        # and still fall through to the LLM below.
+        active = {job["agent_id"] for job in list_jobs(200) if job["status"] in {"queued", "running"}}
+        lines = [
+            f"{value['name']} — {value['role']} — {'busy' if agent_id in active else 'free'}"
+            for agent_id, value in AGENTS.items()
+        ]
+        free_count = sum(1 for agent_id in AGENTS if agent_id not in active)
+        return (
+            f"You have {len(AGENTS)} agents, {free_count} free right now:\n" + "\n".join(lines)
+        )
 
     selected = _match_agent_id(lowered)
     has_dispatch_verb = bool(
