@@ -347,6 +347,29 @@ class ScreenControlTool(BaseTool):
             )
 
         pyautogui.FAILSAFE = False  # top-left-corner abort would fire on legit clicks
+
+        # UI Automation (uiautomation) is a COM client API. The Ghost Agent
+        # runs this tool on a server worker thread, while uiautomation's client
+        # object was created on the server's MAIN thread -- so on this thread
+        # COM was never initialized and the pattern calls below (GetChildren,
+        # BoundingRectangle, GetWindowPattern, SetActive) raise "CoInitialize
+        # has not been called". This is NOT a Windows fault and no reboot fixes
+        # it: COM is per-thread and must simply be initialized on THIS thread.
+        # uiautomation documents exactly this and ships the correct call
+        # (InitializeUIAutomationInCurrentThread -> comtypes.CoInitializeEx),
+        # matching the apartment comtypes expects. It is safe to call again on
+        # an already-initialized thread, so it's fine on pooled worker threads.
+        try:
+            auto.InitializeUIAutomationInCurrentThread()
+        except Exception:
+            # Fallback: initialize an STA apartment directly. Idempotent --
+            # returns S_FALSE if COM is already up on this thread.
+            try:
+                import ctypes
+                ctypes.windll.ole32.CoInitialize(None)
+            except Exception:
+                pass
+
         action = str(params.get("action", "")).strip()
 
         try:
