@@ -1237,6 +1237,9 @@ export function OneCockpit() {
 
   // Last ONE reply shown on the landing screen (avoids IIFE inside JSX)
   const lastOneReply = [...lines].reverse().find(l => l.role === 'one' && l.text.trim());
+  // Last 5 spoken replies for the glass chat window (frontend-only, from local
+  // conversation state). Empty => the window stays hidden and the area is blank.
+  const oneReplies = lines.filter(l => l.role === 'one' && l.text.trim()).slice(-5);
 
   // Right-panel metric rows
   const rightMetrics = [
@@ -1338,6 +1341,31 @@ export function OneCockpit() {
           </aside>
         </div>
 
+        {/* ── 6D glass chat window — pops forward when ONE speaks, holds the
+             last 5 replies. Hidden entirely until there's something to show, so
+             the area is just blank HUD background otherwise. ── */}
+        {oneReplies.length > 0 && (
+          <div className="one-glass-chat" aria-live="polite" aria-label="ONE conversation">
+            <span className="one-glass-tail" aria-hidden="true" />
+            <div className="one-glass-sheen" aria-hidden="true" />
+            <div className="one-glass-head">
+              <span className={`one-glass-dot${busy ? ' speaking' : ''}`} />
+              <span className="one-glass-title">ONE</span>
+              <span className="one-glass-sub">{busy ? 'SPEAKING' : 'TRANSMISSION'}</span>
+            </div>
+            <div className="one-glass-body">
+              {oneReplies.map((line, i) => (
+                <p
+                  key={`${i}-${line.text.slice(0, 12)}`}
+                  className={`one-glass-msg${i === oneReplies.length - 1 ? ' latest' : ''}`}
+                >
+                  {line.text}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ── Telemetry stream ticker ── */}
         <div className="jarvis-telemetry-stream" aria-hidden="true">
           <span className="jarvis-telemetry-tag">TELEMETRY</span>
@@ -1349,12 +1377,11 @@ export function OneCockpit() {
         </div>
 
         {/* ── Live response strip — shows ONE's last reply on the landing screen ── */}
+        {/* Bottom strip now shows only live status — ONE's reply text moved to
+            the 6D glass chat window above. */}
         <div className="jarvis-live-output" aria-live="polite" aria-atomic="false">
           {transcribing && <div className="jarvis-live-status">◆ TRANSCRIBING...</div>}
           {busy && !transcribing && <div className="jarvis-live-status">◆ PROCESSING...</div>}
-          {!busy && !transcribing && lastOneReply && (
-            <p className="jarvis-live-reply">{lastOneReply.text}</p>
-          )}
         </div>
 
         {/* ── Inline command bar ── */}

@@ -478,6 +478,186 @@ body { margin: 0; background: #02060b; }
 }
 
 /* ── Live response strip (grid row 3) ── */
+/* ══════════════════════════════════════════════════════════════════════
+   6D gloss chat window — pops forward when ONE speaks, holds last 5 replies.
+   Positioned in the right-centre HUD void. Hidden entirely until there is a
+   reply (rendered conditionally in JSX), so the area is blank otherwise.
+   ══════════════════════════════════════════════════════════════════════ */
+.one-glass-chat {
+  position: fixed;
+  top: 24%;
+  right: 16%;
+  width: min(20vw, 420px);
+  min-width: 232px;
+  max-height: 46vh;
+  z-index: 14;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 16px 17px 18px;
+  border-radius: 20px;
+  color: #dff2fb;
+  /* the glass body: cool cyan-tinted, mostly transparent, frosted */
+  background:
+    linear-gradient(158deg,
+      rgba(150, 220, 245, 0.13) 0%,
+      rgba(40, 90, 120, 0.10) 42%,
+      rgba(8, 20, 34, 0.22) 100%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(130, 218, 240, 0.30);
+  /* layered depth + cyan aura + top gloss line + inner bottom shade = "6D" */
+  box-shadow:
+    0 26px 64px -22px rgba(0, 0, 0, 0.78),
+    0 0 34px -8px rgba(60, 190, 225, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.40),
+    inset 0 0 0 1px rgba(120, 210, 240, 0.06),
+    inset 0 -40px 70px -40px rgba(0, 30, 45, 0.60);
+  transform-origin: 70% 100%;
+  animation: one-glass-pop 0.55s cubic-bezier(0.18, 0.9, 0.24, 1.04) both;
+  overflow: hidden;
+  isolation: isolate;
+}
+/* fixed top specular sheen (the permanent gloss highlight) */
+.one-glass-chat::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.26) 0%,
+    rgba(255, 255, 255, 0.06) 11%,
+    transparent 28%);
+  pointer-events: none;
+  z-index: 1;
+}
+/* moving specular sweep — the "liquid glass" life */
+.one-glass-sheen {
+  position: absolute;
+  top: -20%;
+  left: -60%;
+  width: 48%;
+  height: 140%;
+  background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.13), transparent);
+  transform: skewX(-16deg);
+  animation: one-glass-sheen-move 6s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 2;
+}
+/* speech-bubble tail pointing back toward the ONE core (left) */
+.one-glass-tail {
+  position: absolute;
+  left: -9px;
+  bottom: 30px;
+  width: 20px;
+  height: 20px;
+  background: linear-gradient(158deg, rgba(150, 220, 245, 0.16), rgba(8, 20, 34, 0.20));
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  border-left: 1px solid rgba(130, 218, 240, 0.30);
+  border-bottom: 1px solid rgba(130, 218, 240, 0.30);
+  border-radius: 0 0 0 6px;
+  transform: rotate(45deg);
+  z-index: 0;
+}
+.one-glass-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  z-index: 3;
+  padding-bottom: 2px;
+}
+.one-glass-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4fd6e8;
+  box-shadow: 0 0 8px 1px rgba(79, 214, 232, 0.8);
+  flex: none;
+}
+.one-glass-dot.speaking { animation: one-glass-pulse 1.1s ease-in-out infinite; }
+.one-glass-title {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: #eaf7fd;
+  font-weight: 700;
+}
+.one-glass-sub {
+  margin-left: auto;
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+  letter-spacing: 2.5px;
+  color: rgba(150, 210, 232, 0.7);
+}
+.one-glass-body {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding-right: 3px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 210, 240, 0.35) transparent;
+}
+.one-glass-body::-webkit-scrollbar { width: 5px; }
+.one-glass-body::-webkit-scrollbar-thumb { background: rgba(120, 210, 240, 0.3); border-radius: 4px; }
+.one-glass-msg {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.48;
+  color: #d6edf8;
+  padding: 8px 11px;
+  border-radius: 11px 11px 11px 4px;
+  background: linear-gradient(160deg, rgba(90, 195, 228, 0.11), rgba(18, 45, 66, 0.10));
+  border: 1px solid rgba(120, 210, 235, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  animation: one-glass-msg-in 0.4s ease both;
+}
+/* newest reply: brighter, gently glowing so the eye lands on what ONE just said */
+.one-glass-msg.latest {
+  color: #eaf9ff;
+  border-color: rgba(130, 224, 244, 0.42);
+  background: linear-gradient(160deg, rgba(110, 210, 240, 0.17), rgba(24, 58, 82, 0.13));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.26), 0 0 20px -5px rgba(80, 205, 238, 0.5);
+}
+@keyframes one-glass-pop {
+  0%   { opacity: 0; transform: perspective(900px) translateY(20px) translateZ(-70px) rotateX(9deg) scale(0.9); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: perspective(900px) translateY(0) translateZ(0) rotateX(0) scale(1); }
+}
+@keyframes one-glass-sheen-move {
+  0%, 100% { left: -60%; }
+  50%      { left: 130%; }
+}
+@keyframes one-glass-msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes one-glass-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 8px 1px rgba(79, 214, 232, 0.8); }
+  50%      { transform: scale(1.35); box-shadow: 0 0 14px 3px rgba(79, 214, 232, 0.95); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .one-glass-chat { animation: none; }
+  .one-glass-sheen, .one-glass-dot.speaking, .one-glass-msg { animation: none; }
+}
+/* Narrow screens: dock it to the bottom above the command bar instead of the
+   right-centre void (which doesn't exist on mobile). */
+@media (max-width: 900px) {
+  .one-glass-chat {
+    top: auto;
+    bottom: 96px;
+    right: 4vw;
+    left: 4vw;
+    width: auto;
+    max-height: 34vh;
+  }
+}
+
 .jarvis-live-output {
   display: flex;
   align-items: center;
