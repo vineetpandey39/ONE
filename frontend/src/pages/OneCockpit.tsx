@@ -353,6 +353,9 @@ export function OneCockpit() {
     applications: [],
   });
   const [health, setHealth] = useState<{ status: string; issues: number }>({ status: 'unknown', issues: 0 });
+  // Glass chat window is only visible while ONE is actively speaking/replying,
+  // then fades out after a short quiet window — so it isn't parked on screen.
+  const [glassVisible, setGlassVisible] = useState(false);
   const [credentialVault, setCredentialVault] = useState<CredentialVault>(DEFAULT_CREDENTIAL_VAULT);
   const [credentialVaultMessage, setCredentialVaultMessage] = useState('');
   const [credentialActionKey, setCredentialActionKey] = useState<string | null>(null);
@@ -507,6 +510,18 @@ export function OneCockpit() {
     const t = window.setInterval(load, 20000);
     return () => window.clearInterval(t);
   }, []);
+
+  // Show the glass window when ONE is working or a fresh reply arrives; hide it
+  // ~11s after the last reply so it only appears while ONE is "saying something".
+  const latestReplyText = lines.length && lines[lines.length - 1].role === 'one'
+    ? lines[lines.length - 1].text
+    : '';
+  useEffect(() => {
+    if (busy || latestReplyText.trim()) setGlassVisible(true);
+    if (busy) return; // stay up while ONE is still generating/speaking
+    const hide = window.setTimeout(() => setGlassVisible(false), 11000);
+    return () => window.clearTimeout(hide);
+  }, [busy, latestReplyText]);
 
   useEffect(() => {
     void refreshMemoryGraph();
@@ -1345,7 +1360,7 @@ export function OneCockpit() {
              last 5 replies. Hidden entirely until there's something to show, so
              the area is just blank HUD background otherwise. ── */}
         {oneReplies.length > 0 && (
-          <div className="one-glass-chat" aria-live="polite" aria-label="ONE conversation">
+          <div className={`one-glass-chat${glassVisible ? ' show' : ''}`} aria-live="polite" aria-label="ONE conversation">
             <span className="one-glass-tail" aria-hidden="true" />
             <div className="one-glass-sheen" aria-hidden="true" />
             <div className="one-glass-head">

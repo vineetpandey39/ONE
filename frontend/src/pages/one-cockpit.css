@@ -513,10 +513,22 @@ body { margin: 0; background: #02060b; }
     inset 0 1px 0 rgba(255, 255, 255, 0.40),
     inset 0 0 0 1px rgba(120, 210, 240, 0.06),
     inset 0 -40px 70px -40px rgba(0, 30, 45, 0.60);
-  transform-origin: 70% 100%;
-  animation: one-glass-pop 0.55s cubic-bezier(0.18, 0.9, 0.24, 1.04) both;
+  transform-origin: 80% 50%;
+  /* Hidden by default — receded into depth and turned slightly. It only shows
+     while ONE is speaking (the .show class), so the panel is NOT parked on
+     screen when idle (opacity 0 hides the glass/backdrop entirely). */
+  opacity: 0;
+  transform: perspective(1100px) translateX(28px) translateZ(-70px) rotateY(-11deg) scale(0.94);
+  pointer-events: none;
+  transition: opacity 0.5s ease, transform 0.55s cubic-bezier(0.18, 0.9, 0.24, 1.04);
   overflow: hidden;
   isolation: isolate;
+}
+/* Speaking: pop forward out of the depth toward the viewer (the "6D" reveal). */
+.one-glass-chat.show {
+  opacity: 1;
+  transform: perspective(1100px) translateX(0) translateZ(0) rotateY(0) scale(1);
+  pointer-events: auto;
 }
 /* fixed top specular sheen (the permanent gloss highlight) */
 .one-glass-chat::before {
@@ -545,20 +557,18 @@ body { margin: 0; background: #02060b; }
   pointer-events: none;
   z-index: 2;
 }
-/* speech-bubble tail pointing back toward the ONE core (left) */
+/* speech-bubble tail — apex points LEFT, back toward the ONE core / JARVIS ring */
 .one-glass-tail {
   position: absolute;
-  left: -9px;
+  left: -13px;
   bottom: 30px;
-  width: 20px;
-  height: 20px;
-  background: linear-gradient(158deg, rgba(150, 220, 245, 0.16), rgba(8, 20, 34, 0.20));
+  width: 15px;
+  height: 26px;
+  background: linear-gradient(120deg, rgba(150, 220, 245, 0.17), rgba(8, 20, 34, 0.16));
   -webkit-backdrop-filter: blur(20px) saturate(150%);
   backdrop-filter: blur(20px) saturate(150%);
-  border-left: 1px solid rgba(130, 218, 240, 0.30);
-  border-bottom: 1px solid rgba(130, 218, 240, 0.30);
-  border-radius: 0 0 0 6px;
-  transform: rotate(45deg);
+  /* triangle: apex at left-middle (0 50%), base on the right edge → points left */
+  clip-path: polygon(0 50%, 100% 0, 100% 100%);
   z-index: 0;
 }
 .one-glass-head {

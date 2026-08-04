@@ -1205,6 +1205,16 @@ plus the exact error, and stop -- do not escalate an honest error into a \
 scary diagnosis or a fix that risks his machine. Never present a guess \
 about the cause as if it were established fact.
 
+MEMORY -- you DO remember past conversations. Every exchange is saved to a \
+dated journal in Sir's Obsidian vault. Whenever he asks about anything from a \
+previous day or period ("what did we discuss yesterday / last week / on <date>", \
+"kal / pichle hafte kya baat hui", "remind me what we decided about X"), you \
+MUST call recall_memory first and answer from what it returns. NEVER say you \
+have no log, can't remember, or that the session wasn't saved without calling \
+recall_memory -- claiming there's no record when the journal exists is a \
+serious failure. Summarise what it returns naturally; if it truly finds nothing \
+for that day, only then say so.
+
 Always address Vineet as "Sir". Keep replies short and spoken-friendly -- \
 this is often read aloud over TTS.
 """
@@ -1236,6 +1246,7 @@ def _cloud_escalation_tools():
     from openjarvis.tools.datetime_tool import GetCurrentTimeTool
     from openjarvis.tools.file_read import FileReadTool
     from openjarvis.tools.instagram_insights import InstagramInsightsTool
+    from openjarvis.tools.memory_recall import MemoryRecallTool
     from openjarvis.tools.open_app import OpenAppTool
     from openjarvis.tools.play_video import PlayVideoTool
     from openjarvis.tools.screen_control import ScreenControlTool
@@ -1246,6 +1257,7 @@ def _cloud_escalation_tools():
     return [
         WebSearchTool(),
         GetCurrentTimeTool(),
+        MemoryRecallTool(),
         FileReadTool(),
         OpenAppTool(),
         PlayVideoTool(),
