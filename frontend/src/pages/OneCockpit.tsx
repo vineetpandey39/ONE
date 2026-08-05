@@ -511,17 +511,21 @@ export function OneCockpit() {
     return () => window.clearInterval(t);
   }, []);
 
-  // Show the glass window when ONE is working or a fresh reply arrives; hide it
-  // ~11s after the last reply so it only appears while ONE is "saying something".
-  const latestReplyText = lines.length && lines[lines.length - 1].role === 'one'
-    ? lines[lines.length - 1].text
-    : '';
+  // The glass window tracks ONE's real response lifecycle: it appears the
+  // instant ONE starts working on a reply and stays up for the WHOLE time ONE
+  // is either generating (busy) or speaking it aloud (`speaking` = TTS is
+  // audibly playing, true until the whole utterance queue drains). It only
+  // vanishes once ONE has genuinely finished — a short grace after both go
+  // quiet absorbs the brief gap between "generated" and the first spoken word
+  // (and any gap between chunks), so it never flickers off mid-response.
   useEffect(() => {
-    if (busy || latestReplyText.trim()) setGlassVisible(true);
-    if (busy) return; // stay up while ONE is still generating/speaking
-    const hide = window.setTimeout(() => setGlassVisible(false), 11000);
+    if (busy || speaking) {
+      setGlassVisible(true);
+      return; // hold open through the entire think + speak cycle
+    }
+    const hide = window.setTimeout(() => setGlassVisible(false), 2500);
     return () => window.clearTimeout(hide);
-  }, [busy, latestReplyText]);
+  }, [busy, speaking]);
 
   useEffect(() => {
     void refreshMemoryGraph();
