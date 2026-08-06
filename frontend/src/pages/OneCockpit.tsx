@@ -352,7 +352,10 @@ export function OneCockpit() {
     applied_counts: {},
     applications: [],
   });
-  const [health, setHealth] = useState<{ status: string; issues: number }>({ status: 'unknown', issues: 0 });
+  // issueTitles kept alongside the count so the HUD can point a status dot at
+  // the specific agent a self-diagnosis issue names (e.g. "IA is failing
+  // often") instead of only showing an aggregate issue count.
+  const [health, setHealth] = useState<{ status: string; issues: number; issueTitles: string[] }>({ status: 'unknown', issues: 0, issueTitles: [] });
   // Glass chat window is only visible while ONE is actively speaking/replying,
   // then fades out after a short quiet window — so it isn't parked on screen.
   const [glassVisible, setGlassVisible] = useState(false);
@@ -501,7 +504,8 @@ export function OneCockpit() {
         const r = await coreFetch('/v1/one/self-diagnosis', { cache: 'no-store' });
         if (!r.ok) return;
         const d = await r.json();
-        setHealth({ status: d.status || 'unknown', issues: d.issue_count || 0 });
+        const titles: string[] = Array.isArray(d.issues) ? d.issues.map((i: { title?: string }) => i.title || '') : [];
+        setHealth({ status: d.status || 'unknown', issues: d.issue_count || 0, issueTitles: titles });
       } catch {
         // best-effort; the tile just shows unknown if this is unreachable.
       }
@@ -1244,15 +1248,24 @@ export function OneCockpit() {
     ? 'sleeping'
     : 'awake';
 
+  // Real per-agent status: 'a' (busy) if a queued/running job names this
+  // agent right now, 'r' (needs attention) if a self-diagnosis issue names
+  // it, else 'g' (free). Replaces the old hardcoded "READY" on every row,
+  // which never reflected whether an agent was actually doing anything.
+  function agentDot(agentId: string, name: string): 'g' | 'a' | 'r' {
+    const busy = status.jobs.some(j => j.agent_id === agentId && (j.status === 'running' || j.status === 'queued'));
+    if (busy) return 'a';
+    const flagged = health.issueTitles.some(t => t.toUpperCase().includes(name.toUpperCase()));
+    if (flagged) return 'r';
+    return 'g';
+  }
+  const DOT_VALUE: Record<'g' | 'a' | 'r', string> = { g: 'FREE', a: 'BUSY', r: 'CHECK' };
+
   // Left-panel status rows
-  const leftStats = [
-    { label: 'SYSTEM', value: status.online ? 'NOMINAL' : 'OFFLINE', ok: status.online },
-    ...status.agents.slice(0, 4).map(a => ({
-      label: a.name.toUpperCase().slice(0, 6),
-      value: 'READY',
-      ok: true,
-    })),
-  ];
+  const leftStats = status.agents.slice(0, 5).map(a => {
+    const dot = agentDot(a.id, a.name);
+    return { label: a.name.toUpperCase().slice(0, 8), value: DOT_VALUE[dot], dot };
+  });
 
   // Last ONE reply shown on the landing screen (avoids IIFE inside JSX)
   const lastOneReply = [...lines].reverse().find(l => l.role === 'one' && l.text.trim());
@@ -1260,17 +1273,22 @@ export function OneCockpit() {
   // conversation state). Empty => the window stays hidden and the area is blank.
   const oneReplies = lines.filter(l => l.role === 'one' && l.text.trim()).slice(-5);
 
+  // Real activity % -- obsidian note growth, same number the ring's activity
+  // line surfaces. Not a fabricated metric, just the one number both spots
+  // legitimately have.
+  const neuralPct = Math.min(100, Math.round(status.obsidian.notes / 3));
+
   // Right-panel metric rows
-  const rightMetrics = [
-    { label: 'NEURAL',   value: `${Math.min(100, Math.round(status.obsidian.notes / 3))}%`, ok: status.online },
-    { label: 'AGENTS',   value: `${status.agents.length} / ${status.agents.length}`,         ok: status.agents.length > 0 },
-    { label: 'MEMORIES', value: `${status.obsidian.notes}`,                                  ok: status.online },
-    { label: 'LISTEN',   value: alwaysListening ? 'ON' : 'OFF',                              ok: alwaysListening },
+  const rightMetrics: { label: string; value: string; dot: 'g' | 'a' | 'r' }[] = [
+    { label: 'NEURAL',   value: `${neuralPct}%`,                                  dot: status.online ? 'g' : 'r' },
+    { label: 'AGENTS',   value: `${status.agents.length} / ${status.agents.length}`, dot: status.agents.length > 0 ? 'g' : 'r' },
+    { label: 'MEMORIES', value: `${status.obsidian.notes}`,                       dot: status.online ? 'g' : 'r' },
+    { label: 'LISTEN',   value: alwaysListening ? 'ON' : 'OFF',                   dot: alwaysListening ? 'g' : 'a' },
     { label: 'HEALTH',   value: health.status === 'healthy' ? 'OK'
                               : health.status === 'attention' ? `${health.issues} ISSUE${health.issues === 1 ? '' : 'S'}`
                               : health.status === 'critical' ? 'CRITICAL' : '—',
-                         ok: health.status === 'healthy' },
-    { label: 'CORE',     value: status.online ? 'ONLINE' : 'OFFLINE',                        ok: status.online },
+                         dot: health.status === 'healthy' ? 'g' : health.status === 'critical' ? 'r' : 'a' },
+    { label: 'CORE',     value: status.online ? 'ONLINE' : 'OFFLINE',             dot: status.online ? 'g' : 'r' },
   ];
 
   return (
@@ -1291,13 +1309,11 @@ export function OneCockpit() {
           <aside className="jarvis-pg-panel jarvis-pg-panel--left" aria-label="System status">
             <div className="jarvis-pg-panel-label">SYSTEM STATUS</div>
             {leftStats.map((item, i) => (
-              <div key={i} className={`jarvis-pg-bar-row ${item.ok ? 'jarvis-pg-bar-row--ok' : 'jarvis-pg-bar-row--dim'}`}>
+              <div key={i} className="jarvis-pg-bar-row">
+                <span className={`jarvis-pg-dot jarvis-pg-dot--${item.dot}`} />
                 <div className="jarvis-pg-bar-row-head">
                   <span>{item.label}</span>
                   <strong>{item.value}</strong>
-                </div>
-                <div className="jarvis-pg-bar-track">
-                  <div className="jarvis-pg-bar-fill" style={{ width: `${item.ok ? 88 + (i % 3) * 4 : 14}%` }} />
                 </div>
               </div>
             ))}
@@ -1324,6 +1340,7 @@ export function OneCockpit() {
             <JarvisCore
               state={coreState}
               memories={status.obsidian.notes}
+              activityPct={neuralPct}
               onTap={recording ? stopRecording : startRecording}
             />
           </div>
@@ -1332,13 +1349,11 @@ export function OneCockpit() {
           <aside className="jarvis-pg-panel jarvis-pg-panel--right" aria-label="System metrics">
             <div className="jarvis-pg-panel-label">TELEMETRY</div>
             {rightMetrics.map((item, i) => (
-              <div key={i} className={`jarvis-pg-bar-row jarvis-pg-bar-row--right ${item.ok ? 'jarvis-pg-bar-row--ok' : 'jarvis-pg-bar-row--dim'}`}>
+              <div key={i} className="jarvis-pg-bar-row jarvis-pg-bar-row--right">
+                <span className={`jarvis-pg-dot jarvis-pg-dot--${item.dot}`} />
                 <div className="jarvis-pg-bar-row-head">
                   <strong>{item.value}</strong>
                   <span>{item.label}</span>
-                </div>
-                <div className="jarvis-pg-bar-track">
-                  <div className="jarvis-pg-bar-fill" style={{ width: `${item.ok ? 90 - (i % 3) * 5 : 12}%` }} />
                 </div>
               </div>
             ))}
@@ -1385,12 +1400,16 @@ export function OneCockpit() {
           </div>
         )}
 
-        {/* ── Telemetry stream ticker ── */}
+        {/* ── Telemetry readout — one live line, no repeat ── */}
         <div className="jarvis-telemetry-stream" aria-hidden="true">
           <span className="jarvis-telemetry-tag">TELEMETRY</span>
+          <span
+            className="jarvis-telemetry-live-dot"
+            style={status.online ? undefined : { background: 'var(--dot-r)', boxShadow: '0 0 5px var(--dot-r)' }}
+          />
           <div className="jarvis-telemetry-track">
             <span>
-              {`CORE:${status.online ? 'ONLINE' : 'OFFLINE'}  ·  AGENTS:${status.agents.length}  ·  MEMORIES:${status.obsidian.notes}  ·  MODEL:${status.model}  ·  LISTEN:${alwaysListening ? 'ARMED' : 'STANDBY'}  ·  `.repeat(3)}
+              {`core:${status.online ? 'online' : 'offline'} · ${status.agents.length} agents · ${status.obsidian.notes} memories · listening on ${alwaysListening ? 'wake-word' : 'tap'}`}
             </span>
           </div>
         </div>

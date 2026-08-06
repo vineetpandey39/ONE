@@ -1,4 +1,29 @@
-:root { color-scheme: dark; }
+/* JetBrains Mono (OFL) -- the "Tech/HUD Mono" pairing surfaced by the
+   ui-ux-pro-max design skill for sci-fi/HUD interfaces. Local files served
+   from public/fonts, not a CDN. Replaces the ad-hoc 'Courier New' used
+   across the HUD chrome (panels, ticker, ring labels) with one deliberate
+   technical typeface, real weights instead of a browser-faked bold. */
+@font-face {
+  font-family: "JBM";
+  src: url("/fonts/JetBrainsMono-Regular.ttf") format("truetype");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "JBM";
+  src: url("/fonts/JetBrainsMono-Bold.ttf") format("truetype");
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+:root {
+  color-scheme: dark;
+  --hud-mono: "JBM", "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+  /* Unified glass material -- shared by the side panels, the ring, and the
+     reply window so the whole HUD reads as one instrument instead of one
+     glassy panel bolted onto a flat frame. */
+  --glass-fill: linear-gradient(160deg, rgba(90,210,240,.08), rgba(8,20,30,.16));
+  --glass-line: rgba(110,220,245,.20);
+  --glass-blur: blur(7px);
+  --dot-g: #4fd98a; --dot-a: #f0b94f; --dot-r: #f2685c;
+}
 * { box-sizing: border-box; }
 body { margin: 0; background: #02060b; }
 .one-shell { min-height: 100vh; position: relative; overflow: hidden; color: #e8f6ff; background: radial-gradient(circle at 50% 38%, #07233a 0, #030b15 34%, #02060b 68%); font-family: "Geist Variable", system-ui, sans-serif; letter-spacing: 0; }
@@ -240,7 +265,7 @@ body { margin: 0; background: #02060b; }
   font-size: 11px;
   letter-spacing: 5px;
   color: #00d4ff66;
-  font-family: 'Courier New', monospace;
+  font-family: var(--hud-mono);
   white-space: nowrap;
 }
 .jarvis-pg-header-line {
@@ -254,28 +279,38 @@ body { margin: 0; background: #02060b; }
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0;
+  gap: 28px;
   padding: 0 16px;
   min-height: 0;
 }
 
-/* ── Side panels ── */
+/* ── Side panels ──
+   Unified glass material (same tokens as .one-glass-chat) so the whole HUD
+   frame -- panels, ring, reply window -- reads as one instrument instead of
+   flat chrome with one glassy bolt-on. */
 .jarvis-pg-panel {
   width: 210px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 14px;
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-line);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 14px 30px -20px rgba(0,0,0,.6);
 }
-.jarvis-pg-panel--left  { padding-right: 28px; align-items: flex-start; }
-.jarvis-pg-panel--right { padding-left: 28px;  align-items: flex-end; }
+.jarvis-pg-panel--left  { align-items: flex-start; }
+.jarvis-pg-panel--right { align-items: flex-end; }
 
 /* Panel section label ("SYSTEM STATUS" / "TELEMETRY") */
 .jarvis-pg-panel-label {
   font-size: 9px;
   letter-spacing: 4px;
   color: #00d4ff88;
-  font-family: 'Courier New', monospace;
+  font-family: var(--hud-mono);
   margin-bottom: 4px;
   padding-bottom: 6px;
   border-bottom: 1px solid #00d4ff22;
@@ -283,42 +318,37 @@ body { margin: 0; background: #02060b; }
 }
 .jarvis-pg-panel--right .jarvis-pg-panel-label { text-align: right; }
 
-/* Labeled bar-meter rows (System Status / Telemetry panels) */
+/* Status rows: a real semantic dot (green/amber/red, from live agent + job
+   + health data) plus label + value. Replaces the old bar-meter, which
+   always rendered every row as ~90% filled regardless of real state --
+   decoration that looked like data. */
 .jarvis-pg-bar-row {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
   width: 100%;
-  font-family: 'Courier New', monospace;
+  font-family: var(--hud-mono);
+  padding: 5px 0;
+  border-top: 1px solid rgba(255,255,255,.05);
 }
+.jarvis-pg-panel > .jarvis-pg-bar-row:first-of-type { border-top: 0; padding-top: 0; }
 .jarvis-pg-bar-row-head {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  flex: 1;
   font-size: 9px;
   letter-spacing: 1.5px;
   color: #6699bb;
 }
 .jarvis-pg-bar-row-head strong { color: #aaddff; font-size: 10px; }
+.jarvis-pg-bar-row--right { flex-direction: row-reverse; }
 .jarvis-pg-bar-row--right .jarvis-pg-bar-row-head { flex-direction: row-reverse; }
-.jarvis-pg-bar-track {
-  height: 3px;
-  width: 100%;
-  background: #0a2a3a;
-  border-radius: 2px;
-  overflow: hidden;
-}
-.jarvis-pg-bar-fill {
-  height: 100%;
-  border-radius: 2px;
-  background: linear-gradient(90deg, #0099ff, #00ffcc);
-  box-shadow: 0 0 6px #00d4ff88;
-  transition: width .6s ease;
-}
-.jarvis-pg-bar-row--dim .jarvis-pg-bar-fill {
-  background: #445566;
-  box-shadow: none;
-}
+
+.jarvis-pg-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.jarvis-pg-dot--g { background: var(--dot-g); box-shadow: 0 0 6px var(--dot-g); }
+.jarvis-pg-dot--a { background: var(--dot-a); box-shadow: 0 0 6px var(--dot-a); }
+.jarvis-pg-dot--r { background: var(--dot-r); box-shadow: 0 0 6px var(--dot-r); }
 
 /* Proximity radar (left panel decoration) */
 .jarvis-pg-radar {
@@ -368,7 +398,7 @@ body { margin: 0; background: #02060b; }
   font-size: 8px;
   letter-spacing: 3px;
   color: #00d4ff55;
-  font-family: 'Courier New', monospace;
+  font-family: var(--hud-mono);
   white-space: nowrap;
 }
 
@@ -381,7 +411,7 @@ body { margin: 0; background: #02060b; }
   font-size: 8px;
   letter-spacing: 3px;
   color: #00d4ff55;
-  font-family: 'Courier New', monospace;
+  font-family: var(--hud-mono);
   text-align: right;
   margin-bottom: 6px;
 }
@@ -402,13 +432,21 @@ body { margin: 0; background: #02060b; }
 @keyframes jarvis-power-pulse { 0%, 100% { opacity: .45; } 50% { opacity: .9; } }
 
 /* Scrolling telemetry stream ticker, under the three-column main */
+/* Calmer readout: one live line, no repeat. The old version scrolled the
+   same string three times back-to-back, which reads as filler motion
+   rather than a real status feed. */
 .jarvis-telemetry-stream {
   display: flex;
   align-items: center;
-  gap: 14px;
+  justify-content: center;
+  gap: 10px;
   padding: 4px 72px;
   overflow: hidden;
-  font-family: 'Courier New', monospace;
+  font-family: var(--hud-mono);
+}
+.jarvis-telemetry-live-dot {
+  width: 5px; height: 5px; border-radius: 50%; flex: none;
+  background: var(--dot-g); box-shadow: 0 0 5px var(--dot-g);
 }
 .jarvis-telemetry-tag {
   font-size: 8px;
@@ -417,17 +455,16 @@ body { margin: 0; background: #02060b; }
   flex-shrink: 0;
 }
 .jarvis-telemetry-track {
-  flex: 1;
   overflow: hidden;
   white-space: nowrap;
-  mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 .jarvis-telemetry-track span {
   display: inline-block;
   font-size: 9px;
   letter-spacing: 2px;
-  color: #4a8aa6;
-  animation: jarvis-telemetry-scroll 26s linear infinite;
+  color: #6fa0b2;
 }
 @keyframes jarvis-telemetry-scroll {
   from { transform: translateX(0); }
@@ -444,11 +481,22 @@ body { margin: 0; background: #02060b; }
   position: relative;
   min-width: 0;
 }
+/* Same glass halo language as the side panels and reply window, so the ring
+   doesn't read as a separate visual system from the rest of the frame. */
+.jarvis-pg-orb-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 8%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(70,220,255,.05), transparent 68%);
+  pointer-events: none;
+  z-index: 0;
+}
 .jarvis-pg-core-label {
   font-size: 9px;
   letter-spacing: 5px;
   color: #00d4ff33;
-  font-family: 'Courier New', monospace;
+  font-family: var(--hud-mono);
   margin-bottom: -14px;
   z-index: 1;
   pointer-events: none;
@@ -473,7 +521,7 @@ body { margin: 0; background: #02060b; }
   font-size: 9px;
   letter-spacing: 3.5px;
   color: #00d4ff28;
-  font-family: 'Courier New', monospace;
+  font-family: var(--hud-mono);
   text-align: center;
 }
 
@@ -589,7 +637,7 @@ body { margin: 0; background: #02060b; }
 }
 .one-glass-dot.speaking { animation: one-glass-pulse 1.1s ease-in-out infinite; }
 .one-glass-title {
-  font-family: 'Courier New', monospace;
+  font-family: var(--hud-mono);
   font-size: 12px;
   letter-spacing: 3px;
   color: #eaf7fd;
@@ -597,7 +645,7 @@ body { margin: 0; background: #02060b; }
 }
 .one-glass-sub {
   margin-left: auto;
-  font-family: 'Courier New', monospace;
+  font-family: var(--hud-mono);
   font-size: 9px;
   letter-spacing: 2.5px;
   color: rgba(150, 210, 232, 0.7);
@@ -681,7 +729,7 @@ body { margin: 0; background: #02060b; }
   font-size: 10px;
   letter-spacing: 3px;
   color: #00ffaa99;
-  font-family: 'Courier New', monospace;
+  font-family: var(--hud-mono);
   animation: jarvis-live-blink 1.2s ease-in-out infinite;
 }
 @keyframes jarvis-live-blink {
@@ -1117,7 +1165,7 @@ body { margin: 0; background: #02060b; }
   font-size: 9px;
   letter-spacing: 4px;
   color: var(--jarvis-accent-dim, #00d4ff77);
-  font-family: 'Courier New', monospace;
+  font-family: var(--hud-mono);
   margin-bottom: 2px;
   transition: color 0.4s;
 }
@@ -1146,6 +1194,16 @@ body { margin: 0; background: #02060b; }
   letter-spacing: 2px;
   color: #4488aa;
   margin-top: 2px;
+}
+/* Real activity readout under the memory count -- reuses the same NEURAL %
+   already computed for the telemetry panel (obsidian note growth), instead
+   of a decorative arc sweep with no data behind it. */
+.jarvis-activity {
+  font-size: 8.5px;
+  letter-spacing: 1.6px;
+  color: var(--jarvis-accent-dim, #58caff);
+  margin-top: 6px;
+  font-family: var(--hud-mono);
 }
 
 /* CSS-only fallback orb (shown while THREE.js loads or if it fails) */

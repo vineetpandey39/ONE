@@ -12,6 +12,9 @@ export type CoreState = 'awake' | 'listening' | 'speaking' | 'thinking' | 'offli
 interface JarvisCoreProps {
   state: CoreState;
   memories: number;
+  /** Real activity percentage (same NEURAL % shown in the telemetry panel —
+   * not a decorative sweep). Optional so existing callers keep working. */
+  activityPct?: number;
   onTap?: () => void;
 }
 
@@ -50,7 +53,7 @@ function arcPath(r: number, startDeg: number, endDeg: number) {
 const TICK_DEGREES = Array.from({ length: 72 }, (_, i) => i * 5);
 const MARKER_DEGREES = [18, 96, 158, 232, 305];
 
-export function JarvisCore({ state, memories, onTap }: JarvisCoreProps) {
+export function JarvisCore({ state, memories, activityPct, onTap }: JarvisCoreProps) {
   const ticks = useMemo(
     () =>
       TICK_DEGREES.map((deg) => {
@@ -126,6 +129,9 @@ export function JarvisCore({ state, memories, onTap }: JarvisCoreProps) {
         <div className="jarvis-name">ONE</div>
         <div className={`jarvis-status jarvis-status--${state}`}>{STATUS_LABELS[state]}</div>
         <div className="jarvis-mem">{memories} MEMORIES</div>
+        {typeof activityPct === 'number' && (
+          <div className="jarvis-activity">◆ {activityPct}% ACTIVE</div>
+        )}
       </div>
     </div>
   );
