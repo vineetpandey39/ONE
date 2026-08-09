@@ -515,7 +515,11 @@ body { margin: 0; background: #02060b; }
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  padding: 10px 20px 16px;
+  /* Bottom padding cleared to 64px (was 16px): the fixed .one-drawer-tab
+     ("TRACKING DASHBOARD") sits at bottom:18px + its own ~34px pill height,
+     which was overlapping this footer's second (JARVIS Voice Mode) button
+     now that there are two stacked toggle pills instead of one. */
+  padding: 10px 20px 64px;
 }
 .jarvis-pg-hint {
   font-size: 9px;
