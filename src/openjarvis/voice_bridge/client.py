@@ -62,6 +62,13 @@ _PLAYBACK_PREBUFFER_SECONDS = 0.15
 # loud-moment peak (~0.09 raw * 9 =~ 0.8, under the 1.0 clip ceiling).
 _DEFAULT_MIC_GAIN = 9.0
 
+# Deepgram Aura v1 speed control (agent.speak.provider.speed), valid range
+# 0.7-1.5, default 1.0. Requested live (2026-08-09) to slow the reply pace
+# down a notch as a further mitigation against the fluctuation/humming
+# reported earlier -- a gentler pace gives the playback prebuffer/network
+# more slack per word, on top of the buffering and device fixes already in.
+_DEFAULT_SPEAK_SPEED = 0.85
+
 # Deliberately generic: no name, no household details -- this prompt leaves
 # the machine and is read by Deepgram's managed cloud LLM. The full,
 # detailed local persona (data/config.toml's default_system_prompt) is
@@ -128,11 +135,13 @@ class VoiceBridgeSession:
         think_model: str = "claude-haiku-4-5",
         silence_timeout_seconds: float = 90.0,
         mic_gain: float = _DEFAULT_MIC_GAIN,
+        speak_speed: float = _DEFAULT_SPEAK_SPEED,
     ) -> None:
         self.speak_model = speak_model
         self.think_model = think_model
         self.silence_timeout_seconds = silence_timeout_seconds
         self.mic_gain = mic_gain
+        self.speak_speed = speak_speed
         self.state = "idle"  # idle | listening | thinking | speaking
         self.error: Optional[str] = None
         self._ws: Any = None
@@ -402,7 +411,9 @@ class VoiceBridgeSession:
                     "prompt": redact(_GENERIC_PROMPT),
                     "functions": deepgram_function_schemas(),
                 },
-                "speak": {"provider": {"type": "deepgram", "model": self.speak_model}},
+                "speak": {
+                    "provider": {"type": "deepgram", "model": self.speak_model, "speed": self.speak_speed}
+                },
             },
         }
         await ws.send(json.dumps(settings))

@@ -159,16 +159,20 @@ async def voice_bridge_start(request: Request):
     if not os.environ.get("DEEPGRAM_API_KEY", "").strip():
         raise HTTPException(status_code=400, detail="DEEPGRAM_API_KEY is not configured; voice bridge refuses to start.")
 
-    from openjarvis.voice_bridge.client import VoiceBridgeSession
+    from openjarvis.voice_bridge.client import (
+        _DEFAULT_MIC_GAIN,
+        _DEFAULT_SPEAK_SPEED,
+        VoiceBridgeSession,
+    )
 
     cfg = _voice_bridge_config()
-    from openjarvis.voice_bridge.client import _DEFAULT_MIC_GAIN
 
     session = VoiceBridgeSession(
         speak_model=str(cfg.get("speak_model", "aura-2-thalia-en")),
         think_model=str(cfg.get("think_model", "claude-haiku-4-5")),
         silence_timeout_seconds=float(cfg.get("silence_timeout_seconds", 90)),
         mic_gain=float(cfg.get("mic_gain", _DEFAULT_MIC_GAIN)),
+        speak_speed=float(cfg.get("speak_speed", _DEFAULT_SPEAK_SPEED)),
     )
 
     async def _runner() -> None:
