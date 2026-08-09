@@ -98,6 +98,19 @@ class VoiceBridgeSession:
         self._bytes_sent = 0
         self._bytes_received_audio = 0
         self._events_seen: list[str] = []
+        # Half-duplex gate: no AEC (acoustic echo cancellation) exists on
+        # this raw sounddevice path (unlike a browser's getUserMedia, which
+        # gets it for free), so on a desktop with open mic + open speakers
+        # ONE's own TTS output was being picked up by the mic and read back
+        # to Deepgram as if Sir were talking -- a self-sustaining feedback
+        # loop (confirmed live: continuous back-to-back replies, audio
+        # cutting in and out from false barge-in). Mic capture is suppressed
+        # while state=="speaking" and for a short cooldown after, so ONE
+        # can't hear itself. Trade-off: true mid-sentence barge-in is off
+        # for now -- ONE finishes speaking, then listens. Real headphones
+        # would remove the acoustic coupling entirely and let barge-in come
+        # back safely later if wanted.
+        self._mic_gate_until = 0.0
 
     def _touch(self) -> None:
         self._last_activity = time.monotonic()
@@ -106,6 +119,10 @@ class VoiceBridgeSession:
 
     def _mic_callback(self, indata, frames, time_info, status) -> None:  # noqa: ANN001
         try:
+            # Half-duplex gate -- see __init__'s comment. Don't send ONE's
+            # own voice back to Deepgram as if it were Sir talking.
+            if self.state == "speaking" or time.monotonic() < self._mic_gate_until:
+                return
             mono = indata[:, 0]
             # Diagnostic only: lets _idle_watchdog's periodic log answer
             # "is real signal even reaching us" without needing another
@@ -302,6 +319,11 @@ class VoiceBridgeSession:
             self.state = "speaking"
         elif etype == "AgentAudioDone":
             self.state = "listening"
+            # Cooldown before re-opening the mic gate: the room's own
+            # acoustic decay (speaker output still ringing off walls/desk)
+            # can otherwise get picked up as the start of a new utterance
+            # right as ONE stops talking.
+            self._mic_gate_until = time.monotonic() + 0.4
         elif etype == "FunctionCallRequest":
             await self._handle_function_calls(ws, event)
         elif etype in ("Error", "Warning"):
