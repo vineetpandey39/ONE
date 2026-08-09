@@ -19,6 +19,7 @@ import {
   Send,
   Settings2,
   Share2,
+  Sparkles,
   Square,
   Target,
   Users,
@@ -294,6 +295,15 @@ export function OneCockpit() {
   const asleepRef = useRef(false);
   const lastWakeAtRef = useRef(Date.now());
   const SLEEP_AFTER_MS = 180_000; // 3 min of no wake word -> sleep
+  // JARVIS Voice Mode: a live Deepgram Voice Agent session (Flux STT + a
+  // redacted cloud brain + Aura-2 TTS over one socket, all audio handled
+  // server-side via sounddevice -- see voice_bridge/client.py). Entirely
+  // separate from alwaysListening/recording above; neither path is touched
+  // by this. Billed per connected minute, so it's an explicit on/off toggle
+  // polled at the same cadence as the rest of /v1/one/status, never implied.
+  const [voiceBridgeActive, setVoiceBridgeActive] = useState(false);
+  const [voiceBridgeState, setVoiceBridgeState] = useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
+  const [voiceBridgeError, setVoiceBridgeError] = useState<string | null>(null);
   useEffect(() => { busyRef.current = busy; }, [busy]);
   useEffect(() => { speakingRef.current = speaking; }, [speaking]);
   useEffect(() => { linesRef.current = lines; }, [lines]);
@@ -495,6 +505,59 @@ export function OneCockpit() {
     const timer = window.setInterval(refreshStatus, 3000);
     return () => window.clearInterval(timer);
   }, [refreshStatus]);
+
+  // JARVIS Voice Mode: while a session is active, poll its real turn-state
+  // (driven by Deepgram's own UserStartedSpeaking/AgentThinking/
+  // AgentStartedSpeaking events on the backend) so the ring reflects actual
+  // Deepgram state, not a guess. Stops polling the moment the toggle is off.
+  useEffect(() => {
+    if (!voiceBridgeActive) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await coreFetch('/v1/voice-bridge/status', { cache: 'no-store' });
+        if (!r.ok || cancelled) return;
+        const data = await r.json();
+        if (cancelled) return;
+        setVoiceBridgeState(data.state || 'idle');
+        setVoiceBridgeError(data.error || null);
+        if (!data.active) setVoiceBridgeActive(false);
+      } catch {
+        // transient -- next poll will retry
+      }
+    };
+    poll();
+    const timer = window.setInterval(poll, 700);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [voiceBridgeActive]);
+
+  async function toggleVoiceBridge() {
+    if (voiceBridgeActive) {
+      setVoiceBridgeActive(false);
+      try {
+        await coreFetch('/v1/voice-bridge/stop', { method: 'POST' });
+      } catch {
+        // best-effort -- status poll would have caught it anyway
+      }
+      return;
+    }
+    setVoiceBridgeError(null);
+    try {
+      const r = await coreFetch('/v1/voice-bridge/start', { method: 'POST' });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setVoiceBridgeError(data.detail || 'Voice bridge failed to start.');
+        return;
+      }
+      setVoiceBridgeActive(true);
+      setVoiceBridgeState('listening');
+    } catch {
+      setVoiceBridgeError('Voice bridge failed to start.');
+    }
+  }
 
   // Reliability: poll ONE's self-diagnosis so the HEALTH tile reflects the
   // supervisor + canaries at a glance (green = healthy, else issue count).
@@ -1238,6 +1301,10 @@ export function OneCockpit() {
 
   const coreState: CoreState = !status.online
     ? 'offline'
+    : voiceBridgeActive
+    ? voiceBridgeState === 'idle'
+      ? 'awake'
+      : voiceBridgeState
     : recording
     ? 'listening'
     : speaking
@@ -1465,7 +1532,22 @@ export function OneCockpit() {
             {alwaysListening ? <Square size={16} fill="currentColor" /> : <Mic size={18} />}
             <span>{alwaysListening ? 'LISTENING - TAP TO STOP' : 'ALWAYS LISTEN'}</span>
           </button>
+          <button
+            type="button"
+            className={`one-listen-toggle ${voiceBridgeActive ? 'on' : ''}`}
+            title={
+              voiceBridgeActive
+                ? 'End the live Deepgram voice session'
+                : 'Start a live, real-time voice conversation (Deepgram Voice Agent -- redacted before anything leaves this machine)'
+            }
+            onClick={() => void toggleVoiceBridge()}
+            disabled={!status.online}
+          >
+            {voiceBridgeActive ? <Square size={16} fill="currentColor" /> : <Sparkles size={18} />}
+            <span>{voiceBridgeActive ? `JARVIS MODE - ${voiceBridgeState.toUpperCase()}` : 'JARVIS VOICE MODE'}</span>
+          </button>
           {micError && <div className="one-mic-error">{micError}</div>}
+          {voiceBridgeError && <div className="one-mic-error">{voiceBridgeError}</div>}
         </footer>
       </section>
 

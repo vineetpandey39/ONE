@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import json
 import os
@@ -123,6 +124,78 @@ async def one_self_diagnosis(request: Request):
     from openjarvis.reliability.diagnose import self_diagnose
 
     return self_diagnose(request.app)
+
+
+def _voice_bridge_config() -> dict[str, Any]:
+    """Read [voice_bridge] directly from data/config.toml -- deliberately not
+    wired into the core JarvisConfig loader (see the section's own comment
+    in config.toml for why); this is a small, self-contained opt-in feature."""
+    try:
+        from openjarvis.core.paths import get_config_path
+
+        try:
+            import tomllib  # Python 3.11+
+        except ModuleNotFoundError:  # pragma: no cover
+            import tomli as tomllib  # type: ignore[no-redef]
+
+        path = get_config_path()
+        if not path.is_file():
+            return {}
+        with open(path, "rb") as fh:
+            return dict(tomllib.load(fh).get("voice_bridge", {}) or {})
+    except Exception:
+        return {}
+
+
+@router.post("/v1/voice-bridge/start")
+async def voice_bridge_start(request: Request):
+    """Start a live Deepgram Voice Agent session. On-demand only -- Deepgram
+    bills per connected minute, so this never starts on its own."""
+    existing_task = getattr(request.app.state, "voice_bridge_task", None)
+    existing_session = getattr(request.app.state, "voice_bridge_session", None)
+    if existing_task is not None and not existing_task.done():
+        return {"status": "already_running", "state": existing_session.state if existing_session else "unknown"}
+
+    if not os.environ.get("DEEPGRAM_API_KEY", "").strip():
+        raise HTTPException(status_code=400, detail="DEEPGRAM_API_KEY is not configured; voice bridge refuses to start.")
+
+    from openjarvis.voice_bridge.client import VoiceBridgeSession
+
+    cfg = _voice_bridge_config()
+    session = VoiceBridgeSession(
+        speak_model=str(cfg.get("speak_model", "aura-2-thalia-en")),
+        think_model=str(cfg.get("think_model", "claude-haiku-4-5")),
+        silence_timeout_seconds=float(cfg.get("silence_timeout_seconds", 90)),
+    )
+
+    async def _runner() -> None:
+        try:
+            await session.run()
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger("openjarvis.voice_bridge").error("voice bridge session crashed: %s", exc)
+
+    task = asyncio.create_task(_runner())
+    request.app.state.voice_bridge_session = session
+    request.app.state.voice_bridge_task = task
+    return {"status": "starting"}
+
+
+@router.post("/v1/voice-bridge/stop")
+async def voice_bridge_stop(request: Request):
+    session = getattr(request.app.state, "voice_bridge_session", None)
+    if session is None:
+        return {"status": "not_running"}
+    session.request_stop()
+    return {"status": "stopping"}
+
+
+@router.get("/v1/voice-bridge/status")
+async def voice_bridge_status(request: Request):
+    session = getattr(request.app.state, "voice_bridge_session", None)
+    task = getattr(request.app.state, "voice_bridge_task", None)
+    if session is None or task is None or task.done():
+        return {"active": False, "state": "idle", "error": getattr(session, "error", None) if session else None}
+    return {"active": True, "state": session.state, "error": session.error}
 
 
 @router.get("/v1/one/model-status")
