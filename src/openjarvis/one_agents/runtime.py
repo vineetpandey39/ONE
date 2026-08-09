@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import time
 import uuid
@@ -425,9 +426,151 @@ def _run_apollo(job: dict[str, Any]) -> dict[str, Any]:
     return _local_plan(job)
 
 
+KDP_PROCESS_NAME = "KDP Book Factory - Full Manuscript Draft"
+
+
+def _claude_research(prompt: str, max_tokens: int = 1400) -> tuple[str, str]:
+    """Ask Claude directly. Returns (text, failure_note); never raises.
+
+    Deliberately separate from the local Ollama planner: the 8B local model
+    invents plausible-sounding infrastructure that doesn't exist, which is
+    exactly the wrong failure mode for research that feeds a real book run.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return "", "ANTHROPIC_API_KEY is not in ONE's credential vault"
+    try:
+        import anthropic
+    except ImportError as exc:  # optional dep — surface it, never swallow
+        return "", f"anthropic package unavailable: {exc}"
+    model = os.environ.get("ONE_RESEARCH_MODEL", "claude-haiku-4-5")
+    try:
+        # verify=False: the same Avast SSL-interception workaround already used
+        # for Deepgram, web_search and instagram_insights on this machine — a
+        # bare client fails here with a generic "Connection error".
+        client = anthropic.Anthropic(
+            api_key=api_key,
+            http_client=httpx.Client(verify=False, timeout=90.0),
+        )
+        message = client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = "".join(
+            block.text for block in message.content
+            if getattr(block, "type", None) == "text"
+        ).strip()
+        return (text, "") if text else ("", f"{model} returned no text")
+    except Exception as exc:  # noqa: BLE001 - reported, not hidden
+        return "", f"Claude call failed ({model}): {exc}"
+
+
+def _marker(text: str, key: str, default: str = "") -> str:
+    match = re.search(rf"^{key}:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
+    return match.group(1).strip() if match else default
+
+
 def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
-    """Floor 5 - Book Publishing (KDP). Pending LAO integration."""
-    return _local_plan(job)
+    """Floor 5 - Book Publishing (KDP).
+
+    Two stages: Claude researches the commissioning decision, then LAO's
+    existing ``kdp-book-factory`` process actually writes the book. LAO is
+    never modified here — this only starts one of its published processes
+    through the public REST API, exactly as its own scheduler would.
+
+    Starting a real run costs genuine Claude Code / NVIDIA / ChatGPT quota
+    and can take up to three hours, so it is gated behind execute mode the
+    same way the LAO bridge has always been. Plan mode researches only.
+    """
+    task = str(job.get("task") or "")
+    mode = str(job.get("mode") or "plan").strip().lower()
+
+    brief, note = _claude_research(
+        "You are HERMES, head of Book Publishing at a digital holding company, "
+        "commissioning the next Amazon KDP title.\n\n"
+        f"Request: {task}\n\n"
+        "Decide what to commission and why. Ground it in what actually sells on "
+        "KDP: real reader demand, a specific reachable audience, and a gap a new "
+        "title can genuinely fill. Do not invent internal teams, tools, boards or "
+        "databases — the only production system is an automated drafting pipeline.\n\n"
+        "Reply in exactly this shape:\n"
+        "MODE: fiction | nonfiction\n"
+        "REGION: <primary market, e.g. global or india>\n"
+        "ANGLE: <one line — the specific hook this book leads with>\n"
+        "BRIEF:\n"
+        "<8-14 lines: target reader, why now, competing titles, what makes this "
+        "one different, and the honest commercial risk>"
+    )
+
+    if not brief:
+        # Never silently downgrade to the weaker model without saying so.
+        fallback = _local_plan(job)
+        fallback["research_engine"] = "local planner"
+        fallback["claude_unavailable"] = note
+        return fallback
+
+    kdp_mode = _marker(brief, "MODE", "auto").lower()
+    if kdp_mode not in {"fiction", "nonfiction"}:
+        kdp_mode = "auto"
+    region = _marker(brief, "REGION", "global").lower()
+    angle = _marker(brief, "ANGLE")
+
+    output_dir = _home() / "agent_outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{job['id']}.md"
+    output_path.write_text(
+        f"# HERMES — KDP Commissioning Brief\n\n"
+        f"Request: {task}\n\nResearched by: {os.environ.get('ONE_RESEARCH_MODEL', 'claude-haiku-4-5')}\n\n"
+        f"{brief}\n",
+        encoding="utf-8",
+    )
+
+    result: dict[str, Any] = {
+        "agent": "HERMES",
+        "mode": mode,
+        "research_engine": os.environ.get("ONE_RESEARCH_MODEL", "claude-haiku-4-5"),
+        "kdp_mode": kdp_mode,
+        "region": region,
+        "angle": angle,
+        "content": brief,
+        "output": str(output_path),
+    }
+
+    if mode not in {"execute", "publish"}:
+        result["lao"] = None
+        result["note"] = (
+            "Research only — no LAO job started. A real run spends Claude Code, "
+            "NVIDIA and ChatGPT quota and can take up to 3 hours. Dispatch with "
+            "mode 'execute' to actually generate the book."
+        )
+        return result
+
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+
+    # dryRun stays True: it still produces the full manuscript + images, and
+    # KDP upload is a manual human gate that must never be automated.
+    lao = LaoOrchestratorTool().execute(
+        action="start",
+        mode="dry_run",
+        process_name=os.environ.get("LAO_KDP_PROCESS", KDP_PROCESS_NAME),
+        scope="production",
+        input_args={"mode": kdp_mode, "region": region, "dryRun": True},
+    )
+    try:
+        payload = json.loads(lao.content)
+    except json.JSONDecodeError:
+        payload = {"raw": lao.content}
+    if not lao.success:
+        raise RuntimeError(f"LAO refused the KDP run: {lao.content}")
+
+    result["lao"] = payload
+    result["note"] = (
+        "LAO KDP Book Factory started. It writes the manuscript, generates the "
+        "cover/interior images and renders the DOCX. Uploading to Amazon KDP "
+        "remains a manual human step."
+    )
+    return result
 
 
 def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
