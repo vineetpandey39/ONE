@@ -97,6 +97,7 @@ class VoiceBridgeSession:
         self._bytes_sent = 0
         self._bytes_received_audio = 0
         self._events_seen: list[str] = []
+        self._mic_status_flags = 0
         # Half-duplex gate: no AEC (acoustic echo cancellation) exists on
         # this raw sounddevice path (unlike a browser's getUserMedia, which
         # gets it for free), so on a desktop with open mic + open speakers
@@ -118,6 +119,14 @@ class VoiceBridgeSession:
 
     def _mic_callback(self, indata, frames, time_info, status) -> None:  # noqa: ANN001
         try:
+            if status:
+                # PortAudio overflow/underflow flags -- silently ignored
+                # until now. If this counter climbs during a live session,
+                # the callback thread isn't being scheduled promptly enough
+                # inside the busy multi-threaded server, and that (not the
+                # device or buffer size) is what's attenuating/corrupting
+                # what actually gets captured.
+                self._mic_status_flags += 1
             # Half-duplex gate -- see __init__'s comment. Don't send ONE's
             # own voice back to Deepgram as if it were Sir talking.
             if self.state == "speaking" or time.monotonic() < self._mic_gate_until:
@@ -366,11 +375,12 @@ class VoiceBridgeSession:
             tick += 1
             if tick % 2 == 0:
                 logger.warning(
-                    "[voice bridge diag] state=%s mic_peak=%.3f bytes_sent=%d bytes_recv_audio=%d events=%s",
+                    "[voice bridge diag] state=%s mic_peak=%.3f bytes_sent=%d bytes_recv_audio=%d status_flags=%d events=%s",
                     self.state,
                     self._last_mic_peak,
                     self._bytes_sent,
                     self._bytes_received_audio,
+                    self._mic_status_flags,
                     self._events_seen[-10:],
                 )
                 self._last_mic_peak = 0.0
