@@ -194,8 +194,18 @@ class VoiceBridgeSession:
                 # what actually gets captured.
                 self._mic_status_flags += 1
             # Half-duplex gate -- see __init__'s comment. Don't send ONE's
-            # own voice back to Deepgram as if it were Sir talking.
-            if self.state == "speaking" or time.monotonic() < self._mic_gate_until:
+            # own voice back to Deepgram as if it were Sir talking. Gated on
+            # self.state for the window between "Deepgram started sending
+            # audio" and "playback actually started", and on
+            # _audio_out_queued_bytes for as long as there's still buffered
+            # audio actually coming out of the speaker -- NOT on
+            # AgentAudioDone, which only means the server finished SENDING,
+            # not that playback has finished being heard (confirmed live:
+            # gating on that signal alone reopened the mic mid-playback and
+            # produced a self-sustaining feedback loop). See _play_callback
+            # for where the cooldown actually starts once the speaker goes
+            # quiet for real.
+            if self.state == "speaking" or self._audio_out_queued_bytes > 0 or time.monotonic() < self._mic_gate_until:
                 return
             mono = indata[:, 0] * self.mic_gain
             # Diagnostic only: lets _idle_watchdog's periodic log answer
@@ -236,8 +246,13 @@ class VoiceBridgeSession:
             if not chunk:
                 # Ran dry -- re-prime before resuming so the next burst of
                 # audio gets its own cushion instead of stuttering straight
-                # through.
+                # through. This is also the ONE authoritative place the
+                # mic's post-speech cooldown starts: the speaker has
+                # genuinely gone quiet right now (not just "server said
+                # it's done sending" -- see _mic_callback's comment on why
+                # that signal alone caused a feedback loop).
                 self._playback_primed = False
+                self._mic_gate_until = time.monotonic() + 0.4
                 outdata.fill(0)
                 return
             if len(chunk) < needed:
@@ -435,12 +450,11 @@ class VoiceBridgeSession:
         elif etype == "AgentStartedSpeaking":
             self.state = "speaking"
         elif etype == "AgentAudioDone":
+            # Only means Deepgram finished SENDING audio -- playback may
+            # still have several seconds queued. The mic stays gated via
+            # _audio_out_queued_bytes (checked in _mic_callback) until
+            # _play_callback confirms the speaker has actually gone quiet.
             self.state = "listening"
-            # Cooldown before re-opening the mic gate: the room's own
-            # acoustic decay (speaker output still ringing off walls/desk)
-            # can otherwise get picked up as the start of a new utterance
-            # right as ONE stops talking.
-            self._mic_gate_until = time.monotonic() + 0.4
         elif etype == "FunctionCallRequest":
             await self._handle_function_calls(ws, event)
         elif etype in ("Error", "Warning"):
