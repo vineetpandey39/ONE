@@ -162,10 +162,13 @@ async def voice_bridge_start(request: Request):
     from openjarvis.voice_bridge.client import VoiceBridgeSession
 
     cfg = _voice_bridge_config()
+    from openjarvis.voice_bridge.client import _DEFAULT_MIC_GAIN
+
     session = VoiceBridgeSession(
         speak_model=str(cfg.get("speak_model", "aura-2-thalia-en")),
         think_model=str(cfg.get("think_model", "claude-haiku-4-5")),
         silence_timeout_seconds=float(cfg.get("silence_timeout_seconds", 90)),
+        mic_gain=float(cfg.get("mic_gain", _DEFAULT_MIC_GAIN)),
     )
 
     async def _runner() -> None:

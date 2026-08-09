@@ -41,6 +41,23 @@ logger = logging.getLogger("openjarvis.voice_bridge")
 
 _AGENT_WS_URL = "wss://agent.deepgram.com/v1/agent/converse"
 _SAMPLE_RATE_OUT = 24000
+# Playback prebuffer: confirmed live (2026-08-09) that draining Deepgram's
+# incoming audio into the speaker callback as it trickles in, with no
+# buffer ahead of the play head, produces audible fluctuation/humming --
+# the callback outruns the network and fills the gap with silence, over
+# and over. Holding back ~150ms of audio before starting playback (and
+# re-priming after every silence gap) gives the network a cushion so the
+# callback is never starved mid-utterance.
+_PLAYBACK_PREBUFFER_BYTES = int(_SAMPLE_RATE_OUT * 2 * 0.15)  # 150ms, 16-bit mono
+# Confirmed live (2026-08-09): repeated controlled tests (device selection,
+# buffer size, full-duplex vs input-only) all ruled out as the cause of a
+# consistently weak captured signal (~0.01-0.03 peak on a 0-1 scale, vs the
+# ~0.3-0.6 a normal speaking voice should produce) on this mic/room setup.
+# The signal is real, just quiet -- so it's boosted in software rather than
+# depending on Windows mic-boost/OS gain settings. Applied before int16
+# conversion, with hard clipping as the safety limiter against distortion
+# on louder moments.
+_DEFAULT_MIC_GAIN = 16.0
 
 # Deliberately generic: no name, no household details -- this prompt leaves
 # the machine and is read by Deepgram's managed cloud LLM. The full,
@@ -68,10 +85,12 @@ class VoiceBridgeSession:
         speak_model: str = "aura-2-thalia-en",
         think_model: str = "claude-haiku-4-5",
         silence_timeout_seconds: float = 90.0,
+        mic_gain: float = _DEFAULT_MIC_GAIN,
     ) -> None:
         self.speak_model = speak_model
         self.think_model = think_model
         self.silence_timeout_seconds = silence_timeout_seconds
+        self.mic_gain = mic_gain
         self.state = "idle"  # idle | listening | thinking | speaking
         self.error: Optional[str] = None
         self._ws: Any = None
@@ -90,6 +109,9 @@ class VoiceBridgeSession:
         # thread). asyncio.Queue is NOT safe to read from a non-loop thread,
         # so this is a plain thread-safe stdlib queue instead.
         self._audio_out_queue: "queue.SimpleQueue[bytes]" = queue.SimpleQueue()
+        # Prebuffer bookkeeping -- see _PLAYBACK_PREBUFFER_BYTES above.
+        self._audio_out_queued_bytes = 0
+        self._playback_primed = False
         # Diagnostics, all logged periodically by _idle_watchdog so a live
         # session leaves a real trail of where the pipeline actually got to
         # instead of a bare "nothing happened".
@@ -131,10 +153,11 @@ class VoiceBridgeSession:
             # own voice back to Deepgram as if it were Sir talking.
             if self.state == "speaking" or time.monotonic() < self._mic_gate_until:
                 return
-            mono = indata[:, 0]
+            mono = indata[:, 0] * self.mic_gain
             # Diagnostic only: lets _idle_watchdog's periodic log answer
             # "is real signal even reaching us" without needing another
             # live attempt to find out -- cheap, no allocation beyond a max().
+            # Reported post-gain so it reflects what's actually being sent.
             self._last_mic_peak = max(self._last_mic_peak, float(np.max(np.abs(mono))))
             pcm = np.clip(mono * 32767, -32768, 32767).astype(np.int16).tobytes()
             if self._loop is not None:
@@ -151,19 +174,34 @@ class VoiceBridgeSession:
     def _play_callback(self, outdata, frames, time_info, status) -> None:  # noqa: ANN001
         try:
             needed = frames * 2  # 2 bytes/sample, mono int16
+
+            if not self._playback_primed:
+                if self._audio_out_queued_bytes < _PLAYBACK_PREBUFFER_BYTES:
+                    outdata.fill(0)
+                    return
+                self._playback_primed = True
+
             chunk = b""
             while len(chunk) < needed:
                 try:
-                    chunk += self._audio_out_queue.get_nowait()
+                    piece = self._audio_out_queue.get_nowait()
+                    self._audio_out_queued_bytes -= len(piece)
+                    chunk += piece
                 except queue.Empty:
                     break
             if not chunk:
+                # Ran dry -- re-prime before resuming so the next burst of
+                # audio gets its own cushion instead of stuttering straight
+                # through.
+                self._playback_primed = False
                 outdata.fill(0)
                 return
             if len(chunk) < needed:
                 chunk += b"\x00" * (needed - len(chunk))
             elif len(chunk) > needed:
-                self._audio_out_queue.put(chunk[needed:])
+                leftover = chunk[needed:]
+                self._audio_out_queue.put(leftover)
+                self._audio_out_queued_bytes += len(leftover)
                 chunk = chunk[:needed]
             outdata[:] = np.frombuffer(chunk, dtype=np.int16).reshape(-1, 1)
         except Exception:
@@ -177,6 +215,8 @@ class VoiceBridgeSession:
                 self._audio_out_queue.get_nowait()
             except queue.Empty:
                 break
+        self._audio_out_queued_bytes = 0
+        self._playback_primed = False
 
     # -- main session --
 
@@ -307,6 +347,7 @@ class VoiceBridgeSession:
                 if isinstance(message, (bytes, bytearray)):
                     self._bytes_received_audio += len(message)
                     self._audio_out_queue.put(bytes(message))
+                    self._audio_out_queued_bytes += len(message)
                     self.state = "speaking"
                     continue
                 await self._handle_event(ws, message)
