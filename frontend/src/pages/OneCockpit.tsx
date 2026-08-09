@@ -1534,7 +1534,7 @@ export function OneCockpit() {
           </button>
           <button
             type="button"
-            className={`one-listen-toggle ${voiceBridgeActive ? 'on' : ''}`}
+            className={`one-listen-toggle one-voice-bridge-toggle ${voiceBridgeActive ? 'on' : ''}`}
             title={
               voiceBridgeActive
                 ? 'End the live Deepgram voice session'

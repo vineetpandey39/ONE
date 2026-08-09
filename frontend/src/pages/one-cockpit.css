@@ -990,6 +990,28 @@ body { margin: 0; background: #02060b; }
   50% { box-shadow: 0 0 0 4px #ff5d6c33, 0 6px 30px #6a0012c0; }
 }
 
+/* JARVIS Voice Mode (Deepgram bridge) toggle: deliberately NOT the same
+   cyan pill as one-listen-toggle above -- they sit stacked right on top of
+   each other and were getting mistaken for one another. Gold/violet accent
+   ties it visually to the ring's "speaking" state instead. */
+.one-voice-bridge-toggle {
+  border-color: #7a5cff88;
+  background: #1a1030b3;
+  color: #c9b6ff;
+}
+.one-voice-bridge-toggle:hover { background: #241849; }
+.one-voice-bridge-toggle.on {
+  border-color: #ffd700;
+  background: #2a1f00cc;
+  color: #ffe9a3;
+  box-shadow: 0 0 0 1px #ffd70055, 0 6px 26px #4a3a00b0;
+  animation: one-voice-bridge-pulse 1.8s ease-in-out infinite;
+}
+@keyframes one-voice-bridge-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px #ffd70055, 0 6px 26px #4a3a00b0; }
+  50% { box-shadow: 0 0 0 4px #ffd70033, 0 6px 30px #6a5600c0; }
+}
+
 /* ============================================================
    JarvisCore — circular JARVIS-style HUD ring (SVG + CSS)
    ============================================================ */
