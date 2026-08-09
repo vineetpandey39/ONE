@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import queue
+import threading
 import time
 from typing import Any, Dict, Optional
 
@@ -48,7 +49,10 @@ _AGENT_WS_URL = "wss://agent.deepgram.com/v1/agent/converse"
 # re-priming after every silence gap) gives the network a cushion so the
 # callback is never starved mid-utterance. Computed per-session from the
 # actually-resolved output rate (see run()), not a fixed constant.
-_PLAYBACK_PREBUFFER_SECONDS = 0.15
+# Reported live (2026-08-09): still crackling/clicking after 150ms -- likely
+# not quite enough cushion against real network jitter inside a busy
+# multi-threaded server. Doubled for more headroom.
+_PLAYBACK_PREBUFFER_SECONDS = 0.3
 # Confirmed live (2026-08-09): repeated controlled tests (device selection,
 # buffer size, full-duplex vs input-only) all ruled out as the cause of a
 # consistently weak captured signal (~0.01-0.03 peak on a 0-1 scale, vs the
@@ -163,6 +167,16 @@ class VoiceBridgeSession:
         # so this is a plain thread-safe stdlib queue instead.
         self._audio_out_queue: "queue.SimpleQueue[bytes]" = queue.SimpleQueue()
         # Prebuffer bookkeeping -- see _PLAYBACK_PREBUFFER_SECONDS above.
+        # _out_lock guards _audio_out_queued_bytes specifically: it's
+        # mutated from three different threads (asyncio loop via
+        # _receive_loop/_drain_playback, PortAudio's output callback via
+        # _play_callback) with no synchronization previously -- confirmed
+        # live (2026-08-09) as the likely cause of the mic getting stuck
+        # permanently gated (counter left stranded above zero by a lost
+        # update), which then starved Deepgram of any audio at all long
+        # enough to trip its own CLIENT_MESSAGE_TIMEOUT and kill the
+        # session.
+        self._out_lock = threading.Lock()
         self._audio_out_queued_bytes = 0
         self._playback_primed = False
         # Diagnostics, all logged periodically by _idle_watchdog so a live
@@ -214,7 +228,21 @@ class VoiceBridgeSession:
             # produced a self-sustaining feedback loop). See _play_callback
             # for where the cooldown actually starts once the speaker goes
             # quiet for real.
-            if self.state == "speaking" or self._audio_out_queued_bytes > 0 or time.monotonic() < self._mic_gate_until:
+            with self._out_lock:
+                queued = self._audio_out_queued_bytes
+            gated = self.state == "speaking" or queued > 0 or time.monotonic() < self._mic_gate_until
+            if gated:
+                # Send silence rather than nothing at all: Deepgram expects
+                # a continuous stream of SOMETHING to stay alive. Confirmed
+                # live (2026-08-09) -- going fully silent client-side for
+                # the length of a longer reply (a normal, correctly-gated
+                # window, not a bug) still tripped Deepgram's own
+                # CLIENT_MESSAGE_TIMEOUT and killed the session. Silence
+                # keeps the socket fed without ever leaking ONE's own
+                # (amplified) voice back to it.
+                silence = np.zeros(frames, dtype=np.int16).tobytes()
+                if self._loop is not None:
+                    self._loop.call_soon_threadsafe(self._queue_mic_chunk, silence)
                 return
             mono = indata[:, 0] * self.mic_gain
             # Diagnostic only: lets _idle_watchdog's periodic log answer
@@ -238,39 +266,41 @@ class VoiceBridgeSession:
         try:
             needed = frames * 2  # 2 bytes/sample, mono int16
 
-            if not self._playback_primed:
-                if self._audio_out_queued_bytes < self._playback_prebuffer_bytes:
+            with self._out_lock:
+                if not self._playback_primed:
+                    if self._audio_out_queued_bytes < self._playback_prebuffer_bytes:
+                        outdata.fill(0)
+                        return
+                    self._playback_primed = True
+
+                chunk = b""
+                while len(chunk) < needed:
+                    try:
+                        piece = self._audio_out_queue.get_nowait()
+                        self._audio_out_queued_bytes -= len(piece)
+                        chunk += piece
+                    except queue.Empty:
+                        break
+                if not chunk:
+                    # Ran dry -- re-prime before resuming so the next burst
+                    # of audio gets its own cushion instead of stuttering
+                    # straight through. This is also the ONE authoritative
+                    # place the mic's post-speech cooldown starts: the
+                    # speaker has genuinely gone quiet right now (not just
+                    # "server said it's done sending" -- see
+                    # _mic_callback's comment on why that signal alone
+                    # caused a feedback loop).
+                    self._playback_primed = False
+                    self._mic_gate_until = time.monotonic() + 0.4
                     outdata.fill(0)
                     return
-                self._playback_primed = True
-
-            chunk = b""
-            while len(chunk) < needed:
-                try:
-                    piece = self._audio_out_queue.get_nowait()
-                    self._audio_out_queued_bytes -= len(piece)
-                    chunk += piece
-                except queue.Empty:
-                    break
-            if not chunk:
-                # Ran dry -- re-prime before resuming so the next burst of
-                # audio gets its own cushion instead of stuttering straight
-                # through. This is also the ONE authoritative place the
-                # mic's post-speech cooldown starts: the speaker has
-                # genuinely gone quiet right now (not just "server said
-                # it's done sending" -- see _mic_callback's comment on why
-                # that signal alone caused a feedback loop).
-                self._playback_primed = False
-                self._mic_gate_until = time.monotonic() + 0.4
-                outdata.fill(0)
-                return
-            if len(chunk) < needed:
-                chunk += b"\x00" * (needed - len(chunk))
-            elif len(chunk) > needed:
-                leftover = chunk[needed:]
-                self._audio_out_queue.put(leftover)
-                self._audio_out_queued_bytes += len(leftover)
-                chunk = chunk[:needed]
+                if len(chunk) < needed:
+                    chunk += b"\x00" * (needed - len(chunk))
+                elif len(chunk) > needed:
+                    leftover = chunk[needed:]
+                    self._audio_out_queue.put(leftover)
+                    self._audio_out_queued_bytes += len(leftover)
+                    chunk = chunk[:needed]
             outdata[:] = np.frombuffer(chunk, dtype=np.int16).reshape(-1, 1)
         except Exception:
             logger.debug("voice bridge playback callback error", exc_info=True)
@@ -278,13 +308,14 @@ class VoiceBridgeSession:
 
     def _drain_playback(self) -> None:
         """Barge-in: the user started talking, stop whatever ONE was saying."""
-        while True:
-            try:
-                self._audio_out_queue.get_nowait()
-            except queue.Empty:
-                break
-        self._audio_out_queued_bytes = 0
-        self._playback_primed = False
+        with self._out_lock:
+            while True:
+                try:
+                    self._audio_out_queue.get_nowait()
+                except queue.Empty:
+                    break
+            self._audio_out_queued_bytes = 0
+            self._playback_primed = False
 
     # -- main session --
 
@@ -437,7 +468,8 @@ class VoiceBridgeSession:
                 if isinstance(message, (bytes, bytearray)):
                     self._bytes_received_audio += len(message)
                     self._audio_out_queue.put(bytes(message))
-                    self._audio_out_queued_bytes += len(message)
+                    with self._out_lock:
+                        self._audio_out_queued_bytes += len(message)
                     self.state = "speaking"
                     continue
                 await self._handle_event(ws, message)
