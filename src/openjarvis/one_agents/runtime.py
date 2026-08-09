@@ -17,7 +17,7 @@ import httpx
 AGENTS: dict[str, dict[str, str]] = {
     "zeus": {"name": "ZEUS", "role": "Cross-division orchestration, escalation, and resource-allocation operator", "floor_id": "11", "floor_name": "ONE-JARVIS Executive Command", "division": "executive"},
     "athena": {"name": "ATHENA", "role": "Opportunity discovery, research, and scoring operator", "floor_id": "10", "floor_name": "Venture & Opportunity Lab", "division": "venture_lab"},
-    "jobhunt": {"name": "JOBHUNT", "role": "Micro-SaaS and AI product build/QA operator", "floor_id": "9", "floor_name": "Micro-SaaS & AI Product Factory", "division": "micro_saas"},
+    "jobhunt": {"name": "DAEDALUS", "role": "Micro-SaaS and AI product build/QA operator", "floor_id": "9", "floor_name": "Micro-SaaS & AI Product Factory", "division": "micro_saas"},
     "titan": {"name": "TITAN", "role": "Apps, websites, and games build/ship operator", "floor_id": "8", "floor_name": "Apps / Websites / Games", "division": "apps_web_games"},
     "beta": {"name": "BETA", "role": "Browser extensions, plugins, and utility-tools delivery operator", "floor_id": "7", "floor_name": "Digital Utilities", "division": "digital_utilities"},
     "apollo": {"name": "APOLLO", "role": "Courses, templates, and digital-product operator", "floor_id": "6", "floor_name": "Digital Products & Education", "division": "digital_products"},
@@ -415,7 +415,7 @@ def _run_athena(job: dict[str, Any]) -> dict[str, Any]:
     return _local_plan(job)
 
 
-def _run_jobhunt(job: dict[str, Any]) -> dict[str, Any]:
+def _run_daedalus(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 9 - Micro-SaaS & AI Product Factory. Pending LAO integration."""
     return _local_plan(job)
 
@@ -490,7 +490,7 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
     handlers = {
         "zeus": _run_zeus,
         "athena": _run_athena,
-        "jobhunt": _run_jobhunt,
+        "jobhunt": _run_daedalus,
         "titan": _run_titan,
         "beta": _run_beta,
         "apollo": _run_apollo,
