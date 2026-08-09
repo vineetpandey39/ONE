@@ -40,24 +40,27 @@ from openjarvis.voice_bridge.redact import redact
 logger = logging.getLogger("openjarvis.voice_bridge")
 
 _AGENT_WS_URL = "wss://agent.deepgram.com/v1/agent/converse"
-_SAMPLE_RATE_OUT = 24000
 # Playback prebuffer: confirmed live (2026-08-09) that draining Deepgram's
 # incoming audio into the speaker callback as it trickles in, with no
 # buffer ahead of the play head, produces audible fluctuation/humming --
 # the callback outruns the network and fills the gap with silence, over
 # and over. Holding back ~150ms of audio before starting playback (and
 # re-priming after every silence gap) gives the network a cushion so the
-# callback is never starved mid-utterance.
-_PLAYBACK_PREBUFFER_BYTES = int(_SAMPLE_RATE_OUT * 2 * 0.15)  # 150ms, 16-bit mono
+# callback is never starved mid-utterance. Computed per-session from the
+# actually-resolved output rate (see run()), not a fixed constant.
+_PLAYBACK_PREBUFFER_SECONDS = 0.15
 # Confirmed live (2026-08-09): repeated controlled tests (device selection,
 # buffer size, full-duplex vs input-only) all ruled out as the cause of a
 # consistently weak captured signal (~0.01-0.03 peak on a 0-1 scale, vs the
 # ~0.3-0.6 a normal speaking voice should produce) on this mic/room setup.
 # The signal is real, just quiet -- so it's boosted in software rather than
-# depending on Windows mic-boost/OS gain settings. Applied before int16
-# conversion, with hard clipping as the safety limiter against distortion
-# on louder moments.
-_DEFAULT_MIC_GAIN = 16.0
+# depending on Windows mic-boost/OS gain settings. First live conversation
+# at gain=16 worked (real replies came back) but peaked at 1.13-1.48 --
+# audibly clipping, and likely feeding Flux's turn-detector distorted noise
+# that triggered extra false turns (reported live as replies overlapping
+# within milliseconds). Backed off to leave headroom against that same
+# loud-moment peak (~0.09 raw * 9 =~ 0.8, under the 1.0 clip ceiling).
+_DEFAULT_MIC_GAIN = 9.0
 
 # Deliberately generic: no name, no household details -- this prompt leaves
 # the machine and is read by Deepgram's managed cloud LLM. The full,
@@ -73,6 +76,45 @@ _GENERIC_PROMPT = (
     "function first. For anything else, just answer naturally; you have no "
     "other tools available in this conversation."
 )
+
+
+def _preferred_output_device(sd: Any) -> Optional[int]:
+    """Mirrors one_agents.wake._preferred_device, for the speaker side.
+
+    Confirmed live (2026-08-09): the input side used the plain OS-default
+    device until it was pointed at the WASAPI-hosted Realtek instance
+    specifically; the output side had the same class of bug -- it was never
+    given a device at all, so it fell back to Windows' default speaker
+    entry (an older, non-WASAPI, 44.1kHz-native path) while the Settings
+    message told Deepgram to expect 24kHz. That mismatch is the most likely
+    cause of the "deep, pitch-distorted" voice reported live. Walking to the
+    WASAPI Realtek output, same as the input side, keeps both directions on
+    the same reliable host API.
+    """
+    configured = os.environ.get("ONE_VOICE_OUTPUT_DEVICE", "").strip()
+    if configured:
+        return int(configured)
+    try:
+        count = len(sd.query_devices())
+    except Exception:
+        count = 0
+    for index in range(count):
+        try:
+            device = sd.query_devices(index)
+        except Exception:
+            continue
+        if device.get("max_output_channels", 0) < 1 or "realtek" not in str(device.get("name", "")).lower():
+            continue
+        try:
+            host_name = sd.query_hostapis(device["hostapi"])["name"]
+        except Exception:
+            continue
+        if "WASAPI" in host_name:
+            return index
+    try:
+        return int(sd.default.device[1])
+    except Exception:
+        return None
 
 
 class VoiceBridgeSession:
@@ -97,10 +139,12 @@ class VoiceBridgeSession:
         self._stop = asyncio.Event()
         self._last_activity = time.monotonic()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
-        # Resolved at run() time to the real input device's own native rate
-        # -- see run()'s device-selection comment for why this can't be a
-        # hardcoded constant.
+        # Resolved at run() time to the real input/output devices' own
+        # native rates -- see run()'s device-selection comment for why
+        # these can't be hardcoded constants.
         self._sample_rate_in = 16000
+        self._sample_rate_out = 24000
+        self._playback_prebuffer_bytes = int(self._sample_rate_out * 2 * _PLAYBACK_PREBUFFER_SECONDS)
         # Mic-in: producer (PortAudio thread) -> consumer (asyncio task).
         # asyncio.Queue is safe here because the producer only ever touches
         # it via call_soon_threadsafe, which hops onto the loop thread first.
@@ -109,7 +153,7 @@ class VoiceBridgeSession:
         # thread). asyncio.Queue is NOT safe to read from a non-loop thread,
         # so this is a plain thread-safe stdlib queue instead.
         self._audio_out_queue: "queue.SimpleQueue[bytes]" = queue.SimpleQueue()
-        # Prebuffer bookkeeping -- see _PLAYBACK_PREBUFFER_BYTES above.
+        # Prebuffer bookkeeping -- see _PLAYBACK_PREBUFFER_SECONDS above.
         self._audio_out_queued_bytes = 0
         self._playback_primed = False
         # Diagnostics, all logged periodically by _idle_watchdog so a live
@@ -176,7 +220,7 @@ class VoiceBridgeSession:
             needed = frames * 2  # 2 bytes/sample, mono int16
 
             if not self._playback_primed:
-                if self._audio_out_queued_bytes < _PLAYBACK_PREBUFFER_BYTES:
+                if self._audio_out_queued_bytes < self._playback_prebuffer_bytes:
                     outdata.fill(0)
                     return
                 self._playback_primed = True
@@ -256,6 +300,25 @@ class VoiceBridgeSession:
             self._sample_rate_in,
         )
 
+        # Same reasoning, speaker side: the previous code never selected an
+        # output device at all, so it silently fell back to Windows'
+        # non-WASAPI default speaker entry while Settings told Deepgram a
+        # fixed 24kHz -- confirmed live as the likely cause of a
+        # pitch-distorted ("deep") voice. Walk to the WASAPI Realtek output
+        # and use ITS native rate everywhere, same pattern as the input side.
+        output_device = _preferred_output_device(sd)
+        if output_device is None:
+            output_device = sd.default.device[1]
+        output_info = sd.query_devices(output_device, "output")
+        self._sample_rate_out = int(output_info.get("default_samplerate", 24000)) or 24000
+        self._playback_prebuffer_bytes = int(self._sample_rate_out * 2 * _PLAYBACK_PREBUFFER_SECONDS)
+        logger.warning(
+            "[voice bridge diag] using output device %r (index=%s) at %dHz",
+            output_info.get("name"),
+            output_device,
+            self._sample_rate_out,
+        )
+
         pause_wake_listener()
         try:
             async with websockets.connect(
@@ -280,7 +343,8 @@ class VoiceBridgeSession:
                     dtype="float32",
                     callback=self._mic_callback,
                 ), sd.OutputStream(
-                    samplerate=_SAMPLE_RATE_OUT,
+                    device=output_device,
+                    samplerate=self._sample_rate_out,
                     channels=1,
                     dtype="int16",
                     callback=self._play_callback,
@@ -312,7 +376,7 @@ class VoiceBridgeSession:
             "type": "Settings",
             "audio": {
                 "input": {"encoding": "linear16", "sample_rate": self._sample_rate_in},
-                "output": {"encoding": "linear16", "sample_rate": _SAMPLE_RATE_OUT, "container": "none"},
+                "output": {"encoding": "linear16", "sample_rate": self._sample_rate_out, "container": "none"},
             },
             "agent": {
                 "listen": {
