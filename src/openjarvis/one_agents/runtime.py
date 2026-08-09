@@ -15,18 +15,19 @@ import httpx
 
 
 AGENTS: dict[str, dict[str, str]] = {
-    "titan": {"name": "TITAN", "role": "Instagram and PostForge operator"},
-    "alfa": {"name": "ALFA", "role": "Recurring revenue opportunity and service lead scout"},
-    "jobhunt": {"name": "JOBHUNT", "role": "Approval-gated QA/Product job search copilot"},
-    "beta": {"name": "BETA", "role": "Freelance opportunity and delivery operator"},
-    "hermes": {"name": "HERMES", "role": "KDP research and publishing operator"},
-    "ares": {"name": "ARES", "role": "LinkedIn B2B content and leads operator"},
-    "apollo": {"name": "APOLLO", "role": "X threads and growth operator"},
-    "athena": {"name": "ATHENA", "role": "Research and intelligence operator"},
-    "hephaistos": {"name": "HEPHAISTOS", "role": "LAO and local automation bot operator"},
-    "poseidon": {"name": "POSEIDON", "role": "Revenue and payout control operator"},
-    "zeus": {"name": "ZEUS", "role": "Agent orchestration and escalation operator"},
-    "ia": {"name": "IA", "role": "Restoration-reel content operator"},
+    "zeus": {"name": "ZEUS", "role": "Cross-division orchestration, escalation, and resource-allocation operator", "floor_id": "11", "floor_name": "ONE-JARVIS Executive Command", "division": "executive"},
+    "athena": {"name": "ATHENA", "role": "Opportunity discovery, research, and scoring operator", "floor_id": "10", "floor_name": "Venture & Opportunity Lab", "division": "venture_lab"},
+    "jobhunt": {"name": "JOBHUNT", "role": "Micro-SaaS and AI product build/QA operator", "floor_id": "9", "floor_name": "Micro-SaaS & AI Product Factory", "division": "micro_saas"},
+    "titan": {"name": "TITAN", "role": "Apps, websites, and games build/ship operator", "floor_id": "8", "floor_name": "Apps / Websites / Games", "division": "apps_web_games"},
+    "beta": {"name": "BETA", "role": "Browser extensions, plugins, and utility-tools delivery operator", "floor_id": "7", "floor_name": "Digital Utilities", "division": "digital_utilities"},
+    "apollo": {"name": "APOLLO", "role": "Courses, templates, and digital-product operator", "floor_id": "6", "floor_name": "Digital Products & Education", "division": "digital_products"},
+    "hermes": {"name": "HERMES", "role": "KDP fiction/non-fiction research and publishing operator", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing"},
+    "ia": {"name": "IRIS", "role": "Media and content production/distribution operator across ImagineIndia and future brands", "floor_id": "4", "floor_name": "Media & Content (ImagineIndia)", "division": "media"},
+    "ares": {"name": "ARES", "role": "SEO, social, and cross-floor distribution operator", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth"},
+    "alfa": {"name": "ALFA", "role": "Pricing, funnels, and revenue-attribution operator", "floor_id": "2", "floor_name": "Commerce & Monetization", "division": "commerce"},
+    "poseidon": {"name": "POSEIDON", "role": "Finance, HR, Admin, and Legal/Compliance operator", "floor_id": "1", "floor_name": "Corporate Services", "division": "corporate"},
+    "hephaistos": {"name": "HEPHAISTOS", "role": "ONE runtime, workflow-engine, and LAO-bridge operator", "floor_id": "B1", "floor_name": "Platform Engineering", "division": "platform"},
+    "argus": {"name": "ARGUS", "role": "Health, audit, kill-switch, and rate-limit operator", "floor_id": "B2", "floor_name": "Security & SRE", "division": "security"},
 }
 
 
@@ -389,300 +390,120 @@ def _local_plan(job: dict[str, Any]) -> dict[str, Any]:
     return {"agent": agent["name"], "mode": "local-plan", "content": content, "output": str(output_path)}
 
 
+# --- ONE Autonomous Company floor-head scaffolds -----------------------
+#
+# Rebuilt per Vineet's direction: LAO (Documents\LAO) is not being touched,
+# so each of these is a clean, safe, side-effect-free scaffold for now (they
+# all just produce a local plan/log artifact via `_local_plan`, same as the
+# old dead-persona fallback did). Real LAO integration gets wired into each
+# one individually once the full floor set is built — that's the intended
+# hook point for e.g. a future `LaoOrchestratorTool` call inside `_run_iris`
+# or `_run_hermes`. The old direct external integrations this replaced
+# (PostForge/Instagram in TITAN, the Leonardo/ffmpeg pipeline in IA, the
+# live LAO bridge in HEPHAISTOS, the alfa.py/jobhunt.py scan jobs) are left
+# in place as unused source files, not deleted, in case any of that logic is
+# worth reusing when real integration comes back.
+
+
+def _run_zeus(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 11 - ONE-JARVIS Executive Command. Pending LAO integration."""
+    return _local_plan(job)
+
+
+def _run_athena(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 10 - Venture & Opportunity Lab. Pending LAO integration."""
+    return _local_plan(job)
+
+
+def _run_jobhunt(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 9 - Micro-SaaS & AI Product Factory. Pending LAO integration."""
+    return _local_plan(job)
+
+
+def _run_apollo(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 6 - Digital Products & Education. Pending LAO integration."""
+    return _local_plan(job)
+
+
+def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 5 - Book Publishing (KDP). Pending LAO integration."""
+    return _local_plan(job)
+
+
+def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 3 - Growth & Distribution. Pending LAO integration."""
+    return _local_plan(job)
+
+
+def _run_alfa(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 2 - Commerce & Monetization. Pending LAO integration."""
+    return _local_plan(job)
+
+
+def _run_poseidon(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 1 - Corporate Services. Pending LAO integration."""
+    return _local_plan(job)
+
+
+def _run_argus(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor B2 - Security & SRE. Pending LAO integration."""
+    return _local_plan(job)
+
+
 def _run_beta(job: dict[str, Any]) -> dict[str, Any]:
-    """Build a durable delivery workspace for an approved paid engagement."""
-    planned = _local_plan(job)
-    workspace = _home() / "delivery" / job["id"]
-    workspace.mkdir(parents=True, exist_ok=True)
-    plan = workspace / "delivery-plan.md"
-    qa = workspace / "qa-checklist.md"
-    handoff = workspace / "client-handoff.md"
-    plan.write_text(
-        "# BETA Delivery Plan\n\n" + planned["content"] + "\n\n"
-        "Status: WORKSPACE READY. This does not mean the client deliverable has been sent.\n",
-        encoding="utf-8",
-    )
-    qa.write_text(
-        "# QA Checklist\n\n- [ ] Scope matches the approved proposal\n- [ ] Real inputs tested\n"
-        "- [ ] Edge cases tested\n- [ ] Credentials removed from deliverables\n"
-        "- [ ] Client instructions written\n- [ ] Vineet approved final delivery\n",
-        encoding="utf-8",
-    )
-    handoff.write_text(
-        "# Client Handoff Draft\n\n## Delivered items\n- Add final files/links\n\n"
-        "## How to use\n- Add instructions\n\n## Support\n- Confirm revision window and optional monthly care plan\n",
-        encoding="utf-8",
-    )
-    return {
-        "agent": "BETA",
-        "mode": "delivery-workspace",
-        "workspace": str(workspace),
-        "plan": str(plan),
-        "qa_checklist": str(qa),
-        "handoff": str(handoff),
-    }
+    """Floor 7 - Digital Utilities. Pending LAO integration."""
+    return _local_plan(job)
 
 
 def _run_hephaistos(job: dict[str, Any]) -> dict[str, Any]:
-    """Route ONE voice/text commands into LAO's deterministic bot runtime."""
-    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+    """Floor B1 - Platform Engineering. Pending LAO integration.
 
-    task = str(job.get("task") or "")
-    text = task.lower()
-    mode = str(job.get("mode") or "plan").lower()
-
-    action = "start"
-    include_logs = False
-    publish_negated = bool(
-        any(
-            phrase in text
-            for phrase in (
-                "publish mat",
-                "post mat",
-                "publish nahi",
-                "publish nahin",
-                "post nahi",
-                "post nahin",
-                "publish na",
-                "post na",
-                "without publish",
-                "without posting",
-                "do not publish",
-                "do not post",
-                "don't publish",
-                "dont publish",
-                "don't post",
-                "dont post",
-            )
-        )
-    )
-    dry_requested = publish_negated or any(
-        word in text for word in ("dry", "dry run", "test", "preview", "without publish", "publish mat")
-    )
-    publish_requested = (mode == "publish") or any(
-        phrase in text for phrase in ("publish", "post kar", "post karo", "shoot", "live run", "go live")
-    )
-
-    if any(word in text for word in ("status", "progress", "result", "kya chal", "logs", "log bata")):
-        action = "status"
-        include_logs = "log" in text
-    elif any(word in text for word in ("stop", "cancel", "rok", "band karo")):
-        action = "stop"
-    elif any(word in text for word in ("list process", "process list", "processes")):
-        action = "list_processes"
-
-    run_mode = "publish" if (publish_requested and not publish_negated) else "dry_run"
-
-    # "start" is the only real, side-effecting action here — unlike TITAN/IA,
-    # which stay side-effect-free in job mode "plan", this used to start a
-    # live LAO job (in dry_run flavor) regardless of mode, so ambiguous
-    # phrasing dispatched with mode="plan" silently ran a real LAO job every
-    # time instead of just describing intent. Gated the same way TITAN/IA
-    # already are: only take the real action on execute/publish.
-    if action == "start" and mode not in {"execute", "publish"}:
-        return {
-            "agent": "HEPHAISTOS",
-            "mode": "lao-operator-plan",
-            "command": task,
-            "content": (
-                f"Plan only — no LAO job started. Would run the LinkedIn posting "
-                f"process in '{run_mode}' mode. Say 'execute' to run it as a dry "
-                f"run, or 'publish' to actually post."
-            ),
-        }
-
-    result = LaoOrchestratorTool().execute(
-        action=action,
-        mode=run_mode,
-        include_logs=include_logs,
-        confirm_publish=(run_mode == "publish"),
-    )
-    try:
-        lao_payload = json.loads(result.content)
-    except json.JSONDecodeError:
-        lao_payload = {"raw": result.content}
-    if not result.success:
-        raise RuntimeError(result.content)
-    return {
-        "agent": "HEPHAISTOS",
-        "mode": "lao-operator",
-        "command": task,
-        "lao_action": action,
-        "lao_mode": run_mode,
-        "lao": lao_payload,
-    }
-
-
-def _postforge(path: str, payload: dict[str, Any], timeout: float = 300) -> dict[str, Any]:
-    base = os.environ.get("POSTFORGE_URL", "https://postforge-ai-one.vercel.app").rstrip("/")
-    secret = os.environ.get("POSTFORGE_API_SECRET", "").strip()
-    if not secret:
-        raise RuntimeError("POSTFORGE_API_SECRET is missing from one.env")
-    response = httpx.post(
-        base + path,
-        headers={"Content-Type": "application/json", "x-postforge-secret": secret},
-        json=payload,
-        timeout=timeout,
-    )
-    text = response.text
-    try:
-        data = response.json()
-    except Exception as exc:
-        raise RuntimeError(f"PostForge returned non-JSON ({response.status_code}): {text[:300]}") from exc
-    if response.is_error or data.get("error"):
-        raise RuntimeError(data.get("error") or f"PostForge failed with {response.status_code}")
-    return data
+    The old body of this function called LaoOrchestratorTool directly to
+    start a real LAO job. That's intentionally retired for now — LAO stays
+    untouched and unwired until the full floor set is built, at which point
+    the LaoOrchestratorTool call is the natural thing to reintroduce here.
+    """
+    return _local_plan(job)
 
 
 def _run_titan(job: dict[str, Any]) -> dict[str, Any]:
-    pillar = os.environ.get("TITAN_DEFAULT_PILLAR", "news")
-    pillar_names = {
-        "news": "AI News Breakdown",
-        "tool": "AI Tool Drop",
-        "income": "AI Income Update",
-        "transformation": "AI Transformation",
-        "automation": "AI Automation Win",
-    }
-    refresh = _postforge("/api/refresh", {"pillar": pillar, "pillarFull": pillar_names[pillar]})
-    items = refresh.get("items") or []
-    if not items:
-        raise RuntimeError("TITAN found no verified source")
-    items.sort(key=lambda item: item.get("publishedAt") or item.get("date") or "", reverse=True)
-    selected = items[0]
-    generated = _postforge(
-        "/api/generate",
-        {"selectedItems": [selected], "pillarFull": pillar_names[pillar], "pillarId": pillar, "format": "Carousel"},
-    )
-    result: dict[str, Any] = {
-        "agent": "TITAN",
-        "mode": job["mode"],
-        "source": selected,
-        "hook": generated.get("hook", ""),
-        "caption": generated.get("caption", ""),
-    }
-    if job["mode"] == "execute":
-        return result
+    """Floor 8 - Apps / Websites / Games. Pending LAO integration.
 
-    image_urls: list[str] = []
-    image_meta: list[dict[str, Any]] = []
-    for index in range(6):
-        images = _postforge(
-            "/api/carousel-images",
-            {
-                "hook": generated.get("hook"),
-                "cover_text": generated.get("cover_text"),
-                "cover_subtext": generated.get("cover_subtext"),
-                "cover_visual_prompt": generated.get("cover_visual_prompt"),
-                "slides": generated.get("slides"),
-                "pillarId": pillar,
-                "onlyIndex": index,
-            },
-        )
-        for image in images.get("images") or []:
-            image_meta.append(image)
-            if image.get("success") and image.get("imageUrl"):
-                image_urls.append(image["imageUrl"])
-    if len(image_urls) < 2:
-        raise RuntimeError(f"TITAN created only {len(image_urls)} public image URL(s)")
-    instagram = _postforge(
-        "/api/instagram",
-        {
-            "imageUrls": image_urls,
-            "caption": generated.get("caption", ""),
-            "cta": generated.get("cta", ""),
-            "hashtags": generated.get("hashtags", ""),
-        },
-    )
-    result.update({"images": image_meta, "imageUrls": image_urls, "instagram": instagram})
-    return result
-
-
-def _run_ia(job: dict[str, Any]) -> dict[str, Any]:
-    """Run the real restoration-reel pipeline end-to-end: image_generate ->
-    leonardo_video_generate -> video_merge, via the deterministic
-    IAAgent (not the generic Ollama planner). The agent itself
-    mirrors its own progress into the managed-agent dashboard record
-    (see ``agents/ia_dashboard.py``); this just bridges the ONE
-    Cockpit job queue to that same run.
+    The old body of this function called the PostForge API directly
+    (refresh -> generate -> carousel-images -> instagram). Retired for now,
+    same reasoning as _run_hephaistos above.
     """
-    from pathlib import Path
+    return _local_plan(job)
 
-    from openjarvis.agents.ia import IAAgent
-    from openjarvis.tools.image_tool import ImageGenerateTool
-    from openjarvis.tools.leonardo_browser_video_tool import LeonardoBrowserVideoGenerateTool
-    from openjarvis.tools.leonardo_video_tool import LeonardoVideoGenerateTool
-    from openjarvis.tools.video_merge_tool import VideoMergeTool
-    from openjarvis.tools.video_tool import VideoGenerateTool
 
-    # Backend preference. The production IA reel should use the Leonardo web
-    # app first, because that spends subscription creation credits and follows
-    # the exact UI path captured in LAO Task Capture. FAL/API remain fallbacks
-    # only when no logged-in Leonardo profile exists or the backend is forced.
-    forced_backend = os.environ.get("LEONARDO_VIDEO_BACKEND")
-    lao_profile_dir = Path.home() / "Documents" / "LAO" / "task-capture-browser-profile-leonardo"
-    legacy_profile_dir = Path.home() / ".openjarvis" / "leonardo_browser_profile"
-    profile_dir = os.environ.get("LEONARDO_CHROME_PROFILE_DIR") or str(
-        lao_profile_dir if lao_profile_dir.exists() else legacy_profile_dir
-    )
-    os.environ.setdefault("LEONARDO_CHROME_PROFILE_DIR", profile_dir)
-    if forced_backend in {"browser", "fal", "api"}:
-        video_backend = forced_backend
-    elif Path(profile_dir).exists():
-        video_backend = "browser"
-    elif os.environ.get("FAL_KEY"):
-        video_backend = "fal"
-    else:
-        video_backend = "api"
+def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 4 - Media & Content (ImagineIndia). Pending LAO integration.
 
-    agent = IAAgent(
-        engine=None,
-        model="",
-        tools=[
-            ImageGenerateTool(),
-            LeonardoVideoGenerateTool(),
-            LeonardoBrowserVideoGenerateTool(),
-            VideoGenerateTool(),
-            VideoMergeTool(),
-        ],
-        video_backend=video_backend,
-    )
-    result = agent.run(job["task"])
-    final_path = result.metadata.get("final_path")
-    if not final_path:
-        # The agent never raises on internal step failures -- it returns an
-        # AgentResult with the failure described in .content/.metadata so the
-        # dashboard bridge can log it. Surface that here as a real exception
-        # so the cockpit job queue marks this run "failed" instead of
-        # "completed" with a buried error.
-        raise RuntimeError(result.content)
-    return {
-        "agent": "IA",
-        "mode": job["mode"],
-        "content": result.content,
-        "run_dir": result.metadata.get("run_dir"),
-        "final_path": final_path,
-        "location": result.metadata.get("location"),
-    }
+    The old body of this function (as _run_ia) ran the real IAAgent
+    image -> Leonardo video -> ffmpeg merge pipeline directly. Retired for
+    now, same reasoning as _run_hephaistos above.
+    """
+    return _local_plan(job)
 
 
 def execute_job(job: dict[str, Any]) -> dict[str, Any]:
-    if job["agent_id"] == "titan" and job["mode"] in {"execute", "publish"}:
-        return _run_titan(job)
-    if job["agent_id"] == "ia" and job["mode"] in {"execute", "publish"}:
-        return _run_ia(job)
-    if job["agent_id"] == "alfa":
-        from openjarvis.one_agents.alfa import run_alfa_scan
-
-        return run_alfa_scan()
-    if job["agent_id"] == "jobhunt":
-        from openjarvis.one_agents.jobhunt import run_jobhunt_scan
-
-        return run_jobhunt_scan()
-    if job["agent_id"] == "beta":
-        return _run_beta(job)
-    if job["agent_id"] == "hephaistos":
-        return _run_hephaistos(job)
-    return _local_plan(job)
+    handlers = {
+        "zeus": _run_zeus,
+        "athena": _run_athena,
+        "jobhunt": _run_jobhunt,
+        "titan": _run_titan,
+        "beta": _run_beta,
+        "apollo": _run_apollo,
+        "hermes": _run_hermes,
+        "ia": _run_iris,
+        "ares": _run_ares,
+        "alfa": _run_alfa,
+        "poseidon": _run_poseidon,
+        "hephaistos": _run_hephaistos,
+        "argus": _run_argus,
+    }
+    handler = handlers.get(job["agent_id"], _local_plan)
+    return handler(job)
 
 
 def _job_watchdog_seconds() -> float:
