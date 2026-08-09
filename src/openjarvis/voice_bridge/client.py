@@ -91,6 +91,13 @@ class VoiceBridgeSession:
         # thread). asyncio.Queue is NOT safe to read from a non-loop thread,
         # so this is a plain thread-safe stdlib queue instead.
         self._audio_out_queue: "queue.SimpleQueue[bytes]" = queue.SimpleQueue()
+        # Diagnostics, all logged periodically by _idle_watchdog so a live
+        # session leaves a real trail of where the pipeline actually got to
+        # instead of a bare "nothing happened".
+        self._last_mic_peak = 0.0
+        self._bytes_sent = 0
+        self._bytes_received_audio = 0
+        self._events_seen: list[str] = []
 
     def _touch(self) -> None:
         self._last_activity = time.monotonic()
@@ -99,7 +106,12 @@ class VoiceBridgeSession:
 
     def _mic_callback(self, indata, frames, time_info, status) -> None:  # noqa: ANN001
         try:
-            pcm = np.clip(indata[:, 0] * 32767, -32768, 32767).astype(np.int16).tobytes()
+            mono = indata[:, 0]
+            # Diagnostic only: lets _idle_watchdog's periodic log answer
+            # "is real signal even reaching us" without needing another
+            # live attempt to find out -- cheap, no allocation beyond a max().
+            self._last_mic_peak = max(self._last_mic_peak, float(np.max(np.abs(mono))))
+            pcm = np.clip(mono * 32767, -32768, 32767).astype(np.int16).tobytes()
             if self._loop is not None:
                 self._loop.call_soon_threadsafe(self._queue_mic_chunk, pcm)
         except Exception:
@@ -172,8 +184,8 @@ class VoiceBridgeSession:
             input_device = sd.default.device[0]
         device_info = sd.query_devices(input_device, "input")
         self._sample_rate_in = int(device_info.get("default_samplerate", 16000)) or 16000
-        logger.info(
-            "voice bridge: using input device %r (index=%s) at %dHz",
+        logger.warning(
+            "[voice bridge diag] using input device %r (index=%s) at %dHz",
             device_info.get("name"),
             input_device,
             self._sample_rate_in,
@@ -255,6 +267,7 @@ class VoiceBridgeSession:
         while not self._stop.is_set():
             pcm = await self._audio_in_queue.get()
             await ws.send(pcm)
+            self._bytes_sent += len(pcm)
 
     async def _receive_loop(self, ws: Any) -> None:
         try:
@@ -263,6 +276,7 @@ class VoiceBridgeSession:
                     break
                 self._touch()
                 if isinstance(message, (bytes, bytearray)):
+                    self._bytes_received_audio += len(message)
                     self._audio_out_queue.put(bytes(message))
                     self.state = "speaking"
                     continue
@@ -276,6 +290,9 @@ class VoiceBridgeSession:
         except json.JSONDecodeError:
             return
         etype = event.get("type")
+        self._events_seen.append(etype or "?")
+        if etype in ("ConversationText", "Error", "Warning"):
+            logger.warning("[voice bridge diag] event: %s", event)
         if etype == "UserStartedSpeaking":
             self.state = "listening"
             self._drain_playback()
@@ -313,12 +330,28 @@ class VoiceBridgeSession:
 
     async def _idle_watchdog(self) -> None:
         """Auto-disconnect after a period of silence -- Deepgram bills per
-        connected minute, so an idle session left open is wasted credit."""
+        connected minute, so an idle session left open is wasted credit.
+        Also the diagnostic heartbeat: logs mic level / bytes sent+received
+        / events seen every ~4s so a real session leaves concrete evidence
+        of exactly where the pipeline got to, instead of a bare 'nothing
+        happened'."""
+        tick = 0
         while not self._stop.is_set():
             await asyncio.sleep(2.0)
+            tick += 1
+            if tick % 2 == 0:
+                logger.warning(
+                    "[voice bridge diag] state=%s mic_peak=%.3f bytes_sent=%d bytes_recv_audio=%d events=%s",
+                    self.state,
+                    self._last_mic_peak,
+                    self._bytes_sent,
+                    self._bytes_received_audio,
+                    self._events_seen[-10:],
+                )
+                self._last_mic_peak = 0.0
             if time.monotonic() - self._last_activity > self.silence_timeout_seconds:
-                logger.info(
-                    "voice bridge: idle for %.0fs, auto-disconnecting to save credit.",
+                logger.warning(
+                    "[voice bridge diag] idle for %.0fs, auto-disconnecting to save credit.",
                     self.silence_timeout_seconds,
                 )
                 self._stop.set()
