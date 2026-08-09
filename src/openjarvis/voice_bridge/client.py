@@ -41,7 +41,6 @@ logger = logging.getLogger("openjarvis.voice_bridge")
 
 _AGENT_WS_URL = "wss://agent.deepgram.com/v1/agent/converse"
 _SAMPLE_RATE_OUT = 24000
-_BLOCK_SECONDS = 0.02
 
 # Deliberately generic: no name, no household details -- this prompt leaves
 # the machine and is read by Deepgram's managed cloud LLM. The full,
@@ -219,18 +218,22 @@ class VoiceBridgeSession:
                 await self._handshake(ws)
                 self._touch()
 
+                # No explicit blocksize: forcing a tiny 20ms buffer here
+                # (previous code) starves/glitches WASAPI's own preferred
+                # buffering and was confirmed live to suppress the captured
+                # level by 6-14x on this exact device compared to a plain
+                # sd.InputStream() with no blocksize at all -- let PortAudio
+                # pick its own, same as the standalone test that worked.
                 with sd.InputStream(
                     device=input_device,
                     samplerate=self._sample_rate_in,
                     channels=1,
                     dtype="float32",
-                    blocksize=int(self._sample_rate_in * _BLOCK_SECONDS),
                     callback=self._mic_callback,
                 ), sd.OutputStream(
                     samplerate=_SAMPLE_RATE_OUT,
                     channels=1,
                     dtype="int16",
-                    blocksize=int(_SAMPLE_RATE_OUT * _BLOCK_SECONDS),
                     callback=self._play_callback,
                 ):
                     results = await asyncio.gather(
