@@ -29,14 +29,17 @@ from typing import Any, Dict, Optional
 import numpy as np
 import websockets
 
-from openjarvis.one_agents.wake import pause_wake_listener, resume_wake_listener
+from openjarvis.one_agents.wake import (
+    _preferred_device,
+    pause_wake_listener,
+    resume_wake_listener,
+)
 from openjarvis.voice_bridge.functions import deepgram_function_schemas, execute_function
 from openjarvis.voice_bridge.redact import redact
 
 logger = logging.getLogger("openjarvis.voice_bridge")
 
 _AGENT_WS_URL = "wss://agent.deepgram.com/v1/agent/converse"
-_SAMPLE_RATE_IN = 16000
 _SAMPLE_RATE_OUT = 24000
 _BLOCK_SECONDS = 0.02
 
@@ -76,6 +79,10 @@ class VoiceBridgeSession:
         self._stop = asyncio.Event()
         self._last_activity = time.monotonic()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        # Resolved at run() time to the real input device's own native rate
+        # -- see run()'s device-selection comment for why this can't be a
+        # hardcoded constant.
+        self._sample_rate_in = 16000
         # Mic-in: producer (PortAudio thread) -> consumer (asyncio task).
         # asyncio.Queue is safe here because the producer only ever touches
         # it via call_soon_threadsafe, which hops onto the loop thread first.
@@ -149,6 +156,29 @@ class VoiceBridgeSession:
         # imports and runs before ever opening the socket. Fail closed.
         redact("startup self-check")
 
+        # Device selection: reuse the SAME preferred-device logic as ONE's
+        # existing wake listener (one_agents/wake.py's _preferred_device),
+        # rather than trusting sounddevice's plain OS-default input. On this
+        # machine the plain default lands on an MME-level duplicate of the
+        # Realtek mic at its 44.1kHz native rate; wake.py deliberately walks
+        # past that to the WASAPI instance instead (already proven reliable
+        # here). Using the device's OWN native rate for both the capture
+        # stream and what we tell Deepgram to expect avoids a silent
+        # resample mismatch -- a fixed 16000 constant here previously did
+        # not match what was actually being captured, which is the likely
+        # reason a real 19s session produced audio Deepgram couldn't use.
+        input_device = _preferred_device(sd)
+        if input_device is None:
+            input_device = sd.default.device[0]
+        device_info = sd.query_devices(input_device, "input")
+        self._sample_rate_in = int(device_info.get("default_samplerate", 16000)) or 16000
+        logger.info(
+            "voice bridge: using input device %r (index=%s) at %dHz",
+            device_info.get("name"),
+            input_device,
+            self._sample_rate_in,
+        )
+
         pause_wake_listener()
         try:
             async with websockets.connect(
@@ -161,10 +191,11 @@ class VoiceBridgeSession:
                 self._touch()
 
                 with sd.InputStream(
-                    samplerate=_SAMPLE_RATE_IN,
+                    device=input_device,
+                    samplerate=self._sample_rate_in,
                     channels=1,
                     dtype="float32",
-                    blocksize=int(_SAMPLE_RATE_IN * _BLOCK_SECONDS),
+                    blocksize=int(self._sample_rate_in * _BLOCK_SECONDS),
                     callback=self._mic_callback,
                 ), sd.OutputStream(
                     samplerate=_SAMPLE_RATE_OUT,
@@ -173,15 +204,19 @@ class VoiceBridgeSession:
                     blocksize=int(_SAMPLE_RATE_OUT * _BLOCK_SECONDS),
                     callback=self._play_callback,
                 ):
-                    await asyncio.gather(
+                    results = await asyncio.gather(
                         self._send_audio_loop(ws),
                         self._receive_loop(ws),
                         self._idle_watchdog(),
                         return_exceptions=True,
                     )
+                    for result in results:
+                        if isinstance(result, Exception):
+                            logger.warning("voice bridge subtask ended with error: %s", result, exc_info=result)
+                            self.error = self.error or str(result)
         except Exception as exc:  # noqa: BLE001
             self.error = str(exc)
-            logger.warning("voice bridge session ended with error: %s", exc)
+            logger.warning("voice bridge session ended with error: %s", exc, exc_info=True)
         finally:
             self.state = "idle"
             self._ws = None
@@ -195,7 +230,7 @@ class VoiceBridgeSession:
         settings = {
             "type": "Settings",
             "audio": {
-                "input": {"encoding": "linear16", "sample_rate": _SAMPLE_RATE_IN},
+                "input": {"encoding": "linear16", "sample_rate": self._sample_rate_in},
                 "output": {"encoding": "linear16", "sample_rate": _SAMPLE_RATE_OUT, "container": "none"},
             },
             "agent": {
@@ -292,7 +327,17 @@ class VoiceBridgeSession:
                 break
 
     def request_stop(self) -> None:
+        """Called from the /v1/voice-bridge/stop route. Setting the flag
+        alone isn't enough: _receive_loop's `async for message in ws` blocks
+        until the NEXT message arrives, so if Deepgram has gone quiet it
+        would never notice _stop was set. Actually closing the socket is
+        what guarantees the session actually ends instead of hanging."""
         self._stop.set()
+        if self._loop is not None and self._ws is not None:
+            try:
+                asyncio.run_coroutine_threadsafe(self._ws.close(), self._loop)
+            except Exception:
+                logger.debug("voice bridge: closing ws on stop failed", exc_info=True)
 
 
 __all__ = ["VoiceBridgeSession"]
