@@ -68,11 +68,13 @@ _FADE_SAMPLES = 240  # ~5-10ms depending on output rate -- short enough to be in
 # ~0.3-0.6 a normal speaking voice should produce) on this mic/room setup.
 # The signal is real, just quiet -- so it's boosted in software rather than
 # depending on Windows mic-boost/OS gain settings. First live conversation
-# at gain=16 worked (real replies came back) but peaked at 1.13-1.48 --
-# audibly clipping, and likely feeding Flux's turn-detector distorted noise
-# that triggered extra false turns (reported live as replies overlapping
-# within milliseconds). Backed off to leave headroom against that same
-# loud-moment peak (~0.09 raw * 9 =~ 0.8, under the 1.0 clip ceiling).
+# at gain=16 worked (real replies came back) but hard-clipped on loud
+# moments (peaked 1.13-1.48) -- confirmed live that clipping this badly
+# didn't just sound harsh, whole utterances went completely unrecognized
+# by Deepgram. _mic_callback now runs this through a tanh soft limiter
+# instead of a hard clip, so loud moments compress gracefully rather than
+# distorting -- this value no longer needs to be tuned down to the exact
+# edge of clipping the way a hard-clip gain did.
 _DEFAULT_MIC_GAIN = 9.0
 
 # Deepgram Aura v1 speed control (agent.speak.provider.speed), valid range
@@ -258,13 +260,23 @@ class VoiceBridgeSession:
                 if self._loop is not None:
                     self._loop.call_soon_threadsafe(self._queue_mic_chunk, silence)
                 return
-            mono = indata[:, 0] * self.mic_gain
+            # Soft limiter (tanh) instead of a hard clip: confirmed live
+            # (2026-08-09) that hard-clipped mic audio (peak >1.0, a sharp
+            # digital chop) wasn't just harsh-sounding -- entire loud
+            # utterances went completely unrecognized by Deepgram, likely
+            # because clipping mangles the waveform enough to break speech
+            # recognition, not just audio quality. tanh saturates smoothly
+            # toward +-1 instead of chopping, so quiet moments still get
+            # the full gain (linear for small values) while loud ones
+            # compress gracefully instead of distorting.
+            mono = np.tanh(indata[:, 0] * self.mic_gain)
             # Diagnostic only: lets _idle_watchdog's periodic log answer
             # "is real signal even reaching us" without needing another
             # live attempt to find out -- cheap, no allocation beyond a max().
-            # Reported post-gain so it reflects what's actually being sent.
+            # Reported post-limiter, so a healthy loud utterance should now
+            # read close to but never above 1.0.
             self._last_mic_peak = max(self._last_mic_peak, float(np.max(np.abs(mono))))
-            pcm = np.clip(mono * 32767, -32768, 32767).astype(np.int16).tobytes()
+            pcm = (mono * 32767).astype(np.int16).tobytes()
             if self._loop is not None:
                 self._loop.call_soon_threadsafe(self._queue_mic_chunk, pcm)
         except Exception:
