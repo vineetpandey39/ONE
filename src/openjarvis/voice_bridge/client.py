@@ -53,6 +53,15 @@ _AGENT_WS_URL = "wss://agent.deepgram.com/v1/agent/converse"
 # not quite enough cushion against real network jitter inside a busy
 # multi-threaded server. Doubled for more headroom.
 _PLAYBACK_PREBUFFER_SECONDS = 0.3
+# Reported live (2026-08-09): an audible click/crackle after every sentence.
+# Deepgram streams TTS audio in per-sentence bursts, and the playback queue
+# runs dry in the gap between them -- the code was hard-cutting straight to
+# digital silence and then jumping straight back to full amplitude, both
+# genuine waveform discontinuities (clicks), once per sentence boundary.
+# Ramping through a short fade instead of a hard cut removes the click at
+# its source without touching the actual voice tone (unlike adding
+# reverb/echo, which would mask it but color the sound).
+_FADE_SAMPLES = 240  # ~5-10ms depending on output rate -- short enough to be inaudible as a fade itself
 # Confirmed live (2026-08-09): repeated controlled tests (device selection,
 # buffer size, full-duplex vs input-only) all ruled out as the cause of a
 # consistently weak captured signal (~0.01-0.03 peak on a 0-1 scale, vs the
@@ -179,6 +188,11 @@ class VoiceBridgeSession:
         self._out_lock = threading.Lock()
         self._audio_out_queued_bytes = 0
         self._playback_primed = False
+        # Click-free fade state -- see _FADE_SAMPLES above. Touched only
+        # from _play_callback's own thread except _need_fade_in, which
+        # _drain_playback also sets so a barge-in resume fades in too.
+        self._last_output_sample = 0
+        self._need_fade_in = True
         # Diagnostics, all logged periodically by _idle_watchdog so a live
         # session leaves a real trail of where the pipeline actually got to
         # instead of a bare "nothing happened".
@@ -265,43 +279,70 @@ class VoiceBridgeSession:
     def _play_callback(self, outdata, frames, time_info, status) -> None:  # noqa: ANN001
         try:
             needed = frames * 2  # 2 bytes/sample, mono int16
+            chunk = None
 
             with self._out_lock:
                 if not self._playback_primed:
-                    if self._audio_out_queued_bytes < self._playback_prebuffer_bytes:
-                        outdata.fill(0)
-                        return
-                    self._playback_primed = True
+                    if self._audio_out_queued_bytes >= self._playback_prebuffer_bytes:
+                        self._playback_primed = True
 
-                chunk = b""
-                while len(chunk) < needed:
-                    try:
-                        piece = self._audio_out_queue.get_nowait()
-                        self._audio_out_queued_bytes -= len(piece)
-                        chunk += piece
-                    except queue.Empty:
-                        break
-                if not chunk:
-                    # Ran dry -- re-prime before resuming so the next burst
-                    # of audio gets its own cushion instead of stuttering
-                    # straight through. This is also the ONE authoritative
-                    # place the mic's post-speech cooldown starts: the
-                    # speaker has genuinely gone quiet right now (not just
-                    # "server said it's done sending" -- see
-                    # _mic_callback's comment on why that signal alone
-                    # caused a feedback loop).
-                    self._playback_primed = False
-                    self._mic_gate_until = time.monotonic() + 0.4
+                if self._playback_primed:
+                    chunk = b""
+                    while len(chunk) < needed:
+                        try:
+                            piece = self._audio_out_queue.get_nowait()
+                            self._audio_out_queued_bytes -= len(piece)
+                            chunk += piece
+                        except queue.Empty:
+                            break
+                    if not chunk:
+                        # Ran dry -- re-prime before resuming so the next
+                        # burst of audio gets its own cushion instead of
+                        # stuttering straight through, and fade the next
+                        # burst in rather than snapping to full volume.
+                        # This is also the ONE authoritative place the
+                        # mic's post-speech cooldown starts: the speaker
+                        # has genuinely gone quiet right now (not just
+                        # "server said it's done sending" -- see
+                        # _mic_callback's comment on why that signal alone
+                        # caused a feedback loop).
+                        self._playback_primed = False
+                        self._need_fade_in = True
+                        self._mic_gate_until = time.monotonic() + 0.4
+                    elif len(chunk) < needed:
+                        chunk += b"\x00" * (needed - len(chunk))
+                    elif len(chunk) > needed:
+                        leftover = chunk[needed:]
+                        self._audio_out_queue.put(leftover)
+                        self._audio_out_queued_bytes += len(leftover)
+                        chunk = chunk[:needed]
+
+            if not chunk:
+                # Fade from whatever was last actually playing down to true
+                # silence, instead of a hard cut -- removes the click at the
+                # start of every inter-sentence gap.
+                n = min(_FADE_SAMPLES, frames)
+                if n > 0 and self._last_output_sample != 0:
+                    ramp = np.linspace(1.0, 0.0, n, dtype=np.float32)
+                    outdata[:n, 0] = (self._last_output_sample * ramp).astype(np.int16)
+                    outdata[n:] = 0
+                else:
                     outdata.fill(0)
-                    return
-                if len(chunk) < needed:
-                    chunk += b"\x00" * (needed - len(chunk))
-                elif len(chunk) > needed:
-                    leftover = chunk[needed:]
-                    self._audio_out_queue.put(leftover)
-                    self._audio_out_queued_bytes += len(leftover)
-                    chunk = chunk[:needed]
-            outdata[:] = np.frombuffer(chunk, dtype=np.int16).reshape(-1, 1)
+                self._last_output_sample = 0
+                return
+
+            samples = np.frombuffer(chunk, dtype=np.int16).copy()
+            if self._need_fade_in and len(samples):
+                # Symmetric fade-in when resuming after a gap (or on the
+                # very first utterance) -- removes the click at the end of
+                # every inter-sentence gap.
+                n = min(_FADE_SAMPLES, len(samples))
+                ramp = np.linspace(0.0, 1.0, n, dtype=np.float32)
+                samples[:n] = (samples[:n].astype(np.float32) * ramp).astype(np.int16)
+                self._need_fade_in = False
+            outdata[:] = samples.reshape(-1, 1)
+            if len(samples):
+                self._last_output_sample = int(samples[-1])
         except Exception:
             logger.debug("voice bridge playback callback error", exc_info=True)
             outdata.fill(0)
@@ -316,6 +357,7 @@ class VoiceBridgeSession:
                     break
             self._audio_out_queued_bytes = 0
             self._playback_primed = False
+            self._need_fade_in = True
 
     # -- main session --
 
