@@ -14,6 +14,8 @@ from typing import Any
 
 import httpx
 
+from openjarvis.one_agents import memory, stages
+
 
 AGENTS: dict[str, dict[str, str]] = {
     "zeus": {"name": "ZEUS", "role": "Cross-division orchestration, escalation, and resource-allocation operator", "floor_id": "11", "floor_name": "ONE-JARVIS Executive Command", "division": "executive"},
@@ -22,7 +24,10 @@ AGENTS: dict[str, dict[str, str]] = {
     "titan": {"name": "TITAN", "role": "Apps, websites, and games build/ship operator", "floor_id": "8", "floor_name": "Apps / Websites / Games", "division": "apps_web_games"},
     "beta": {"name": "BETA", "role": "Browser extensions, plugins, and utility-tools delivery operator", "floor_id": "7", "floor_name": "Digital Utilities", "division": "digital_utilities"},
     "apollo": {"name": "APOLLO", "role": "Courses, templates, and digital-product operator", "floor_id": "6", "floor_name": "Digital Products & Education", "division": "digital_products"},
-    "hermes": {"name": "HERMES", "role": "KDP fiction/non-fiction research and publishing operator", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing"},
+    "hermes": {"name": "HERMES", "role": "KDP fiction/non-fiction research and publishing operator", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "head"},
+    # First worker agent under a floor head — sits at an open desk on Floor 5
+    # and is the one that actually drives LAO's KDP factory to completion.
+    "scribe": {"name": "SCRIBE", "role": "KDP manuscript production worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
     "ia": {"name": "IRIS", "role": "Media and content production/distribution operator across ImagineIndia and future brands", "floor_id": "4", "floor_name": "Media & Content (ImagineIndia)", "division": "media"},
     "ares": {"name": "ARES", "role": "SEO, social, and cross-floor distribution operator", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth"},
     "alfa": {"name": "ALFA", "role": "Pricing, funnels, and revenue-attribution operator", "floor_id": "2", "floor_name": "Commerce & Monetization", "division": "commerce"},
@@ -472,19 +477,33 @@ def _marker(text: str, key: str, default: str = "") -> str:
 
 
 def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
-    """Floor 5 - Book Publishing (KDP).
+    """Floor 5 head - commissions a title, then hands it to SCRIBE.
 
-    Two stages: Claude researches the commissioning decision, then LAO's
-    existing ``kdp-book-factory`` process actually writes the book. LAO is
-    never modified here — this only starts one of its published processes
-    through the public REST API, exactly as its own scheduler would.
+    The floor works the way a real desk would: HERMES researches what to
+    commission, walks the brief over to the worker, and waits. SCRIBE drives
+    LAO's KDP factory to completion and walks the finished book back. HERMES
+    then reports upward. Each of those is a real step with a real artifact —
+    the stages exist so the building can show the handoff, not to invent it.
 
-    Starting a real run costs genuine Claude Code / NVIDIA / ChatGPT quota
-    and can take up to three hours, so it is gated behind execute mode the
-    same way the LAO bridge has always been. Plan mode researches only.
+    ``mode='report'`` is the third leg of that chain, enqueued by SCRIBE once
+    the book exists; it is not something a person dispatches by hand.
     """
     task = str(job.get("task") or "")
     mode = str(job.get("mode") or "plan").strip().lower()
+
+    if mode == "report":
+        return _hermes_report(job)
+
+    stages.set_stage("hermes", stages.RESEARCHING, "Choosing the next KDP title")
+
+    # Read its own history first. Without this the floor happily re-commissions
+    # a title it already published — the vault is what makes it memory.
+    already = memory.prior_titles("5", "Book Publishing (KDP)")
+    avoid = (
+        "\n\nAlready commissioned by this floor — do not repeat or closely "
+        "overlap these:\n" + "\n".join(f"- {t}" for t in already[:15])
+        if already else ""
+    )
 
     brief, note = _claude_research(
         "You are HERMES, head of Book Publishing at a digital holding company, "
@@ -501,10 +520,12 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "BRIEF:\n"
         "<8-14 lines: target reader, why now, competing titles, what makes this "
         "one different, and the honest commercial risk>"
+        + avoid
     )
 
     if not brief:
         # Never silently downgrade to the weaker model without saying so.
+        stages.clear_stage("hermes")
         fallback = _local_plan(job)
         fallback["research_engine"] = "local planner"
         fallback["claude_unavailable"] = note
@@ -526,6 +547,12 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         encoding="utf-8",
     )
 
+    remembered = memory.remember(
+        agent="HERMES", floor_id="5", floor_name="Book Publishing (KDP)",
+        kind="Commissioning Brief", body=brief, task=task,
+        tags=["kdp", "publishing", kdp_mode],
+    )
+
     result: dict[str, Any] = {
         "agent": "HERMES",
         "mode": mode,
@@ -535,42 +562,243 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "angle": angle,
         "content": brief,
         "output": str(output_path),
+        "vault_note": remembered.get("path"),
+        "prior_titles_considered": len(already),
     }
 
-    if mode not in {"execute", "publish"}:
-        result["lao"] = None
+    # Commissioning the book is the DEFAULT. Telling a floor head to do its job
+    # shouldn't require remembering which verb the router happens to map to
+    # "execute" — any dispatch that reaches HERMES runs the whole pipeline.
+    # Research-only is the explicit exception, asked for in plain words.
+    research_only = bool(re.search(r"\b(plan|draft|prepare|research)\b", task.lower()))
+    if research_only:
+        stages.clear_stage("hermes")
+        result["handed_to"] = None
         result["note"] = (
-            "Research only — no LAO job started. A real run spends Claude Code, "
-            "NVIDIA and ChatGPT quota and can take up to 3 hours. Dispatch with "
-            "mode 'execute' to actually generate the book."
+            "Research only — nothing handed to SCRIBE, because the request asked "
+            "to plan/draft/research. Say it without those words (e.g. 'HERMES, "
+            "get the next book done') to commission it for real."
         )
         return result
 
-    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+    # --- the handoff ------------------------------------------------------
+    # HERMES leaves its desk and walks the brief across the floor. These two
+    # stages are short by nature; the building animates the walk between them.
+    stages.set_stage("hermes", stages.CARRYING_TO_WORKER,
+                     f"Taking the brief to SCRIBE: {angle[:60]}")
+    time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
+    stages.set_stage("hermes", stages.BRIEFING, "Briefing SCRIBE")
+    time.sleep(2.0)
 
-    # dryRun stays True: it still produces the full manuscript + images, and
-    # KDP upload is a manual human gate that must never be automated.
-    lao = LaoOrchestratorTool().execute(
-        action="start",
-        mode="dry_run",
-        process_name=os.environ.get("LAO_KDP_PROCESS", KDP_PROCESS_NAME),
-        scope="production",
-        input_args={"mode": kdp_mode, "region": region, "dryRun": True},
+    worker = enqueue_job(
+        "scribe",
+        json.dumps({"brief_path": str(output_path), "kdp_mode": kdp_mode,
+                    "region": region, "angle": angle, "origin_job": job["id"]}),
+        mode="execute",
+        tier="fast",
     )
-    try:
-        payload = json.loads(lao.content)
-    except json.JSONDecodeError:
-        payload = {"raw": lao.content}
-    if not lao.success:
-        raise RuntimeError(f"LAO refused the KDP run: {lao.content}")
 
-    result["lao"] = payload
+    # HERMES is now blocked on the worker — back at its desk, not idle.
+    stages.set_stage("hermes", stages.AWAITING_WORKER,
+                     "Waiting on SCRIBE to produce the manuscript",
+                     worker_job=worker["id"])
+
+    result["handed_to"] = {"agent": "SCRIBE", "job_id": worker["id"]}
     result["note"] = (
-        "LAO KDP Book Factory started. It writes the manuscript, generates the "
-        "cover/interior images and renders the DOCX. Uploading to Amazon KDP "
+        "Brief handed to SCRIBE, who will run LAO's KDP Book Factory to "
+        "completion and hand the finished book back. Uploading to Amazon KDP "
         "remains a manual human step."
     )
     return result
+
+
+def _hermes_report(job: dict[str, Any]) -> dict[str, Any]:
+    """Third leg: SCRIBE has delivered, HERMES reports the result upward."""
+    stages.set_stage("hermes", stages.REPORTING, "Reporting the finished book")
+    try:
+        payload = json.loads(str(job.get("task") or "{}"))
+    except json.JSONDecodeError:
+        payload = {}
+
+    run_dir = payload.get("run_dir") or "(not reported by LAO)"
+    title = payload.get("title") or "(title in the run folder)"
+    message = (
+        f"Sir, the book is finished. SCRIBE has handed it over.\n\n"
+        f"Title: {title}\n"
+        f"Location: {run_dir}\n\n"
+        "It is ready for upload to Amazon KDP. That upload is a manual step — "
+        "I have not touched it."
+    )
+
+    output_dir = _home() / "agent_outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{job['id']}.md"
+    output_path.write_text(f"# HERMES — Delivery Report\n\n{message}\n", encoding="utf-8")
+
+    remembered = memory.remember(
+        agent="HERMES", floor_id="5", floor_name="Book Publishing (KDP)",
+        kind="Delivery Report",
+        body=f"{message}\n\nANGLE: {title}\n",
+        tags=["kdp", "publishing", "delivered", "awaiting-upload"],
+    )
+
+    time.sleep(2.0)
+    stages.clear_stage("hermes")
+    return {
+        "agent": "HERMES",
+        "mode": "report",
+        "content": message,
+        "run_dir": run_dir,
+        "title": title,
+        "output": str(output_path),
+        "vault_note": remembered.get("path"),
+        "requires_human": "Amazon KDP upload",
+    }
+
+
+def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 5 worker - runs LAO's KDP factory and waits for the book.
+
+    This is the only agent that blocks on an external multi-hour job, so it
+    polls LAO rather than fire-and-forgetting: the floor's whole point is that
+    the worker is genuinely busy for as long as the book takes.
+    """
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+
+    try:
+        brief = json.loads(str(job.get("task") or "{}"))
+    except json.JSONDecodeError:
+        brief = {}
+    kdp_mode = brief.get("kdp_mode") or "auto"
+    region = brief.get("region") or "global"
+
+    stages.set_stage("scribe", stages.RECEIVING, "Taking the brief from HERMES")
+    time.sleep(2.0)
+
+    tool = LaoOrchestratorTool()
+    process_name = os.environ.get("LAO_KDP_PROCESS", KDP_PROCESS_NAME)
+
+    # dryRun stays True: it still produces the full manuscript + images, and
+    # KDP upload is a manual human gate that must never be automated.
+    stages.set_stage("scribe", stages.EXECUTING, "Starting LAO KDP Book Factory")
+    started = tool.execute(
+        action="start", mode="dry_run", process_name=process_name,
+        scope="production",
+        input_args={"mode": kdp_mode, "region": region, "dryRun": True},
+    )
+    if not started.success:
+        stages.clear_stage("scribe")
+        stages.clear_stage("hermes")
+        raise RuntimeError(f"LAO refused the KDP run: {started.content}")
+    try:
+        start_payload = json.loads(started.content)
+    except json.JSONDecodeError:
+        start_payload = {"raw": started.content}
+    lao_job_id = ((start_payload.get("job") or {}).get("id")) or ""
+
+    # --- wait for the book ------------------------------------------------
+    poll_seconds = float(os.environ.get("ONE_LAO_POLL_SECONDS", "30"))
+    max_wait = float(os.environ.get("ONE_LAO_MAX_WAIT_SECONDS", "10800"))  # 3h
+    deadline = time.time() + max_wait
+    terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
+    status = "Pending"
+    last: dict[str, Any] = {}
+
+    while time.time() < deadline:
+        time.sleep(poll_seconds)
+        probe = tool.execute(action="status", process_name=process_name,
+                             scope="production", job_id=lao_job_id)
+        try:
+            last = json.loads(probe.content)
+        except json.JSONDecodeError:
+            last = {"raw": probe.content}
+        status = str((last.get("job") or {}).get("status") or status)
+        stages.set_stage("scribe", stages.EXECUTING,
+                         f"LAO job {status}", lao_job=lao_job_id)
+        if status in terminal:
+            break
+    else:
+        stages.clear_stage("scribe")
+        stages.clear_stage("hermes")
+        raise RuntimeError(
+            f"LAO KDP job did not finish within {max_wait/3600:.1f}h (last status: {status})"
+        )
+
+    if status != "Successful":
+        stages.clear_stage("scribe")
+        stages.clear_stage("hermes")
+        raise RuntimeError(f"LAO KDP job ended as {status}")
+
+    run_dir, title = _latest_kdp_output()
+
+    # --- walk the finished book back to the floor head --------------------
+    stages.set_stage("scribe", stages.CARRYING_TO_HEAD, f"Delivering: {title}")
+    time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
+    stages.set_stage("scribe", stages.DELIVERING, "Handing the book to HERMES")
+    time.sleep(2.0)
+
+    memory.remember(
+        agent="SCRIBE", floor_id="5", floor_name="Book Publishing (KDP)",
+        kind="Production Run",
+        body=(f"Ran LAO's KDP Book Factory to completion.\n\n"
+              f"- LAO job: `{lao_job_id}` — {status}\n"
+              f"- Output folder: `{run_dir}`\n"
+              f"- Title: {title}\n\n"
+              "Handed the finished book to HERMES."),
+        task=f"{kdp_mode} / {region}",
+        tags=["kdp", "publishing", "production"],
+    )
+
+    enqueue_job(
+        "hermes",
+        json.dumps({"run_dir": run_dir, "title": title, "lao_job": lao_job_id}),
+        mode="report", tier="fast",
+    )
+    stages.clear_stage("scribe")
+
+    return {
+        "agent": "SCRIBE",
+        "mode": job.get("mode"),
+        "lao_job": lao_job_id,
+        "lao_status": status,
+        "run_dir": run_dir,
+        "title": title,
+        "delivered_to": "HERMES",
+    }
+
+
+def _latest_kdp_output() -> tuple[str, str]:
+    """Newest KDP run folder on disk, and a best-effort title from it.
+
+    Reads what LAO actually produced rather than trusting the job payload —
+    the run folder is the artifact, and its name is the timestamped truth.
+    """
+    from pathlib import Path as _Path
+
+    base = _Path(os.environ.get(
+        "LAO_KDP_OUTPUT_DIR",
+        str(_Path.home() / "Documents" / "LAO" / "kdp-book-factory" / "output"),
+    ))
+    try:
+        runs = sorted(
+            (p for p in base.iterdir() if p.is_dir() and p.name.endswith("claude-code-kdp-book")),
+            key=lambda p: p.stat().st_mtime,
+        )
+    except OSError:
+        return str(base), "(output folder unreadable)"
+    if not runs:
+        return str(base), "(no run folder found)"
+
+    run = runs[-1]
+    title = run.name
+    meta = run / "kdp_metadata.json"
+    if meta.exists():
+        try:
+            data = json.loads(meta.read_text(encoding="utf-8"))
+            title = str(data.get("title") or data.get("Title") or title)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return str(run), title
 
 
 def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
@@ -638,6 +866,7 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         "beta": _run_beta,
         "apollo": _run_apollo,
         "hermes": _run_hermes,
+        "scribe": _run_scribe,
         "ia": _run_iris,
         "ares": _run_ares,
         "alfa": _run_alfa,
@@ -649,8 +878,14 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
     return handler(job)
 
 
-def _job_watchdog_seconds() -> float:
+def _job_watchdog_seconds(job: dict[str, Any] | None = None) -> float:
     """Outer, additive safety-net timeout for a *whole* job run.
+
+    SCRIBE is the one agent that legitimately blocks for hours — it sits on
+    LAO's KDP factory until the book exists. The default 45-minute net would
+    mark a perfectly healthy book run as failed partway through, so that agent
+    gets a window sized to its own LAO wait plus margin. Every other agent
+    keeps the short net.
 
     This does NOT replace, shorten, or otherwise touch any existing
     per-call timeout inside individual tools/agents (e.g. image/video
@@ -663,9 +898,17 @@ def _job_watchdog_seconds() -> float:
     image+video+merge pipeline run.
     """
     try:
-        return max(60.0, float(os.environ.get("ONE_JOB_WATCHDOG_SECONDS", "2700")))
+        default = max(60.0, float(os.environ.get("ONE_JOB_WATCHDOG_SECONDS", "2700")))
     except ValueError:
-        return 2700.0
+        default = 2700.0
+
+    if job and job.get("agent_id") == "scribe":
+        try:
+            lao_wait = float(os.environ.get("ONE_LAO_MAX_WAIT_SECONDS", "10800"))
+        except ValueError:
+            lao_wait = 10800.0
+        return max(default, lao_wait + 600.0)   # LAO's own wait plus 10 min
+    return default
 
 
 def run_worker(poll_seconds: float = 2.0) -> None:
@@ -693,7 +936,7 @@ def run_worker(poll_seconds: float = 2.0) -> None:
             target=_target, name=f"job-{job['id']}", daemon=True
         )
         worker_thread.start()
-        worker_thread.join(timeout=_job_watchdog_seconds())
+        worker_thread.join(timeout=_job_watchdog_seconds(job))
 
         if worker_thread.is_alive():
             # The job is still running past the outer watchdog window.
@@ -706,7 +949,7 @@ def run_worker(poll_seconds: float = 2.0) -> None:
             fail_job(
                 job["id"],
                 TimeoutError(
-                    f"Job exceeded watchdog timeout of {_job_watchdog_seconds():.0f}s "
+                    f"Job exceeded watchdog timeout of {_job_watchdog_seconds(job):.0f}s "
                     "and was marked failed so it would not stay stuck forever. "
                     "The underlying step may still finish in the background; "
                     "re-run the task if needed."

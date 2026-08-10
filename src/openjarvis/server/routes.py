@@ -83,14 +83,21 @@ def _one_model_status(model: str | None = None) -> dict[str, Any]:
 async def one_status():
     from openjarvis.one_agents.obsidian import obsidian_status, recent_memories
     from openjarvis.one_agents.runtime import AGENTS, list_jobs
+    from openjarvis.one_agents.stages import get_stages
 
     model_status = _one_model_status()
+    # Fine-grained stage (researching / carrying a brief / waiting on a long
+    # external job) for agents mid-flow; absent means "at desk, nothing running".
+    live_stages = get_stages()
     return {
         "name": "ONE",
         "online": True,
         "model": model_status["router_model"],
         "model_status": model_status,
-        "agents": [{"id": key, **value} for key, value in AGENTS.items()],
+        "agents": [
+            {"id": key, **value, **(live_stages.get(key) or {})}
+            for key, value in AGENTS.items()
+        ],
         "jobs": list_jobs(12),
         "obsidian": obsidian_status(),
         "memories": recent_memories(12),
@@ -581,11 +588,40 @@ def _one_agent_command(text: str) -> str | None:
         )
 
     selected = _match_agent_id(lowered)
+    # Broadened so ordinary phrasings reach the agent instead of falling
+    # through to the paid cloud path. Still requires a verb (not just the
+    # agent's name) so questions like "what can TITAN do for my launch"
+    # stay conversational rather than silently queuing a job.
     has_dispatch_verb = bool(
-        re.search(r"\b(activate|run|start|dispatch|ask|tell|prepare|plan|create|generate|publish|post)\b", lowered)
+        re.search(
+            r"\b(activate|run|start|dispatch|ask|tell|prepare|plan|create|generate"
+            r"|publish|post|execute|commission|produce|deliver|build|write|finish"
+            r"|research|handle|kick\s*off|get)\b",
+            lowered,
+        )
     )
+    intent_task = ""
     if not selected or not has_dispatch_verb:
-        return None
+        # The keyword path is unsure. Rather than dropping to the paid cloud
+        # path (which can't queue a job at all), ask Claude what was actually
+        # meant — it sees the live roster and routes by subject matter, so an
+        # instruction works in any phrasing or language, named agent or not.
+        from openjarvis.one_agents.intent import classify
+
+        decision = classify(clean, AGENTS)
+        if not decision or not decision.get("agent_id"):
+            return None
+        selected = decision["agent_id"]
+        intent_task = decision.get("task") or ""
+        # 'research' is the only narrowing signal; agents default to doing the job.
+        mode = "plan" if decision.get("action") == "research" else "execute"
+        tier = "fast"
+        job = enqueue_job(selected, intent_task or clean, mode, tier)
+        return (
+            f"{AGENTS[selected]['name']} queued in {mode} mode. "
+            f"Job ID: {job['id']}. I will not claim completion until its queue "
+            "status confirms it."
+        )
 
     mode = "plan"
     publish_is_negated = bool(
