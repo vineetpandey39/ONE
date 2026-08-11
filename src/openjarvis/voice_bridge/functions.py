@@ -1,11 +1,26 @@
-"""Narrow, redacted function surface exposed to Deepgram's cloud 'think' LLM.
+"""Function surface exposed to Deepgram's cloud 'think' LLM.
 
-Only 3 functions are declared here -- deliberately NOT the full tool zoo from
-server/routes.py's `_cloud_escalation_tools()`. Anything that could expose
-free-text conversation/journal/task content wholesale is either excluded
-entirely (search_obsidian, agent_network history/dispatch, ShellExecTool,
-FileReadTool, OpenAppTool, ScreenControlTool) or piped through
-`voice_bridge.redact.redact()` before it's ever returned (recall_memory).
+3 narrow functions (get_current_time, agent_stats, recall_memory) plus one
+gateway function, `ask_ghost_agent`, added 2026-08-11 per Vineet's explicit
+request (confirmed: full toolset) to make the Ghost Agent voice's actual
+driver for "everything on this PC" and for handing work to the floor
+agents (ZEUS, ATHENA, etc.). `ask_ghost_agent` runs the SAME code path
+typed chat's Ghost Agent uses (`_one_agent_command` for agent dispatch,
+`_run_cloud_tool_loop` + `_cloud_escalation_tools()` for web_search/
+file_read/shell_exec/open_app/play_video/system_query/instagram_insights/
+screen_control) -- no new tool loop, no tunnel, just an in-process function
+call, since both already run inside the same FastAPI server. shell_exec
+keeps its existing requires_confirmation gate unchanged (voice does not
+bypass it -- it is refused exactly like a typed request would be, unless
+ONE_GHOST_AGENT_AUTO_EXECUTE is set locally).
+
+The redaction requirement did not go away when this was added -- if
+anything it matters more now, since Ghost Agent can touch far more (file
+contents, shell output, screen state). Every function here, including
+ask_ghost_agent, is still piped through `voice_bridge.redact.redact()`
+before its result is ever written back onto the Deepgram socket, and still
+audit-logged pre/post locally. search_obsidian and agent_network's
+history/status actions remain excluded (raw free-text vault/task content).
 """
 
 from __future__ import annotations
@@ -13,7 +28,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from openjarvis.tools._stubs import BaseTool
 from openjarvis.tools.agent_network import AgentNetworkTool
@@ -26,6 +41,45 @@ logger = logging.getLogger("openjarvis.voice_bridge")
 _time_tool = GetCurrentTimeTool()
 _agent_tool = AgentNetworkTool()
 _memory_tool = MemoryRecallTool()
+
+# Set once, from routes.py's voice_bridge_start (which has request.app.state),
+# since this module's functions are plain dispatch calls with no session
+# object of their own to carry it. Left empty when no cloud key is
+# configured -- ask_ghost_agent then reports unavailable rather than crash.
+_ghost_ctx: Dict[str, Any] = {}
+
+
+def set_ghost_agent_context(engine: Any, model: Optional[str], app_config: Any = None) -> None:
+    _ghost_ctx["engine"] = engine
+    _ghost_ctx["model"] = model
+    _ghost_ctx["app_config"] = app_config
+
+
+_ASK_GHOST_AGENT_SCHEMA: Dict[str, Any] = {
+    "name": "ask_ghost_agent",
+    "description": (
+        "Hand a request to Sir's full local Ghost Agent -- the one with real "
+        "access to this PC and to Sir's team of floor agents (ZEUS, ATHENA, "
+        "DAEDALUS, TITAN, and the rest). Use this for anything beyond a "
+        "simple time/agent-stats/memory lookup: web searches, reading a "
+        "local file, opening an app, playing a video, checking system info, "
+        "Instagram insights, screen control, running a shell command (Sir "
+        "will be asked to confirm before anything actually executes), or "
+        "dispatching/handing off work to one of the named floor agents. "
+        "Pass Sir's request through close to verbatim -- the Ghost Agent "
+        "does its own planning."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Sir's request, in his own words.",
+            }
+        },
+        "required": ["query"],
+    },
+}
 
 _AGENT_STATS_SCHEMA: Dict[str, Any] = {
     "name": "agent_stats",
@@ -49,7 +103,7 @@ _AGENT_STATS_SCHEMA: Dict[str, Any] = {
 
 
 def deepgram_function_schemas() -> List[Dict[str, Any]]:
-    """The 3 functions declared to Deepgram, in its flat schema shape.
+    """The functions declared to Deepgram, in its flat schema shape.
 
     Deepgram's `agent.think.functions` wants `[{name, description,
     parameters}]` -- one layer flatter than BaseTool.to_openai_function()'s
@@ -68,7 +122,56 @@ def deepgram_function_schemas() -> List[Dict[str, Any]]:
         + " Results are sanitized and shortened before you receive them; some detail may be trimmed."
     )
     schemas.append(mem_schema)
+    schemas.append(_ASK_GHOST_AGENT_SCHEMA)
     return schemas
+
+
+def _ask_ghost_agent(query: str) -> str:
+    """Route a request through the same in-process code path typed chat's
+    Ghost Agent uses. Deterministic agent-dispatch commands ("ZEUS, look
+    into X") are tried first via `_one_agent_command` -- free, local, no
+    LLM round-trip, exactly how typed chat resolves them. Anything else
+    falls through to the real tool loop (`_run_cloud_tool_loop` +
+    `_cloud_escalation_tools()`): web_search, file_read, open_app,
+    play_video, system_query, instagram_insights, screen_control,
+    shell_exec (still gated behind its own confirmation requirement)."""
+    query = (query or "").strip()
+    if not query:
+        return "No request came through, Sir."
+
+    # Deterministic agent-dispatch ("ZEUS, look into X", "how are the agents
+    # doing") needs no cloud key at all -- this is pure local parsing, the
+    # same path typed chat resolves it through. Tried before the cloud-key
+    # check below so agent dispatch by voice keeps working even on a setup
+    # (like this one) with no ANTHROPIC_API_KEY/OPENAI_API_KEY configured --
+    # only the broader tool loop (web_search/file_read/shell_exec/etc.)
+    # actually needs a cloud key.
+    from openjarvis.server.routes import _one_agent_command
+
+    deterministic = _one_agent_command(query)
+    if deterministic:
+        return deterministic
+
+    engine = _ghost_ctx.get("engine")
+    model = _ghost_ctx.get("model")
+    if engine is None or not model:
+        return "The Ghost Agent isn't available right now -- no cloud key is configured, Sir."
+
+    from openjarvis.server.routes import (
+        _ensure_identity_prompt,
+        _run_cloud_tool_loop,
+        _with_ghost_agent_prompt,
+    )
+    from openjarvis.core.types import Message, Role
+
+    messages: list[Message] = [Message(role=Role.USER, content=query)]
+    messages = _ensure_identity_prompt(messages, _ghost_ctx.get("app_config"))
+    messages = _with_ghost_agent_prompt(messages)
+    try:
+        result = _run_cloud_tool_loop(engine, model, messages, temperature=0.4, max_tokens=600)
+    except Exception as exc:  # noqa: BLE001
+        return f"The Ghost Agent hit an error: {exc}"
+    return (result.get("content") or "").strip() or "Done, Sir -- though I don't have a summary to report."
 
 
 def _audit(name: str, arguments: Dict[str, Any], pre: str, post: str) -> None:
@@ -97,7 +200,7 @@ def _audit(name: str, arguments: Dict[str, Any], pre: str, post: str) -> None:
 
 
 def execute_function(name: str, arguments: Dict[str, Any]) -> str:
-    """Run one of the 3 allowed functions and return an already-redacted string.
+    """Run one of the allowed functions and return an already-redacted string.
 
     Never raises: an unknown function name or a tool-level error becomes a
     safe generic message rather than propagating, since this return value
@@ -110,6 +213,8 @@ def execute_function(name: str, arguments: Dict[str, Any]) -> str:
             pre = _agent_tool.execute(action="stats", detail=arguments.get("detail", "brief")).content
         elif name == "recall_memory":
             pre = _memory_tool.execute(**arguments).content
+        elif name == "ask_ghost_agent":
+            pre = _ask_ghost_agent(arguments.get("query", ""))
         else:
             pre = f"Unknown function: {name}"
     except Exception as exc:  # noqa: BLE001
@@ -120,4 +225,4 @@ def execute_function(name: str, arguments: Dict[str, Any]) -> str:
     return post
 
 
-__all__ = ["deepgram_function_schemas", "execute_function"]
+__all__ = ["deepgram_function_schemas", "execute_function", "set_ghost_agent_context"]

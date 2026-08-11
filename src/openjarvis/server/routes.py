@@ -171,6 +171,24 @@ async def voice_bridge_start(request: Request):
         _DEFAULT_SPEAK_SPEED,
         VoiceBridgeSession,
     )
+    from openjarvis.voice_bridge.functions import set_ghost_agent_context
+
+    # Wire ask_ghost_agent to the SAME engine + cloud escalation model typed
+    # chat's Ghost Agent uses (request.app.state.engine /
+    # .cloud_escalation_model), mirroring the lazy-resolution fallback in
+    # chat_completions() above so a key injected post-startup still works
+    # here too. Voice's function dispatch (voice_bridge/functions.py) is a
+    # plain module-level call with no session object of its own to carry
+    # this, hence the module-level setter -- set fresh on every start so a
+    # key added/changed between sessions is picked up.
+    ghost_engine = request.app.state.engine
+    ghost_model = getattr(request.app.state, "cloud_escalation_model", None)
+    if not ghost_model:
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            ghost_model = "claude-haiku-4-5"
+        elif os.environ.get("OPENAI_API_KEY"):
+            ghost_model = "gpt-4o-mini"
+    set_ghost_agent_context(ghost_engine, ghost_model, getattr(request.app.state, "config", None))
 
     cfg = _voice_bridge_config()
 

@@ -92,11 +92,14 @@ _GENERIC_PROMPT = (
     "You are ONE, a private voice assistant. Always address the user as "
     "'Sir' -- never by name, never guess a name. Be calm, precise, warm, "
     "and concise: short spoken sentences, no filler, no corporate hedging. "
-    "You may call get_current_time, agent_stats, or recall_memory when "
-    "asked about the time, how the agents are doing, or a past "
+    "You may call get_current_time, agent_stats, or recall_memory directly "
+    "when asked about the time, how the agents are doing, or a past "
     "conversation -- never invent an answer to those without calling the "
-    "function first. For anything else, just answer naturally; you have no "
-    "other tools available in this conversation."
+    "function first. For anything bigger -- searching the web, reading a "
+    "file, opening an app, playing something, checking on the system, "
+    "running a command, or handing work to one of Sir's named floor agents "
+    "(ZEUS, ATHENA, and the rest) -- call ask_ghost_agent with Sir's "
+    "request in his own words and relay back whatever it reports."
 )
 
 
@@ -374,62 +377,72 @@ class VoiceBridgeSession:
     # -- main session --
 
     async def run(self) -> None:
-        import sounddevice as sd
-
         self._loop = asyncio.get_running_loop()
         api_key = os.environ.get("DEEPGRAM_API_KEY", "")
         if not api_key:
             self.error = "DEEPGRAM_API_KEY is not set."
             raise RuntimeError(self.error)
 
-        # Redaction is not optional safety here -- confirm it actually
-        # imports and runs before ever opening the socket. Fail closed.
-        redact("startup self-check")
-
-        # Device selection: reuse the SAME preferred-device logic as ONE's
-        # existing wake listener (one_agents/wake.py's _preferred_device),
-        # rather than trusting sounddevice's plain OS-default input. On this
-        # machine the plain default lands on an MME-level duplicate of the
-        # Realtek mic at its 44.1kHz native rate; wake.py deliberately walks
-        # past that to the WASAPI instance instead (already proven reliable
-        # here). Using the device's OWN native rate for both the capture
-        # stream and what we tell Deepgram to expect avoids a silent
-        # resample mismatch -- a fixed 16000 constant here previously did
-        # not match what was actually being captured, which is the likely
-        # reason a real 19s session produced audio Deepgram couldn't use.
-        input_device = _preferred_device(sd)
-        if input_device is None:
-            input_device = sd.default.device[0]
-        device_info = sd.query_devices(input_device, "input")
-        self._sample_rate_in = int(device_info.get("default_samplerate", 16000)) or 16000
-        logger.warning(
-            "[voice bridge diag] using input device %r (index=%s) at %dHz",
-            device_info.get("name"),
-            input_device,
-            self._sample_rate_in,
-        )
-
-        # Same reasoning, speaker side: the previous code never selected an
-        # output device at all, so it silently fell back to Windows'
-        # non-WASAPI default speaker entry while Settings told Deepgram a
-        # fixed 24kHz -- confirmed live as the likely cause of a
-        # pitch-distorted ("deep") voice. Walk to the WASAPI Realtek output
-        # and use ITS native rate everywhere, same pattern as the input side.
-        output_device = _preferred_output_device(sd)
-        if output_device is None:
-            output_device = sd.default.device[1]
-        output_info = sd.query_devices(output_device, "output")
-        self._sample_rate_out = int(output_info.get("default_samplerate", 24000)) or 24000
-        self._playback_prebuffer_bytes = int(self._sample_rate_out * 2 * _PLAYBACK_PREBUFFER_SECONDS)
-        logger.warning(
-            "[voice bridge diag] using output device %r (index=%s) at %dHz",
-            output_info.get("name"),
-            output_device,
-            self._sample_rate_out,
-        )
-
+        # Everything below, including the sounddevice import itself, now
+        # lives inside the try/except below rather than running unguarded
+        # before it -- confirmed live (2026-08-11) that an import-time crash
+        # here (missing sounddevice in the venv after a relocation)
+        # propagated straight past _runner()'s wrapper in routes.py, so
+        # self.error was never set and /v1/voice-bridge/status reported a
+        # clean idle state with no error at all. The button looked simply
+        # unresponsive with nothing to diagnose from.
         pause_wake_listener()
         try:
+            import sounddevice as sd
+
+            # Redaction is not optional safety here -- confirm it actually
+            # imports and runs before ever opening the socket. Fail closed.
+            redact("startup self-check")
+
+            # Device selection: reuse the SAME preferred-device logic as
+            # ONE's existing wake listener (one_agents/wake.py's
+            # _preferred_device), rather than trusting sounddevice's plain
+            # OS-default input. On this machine the plain default lands on
+            # an MME-level duplicate of the Realtek mic at its 44.1kHz
+            # native rate; wake.py deliberately walks past that to the
+            # WASAPI instance instead (already proven reliable here). Using
+            # the device's OWN native rate for both the capture stream and
+            # what we tell Deepgram to expect avoids a silent resample
+            # mismatch -- a fixed 16000 constant here previously did not
+            # match what was actually being captured, which is the likely
+            # reason a real 19s session produced audio Deepgram couldn't use.
+            input_device = _preferred_device(sd)
+            if input_device is None:
+                input_device = sd.default.device[0]
+            device_info = sd.query_devices(input_device, "input")
+            self._sample_rate_in = int(device_info.get("default_samplerate", 16000)) or 16000
+            logger.warning(
+                "[voice bridge diag] using input device %r (index=%s) at %dHz",
+                device_info.get("name"),
+                input_device,
+                self._sample_rate_in,
+            )
+
+            # Same reasoning, speaker side: the previous code never selected
+            # an output device at all, so it silently fell back to Windows'
+            # non-WASAPI default speaker entry while Settings told Deepgram
+            # a fixed 24kHz -- confirmed live as the likely cause of a
+            # pitch-distorted ("deep") voice. Walk to the WASAPI Realtek
+            # output and use ITS native rate everywhere, same pattern as the
+            # input side.
+            output_device = _preferred_output_device(sd)
+            if output_device is None:
+                output_device = sd.default.device[1]
+            output_info = sd.query_devices(output_device, "output")
+            self._sample_rate_out = int(output_info.get("default_samplerate", 24000)) or 24000
+            self._playback_prebuffer_bytes = int(self._sample_rate_out * 2 * _PLAYBACK_PREBUFFER_SECONDS)
+            logger.warning(
+                "[voice bridge diag] using output device %r (index=%s) at %dHz",
+                output_info.get("name"),
+                output_device,
+                self._sample_rate_out,
+            )
+
             async with websockets.connect(
                 _AGENT_WS_URL,
                 additional_headers={"Authorization": f"Token {api_key}"},
