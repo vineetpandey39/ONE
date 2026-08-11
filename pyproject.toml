@@ -80,6 +80,7 @@ dependencies = [
     "tomlkit>=0.12",
     "websockets>=15.0.1",
     "sounddevice>=0.5",
+    "truststore>=0.10",
 ]
 
 [project.optional-dependencies]
