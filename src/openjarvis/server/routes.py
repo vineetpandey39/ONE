@@ -1348,6 +1348,34 @@ have no log, can't remember, or that the session wasn't saved without calling \
 recall_memory -- claiming there's no record when the journal exists is a \
 serious failure. Summarise what it returns naturally; if it truly finds nothing \
 for that day, only then say so.
+- obsidian_memory: search Sir's vault directly by keyword/topic rather than \
+by date -- use this (not recall_memory) when he asks "what do I have on X" \
+or "find my notes about X" without a specific time reference.
+- memory_manage: proactively save something to durable memory when Sir says \
+"remember this" / "yaad rakhna" / "note this down permanently" -- this is \
+different from the automatic per-exchange journal; use it for things he \
+explicitly wants kept as a standing fact, not routine conversation.
+
+AGENTS -- agent_network is how you reach Sir's team of floor agents (ZEUS, \
+ATHENA, DAEDALUS, TITAN, BETA, APOLLO, HERMES, SCRIBE, IRIS, ARES, ALFA, \
+POSEIDON, HEPHAISTOS, ARGUS). Use action=stats (NOT dispatch) for "how are \
+the agents doing" / status-review questions -- it is free and local. Use \
+action=dispatch only when Sir explicitly wants NEW work started with a named \
+agent ("ZEUS, look into X", "get HERMES to draft a book on Y") -- confirm \
+which agent and what task before dispatching if either is ambiguous. mode \
+defaults to plan (free); only use execute/publish if Sir explicitly asks for \
+it, since those spend real compute/API budget.
+
+GENERATION -- image_tool and video_tool create real images/video and spend \
+real OpenAI/NVIDIA/Leonardo credit per call. Only call them when Sir is \
+clearly asking you to GENERATE/CREATE new visual content (not to search for \
+or play something that already exists -- that's web_search + play_video). \
+If his request is ambiguous about wanting something generated from scratch \
+versus finding an existing one, ask before spending the credit.
+- audio_tool: transcribe an audio file's contents when Sir points you at one.
+- think: a private scratchpad for your own multi-step reasoning before \
+acting -- it never reaches Sir directly, use it to plan out a complex \
+multi-tool request before executing.
 
 Always address Vineet as "Sir". Keep replies short and spoken-friendly -- \
 this is often read aloud over TTS.
@@ -1376,16 +1404,35 @@ def _cloud_escalation_tools():
     source), so it's non-functional on this machine regardless. file_read +
     shell_exec via this same native tool-calling loop already proven
     working for web_search is the actually-deliverable path here.
+
+    Extended 2026-08-11 per Vineet's explicit request ("Ghost agent ki
+    saari power pull karo") to bring this up to parity with what
+    `[agent] tools` in config.toml already trusts for ONE's everyday LOCAL
+    agent -- agent_network (real dispatch, not just voice's own narrow
+    stats-only wrapper), obsidian_memory (search the vault, not just
+    recall), image_tool/video_tool (real generation -- costs OpenAI/NVIDIA/
+    Leonardo credits per call, confirmed accepted), memory_manage (proactive
+    memory writes), audio_tool (transcription), think (scratchpad
+    reasoning). None of these are new to the system -- all six were already
+    enabled for the local agent; this just stops Ghost Agent/voice from
+    being the one path without them.
     """
+    from openjarvis.tools.agent_network import AgentNetworkTool
+    from openjarvis.tools.audio_tool import AudioTranscribeTool
     from openjarvis.tools.datetime_tool import GetCurrentTimeTool
     from openjarvis.tools.file_read import FileReadTool
+    from openjarvis.tools.image_tool import ImageGenerateTool
     from openjarvis.tools.instagram_insights import InstagramInsightsTool
+    from openjarvis.tools.memory_manage import MemoryManageTool
     from openjarvis.tools.memory_recall import MemoryRecallTool
+    from openjarvis.tools.obsidian_memory import ObsidianMemoryTool
     from openjarvis.tools.open_app import OpenAppTool
     from openjarvis.tools.play_video import PlayVideoTool
     from openjarvis.tools.screen_control import ScreenControlTool
     from openjarvis.tools.shell_exec import ShellExecTool
     from openjarvis.tools.system_query import SystemQueryTool
+    from openjarvis.tools.think import ThinkTool
+    from openjarvis.tools.video_tool import VideoGenerateTool
     from openjarvis.tools.web_search import WebSearchTool
 
     return [
@@ -1399,6 +1446,13 @@ def _cloud_escalation_tools():
         InstagramInsightsTool(),
         ScreenControlTool(),
         ShellExecTool(),
+        AgentNetworkTool(),
+        ObsidianMemoryTool(),
+        ImageGenerateTool(),
+        VideoGenerateTool(),
+        MemoryManageTool(),
+        AudioTranscribeTool(),
+        ThinkTool(),
     ]
 
 
