@@ -9,6 +9,7 @@ $pythonExe = if (Test-Path $venvPython) { $venvPython } else { $basePython }
 $ollama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
 $pidFile = Join-Path $oneRoot "one-server.pid"
 $workerPidFile = Join-Path $oneRoot "one-worker.pid"
+$companyPidFile = Join-Path $oneRoot "one-company.pid"
 $logFile = Join-Path $oneRoot "one-server.log"
 $errorLogFile = Join-Path $oneRoot "one-server-error.log"
 $workerLogFile = Join-Path $oneRoot "one-worker.log"
@@ -134,6 +135,33 @@ if (-not $workerRunning) {
     Set-Content -Path $workerPidFile -Value $worker.Id
 }
 
+# Company building (Monitor 3). Lives inside ONE's own folder and is optional —
+# a checkout without it still starts ONE normally. Path is relative so no
+# machine-specific location ends up in the published repo.
+$companyRoot = Join-Path $oneRoot "one-company"
+$companyServer = Join-Path $companyRoot "server.py"
+if (Test-Path $companyServer) {
+    try {
+        $companyRunning = $false
+        if (Test-Path $companyPidFile) {
+            $savedCompanyPid = [int](Get-Content $companyPidFile -Raw)
+            $companyRunning = $null -ne (Get-Process -Id $savedCompanyPid -ErrorAction SilentlyContinue)
+        }
+        if (-not $companyRunning) {
+            $company = Start-Process -FilePath $pythonExe `
+                -ArgumentList @($companyServer, "8200") `
+                -WorkingDirectory $companyRoot `
+                -RedirectStandardOutput (Join-Path $oneRoot "one-company.log") `
+                -RedirectStandardError (Join-Path $oneRoot "one-company-error.log") `
+                -WindowStyle Hidden `
+                -PassThru
+            Set-Content -Path $companyPidFile -Value $company.Id
+        }
+    } catch {
+        Write-Host "ONE company building skipped: $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+}
+
 for ($attempt = 0; $attempt -lt 30; $attempt++) {
     try {
         $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -TimeoutSec 2
@@ -143,6 +171,9 @@ for ($attempt = 0; $attempt -lt 30; $attempt++) {
             Write-Host "ONE speech warmup will complete on first use." -ForegroundColor DarkYellow
         }
         Write-Host "ONE is online at http://127.0.0.1:8000" -ForegroundColor Cyan
+        if (Test-Path $companyServer) {
+            Write-Host "Company building at http://127.0.0.1:8200" -ForegroundColor Cyan
+        }
         exit 0
     } catch {
         Start-Sleep -Seconds 1

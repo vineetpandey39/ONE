@@ -2,6 +2,19 @@ $oneRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pidFile = Join-Path $oneRoot "one-server.pid"
 $workerPidFile = Join-Path $oneRoot "one-worker.pid"
 $fluxPidFile = Join-Path $oneRoot "one-flux.pid"
+$companyPidFile = Join-Path $oneRoot "one-company.pid"
+
+# Stop the company building first, and by port as well as by pid: Windows
+# lets a second process bind an already-listening port, so a stale server
+# left behind here would keep serving old code alongside the new one.
+if (Test-Path $companyPidFile) {
+    $savedCompanyPid = [int](Get-Content $companyPidFile -Raw)
+    $company = Get-Process -Id $savedCompanyPid -ErrorAction SilentlyContinue
+    if ($company) { Stop-Process -Id $savedCompanyPid -Force -ErrorAction SilentlyContinue }
+    Remove-Item $companyPidFile -Force
+}
+Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue |
+    ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 
 if (-not (Test-Path $pidFile)) {
     Write-Host "ONE is not running."
