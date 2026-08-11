@@ -48,11 +48,26 @@ _memory_tool = MemoryRecallTool()
 # configured -- ask_ghost_agent then reports unavailable rather than crash.
 _ghost_ctx: Dict[str, Any] = {}
 
+# Per-voice-session conversation history for ask_ghost_agent. Confirmed live
+# (2026-08-11) that without this, every ask_ghost_agent call started a BRAND
+# NEW conversation with the Ghost Agent LLM -- only that single query, no
+# memory of what it tried or said one turn earlier in the SAME live voice
+# call. A multi-step request (e.g. "create a file with 5 messages" ->
+# "check if it's there" -> "it's not, try again") looked to Sir like ONE
+# repeatedly forgetting/restarting instead of building on its own last
+# attempt -- reported as "voice breaking and getting lost in conversation."
+# Reset at the start of every voice_bridge_start (see set_ghost_agent_context)
+# so a new live session starts clean; capped so a very long session doesn't
+# grow the prompt/cost unbounded.
+_conversation_history: list = []
+_MAX_HISTORY_TURNS = 12  # user+assistant pairs kept, oldest dropped first
+
 
 def set_ghost_agent_context(engine: Any, model: Optional[str], app_config: Any = None) -> None:
     _ghost_ctx["engine"] = engine
     _ghost_ctx["model"] = model
     _ghost_ctx["app_config"] = app_config
+    _conversation_history.clear()
 
 
 _ASK_GHOST_AGENT_SCHEMA: Dict[str, Any] = {
@@ -134,7 +149,11 @@ def _ask_ghost_agent(query: str) -> str:
     falls through to the real tool loop (`_run_cloud_tool_loop` +
     `_cloud_escalation_tools()`): web_search, file_read, open_app,
     play_video, system_query, instagram_insights, screen_control,
-    shell_exec (still gated behind its own confirmation requirement)."""
+    shell_exec (still gated behind its own confirmation requirement).
+
+    Carries `_conversation_history` across calls within the same voice
+    session, and saves each exchange to Obsidian -- see the comments on
+    `_conversation_history` above for why both matter."""
     query = (query or "").strip()
     if not query:
         return "No request came through, Sir."
@@ -145,11 +164,14 @@ def _ask_ghost_agent(query: str) -> str:
     # check below so agent dispatch by voice keeps working even on a setup
     # (like this one) with no ANTHROPIC_API_KEY/OPENAI_API_KEY configured --
     # only the broader tool loop (web_search/file_read/shell_exec/etc.)
-    # actually needs a cloud key.
+    # actually needs a cloud key. Deterministic replies are still added to
+    # history/Obsidian below so a later "the same thing I just dispatched"
+    # reference in the SAME tool-loop call still resolves correctly.
     from openjarvis.server.routes import _one_agent_command
 
     deterministic = _one_agent_command(query)
     if deterministic:
+        _remember_exchange(query, deterministic)
         return deterministic
 
     engine = _ghost_ctx.get("engine")
@@ -164,14 +186,38 @@ def _ask_ghost_agent(query: str) -> str:
     )
     from openjarvis.core.types import Message, Role
 
-    messages: list[Message] = [Message(role=Role.USER, content=query)]
+    messages: list[Message] = list(_conversation_history) + [Message(role=Role.USER, content=query)]
     messages = _ensure_identity_prompt(messages, _ghost_ctx.get("app_config"))
     messages = _with_ghost_agent_prompt(messages)
     try:
         result = _run_cloud_tool_loop(engine, model, messages, temperature=0.4, max_tokens=600)
     except Exception as exc:  # noqa: BLE001
         return f"The Ghost Agent hit an error: {exc}"
-    return (result.get("content") or "").strip() or "Done, Sir -- though I don't have a summary to report."
+    reply = (result.get("content") or "").strip() or "Done, Sir -- though I don't have a summary to report."
+    _remember_exchange(query, reply)
+    return reply
+
+
+def _remember_exchange(query: str, reply: str) -> None:
+    """Append to the in-session history (so the NEXT ask_ghost_agent call in
+    this same voice session has real context) and best-effort save to the
+    Obsidian journal (so it survives a page refresh / new session, exactly
+    like typed chat's exchanges already do)."""
+    from openjarvis.core.types import Message, Role
+
+    _conversation_history.append(Message(role=Role.USER, content=query))
+    _conversation_history.append(Message(role=Role.ASSISTANT, content=reply))
+    # Keep the last _MAX_HISTORY_TURNS user+assistant pairs only.
+    max_messages = _MAX_HISTORY_TURNS * 2
+    if len(_conversation_history) > max_messages:
+        del _conversation_history[: len(_conversation_history) - max_messages]
+
+    try:
+        from openjarvis.server.routes import _save_exchange_to_obsidian
+
+        _save_exchange_to_obsidian(query, reply)
+    except Exception:
+        logger.debug("voice bridge: saving exchange to Obsidian failed", exc_info=True)
 
 
 def _audit(name: str, arguments: Dict[str, Any], pre: str, post: str) -> None:

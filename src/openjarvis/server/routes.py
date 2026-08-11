@@ -1232,6 +1232,18 @@ needs current information you cannot know from training data.
 - get_current_time: the real current date/time. Never guess it.
 - file_read: read any file on Vineet's computer to inspect its contents. \
 Safe, read-only -- use freely to look something up locally.
+- file_write: create or overwrite a file with exact text content -- THIS is \
+the tool for "create a file with X", "save these messages/notes to a file", \
+"write this to my desktop" etc. Call it directly with the full path and \
+content in ONE call. Do NOT use shell_exec (PowerShell here-string/quoting \
+breaks on multi-line text, sometimes silently) or open_app+screen_control+\
+Notepad (the window can lose focus mid-task) for creating file content -- \
+both are unreliable for this and have failed live. Do NOT dispatch a \
+file-creation request to a floor agent via agent_network either -- that's a \
+slow, indirect detour for something you can do directly in one call. After \
+writing, use file_read to verify the exact content landed before telling \
+Vineet it's done -- never claim a file is "verified and ready" without \
+actually reading it back first.
 - open_app: open an application, website, or file on Vineet's computer -- \
 e.g. "open Chrome", "open a document". Safe and non-destructive (equivalent \
 to double-clicking it), so call it directly, immediately, with no \
@@ -1416,11 +1428,23 @@ def _cloud_escalation_tools():
     reasoning). None of these are new to the system -- all six were already
     enabled for the local agent; this just stops Ghost Agent/voice from
     being the one path without them.
+
+    Added file_write 2026-08-12 after a live failure: asked (by voice) to
+    create a text file with 5 lines of content, Ghost Agent had only
+    file_read -- no direct write path -- so it fell back to shell_exec
+    (PowerShell here-string quoting broke on multi-line content, sometimes
+    silently) and screen_control+Notepad (lost window focus mid-task), plus
+    wastefully dispatching the same simple task to three different floor
+    agents (ARGUS, HEPHAISTOS, APOLLO) as a fallback. 13 minutes, no working
+    file, and Sir experiencing it as "voice breaking and getting lost."
+    file_write is a direct, reliable, purpose-built tool for exactly this --
+    no shell quoting, no GUI focus to lose.
     """
     from openjarvis.tools.agent_network import AgentNetworkTool
     from openjarvis.tools.audio_tool import AudioTranscribeTool
     from openjarvis.tools.datetime_tool import GetCurrentTimeTool
     from openjarvis.tools.file_read import FileReadTool
+    from openjarvis.tools.file_write import FileWriteTool
     from openjarvis.tools.image_tool import ImageGenerateTool
     from openjarvis.tools.instagram_insights import InstagramInsightsTool
     from openjarvis.tools.memory_manage import MemoryManageTool
@@ -1440,6 +1464,7 @@ def _cloud_escalation_tools():
         GetCurrentTimeTool(),
         MemoryRecallTool(),
         FileReadTool(),
+        FileWriteTool(),
         OpenAppTool(),
         PlayVideoTool(),
         SystemQueryTool(),
