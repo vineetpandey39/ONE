@@ -178,9 +178,12 @@ def _ask_ghost_agent(query: str) -> str:
     play_video, system_query, instagram_insights, screen_control,
     shell_exec (still gated behind its own confirmation requirement).
 
-    Carries `_conversation_history` across calls within the same voice
-    session, and saves each exchange to Obsidian -- see the comments on
-    `_conversation_history` above for why both matter."""
+    Reads `_conversation_history` (built from EVERY turn of the live
+    conversation via client.py's remember_full_turn, not just tool-triggered
+    ones) so the Ghost Agent's own reasoning has real context. Does not
+    write to history/Obsidian itself -- remember_full_turn already covers
+    this turn once Deepgram finishes speaking the reply; recording here too
+    would double-save it."""
     query = (query or "").strip()
     if not query:
         return "No request came through, Sir."
@@ -198,7 +201,9 @@ def _ask_ghost_agent(query: str) -> str:
 
     deterministic = _one_agent_command(query)
     if deterministic:
-        _remember_exchange(query, deterministic)
+        # Not recorded here -- client.py's ConversationText flush
+        # (remember_full_turn) covers every turn uniformly, tool-triggered
+        # or not; recording here too would double-save this exchange.
         return _strip_markdown_for_speech(deterministic)
 
     engine = _ghost_ctx.get("engine")
@@ -221,7 +226,8 @@ def _ask_ghost_agent(query: str) -> str:
     except Exception as exc:  # noqa: BLE001
         return f"The Ghost Agent hit an error: {exc}"
     reply = (result.get("content") or "").strip() or "Done, Sir -- though I don't have a summary to report."
-    _remember_exchange(query, reply)  # keeps full markdown -- history/Obsidian are fine with it
+    # Not recorded here -- see the note on the deterministic-reply branch
+    # above; client.py's ConversationText flush covers this turn already.
     return _strip_markdown_for_speech(reply)
 
 
@@ -238,6 +244,26 @@ def _remember_exchange(query: str, reply: str) -> None:
     max_messages = _MAX_HISTORY_TURNS * 2
     if len(_conversation_history) > max_messages:
         del _conversation_history[: len(_conversation_history) - max_messages]
+
+    try:
+        from openjarvis.server.routes import _save_exchange_to_obsidian
+
+        _save_exchange_to_obsidian(query, reply)
+    except Exception:
+        logger.debug("voice bridge: saving exchange to Obsidian failed", exc_info=True)
+
+
+def remember_full_turn(user_text: str, assistant_text: str) -> None:
+    """Called from client.py for EVERY turn of the live conversation, not
+    just ones that happened to call a function -- confirmed live
+    (2026-08-12) that most of a real conversation is Deepgram's own
+    think-model answering directly, with no function call at all, and none
+    of that was previously captured anywhere (in-session history OR
+    Obsidian). No redaction needed here: this is Deepgram's own transcript
+    of what it already said/heard over the SAME socket -- saving it locally
+    (Obsidian) or replaying it back to Deepgram as history exposes nothing
+    that party doesn't already have."""
+    _remember_exchange(user_text, assistant_text)
 
     try:
         from openjarvis.server.routes import _save_exchange_to_obsidian
@@ -298,4 +324,9 @@ def execute_function(name: str, arguments: Dict[str, Any]) -> str:
     return post
 
 
-__all__ = ["deepgram_function_schemas", "execute_function", "set_ghost_agent_context"]
+__all__ = [
+    "deepgram_function_schemas",
+    "execute_function",
+    "set_ghost_agent_context",
+    "remember_full_turn",
+]

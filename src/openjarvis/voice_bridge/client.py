@@ -35,7 +35,11 @@ from openjarvis.one_agents.wake import (
     pause_wake_listener,
     resume_wake_listener,
 )
-from openjarvis.voice_bridge.functions import deepgram_function_schemas, execute_function
+from openjarvis.voice_bridge.functions import (
+    deepgram_function_schemas,
+    execute_function,
+    remember_full_turn,
+)
 from openjarvis.voice_bridge.redact import redact
 
 logger = logging.getLogger("openjarvis.voice_bridge")
@@ -206,6 +210,17 @@ class VoiceBridgeSession:
         self._bytes_received_audio = 0
         self._events_seen: list[str] = []
         self._mic_status_flags = 0
+        # Full-transcript memory: confirmed live (2026-08-12) that only
+        # exchanges which happened to trigger a function call (ask_ghost_agent
+        # etc.) were ever remembered/saved to Obsidian -- most of a real
+        # conversation is Deepgram's own think-model answering directly with
+        # NO function call at all, and none of that was captured anywhere.
+        # ConversationText events cover EVERY turn regardless, so these
+        # accumulate the current turn's text and flush (remember + save) it
+        # the moment the next user turn starts -- see _handle_event/
+        # _flush_conversation_turn.
+        self._pending_user_text: Optional[str] = None
+        self._pending_assistant_parts: list[str] = []
         # Half-duplex gate: no AEC (acoustic echo cancellation) exists on
         # this raw sounddevice path (unlike a browser's getUserMedia, which
         # gets it for free), so on a desktop with open mic + open speakers
@@ -487,6 +502,7 @@ class VoiceBridgeSession:
         finally:
             self.state = "idle"
             self._ws = None
+            self._flush_conversation_turn()  # catch the last pending turn before the session ends
             resume_wake_listener()
 
     async def _handshake(self, ws: Any) -> None:
@@ -552,6 +568,20 @@ class VoiceBridgeSession:
         self._events_seen.append(etype or "?")
         if etype in ("ConversationText", "Error", "Warning"):
             logger.warning("[voice bridge diag] event: %s", event)
+        if etype == "ConversationText":
+            role = event.get("role")
+            content = str(event.get("content") or "").strip()
+            if content:
+                if role == "user":
+                    # A new user turn starting means the PRIOR turn (if any)
+                    # is now complete -- flush it before starting the new one.
+                    self._flush_conversation_turn()
+                    self._pending_user_text = content
+                elif role == "assistant":
+                    # Deepgram streams a reply as several short
+                    # ConversationText chunks -- accumulate all of them into
+                    # one turn, flushed as a single exchange.
+                    self._pending_assistant_parts.append(content)
         if etype == "UserStartedSpeaking":
             self.state = "listening"
             self._drain_playback()
@@ -569,6 +599,21 @@ class VoiceBridgeSession:
             await self._handle_function_calls(ws, event)
         elif etype in ("Error", "Warning"):
             logger.warning("voice bridge: Deepgram %s: %s", etype, event)
+
+    def _flush_conversation_turn(self) -> None:
+        """Remember + save whatever user/assistant turn has accumulated so
+        far, then reset. Runs on the asyncio loop thread (called from
+        _handle_event and run()'s finally), so this offloads the actual
+        remember/save work to a background thread rather than blocking event
+        handling -- same reasoning as _handle_function_calls' run_in_executor."""
+        user_text = self._pending_user_text
+        assistant_text = " ".join(self._pending_assistant_parts).strip()
+        self._pending_user_text = None
+        self._pending_assistant_parts = []
+        if not user_text or not assistant_text:
+            return
+        if self._loop is not None:
+            self._loop.run_in_executor(None, remember_full_turn, user_text, assistant_text)
 
     async def _handle_function_calls(self, ws: Any, event: Dict[str, Any]) -> None:
         for call in event.get("functions", []):
