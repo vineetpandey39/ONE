@@ -12,7 +12,6 @@ import {
   ExternalLink,
   HardDrive,
   Mail,
-  Mic,
   Palette,
   RefreshCw,
   Search,
@@ -278,37 +277,19 @@ export function OneCockpit() {
   // Drawer stays hidden on the orb screen, but opens directly into the
   // tracking dashboard when the user taps Agents & Results.
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // Always-listening mode: a continuous mic loop that replaces click-to-talk
-  // until the user explicitly turns it off. Refs mirror the state so the
-  // async loop (which runs outside the normal render cycle) always reads
-  // live values instead of a stale closure.
-  const [alwaysListening, setAlwaysListening] = useState(false);
-  const alwaysListeningRef = useRef(false);
-  const busyRef = useRef(false);
-  const speakingRef = useRef(false);
   const linesRef = useRef<Line[]>([]);
-  // Sleep-on-silence: while always-listening, if no command is addressed to
-  // ONE for a while it drops into a quiet "asleep" state (still listening
-  // locally for the wake word, just not actively engaged) and wakes the
-  // moment it hears "hey ONE" again -- the JARVIS "silent listener" behavior.
-  const [asleep, setAsleep] = useState(false);
-  const asleepRef = useRef(false);
-  const lastWakeAtRef = useRef(Date.now());
-  const SLEEP_AFTER_MS = 180_000; // 3 min of no wake word -> sleep
   // JARVIS Voice Mode: a live Deepgram Voice Agent session (Flux STT + a
   // redacted cloud brain + Aura-2 TTS over one socket, all audio handled
-  // server-side via sounddevice -- see voice_bridge/client.py). Entirely
-  // separate from alwaysListening/recording above; neither path is touched
-  // by this. Billed per connected minute, so it's an explicit on/off toggle
-  // polled at the same cadence as the rest of /v1/one/status, never implied.
+  // server-side via sounddevice -- see voice_bridge/client.py). Billed per
+  // connected minute, so it's an explicit on/off toggle polled at the same
+  // cadence as the rest of /v1/one/status, never implied. As of 2026-08-11
+  // this is the only live voice input path -- ring-click STT is disabled
+  // and Always Listening is fully removed (both backed up in
+  // _backup_2026-08-11_voice_layer_cleanup/).
   const [voiceBridgeActive, setVoiceBridgeActive] = useState(false);
   const [voiceBridgeState, setVoiceBridgeState] = useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
   const [voiceBridgeError, setVoiceBridgeError] = useState<string | null>(null);
-  useEffect(() => { busyRef.current = busy; }, [busy]);
-  useEffect(() => { speakingRef.current = speaking; }, [speaking]);
   useEffect(() => { linesRef.current = lines; }, [lines]);
-  useEffect(() => { asleepRef.current = asleep; }, [asleep]);
-  useEffect(() => () => { alwaysListeningRef.current = false; }, []);
   // Holographic orb interaction: a 3D tilt that follows the cursor/finger,
   // and a trail of sparkle particles spawned wherever the orb is touched,
   // so it reads as a live hologram rather than a flat glowing circle.
@@ -1027,9 +1008,6 @@ export function OneCockpit() {
       ));
       if (silent && (soundsLikeEcho || !isClearOneCommand(text))) return;
       if (!silent && soundsLikeEcho) throw new Error('ONE heard its own voice. Try again after it finishes speaking.');
-      // A real command addressed to ONE -- wake up and reset the sleep timer.
-      lastWakeAtRef.current = Date.now();
-      if (asleepRef.current) setAsleep(false);
       setCommand(text);
       await sendCommand(text.replace(/^\s*(hey\s+)?one[,:]?\s*/i, ''));
     } catch (error) {
@@ -1135,70 +1113,6 @@ export function OneCockpit() {
   function stopRecording() {
     if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
     setRecording(false);
-  }
-
-  // Always-listening mode: instead of click-to-talk, ONE keeps capturing
-  // short windows from the microphone back-to-back -- pausing only while
-  // it's thinking or speaking, so it doesn't pick up its own voice -- until
-  // the user explicitly turns it off again.
-  async function runListenLoop() {
-    while (alwaysListeningRef.current) {
-      // Hold off while ONE is thinking/speaking so it doesn't listen over
-      // its own voice or a command in flight.
-      while (
-        alwaysListeningRef.current
-        && (speakingRef.current || busyRef.current || Date.now() - lastSpeechEndedAtRef.current < 1000)
-      ) {
-        await new Promise((resolve) => window.setTimeout(resolve, 200));
-      }
-      if (!alwaysListeningRef.current) break;
-      // Drop into quiet sleep after a long stretch with no command -- ONE
-      // keeps listening locally for the wake word but stops actively
-      // engaging, and wakes on the next "hey Jarvis".
-      if (!asleepRef.current && Date.now() - lastWakeAtRef.current > SLEEP_AFTER_MS) {
-        setAsleep(true);
-      }
-      try {
-        // Long-poll the LOCAL wake-word gate. It blocks on-machine listening
-        // for "hey Jarvis" and only then transcribes the following command
-        // via Deepgram -- private talk never reaches the cloud. Returns
-        // {detected:false} when the window elapsed with no wake word.
-        const nativeDev = selectedDeviceId.startsWith('native:')
-          ? Number(selectedDeviceId.split(':')[1]) : undefined;
-        const response = await coreFetch('/v1/speech/wake-and-command', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ device: nativeDev, wake_timeout: 25 }),
-        });
-        const payload = await response.json();
-        if (response.ok && payload.detected) {
-          const heard = String(payload.text || '').trim();
-          // Strip the wake word; what's left is the actual command.
-          const cmd = heard.replace(/^\s*(hey\s+)?(jarvis|one)[,:]?\s*/i, '').trim();
-          lastWakeAtRef.current = Date.now();
-          if (asleepRef.current) setAsleep(false);
-          if (cmd) {
-            setCommand(heard);
-            await sendCommand(cmd);
-          }
-        }
-      } catch {
-        // Tolerate transient failures; brief pause before re-polling.
-        await new Promise((resolve) => window.setTimeout(resolve, 800));
-      }
-    }
-  }
-
-  function toggleAlwaysListening() {
-    if (alwaysListeningRef.current) {
-      alwaysListeningRef.current = false;
-      setAlwaysListening(false);
-      if (recorderRef.current?.state === 'recording') stopRecording();
-      return;
-    }
-    alwaysListeningRef.current = true;
-    setAlwaysListening(true);
-    void runListenLoop();
   }
 
   function chooseAudioDevice(deviceId: string) {
@@ -1311,8 +1225,6 @@ export function OneCockpit() {
     ? 'speaking'
     : busy || transcribing
     ? 'thinking'
-    : alwaysListening && asleep
-    ? 'sleeping'
     : 'awake';
 
   // Real per-agent status: 'a' (busy) if a queued/running job names this
@@ -1350,7 +1262,7 @@ export function OneCockpit() {
     { label: 'NEURAL',   value: `${neuralPct}%`,                                  dot: status.online ? 'g' : 'r' },
     { label: 'AGENTS',   value: `${status.agents.length} / ${status.agents.length}`, dot: status.agents.length > 0 ? 'g' : 'r' },
     { label: 'MEMORIES', value: `${status.obsidian.notes}`,                       dot: status.online ? 'g' : 'r' },
-    { label: 'LISTEN',   value: alwaysListening ? 'ON' : 'OFF',                   dot: alwaysListening ? 'g' : 'a' },
+    { label: 'LISTEN',   value: voiceBridgeActive ? 'ON' : 'OFF',                 dot: voiceBridgeActive ? 'g' : 'a' },
     { label: 'HEALTH',   value: health.status === 'healthy' ? 'OK'
                               : health.status === 'attention' ? `${health.issues} ISSUE${health.issues === 1 ? '' : 'S'}`
                               : health.status === 'critical' ? 'CRITICAL' : '—',
@@ -1408,7 +1320,12 @@ export function OneCockpit() {
               state={coreState}
               memories={status.obsidian.notes}
               activityPct={neuralPct}
-              onTap={recording ? stopRecording : startRecording}
+              // Ring-click STT (startRecording/stopRecording/transcribe) is
+              // disabled per request, 2026-08-11 -- backed up in
+              // _backup_2026-08-11_voice_layer_cleanup/, functions left
+              // intact below in case it's re-enabled. The ring now drives
+              // JARVIS Voice Mode instead, the one surviving voice path.
+              onTap={() => void toggleVoiceBridge()}
             />
           </div>
 
@@ -1476,7 +1393,7 @@ export function OneCockpit() {
           />
           <div className="jarvis-telemetry-track">
             <span>
-              {`core:${status.online ? 'online' : 'offline'} · ${status.agents.length} agents · ${status.obsidian.notes} memories · listening on ${alwaysListening ? 'wake-word' : 'tap'}`}
+              {`core:${status.online ? 'online' : 'offline'} · ${status.agents.length} agents · ${status.obsidian.notes} memories · listening on ${voiceBridgeActive ? 'live voice' : 'tap'}`}
             </span>
           </div>
         </div>
@@ -1491,13 +1408,17 @@ export function OneCockpit() {
 
         {/* ── Inline command bar ── */}
         <div className="jarvis-cmd-row">
+          {/* Ring-click STT disabled 2026-08-11 -- same mechanism as the
+              ring's old onTap, backed up in
+              _backup_2026-08-11_voice_layer_cleanup/. Always disabled
+              rather than removed so it can come back with one flag flip. */}
           <button
-            className={`jarvis-cmd-mic-btn${recording ? ' recording' : ''}`}
-            onClick={recording ? stopRecording : startRecording}
-            disabled={!status.online || transcribing || nativeRecording}
-            title={recording ? 'Stop recording' : 'Tap to speak to ONE'}
+            className="jarvis-cmd-mic-btn"
+            onClick={() => void toggleVoiceBridge()}
+            disabled={!status.online}
+            title="Use JARVIS Voice Mode instead"
           >
-            {recording ? <Square size={15} fill="currentColor" /> : <Mic size={17} />}
+            <Sparkles size={17} />
           </button>
           <input
             className="jarvis-cmd-field"
@@ -1522,16 +1443,9 @@ export function OneCockpit() {
         {/* ── Footer ── */}
         <footer className="jarvis-pg-footer">
           <div className="jarvis-pg-hint" aria-hidden="true">TAP CORE TO SPEAK</div>
-          <button
-            type="button"
-            className={`one-listen-toggle ${alwaysListening ? 'on' : ''}`}
-            title={alwaysListening ? 'Stop continuous listening' : 'Listen continuously until I turn it off'}
-            onClick={toggleAlwaysListening}
-            disabled={!status.online}
-          >
-            {alwaysListening ? <Square size={16} fill="currentColor" /> : <Mic size={18} />}
-            <span>{alwaysListening ? 'LISTENING - TAP TO STOP' : 'ALWAYS LISTEN'}</span>
-          </button>
+          {/* Always Listening fully removed 2026-08-11 (backed up in
+              _backup_2026-08-11_voice_layer_cleanup/) -- JARVIS Voice Mode
+              below is the only live voice path now. */}
           <button
             type="button"
             className={`one-listen-toggle one-voice-bridge-toggle ${voiceBridgeActive ? 'on' : ''}`}
@@ -1751,17 +1665,18 @@ export function OneCockpit() {
               <button title="Refresh microphone list" onClick={() => void refreshAudioDevices()}><RefreshCw size={14} /></button>
             </div>
 
-            {/* Typing fallback. Always-listen mode handles voice on its
-                own, so this lives tucked in the drawer instead of sitting
-                in front of the orb. */}
+            {/* Typing fallback -- JARVIS Voice Mode handles voice now, so
+                this lives tucked in the drawer instead of sitting in front
+                of the orb. Ring-click STT disabled 2026-08-11, backed up in
+                _backup_2026-08-11_voice_layer_cleanup/. */}
             <div className="one-command-bar">
               <button
-                className={`one-mic ${recording ? 'recording' : ''}`}
-                title={recording ? 'Stop recording' : 'Speak to ONE'}
-                onClick={recording ? stopRecording : startRecording}
-                disabled={!status.online || transcribing || nativeRecording}
+                className="one-mic"
+                title="Use JARVIS Voice Mode instead"
+                onClick={() => void toggleVoiceBridge()}
+                disabled={!status.online}
               >
-                {recording ? <Square size={20} fill="currentColor" /> : <Mic size={22} />}
+                <Sparkles size={22} />
               </button>
               <input
                 value={command}

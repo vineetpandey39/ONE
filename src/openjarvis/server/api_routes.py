@@ -1302,42 +1302,11 @@ async def native_record(request: Request):
     return safe
 
 
-@speech_router.post("/wake-and-command")
-async def wake_and_command(request: Request):
-    """Always-listening entry point: block locally on 'hey jarvis', then
-    transcribe ONLY the following command via Deepgram.
-
-    This is the JARVIS "silent listener" gate Vineet asked for -- the
-    continuous listening happens on a local wake-word engine (openWakeWord),
-    and audio reaches Deepgram only once he's actually addressed ONE. The
-    frontend long-polls this: {"detected": false} means the window elapsed
-    with no wake word (re-poll), {"detected": true, "text": ...} carries the
-    command. Nothing is sent to the cloud on the not-detected path.
-    """
-    from fastapi.concurrency import run_in_threadpool
-
-    backend = getattr(request.app.state, "speech_backend", None)
-    if backend is None:
-        raise HTTPException(status_code=501, detail="Speech backend not configured")
-    payload = await request.json()
-    device = payload.get("device")
-    device = int(device) if device is not None else None
-    wake_timeout = max(5.0, min(float(payload.get("wake_timeout", 25.0)), 60.0))
-
-    def run():
-        from openjarvis.speech.wake_word import listen_for_command
-
-        return listen_for_command(backend, device=device, wake_timeout=wake_timeout)
-
-    try:
-        result = await run_in_threadpool(run)
-    except Exception as exc:
-        logger.exception("wake-and-command failed")
-        raise HTTPException(status_code=422, detail=f"Wake listen failed: {type(exc).__name__}") from exc
-    return {
-        "detected": bool(result.get("detected")),
-        "text": normalize_one_transcript(str(result.get("text", ""))),
-    }
+# Always Listening ("/wake-and-command", openWakeWord "hey_jarvis" gate +
+# speech/wake_word.py's listen_for_command()) fully removed 2026-08-11 --
+# backed up in _backup_2026-08-11_voice_layer_cleanup/api_routes.py.bak and
+# wake_word.py.bak (plus git history). JARVIS Voice Mode is the sole live
+# voice path now.
 
 
 # ---- Feedback routes ----
