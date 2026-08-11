@@ -227,7 +227,17 @@ async def voice_bridge_status(request: Request):
     task = getattr(request.app.state, "voice_bridge_task", None)
     if session is None or task is None or task.done():
         return {"active": False, "state": "idle", "error": getattr(session, "error", None) if session else None}
-    return {"active": True, "state": session.state, "error": session.error}
+    # last_turn_id/last_turn: lets the cockpit's glass chat window show the
+    # live conversation (previously only wired to typed chat) -- the
+    # frontend polls this and pushes a new line whenever last_turn_id
+    # increases, so it never re-shows an already-seen turn on a repeat poll.
+    return {
+        "active": True,
+        "state": session.state,
+        "error": session.error,
+        "last_turn_id": session.last_turn_id,
+        "last_turn": session.last_turn,
+    }
 
 
 @router.get("/v1/one/model-status")

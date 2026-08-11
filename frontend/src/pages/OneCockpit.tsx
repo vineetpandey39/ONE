@@ -267,6 +267,7 @@ export function OneCockpit() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const meterFrameRef = useRef<number | null>(null);
   const lastWakeEventRef = useRef<number | null>(null);
+  const lastVoiceTurnIdRef = useRef(0);
   const oneVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const voiceLockedRef = useRef(false);
   const speechQueueRef = useRef<string[]>([]);
@@ -502,6 +503,22 @@ export function OneCockpit() {
         if (cancelled) return;
         setVoiceBridgeState(data.state || 'idle');
         setVoiceBridgeError(data.error || null);
+        // Surface each completed turn in the glass chat window -- it was
+        // wired to typed chat and the old wake-word flow, never to JARVIS
+        // Voice Mode. last_turn_id only increases when a NEW turn lands
+        // (see voice_bridge_status), so a repeat poll of the same turn is a
+        // no-op here.
+        if (data.last_turn_id && data.last_turn_id !== lastVoiceTurnIdRef.current) {
+          lastVoiceTurnIdRef.current = data.last_turn_id;
+          const turn = data.last_turn as { user?: string; assistant?: string } | null;
+          if (turn?.user && turn?.assistant) {
+            setLines((current) => [
+              ...current.slice(-6),
+              { role: 'user', text: turn.user! },
+              { role: 'one', text: turn.assistant! },
+            ]);
+          }
+        }
         if (!data.active) setVoiceBridgeActive(false);
       } catch {
         // transient -- next poll will retry
@@ -526,6 +543,7 @@ export function OneCockpit() {
       return;
     }
     setVoiceBridgeError(null);
+    lastVoiceTurnIdRef.current = 0; // a new session's turn ids restart from 1
     try {
       const r = await coreFetch('/v1/voice-bridge/start', { method: 'POST' });
       const data = await r.json().catch(() => ({}));
@@ -562,18 +580,21 @@ export function OneCockpit() {
   // The glass window tracks ONE's real response lifecycle: it appears the
   // instant ONE starts working on a reply and stays up for the WHOLE time ONE
   // is either generating (busy) or speaking it aloud (`speaking` = TTS is
-  // audibly playing, true until the whole utterance queue drains). It only
-  // vanishes once ONE has genuinely finished — a short grace after both go
-  // quiet absorbs the brief gap between "generated" and the first spoken word
-  // (and any gap between chunks), so it never flickers off mid-response.
+  // audibly playing, true until the whole utterance queue drains) -- and,
+  // since JARVIS Voice Mode was wired in, also while Deepgram itself is
+  // thinking/speaking (voiceBridgeState), which this window never reflected
+  // before. It only vanishes once ONE has genuinely finished -- a 5s grace
+  // after everything goes quiet (restored to the original spec) absorbs the
+  // gap between "generated" and the first spoken word, and any gap between
+  // chunks, so it never flickers off mid-response.
   useEffect(() => {
-    if (busy || speaking) {
+    if (busy || speaking || voiceBridgeState === 'thinking' || voiceBridgeState === 'speaking') {
       setGlassVisible(true);
       return; // hold open through the entire think + speak cycle
     }
-    const hide = window.setTimeout(() => setGlassVisible(false), 2500);
+    const hide = window.setTimeout(() => setGlassVisible(false), 5000);
     return () => window.clearTimeout(hide);
-  }, [busy, speaking]);
+  }, [busy, speaking, voiceBridgeState]);
 
   useEffect(() => {
     void refreshMemoryGraph();

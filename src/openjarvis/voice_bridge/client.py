@@ -166,6 +166,14 @@ class VoiceBridgeSession:
         self.speak_speed = speak_speed
         self.state = "idle"  # idle | listening | thinking | speaking
         self.error: Optional[str] = None
+        # Exposed via /v1/voice-bridge/status so the cockpit's glass chat
+        # window (previously wired only to typed chat + the now-removed
+        # wake-word flow, never to JARVIS Voice Mode) can show the live
+        # conversation. Bumped once per completed turn -- see
+        # _flush_conversation_turn -- so the frontend can tell a NEW turn
+        # apart from a repeated poll of the same one.
+        self.last_turn_id = 0
+        self.last_turn: Optional[Dict[str, str]] = None
         self._ws: Any = None
         self._stop = asyncio.Event()
         self._last_activity = time.monotonic()
@@ -612,6 +620,8 @@ class VoiceBridgeSession:
         self._pending_assistant_parts = []
         if not user_text or not assistant_text:
             return
+        self.last_turn_id += 1
+        self.last_turn = {"user": user_text, "assistant": assistant_text}
         if self._loop is not None:
             self._loop.run_in_executor(None, remember_full_turn, user_text, assistant_text)
 
