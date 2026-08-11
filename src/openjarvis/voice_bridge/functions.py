@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -37,6 +38,32 @@ from openjarvis.tools.memory_recall import MemoryRecallTool
 from openjarvis.voice_bridge.redact import redact
 
 logger = logging.getLogger("openjarvis.voice_bridge")
+
+# Ghost Agent's replies are written for a TEXT reader (typed chat renders
+# markdown properly) -- but ask_ghost_agent's return value goes straight
+# onto the Deepgram socket as a FunctionCallResponse and gets spoken. Raw
+# "**word**"/"# Heading"/"`code`" syntax either gets read back literally
+# (confirmed live 2026-08-12: Vineet heard/saw stray asterisks -- "why she
+# always says ** this ** that") or adds junk characters TTS has to deal
+# with. Stripped only at this voice-facing boundary -- typed chat's replies
+# (same Ghost Agent, same _run_cloud_tool_loop) are untouched and keep full
+# markdown, since that's rendered properly there.
+_MARKDOWN_STRIP_PATTERNS = [
+    (re.compile(r"\*\*(.+?)\*\*"), r"\1"),  # **bold**
+    (re.compile(r"__(.+?)__"), r"\1"),  # __bold__
+    (re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)"), r"\1"),  # *italic*
+    (re.compile(r"`{1,3}([^`]+?)`{1,3}"), r"\1"),  # `code` / ```code```
+    (re.compile(r"^#{1,6}\s*", re.MULTILINE), ""),  # # Heading
+    (re.compile(r"^\s*[-*+]\s+", re.MULTILINE), ""),  # - bullet
+    (re.compile(r"^\s*\d+\.\s+", re.MULTILINE), ""),  # 1. numbered list
+]
+
+
+def _strip_markdown_for_speech(text: str) -> str:
+    out = text
+    for pattern, replacement in _MARKDOWN_STRIP_PATTERNS:
+        out = pattern.sub(replacement, out)
+    return re.sub(r"[ \t]{2,}", " ", out).strip()
 
 _time_tool = GetCurrentTimeTool()
 _agent_tool = AgentNetworkTool()
@@ -172,7 +199,7 @@ def _ask_ghost_agent(query: str) -> str:
     deterministic = _one_agent_command(query)
     if deterministic:
         _remember_exchange(query, deterministic)
-        return deterministic
+        return _strip_markdown_for_speech(deterministic)
 
     engine = _ghost_ctx.get("engine")
     model = _ghost_ctx.get("model")
@@ -194,8 +221,8 @@ def _ask_ghost_agent(query: str) -> str:
     except Exception as exc:  # noqa: BLE001
         return f"The Ghost Agent hit an error: {exc}"
     reply = (result.get("content") or "").strip() or "Done, Sir -- though I don't have a summary to report."
-    _remember_exchange(query, reply)
-    return reply
+    _remember_exchange(query, reply)  # keeps full markdown -- history/Obsidian are fine with it
+    return _strip_markdown_for_speech(reply)
 
 
 def _remember_exchange(query: str, reply: str) -> None:
