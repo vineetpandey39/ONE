@@ -138,7 +138,10 @@ type OneStatus = {
   obsidian: { connected: boolean; path: string; notes: number };
   memories: Memory[];
 };
-type Line = { role: 'one' | 'user'; text: string };
+// `live` marks a voice-turn line that's still in progress (see the
+// voice-bridge status poll below) -- it gets updated in place as more
+// speech streams in, rather than appended as a new line each time.
+type Line = { role: 'one' | 'user'; text: string; live?: boolean };
 type AudioDevice = { deviceId: string; label: string };
 type WakeEvent = { id: number; created_at: string; transcript: string; recognized: number; summary: string };
 type CredentialVaultEntry = {
@@ -267,7 +270,12 @@ export function OneCockpit() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const meterFrameRef = useRef<number | null>(null);
   const lastWakeEventRef = useRef<number | null>(null);
-  const lastVoiceTurnIdRef = useRef(0);
+  // Tracks whether the CURRENT in-progress voice turn's user line has
+  // already been appended to `lines` -- lets the assistant-side live text
+  // (below) know whether to update the existing placeholder line in place
+  // or start a fresh one. Resets whenever live_user_text goes empty
+  // (between turns).
+  const voiceTurnUserAppendedRef = useRef(false);
   const oneVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const voiceLockedRef = useRef(false);
   const speechQueueRef = useRef<string[]>([]);
@@ -503,22 +511,39 @@ export function OneCockpit() {
         if (cancelled) return;
         setVoiceBridgeState(data.state || 'idle');
         setVoiceBridgeError(data.error || null);
-        // Surface each completed turn in the glass chat window -- it was
+
+        // Surface the LIVE conversation in the glass chat window -- it was
         // wired to typed chat and the old wake-word flow, never to JARVIS
-        // Voice Mode. last_turn_id only increases when a NEW turn lands
-        // (see voice_bridge_status), so a repeat poll of the same turn is a
-        // no-op here.
-        if (data.last_turn_id && data.last_turn_id !== lastVoiceTurnIdRef.current) {
-          lastVoiceTurnIdRef.current = data.last_turn_id;
-          const turn = data.last_turn as { user?: string; assistant?: string } | null;
-          if (turn?.user && turn?.assistant) {
-            setLines((current) => [
-              ...current.slice(-6),
-              { role: 'user', text: turn.user! },
-              { role: 'one', text: turn.assistant! },
-            ]);
-          }
+        // Voice Mode. Confirmed live (2026-08-12) that showing text only
+        // once a turn fully completed made the window permanently display
+        // the PREVIOUS turn while ONE was actually speaking the current one
+        // ("delay hai... ek message piche chal rahi hai"). live_user_text/
+        // live_assistant_text update on every Deepgram ConversationText
+        // chunk, so this now tracks speech as it actually happens.
+        const liveUser = (data.live_user_text as string) || '';
+        const liveAssistant = (data.live_assistant_text as string) || '';
+
+        if (!liveUser) {
+          // Between turns -- next turn's user line should append fresh,
+          // not be mistaken for a continuation of the last one.
+          voiceTurnUserAppendedRef.current = false;
+        } else if (!voiceTurnUserAppendedRef.current) {
+          voiceTurnUserAppendedRef.current = true;
+          setLines((current) => [...current.slice(-6), { role: 'user', text: liveUser }]);
         }
+
+        if (liveAssistant) {
+          setLines((current) => {
+            const last = current[current.length - 1];
+            if (last && last.role === 'one' && last.live) {
+              // Same turn, more speech streamed in -- update in place
+              // rather than appending a new line per chunk.
+              return [...current.slice(0, -1), { role: 'one', text: liveAssistant, live: true }];
+            }
+            return [...current.slice(-7), { role: 'one', text: liveAssistant, live: true }];
+          });
+        }
+
         if (!data.active) setVoiceBridgeActive(false);
       } catch {
         // transient -- next poll will retry
@@ -543,7 +568,7 @@ export function OneCockpit() {
       return;
     }
     setVoiceBridgeError(null);
-    lastVoiceTurnIdRef.current = 0; // a new session's turn ids restart from 1
+    voiceTurnUserAppendedRef.current = false; // a new session starts with no turn in progress
     try {
       const r = await coreFetch('/v1/voice-bridge/start', { method: 'POST' });
       const data = await r.json().catch(() => ({}));

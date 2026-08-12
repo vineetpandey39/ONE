@@ -231,12 +231,19 @@ async def voice_bridge_status(request: Request):
     # live conversation (previously only wired to typed chat) -- the
     # frontend polls this and pushes a new line whenever last_turn_id
     # increases, so it never re-shows an already-seen turn on a repeat poll.
+    # live_user_text/live_assistant_text: the CURRENT, still-in-progress turn
+    # -- confirmed live (2026-08-12) that showing text only at last_turn
+    # (flush time) made the window permanently display the PREVIOUS turn
+    # while ONE was actually speaking the current one. These update on every
+    # ConversationText chunk, not just at the turn boundary.
     return {
         "active": True,
         "state": session.state,
         "error": session.error,
         "last_turn_id": session.last_turn_id,
         "last_turn": session.last_turn,
+        "live_user_text": session.live_user_text,
+        "live_assistant_text": session.live_assistant_text,
     }
 
 

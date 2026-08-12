@@ -36,6 +36,7 @@ from openjarvis.one_agents.wake import (
     resume_wake_listener,
 )
 from openjarvis.voice_bridge.functions import (
+    _strip_markdown_for_speech,
     deepgram_function_schemas,
     execute_function,
     remember_full_turn,
@@ -229,6 +230,17 @@ class VoiceBridgeSession:
         # _flush_conversation_turn.
         self._pending_user_text: Optional[str] = None
         self._pending_assistant_parts: list[str] = []
+        # Live preview for the cockpit's glass chat window: confirmed live
+        # (2026-08-12) that showing text only at turn-flush time made the
+        # window display the PREVIOUS turn while ONE was actually mid-speech
+        # on the current one -- a permanent one-turn lag ("delay hai... ek
+        # message piche chal rahi hai"). These mirror _pending_user_text/
+        # _pending_assistant_parts but are exposed live via
+        # /v1/voice-bridge/status on every poll, updated the instant each
+        # ConversationText chunk arrives rather than only at flush. Cleared
+        # in lockstep with the pending fields in _flush_conversation_turn.
+        self.live_user_text = ""
+        self.live_assistant_text = ""
         # Half-duplex gate: no AEC (acoustic echo cancellation) exists on
         # this raw sounddevice path (unlike a browser's getUserMedia, which
         # gets it for free), so on a desktop with open mic + open speakers
@@ -585,11 +597,18 @@ class VoiceBridgeSession:
                     # is now complete -- flush it before starting the new one.
                     self._flush_conversation_turn()
                     self._pending_user_text = content
+                    self.live_user_text = content
                 elif role == "assistant":
                     # Deepgram streams a reply as several short
                     # ConversationText chunks -- accumulate all of them into
-                    # one turn, flushed as a single exchange.
+                    # one turn, flushed as a single exchange. live_assistant_text
+                    # updates on every chunk (not just at flush) so the glass
+                    # window can track speech in near real time instead of
+                    # showing the previous, already-finished turn.
                     self._pending_assistant_parts.append(content)
+                    self.live_assistant_text = _strip_markdown_for_speech(
+                        " ".join(self._pending_assistant_parts).strip()
+                    )
         if etype == "UserStartedSpeaking":
             self.state = "listening"
             self._drain_playback()
@@ -613,15 +632,23 @@ class VoiceBridgeSession:
         far, then reset. Runs on the asyncio loop thread (called from
         _handle_event and run()'s finally), so this offloads the actual
         remember/save work to a background thread rather than blocking event
-        handling -- same reasoning as _handle_function_calls' run_in_executor."""
+        handling -- same reasoning as _handle_function_calls' run_in_executor.
+
+        last_turn keeps the markdown-stripped text (matches live_assistant_text,
+        so the glass window doesn't visibly change the instant a turn
+        finalizes) -- remember_full_turn still gets the RAW text, since the
+        Obsidian journal is a markdown vault and stripping there would be a
+        real loss, not a fix."""
         user_text = self._pending_user_text
         assistant_text = " ".join(self._pending_assistant_parts).strip()
         self._pending_user_text = None
         self._pending_assistant_parts = []
+        self.live_user_text = ""
+        self.live_assistant_text = ""
         if not user_text or not assistant_text:
             return
         self.last_turn_id += 1
-        self.last_turn = {"user": user_text, "assistant": assistant_text}
+        self.last_turn = {"user": user_text, "assistant": _strip_markdown_for_speech(assistant_text)}
         if self._loop is not None:
             self._loop.run_in_executor(None, remember_full_turn, user_text, assistant_text)
 
