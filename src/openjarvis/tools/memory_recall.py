@@ -143,7 +143,18 @@ class MemoryRecallTool(BaseTool):
                     # topic not on this day; skip it from the focused view
                     continue
             if len(text) > _MAX_PER_DAY_CHARS:
-                text = text[:_MAX_PER_DAY_CHARS] + "\n…(truncated)…"
+                # Keep the TAIL (most recent entries), not the head -- a
+                # busy day's journal easily exceeds this cap, and entries
+                # are appended chronologically, so truncating from the
+                # front silently drops everything recent and keeps only
+                # the day's oldest exchanges. Confirmed live (2026-08-12):
+                # asked what was discussed "a few minutes back" on a day
+                # with an early throwaway test exchange plus a long real
+                # conversation -- this tool truncated the real, recent
+                # conversation clean off and answered from the stale test
+                # entry instead, which is the opposite of useful for a
+                # "what did we just say" query.
+                text = "…(earlier entries truncated)…\n" + text[-_MAX_PER_DAY_CHARS:]
             found_days.append(d.strftime("%A %Y-%m-%d"))
             chunks.append(f"===== {d.strftime('%A, %d %B %Y')} =====\n{text}")
             total += len(text)
