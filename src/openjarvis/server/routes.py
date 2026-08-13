@@ -1237,6 +1237,60 @@ async def ghost_agent_extension_bookmark(request: Request):
     raise HTTPException(status_code=504, detail="Extension didn't respond in time")
 
 
+# --- ONE Browser Control (Part 2) -------------------------------------
+# Deliberately separate from the /v1/ghost-agent/extension/* endpoints
+# above, which back the simpler "ONE Ghost Agent" extension (open a video,
+# add a bookmark). Per Vineet's explicit instruction the two systems stay
+# apart end to end: separate extension, separate bridge module, separate
+# endpoints, separate tool. Simple "play/search a video" requests never
+# touch this path.
+
+
+@router.get("/v1/ghost-agent/browser-control/poll")
+async def browser_control_poll():
+    """Long-polled by the ONE Browser Control extension's background worker.
+
+    Same long-poll shape as the Ghost Agent extension's own /poll above
+    (block up to ~20s so a queued command is delivered near-instantly,
+    async sleep so the event loop stays free for other requests).
+    """
+    import asyncio
+
+    from openjarvis.server.browser_control_bridge import (
+        has_pending,
+        mark_polled,
+        take_pending,
+    )
+
+    mark_polled()
+    deadline = time.time() + 20.0
+    while time.time() < deadline:
+        if has_pending():
+            break
+        await asyncio.sleep(0.2)
+    return {"commands": take_pending()}
+
+
+@router.post("/v1/ghost-agent/browser-control/result")
+async def browser_control_result(request: Request):
+    """The extension reports back what a page-control command actually did.
+
+    Carries a `data` payload too (unlike the Ghost Agent extension's
+    result endpoint) -- read_page returns the page's text plus its
+    interactive elements through here.
+    """
+    from openjarvis.server.browser_control_bridge import report_result
+
+    payload = await request.json()
+    report_result(
+        str(payload.get("id", "")),
+        bool(payload.get("success")),
+        str(payload.get("detail", "")),
+        payload.get("data"),
+    )
+    return {"ok": True}
+
+
 _GHOST_AGENT_SYSTEM_PROMPT = """\
 You are ONE's Ghost Agent -- the part of ONE that reaches outside the local \
 model's own knowledge for anything real-time or local-machine-specific: \
