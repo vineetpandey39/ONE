@@ -744,7 +744,14 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
         stages.clear_stage("hermes")
         raise RuntimeError(f"LAO KDP job ended as {status}")
 
-    run_dir, title = _latest_kdp_output()
+    try:
+        run_dir, title = _latest_kdp_output()
+    except RuntimeError:
+        # LAO said "Successful" but the output can't actually be confirmed --
+        # do not walk a phantom book across the floor and celebrate it.
+        stages.clear_stage("scribe")
+        stages.clear_stage("hermes")
+        raise
 
     # --- walk the finished book back to the floor head --------------------
     stages.set_stage("scribe", stages.CARRYING_TO_HEAD, f"Delivering: {title}")
@@ -795,6 +802,11 @@ def _latest_kdp_output() -> tuple[str, str]:
 
     Reads what LAO actually produced rather than trusting the job payload —
     the run folder is the artifact, and its name is the timestamped truth.
+    Raises if that can't be confirmed. It used to swallow this and return a
+    placeholder string like "(output folder unreadable)" as if it were a
+    real title -- which then got walked across the floor and celebrated as
+    a shipped book. A caller that reports success must never do so without
+    having actually verified the output.
     """
     from pathlib import Path as _Path
 
@@ -807,10 +819,10 @@ def _latest_kdp_output() -> tuple[str, str]:
             (p for p in base.iterdir() if p.is_dir() and p.name.endswith("claude-code-kdp-book")),
             key=lambda p: p.stat().st_mtime,
         )
-    except OSError:
-        return str(base), "(output folder unreadable)"
+    except OSError as exc:
+        raise RuntimeError(f"Could not read KDP output folder {base}: {exc}") from exc
     if not runs:
-        return str(base), "(no run folder found)"
+        raise RuntimeError(f"LAO reported a successful run but no output folder exists under {base}")
 
     run = runs[-1]
     title = run.name

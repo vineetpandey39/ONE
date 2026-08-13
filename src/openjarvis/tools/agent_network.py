@@ -26,6 +26,10 @@ class AgentNetworkTool(BaseTool):
                 "Use action=stats -- NOT dispatch -- whenever the user asks how the agents are doing, "
                 "for a status/stats review, or a summary of agent activity; dispatch is only for "
                 "actually starting new agent work, never for reporting on existing history. "
+                "Only dispatch a FLOOR HEAD (e.g. hermes, zeus, athena) -- never a worker that "
+                "reports to one (e.g. scribe reports to hermes). A worker is a child the head "
+                "brings in on its own once it needs the work done; dispatching the worker "
+                "directly is rejected and does not start real work. "
                 "detail=brief gives one line per agent; detail=holistic gives the full breakdown. "
                 "Use plan by default because it is free/local. Use execute or publish only when the user explicitly requests it. "
                 "Use tier=fast (default, local model) unless the task genuinely needs the heavier cloud model — "
@@ -63,8 +67,23 @@ class AgentNetworkTool(BaseTool):
             if action == "list":
                 content = [{"id": key, **value} for key, value in AGENTS.items()]
             elif action == "dispatch":
+                agent_id = str(params.get("agent_id", "")).strip().lower()
+                reports_to = AGENTS.get(agent_id, {}).get("reports_to")
+                if reports_to:
+                    # A worker (has reports_to) is a CHILD of its floor head --
+                    # it never gets dispatched directly. Its head's own job
+                    # triggers it automatically once the head actually starts
+                    # running. Dispatching the worker straight from chat was
+                    # observed to send it a malformed/bare task and skip the
+                    # head's real handoff entirely (wrong mode, missing
+                    # brief fields the worker actually needs).
+                    raise ValueError(
+                        f"'{agent_id}' is a worker that reports to '{reports_to}' -- it cannot be "
+                        f"dispatched directly. Dispatch '{reports_to}' instead; it will bring "
+                        f"'{agent_id}' in automatically once it needs the work done."
+                    )
                 content = enqueue_job(
-                    str(params.get("agent_id", "")),
+                    agent_id,
                     str(params.get("task", "")),
                     str(params.get("mode", "plan")),
                     str(params.get("tier", "fast")),
