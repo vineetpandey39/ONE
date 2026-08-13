@@ -33,6 +33,7 @@ RECEIVING = "receiving"            # worker taking the brief
 EXECUTING = "executing"            # worker typing; external job running
 CARRYING_TO_HEAD = "carrying_to_head"        # worker walking back, book in hand
 DELIVERING = "delivering"          # worker at the head's desk, handing over
+CELEBRATING = "celebrating"        # both of them, the moment a book ships
 REPORTING = "reporting"            # head reporting the result upward
 
 _TERMINAL = {IDLE}

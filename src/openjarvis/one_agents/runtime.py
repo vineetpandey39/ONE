@@ -494,7 +494,10 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     if mode == "report":
         return _hermes_report(job)
 
-    stages.set_stage("hermes", stages.RESEARCHING, "Choosing the next KDP title")
+    # The detail is what the building shows in the speech bubble beside HERMES'
+    # face, so it carries the Chairman's actual words — not a generic label.
+    stages.set_stage("hermes", stages.RESEARCHING,
+                     task.strip()[:180] or "Choosing the next KDP title")
 
     # Read its own history first. Without this the floor happily re-commissions
     # a title it already published — the vault is what makes it memory.
@@ -587,8 +590,9 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     stages.set_stage("hermes", stages.CARRYING_TO_WORKER,
                      f"Taking the brief to SCRIBE: {angle[:60]}")
     time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
-    stages.set_stage("hermes", stages.BRIEFING, "Briefing SCRIBE")
-    time.sleep(2.0)
+    stages.set_stage("hermes", stages.BRIEFING,
+                     f"SCRIBE, build this one: {angle[:110]}")
+    time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
 
     worker = enqueue_job(
         "scribe",
@@ -671,16 +675,21 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
         brief = {}
     kdp_mode = brief.get("kdp_mode") or "auto"
     region = brief.get("region") or "global"
+    angle = str(brief.get("angle") or "").strip()
 
-    stages.set_stage("scribe", stages.RECEIVING, "Taking the brief from HERMES")
-    time.sleep(2.0)
+    stages.set_stage("scribe", stages.RECEIVING,
+                     f"Got it — {angle[:110]}" if angle
+                     else "Taking the brief from HERMES")
+    time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
 
     tool = LaoOrchestratorTool()
     process_name = os.environ.get("LAO_KDP_PROCESS", KDP_PROCESS_NAME)
 
     # dryRun stays True: it still produces the full manuscript + images, and
     # KDP upload is a manual human gate that must never be automated.
-    stages.set_stage("scribe", stages.EXECUTING, "Starting LAO KDP Book Factory")
+    stages.set_stage("scribe", stages.EXECUTING,
+                     f"Starting the book: {angle[:110]}" if angle
+                     else "Starting LAO KDP Book Factory")
     started = tool.execute(
         action="start", mode="dry_run", process_name=process_name,
         scope="production",
@@ -713,8 +722,14 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
         except json.JSONDecodeError:
             last = {"raw": probe.content}
         status = str((last.get("job") or {}).get("status") or status)
-        stages.set_stage("scribe", stages.EXECUTING,
-                         f"LAO job {status}", lao_job=lao_job_id)
+        # Keep the bubble beside SCRIBE honest about the long wait: what it is
+        # writing, and where LAO actually is.
+        elapsed = int((time.time() - (deadline - max_wait)) // 60)
+        stages.set_stage(
+            "scribe", stages.EXECUTING,
+            (f"Writing “{angle[:70]}” · LAO {status} · {elapsed}m" if angle
+             else f"LAO job {status} · {elapsed}m"),
+            lao_job=lao_job_id)
         if status in terminal:
             break
     else:
@@ -734,8 +749,16 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     # --- walk the finished book back to the floor head --------------------
     stages.set_stage("scribe", stages.CARRYING_TO_HEAD, f"Delivering: {title}")
     time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
-    stages.set_stage("scribe", stages.DELIVERING, "Handing the book to HERMES")
-    time.sleep(2.0)
+    stages.set_stage("scribe", stages.DELIVERING,
+                     f"It's done — “{title}” is finished.")
+    time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
+
+    # Both of them mark the moment. HERMES has been blocked on this since the
+    # briefing, so it drops AWAITING_WORKER and celebrates alongside SCRIBE.
+    celebration = f"“{title}” shipped! 🎉"
+    stages.set_stage("scribe", stages.CELEBRATING, celebration)
+    stages.set_stage("hermes", stages.CELEBRATING, celebration)
+    time.sleep(float(os.environ.get("ONE_CELEBRATE_SECONDS", "9")))
 
     memory.remember(
         agent="SCRIBE", floor_id="5", floor_name="Book Publishing (KDP)",
