@@ -1377,6 +1377,22 @@ hand-off.
 Vineet can watch, and automatically click any "Skip Ad" button the whole \
 time it plays -- he should never have to click Skip himself. Use this for \
 ANY video/song request instead of open_app.
+- browse_web: work through a WEBSITE step by step in Vineet's real, \
+logged-in Chrome -- go to a page, read what's actually on it, click \
+through it, fill something in. Use this when the task needs real \
+interaction with a site ("find X on this site and tell me", "check my \
+account on Y", "fill in this form"). Do NOT use browse_web merely to play \
+or search for a video -- play_video above is the correct, much faster tool \
+for that, and these are two deliberately separate systems (browse_web \
+needs its own extension loaded). \
+CRITICAL -- the confirmation gate: browse_web will refuse, and come back \
+asking, whenever the next step would COMMIT something real (buy, pay, \
+submit, send, delete, subscribe). When it does that, tell Vineet exactly \
+what the action is and ask him plainly -- then STOP. Only if he explicitly \
+says yes to that specific action may you call browse_web again with \
+confirmed=true. Never set confirmed=true on a first attempt, never set it \
+because you assume he'd agree, and never describe a commit action as \
+already done when it was refused.
 
 IMPORTANT -- when Vineet names a SPECIFIC thing he wants (a song, a video, \
 a particular page), do not just open the app's homepage and stop there -- \
@@ -1513,6 +1529,7 @@ def _cloud_escalation_tools():
     """
     from openjarvis.tools.agent_network import AgentNetworkTool
     from openjarvis.tools.audio_tool import AudioTranscribeTool
+    from openjarvis.tools.browser_control import BrowserControlTool
     from openjarvis.tools.datetime_tool import GetCurrentTimeTool
     from openjarvis.tools.file_read import FileReadTool
     from openjarvis.tools.file_write import FileWriteTool
@@ -1549,6 +1566,7 @@ def _cloud_escalation_tools():
         MemoryManageTool(),
         AudioTranscribeTool(),
         ThinkTool(),
+        BrowserControlTool(),
     ]
 
 
