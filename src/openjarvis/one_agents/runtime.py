@@ -690,18 +690,17 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     stages.set_stage("scribe", stages.EXECUTING,
                      f"Starting the book: {angle[:110]}" if angle
                      else "Starting LAO KDP Book Factory")
-    # LAO's outline stage picks its topic from whatever trend_snapshot it is
-    # given, independently re-researching its own if none is passed. Without
-    # this, HERMES's actual researched angle was discarded on arrival and
-    # SCRIBE's book ended up on a topic nobody briefed it on. Wrapping the
-    # angle as a single high-signal trend item is the same mechanism LAO's
-    # own research step produces, so the outline prompt treats it as the
-    # thing to write about instead of one option among many.
+    # LAO's workflow.yaml unconditionally runs its own trend research as its
+    # first step and always overwrites the trend_snapshot the book-writing
+    # step reads -- passing trend_snapshot directly in input_args never
+    # reached it, since that variable isn't wired to any input at all. LAO's
+    # v0.9.4 KDP package added a real topicOverride input specifically for
+    # this: when set, the research step returns it as the trend_snapshot
+    # instead of scanning RSS, so HERMES's actual researched angle is what
+    # the book gets written about instead of being silently discarded.
     input_args: dict[str, Any] = {"mode": kdp_mode, "region": region, "dryRun": True}
     if angle:
-        input_args["trend_snapshot"] = {
-            "items": [{"title": angle, "source": "HERMES research brief", "summary": angle}],
-        }
+        input_args["topicOverride"] = angle
 
     started = tool.execute(
         action="start", mode="dry_run", process_name=process_name,
