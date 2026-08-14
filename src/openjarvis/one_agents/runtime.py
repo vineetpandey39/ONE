@@ -690,10 +690,23 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     stages.set_stage("scribe", stages.EXECUTING,
                      f"Starting the book: {angle[:110]}" if angle
                      else "Starting LAO KDP Book Factory")
+    # LAO's outline stage picks its topic from whatever trend_snapshot it is
+    # given, independently re-researching its own if none is passed. Without
+    # this, HERMES's actual researched angle was discarded on arrival and
+    # SCRIBE's book ended up on a topic nobody briefed it on. Wrapping the
+    # angle as a single high-signal trend item is the same mechanism LAO's
+    # own research step produces, so the outline prompt treats it as the
+    # thing to write about instead of one option among many.
+    input_args: dict[str, Any] = {"mode": kdp_mode, "region": region, "dryRun": True}
+    if angle:
+        input_args["trend_snapshot"] = {
+            "items": [{"title": angle, "source": "HERMES research brief", "summary": angle}],
+        }
+
     started = tool.execute(
         action="start", mode="dry_run", process_name=process_name,
         scope="production",
-        input_args={"mode": kdp_mode, "region": region, "dryRun": True},
+        input_args=input_args,
     )
     if not started.success:
         stages.clear_stage("scribe")
@@ -744,14 +757,26 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
         stages.clear_stage("hermes")
         raise RuntimeError(f"LAO KDP job ended as {status}")
 
-    try:
-        run_dir, title = _latest_kdp_output()
-    except RuntimeError:
-        # LAO said "Successful" but the output can't actually be confirmed --
-        # do not walk a phantom book across the floor and celebrate it.
-        stages.clear_stage("scribe")
-        stages.clear_stage("hermes")
-        raise
+    # Prefer the run_dir/title LAO's own status response already carries --
+    # it is authoritative (LAO's robot-worker knows exactly what it wrote)
+    # and, critically, this process's Path.home() is a SANDBOXED
+    # runtime_home (set by start-one.ps1), not the real Windows profile LAO
+    # actually writes under, so re-discovering the folder locally via
+    # _latest_kdp_output() was silently looking in the wrong place. That
+    # function is now only a last-resort fallback for the rare case LAO's
+    # response is missing this data.
+    book_draft = ((last.get("job") or {}).get("output_result") or {}).get("book_draft") or {}
+    run_dir = str(book_draft.get("run_dir") or "")
+    title = str(book_draft.get("title") or "")
+    if not run_dir or not title:
+        try:
+            run_dir, title = _latest_kdp_output()
+        except RuntimeError:
+            # LAO said "Successful" but the output can't actually be
+            # confirmed -- do not walk a phantom book across the floor.
+            stages.clear_stage("scribe")
+            stages.clear_stage("hermes")
+            raise
 
     # --- walk the finished book back to the floor head --------------------
     stages.set_stage("scribe", stages.CARRYING_TO_HEAD, f"Delivering: {title}")
