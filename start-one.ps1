@@ -10,6 +10,34 @@ $ollama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
 $pidFile = Join-Path $oneRoot "one-server.pid"
 $workerPidFile = Join-Path $oneRoot "one-worker.pid"
 $companyPidFile = Join-Path $oneRoot "one-company.pid"
+
+function Get-SavedPid {
+    <#
+      Reads a .pid file and returns the pid, or 0 if there isn't a usable one.
+
+      Confirmed live 2026-08-15: after an unclean shutdown all three .pid
+      files were exactly 7 null bytes -- NTFS had recorded the size (a
+      5-digit pid + CRLF) but never flushed the data, so it zero-filled.
+      The old code did [int](Get-Content ...) directly, which threw
+      "Cannot convert value \"\" to type System.Int32", and because
+      $ErrorActionPreference = "Stop" is set at the top of this script that
+      killed the whole startup before anything launched -- which is exactly
+      why auto-start silently stopped working.
+
+      Returns 0 rather than $null on purpose: callers must then guard with
+      -gt 0, because Get-Process -Id 0 succeeds on Windows (it's the System
+      Idle Process) and would otherwise report the service as "running".
+    #>
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return 0 }
+    try {
+        $raw = (Get-Content $Path -Raw -ErrorAction Stop) -replace '[^0-9]', ''
+        if ([string]::IsNullOrWhiteSpace($raw)) { return 0 }
+        return [int]$raw
+    } catch {
+        return 0
+    }
+}
 $logFile = Join-Path $oneRoot "one-server.log"
 $errorLogFile = Join-Path $oneRoot "one-server-error.log"
 $workerLogFile = Join-Path $oneRoot "one-worker.log"
