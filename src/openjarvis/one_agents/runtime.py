@@ -743,11 +743,32 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
     status = "Pending"
     last: dict[str, Any] = {}
+    consecutive_probe_failures = 0
+    # See the matching comment in _run_muse -- without this check, a failed
+    # status probe silently kept the last-known status forever instead of
+    # ever surfacing that polling itself had stopped succeeding.
+    max_consecutive_probe_failures = 5
 
     while time.time() < deadline:
         time.sleep(poll_seconds)
         probe = tool.execute(action="status", process_name=process_name,
                              scope="production", job_id=lao_job_id)
+        if not probe.success:
+            consecutive_probe_failures += 1
+            stages.set_stage(
+                "scribe", stages.EXECUTING,
+                f"Lost contact with LAO, retrying ({consecutive_probe_failures}/{max_consecutive_probe_failures})…",
+                lao_job=lao_job_id)
+            if consecutive_probe_failures >= max_consecutive_probe_failures:
+                stages.clear_stage("scribe")
+                stages.clear_stage("hermes")
+                raise RuntimeError(
+                    f"Lost contact with LAO after {consecutive_probe_failures} consecutive "
+                    f"failed status polls (last: {probe.content[:200]}) -- cannot confirm "
+                    "whether the underlying LAO job is still running."
+                )
+            continue
+        consecutive_probe_failures = 0
         try:
             last = json.loads(probe.content)
         except json.JSONDecodeError:
@@ -1183,11 +1204,36 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
     status = "Pending"
     last: dict[str, Any] = {}
+    consecutive_probe_failures = 0
+    # 5 consecutive failed polls (~2.5min at the default 30s cadence) means
+    # ONE has genuinely lost contact with LAO's API, not a one-off blip.
+    # Without this check, a failed probe fell through to "keep the old
+    # status" below forever -- confirmed live (2026-08-15): a user manually
+    # stopped the underlying LAO job via LAO Studio, but MUSE's floor card
+    # kept showing "LAO Running" indefinitely because nothing ever detected
+    # that status polling itself had stopped succeeding.
+    max_consecutive_probe_failures = 5
 
     while time.time() < deadline:
         time.sleep(poll_seconds)
         probe = tool.execute(action="status", process_name=process_name,
                              scope="production", job_id=lao_job_id)
+        if not probe.success:
+            consecutive_probe_failures += 1
+            stages.set_stage(
+                "muse", stages.EXECUTING,
+                f"Lost contact with LAO, retrying ({consecutive_probe_failures}/{max_consecutive_probe_failures})…",
+                lao_job=lao_job_id)
+            if consecutive_probe_failures >= max_consecutive_probe_failures:
+                stages.clear_stage("muse")
+                stages.clear_stage("ia")
+                raise RuntimeError(
+                    f"Lost contact with LAO after {consecutive_probe_failures} consecutive "
+                    f"failed status polls (last: {probe.content[:200]}) -- cannot confirm "
+                    "whether the underlying LAO job is still running."
+                )
+            continue
+        consecutive_probe_failures = 0
         try:
             last = json.loads(probe.content)
         except json.JSONDecodeError:
