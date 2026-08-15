@@ -110,8 +110,8 @@ if (($env:ONE_FLUX_AUTOSTART -eq "true") -or ($env:ONE_IMAGE_PROVIDER -eq "flux"
         try {
             $fluxPidFile = Join-Path $oneRoot "one-flux.pid"
             $fluxRunning = $false
-            if (Test-Path $fluxPidFile) {
-                $savedFluxPid = [int](Get-Content $fluxPidFile -Raw)
+            $savedFluxPid = Get-SavedPid $fluxPidFile
+            if ($savedFluxPid -gt 0) {
                 $fluxRunning = $null -ne (Get-Process -Id $savedFluxPid -ErrorAction SilentlyContinue)
             }
             if (-not $fluxRunning) {
@@ -131,8 +131,8 @@ if (($env:ONE_FLUX_AUTOSTART -eq "true") -or ($env:ONE_IMAGE_PROVIDER -eq "flux"
 }
 
 $running = $false
-if (Test-Path $pidFile) {
-    $savedPid = [int](Get-Content $pidFile -Raw)
+$savedPid = Get-SavedPid $pidFile
+if ($savedPid -gt 0) {
     $running = $null -ne (Get-Process -Id $savedPid -ErrorAction SilentlyContinue)
 }
 
@@ -148,8 +148,8 @@ if (-not $running) {
 }
 
 $workerRunning = $false
-if (Test-Path $workerPidFile) {
-    $savedWorkerPid = [int](Get-Content $workerPidFile -Raw)
+$savedWorkerPid = Get-SavedPid $workerPidFile
+if ($savedWorkerPid -gt 0) {
     $workerRunning = $null -ne (Get-Process -Id $savedWorkerPid -ErrorAction SilentlyContinue)
 }
 if (-not $workerRunning) {
@@ -171,8 +171,8 @@ $companyServer = Join-Path $companyRoot "server.py"
 if (Test-Path $companyServer) {
     try {
         $companyRunning = $false
-        if (Test-Path $companyPidFile) {
-            $savedCompanyPid = [int](Get-Content $companyPidFile -Raw)
+        $savedCompanyPid = Get-SavedPid $companyPidFile
+        if ($savedCompanyPid -gt 0) {
             $companyRunning = $null -ne (Get-Process -Id $savedCompanyPid -ErrorAction SilentlyContinue)
         }
         if (-not $companyRunning) {
