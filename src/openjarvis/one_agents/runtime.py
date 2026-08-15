@@ -144,8 +144,18 @@ def enqueue_job(agent_id: str, task: str, mode: str = "plan", tier: str = "fast"
     if agent_id not in AGENTS:
         raise ValueError(f"Unknown agent: {agent_id}")
     mode = mode.strip().lower()
-    if mode not in {"plan", "execute", "publish"}:
-        raise ValueError("Mode must be plan, execute, or publish")
+    # "report" is a real, implemented mode: _run_hermes dispatches it to
+    # _hermes_report(), and SCRIBE enqueues it as the hand-back leg once a
+    # book is produced. It was missing from this validation set only, so
+    # SCRIBE crashed at the very END of a run, after doing its actual work
+    # (confirmed 2026-08-14: job scribe-da983f3c750f failed "Mode must be
+    # plan, execute, or publish" while its own mode was execute -- the
+    # rejected value was the downstream hand-back, not the job itself).
+    # This only permits a previously-rejected value; no existing caller
+    # changes behaviour. Deliberately NOT added to agent_network's tool
+    # enum -- this is an internal hand-back, not for the LLM to dispatch.
+    if mode not in {"plan", "execute", "publish", "report"}:
+        raise ValueError("Mode must be plan, execute, publish, or report")
     tier = (tier or "fast").strip().lower()
     if tier not in {"fast", "heavy"}:
         raise ValueError("Tier must be fast or heavy")
