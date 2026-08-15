@@ -959,20 +959,23 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
 
     brief, note = _claude_research(
         "You are IRIS, head of Media & Content at a digital holding company, "
-        "commissioning the next ImagineIndia Instagram reel.\n\n"
+        "signing off the next ImagineIndia Instagram reel run.\n\n"
         f"Request: {task}\n\n"
-        "ImagineIndia posts cinematic short reels about real Indian places — "
-        "landmarks, local icons, water bodies. Decide what the next reel should "
-        "cover and why. Ground it in what actually performs: a recognisable "
-        "place, a genuine hook, and a reason to watch to the end. Do not invent "
-        "internal teams or tools — production is an automated pipeline.\n\n"
+        "ImagineIndia posts cinematic short 'restoration story' reels about real "
+        "Indian places. IMPORTANT: you do NOT choose the location. The pipeline "
+        "picks it deterministically from a zoned manifest so that no place "
+        "repeats and all of India is covered over successive weeks. Your job is "
+        "the editorial call around the run, not the pick.\n\n"
+        "Decide: is now the right time to produce another reel, and what should "
+        "this run prioritise editorially? Do not invent internal teams or tools "
+        "— production is an automated pipeline.\n\n"
         "Reply in exactly this shape:\n"
-        "LOCATION: <the specific place>\n"
-        "REGION: <Indian state or zone>\n"
-        "ANGLE: <one line — the hook this reel leads with>\n"
+        "PRIORITY: <one line — what this run should optimise for>\n"
+        "REGION: <the zone you'd prefer if it were free, or 'rotation'>\n"
+        "ANGLE: <one line — the editorial through-line to aim for>\n"
         "BRIEF:\n"
-        "<6-12 lines: who it's for, why this place now, what the opening frame "
-        "should show, and the honest risk that it underperforms>"
+        "<6-12 lines: who the audience is, why run now, what would make this "
+        "one perform, and the honest risk that it underperforms>"
         + avoid
     )
 
@@ -983,8 +986,11 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         fallback["claude_unavailable"] = note
         return fallback
 
-    location = _marker(brief, "LOCATION")
-    region = _marker(brief, "REGION", "india").lower()
+    # "location" here is IRIS's editorial priority, NOT the place to shoot --
+    # the manifest rotation owns that. Named `priority` so nothing downstream
+    # mistakes it for a location the pipeline would honour.
+    priority = _marker(brief, "PRIORITY")
+    region = _marker(brief, "REGION", "rotation").lower()
     angle = _marker(brief, "ANGLE")
 
     output_dir = _home() / "agent_outputs"
@@ -1007,7 +1013,7 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "agent": "IRIS",
         "mode": mode,
         "research_engine": os.environ.get("ONE_RESEARCH_MODEL", "claude-haiku-4-5"),
-        "location": location,
+        "priority": priority,
         "region": region,
         "angle": angle,
         "content": brief,
@@ -1031,15 +1037,15 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
 
     # --- the handoff ------------------------------------------------------
     stages.set_stage("ia", stages.CARRYING_TO_WORKER,
-                     f"Taking the brief to MUSE: {(location or angle)[:60]}")
+                     f"Taking the brief to MUSE: {(priority or angle)[:60]}")
     time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
     stages.set_stage("ia", stages.BRIEFING,
-                     f"MUSE, shoot this one: {(location or angle)[:110]}")
+                     f"MUSE, run the next reel: {(priority or angle)[:110]}")
     time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
 
     worker = enqueue_job(
         "muse",
-        json.dumps({"brief_path": str(output_path), "location": location,
+        json.dumps({"brief_path": str(output_path), "priority": priority,
                     "region": region, "angle": angle, "origin_job": job["id"]}),
         mode="execute",
         tier="fast",
@@ -1118,10 +1124,10 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         brief = json.loads(str(job.get("task") or "{}"))
     except json.JSONDecodeError:
         brief = {}
-    location = str(brief.get("location") or "").strip()
+    priority = str(brief.get("priority") or "").strip()
     region = brief.get("region") or "india"
     angle = str(brief.get("angle") or "").strip()
-    headline = location or angle
+    headline = angle or priority
 
     stages.set_stage("muse", stages.RECEIVING,
                      f"Got it — {headline[:110]}" if headline
@@ -1135,20 +1141,27 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
                      f"Starting the reel: {headline[:110]}" if headline
                      else "Starting LAO ImagineIndia pipeline")
 
-    # The package normally picks its own location from IA_Locations.json via
-    # its day-of-week rotation. Passing locationOverride only when IRIS
-    # actually named one keeps the untouched scheduled runs behaving exactly
-    # as before -- an empty override must never blank out the rotation.
-    input_args: dict[str, Any] = {"region": region}
-    if location:
-        input_args["locationOverride"] = location
-    if angle:
-        input_args["angleOverride"] = angle
-
+    # Deliberately EMPTY -- confirmed against LAO's own process detail
+    # (2026-08-14): this process carries input_defaults for everything it
+    # needs (chatgptLogin / leonardoLogin credential names, IA_Bible.md,
+    # IA_Locations.json, outputDir, publishMode="manual_review"), and its
+    # 3x/day triggers start it with no arguments at all. Passing {} means
+    # MUSE starts it exactly the way the scheduled runs do.
+    #
+    # Note there is NO location override to pass: the package picks the
+    # location deterministically from IA_Locations.json via its zoned
+    # rotation (v1.2.0 made this deliberate, to guarantee no repeats and
+    # full India coverage -- "ChatGPT never chooses the location"). IRIS's
+    # brief is editorial intent and a durable record; it does not and must
+    # not steer which location comes next.
+    #
+    # mode="dry_run" only avoids the tool's publish gate (mode="publish"
+    # demands confirm_publish=true). What actually gets published is the
+    # package's own publishMode default, which is manual_review.
     started = tool.execute(
-        action="start", mode="production", process_name=process_name,
+        action="start", mode="dry_run", process_name=process_name,
         scope="production",
-        input_args=input_args,
+        input_args={},
     )
     if not started.success:
         stages.clear_stage("muse")
@@ -1162,7 +1175,10 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
 
     # --- wait for the reel ------------------------------------------------
     poll_seconds = float(os.environ.get("ONE_LAO_POLL_SECONDS", "30"))
-    max_wait = float(os.environ.get("ONE_IA_MAX_WAIT_SECONDS", "5400"))  # 1.5h
+    # 2.75h: LAO's own timeout_seconds on this process is 9000 (2.5h), so
+    # waiting less than that would abandon a run LAO is still legitimately
+    # working on and leave MUSE's stage stuck. Sit just past LAO's limit.
+    max_wait = float(os.environ.get("ONE_IA_MAX_WAIT_SECONDS", "9900"))
     deadline = time.time() + max_wait
     terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
     status = "Pending"
@@ -1232,7 +1248,7 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
               f"- Output folder: `{run_dir or '(not reported)'}`\n"
               f"- Reel: {title}\n\n"
               "Handed the finished reel to IRIS."),
-        task=f"{location or 'rotation pick'} / {region}",
+        task=f"{priority or 'rotation pick'} / {region}",
         tags=["imagineindia", "media", "reel", "production"],
     )
 
