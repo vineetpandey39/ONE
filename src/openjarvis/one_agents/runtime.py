@@ -28,7 +28,13 @@ AGENTS: dict[str, dict[str, str]] = {
     # First worker agent under a floor head — sits at an open desk on Floor 5
     # and is the one that actually drives LAO's KDP factory to completion.
     "scribe": {"name": "SCRIBE", "role": "KDP manuscript production worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
-    "ia": {"name": "IRIS", "role": "Media and content production/distribution operator across ImagineIndia and future brands", "floor_id": "4", "floor_name": "Media & Content (ImagineIndia)", "division": "media"},
+    "ia": {"name": "IRIS", "role": "Media and content production/distribution operator across ImagineIndia and future brands", "floor_id": "4", "floor_name": "Media & Content (ImagineIndia)", "division": "media", "seat": "head"},
+    # Floor 4's worker seat, added 2026-08-14 -- deliberately the same
+    # arrangement as HERMES/SCRIBE one floor up: IRIS decides what to shoot,
+    # MUSE actually drives LAO's ImagineIndia reel pipeline to completion and
+    # walks the finished reel back. ImagineIndia's own 3x/day LAO triggers are
+    # untouched; this is a second, on-demand way to run it through the floor.
+    "muse": {"name": "MUSE", "role": "ImagineIndia reel production worker", "floor_id": "4", "floor_name": "Media & Content (ImagineIndia)", "division": "media", "seat": "worker", "reports_to": "ia"},
     "ares": {"name": "ARES", "role": "SEO, social, and cross-floor distribution operator", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth"},
     "alfa": {"name": "ALFA", "role": "Pricing, funnels, and revenue-attribution operator", "floor_id": "2", "floor_name": "Commerce & Monetization", "division": "commerce"},
     "poseidon": {"name": "POSEIDON", "role": "Finance, HR, Admin, and Legal/Compliance operator", "floor_id": "1", "floor_name": "Corporate Services", "division": "corporate"},
@@ -442,6 +448,9 @@ def _run_apollo(job: dict[str, Any]) -> dict[str, Any]:
 
 
 KDP_PROCESS_NAME = "KDP Book Factory - Full Manuscript Draft"
+# Confirmed live against LAO's own /processes list (2026-08-14), not guessed --
+# LAO matches on the exact display name, so a near-miss silently fails to start.
+IA_PROCESS_NAME = "ImagineIndia Reel - Twice Daily Production"
 
 
 def _claude_research(prompt: str, max_tokens: int = 1400) -> tuple[str, str]:
@@ -917,13 +926,335 @@ def _run_titan(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
-    """Floor 4 - Media & Content (ImagineIndia). Pending LAO integration.
+    """Floor 4 head - decides the next reel, then hands it to MUSE.
 
-    The old body of this function (as _run_ia) ran the real IAAgent
-    image -> Leonardo video -> ffmpeg merge pipeline directly. Retired for
-    now, same reasoning as _run_hephaistos above.
+    Deliberately the same shape as _run_hermes one floor up: IRIS researches
+    what is worth shooting, walks the brief to the worker, and waits. MUSE
+    drives LAO's ImagineIndia pipeline to completion and walks the finished
+    reel back. IRIS then reports upward.
+
+    ``mode='report'`` is the third leg, enqueued by MUSE once the reel exists;
+    it is not something a person dispatches by hand.
+
+    ImagineIndia's own 3x/day LAO triggers are untouched by this -- they keep
+    running on their schedule. This is the on-demand path through the floor.
     """
-    return _local_plan(job)
+    task = str(job.get("task") or "")
+    mode = str(job.get("mode") or "plan").strip().lower()
+
+    if mode == "report":
+        return _iris_report(job)
+
+    stages.set_stage("ia", stages.RESEARCHING,
+                     task.strip()[:180] or "Choosing the next ImagineIndia reel")
+
+    # Same reasoning as HERMES reading its own prior titles: without this the
+    # floor cheerfully re-shoots a location it already published.
+    already = memory.prior_titles("4", "Media & Content (ImagineIndia)")
+    avoid = (
+        "\n\nAlready produced by this floor — do not repeat or closely "
+        "overlap these:\n" + "\n".join(f"- {t}" for t in already[:15])
+        if already else ""
+    )
+
+    brief, note = _claude_research(
+        "You are IRIS, head of Media & Content at a digital holding company, "
+        "commissioning the next ImagineIndia Instagram reel.\n\n"
+        f"Request: {task}\n\n"
+        "ImagineIndia posts cinematic short reels about real Indian places — "
+        "landmarks, local icons, water bodies. Decide what the next reel should "
+        "cover and why. Ground it in what actually performs: a recognisable "
+        "place, a genuine hook, and a reason to watch to the end. Do not invent "
+        "internal teams or tools — production is an automated pipeline.\n\n"
+        "Reply in exactly this shape:\n"
+        "LOCATION: <the specific place>\n"
+        "REGION: <Indian state or zone>\n"
+        "ANGLE: <one line — the hook this reel leads with>\n"
+        "BRIEF:\n"
+        "<6-12 lines: who it's for, why this place now, what the opening frame "
+        "should show, and the honest risk that it underperforms>"
+        + avoid
+    )
+
+    if not brief:
+        stages.clear_stage("ia")
+        fallback = _local_plan(job)
+        fallback["research_engine"] = "local planner"
+        fallback["claude_unavailable"] = note
+        return fallback
+
+    location = _marker(brief, "LOCATION")
+    region = _marker(brief, "REGION", "india").lower()
+    angle = _marker(brief, "ANGLE")
+
+    output_dir = _home() / "agent_outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{job['id']}.md"
+    output_path.write_text(
+        f"# IRIS — ImagineIndia Reel Brief\n\n"
+        f"Request: {task}\n\nResearched by: {os.environ.get('ONE_RESEARCH_MODEL', 'claude-haiku-4-5')}\n\n"
+        f"{brief}\n",
+        encoding="utf-8",
+    )
+
+    remembered = memory.remember(
+        agent="IRIS", floor_id="4", floor_name="Media & Content (ImagineIndia)",
+        kind="Reel Brief", body=brief, task=task,
+        tags=["imagineindia", "media", "reel"],
+    )
+
+    result: dict[str, Any] = {
+        "agent": "IRIS",
+        "mode": mode,
+        "research_engine": os.environ.get("ONE_RESEARCH_MODEL", "claude-haiku-4-5"),
+        "location": location,
+        "region": region,
+        "angle": angle,
+        "content": brief,
+        "output": str(output_path),
+        "vault_note": remembered.get("path"),
+        "prior_reels_considered": len(already),
+    }
+
+    # Same default as HERMES: dispatching the floor head means "get it done".
+    # Research-only is the explicit exception, asked for in plain words.
+    research_only = bool(re.search(r"\b(plan|draft|prepare|research)\b", task.lower()))
+    if research_only:
+        stages.clear_stage("ia")
+        result["handed_to"] = None
+        result["note"] = (
+            "Research only — nothing handed to MUSE, because the request asked "
+            "to plan/draft/research. Say it without those words (e.g. 'IRIS, "
+            "get the next reel done') to commission it for real."
+        )
+        return result
+
+    # --- the handoff ------------------------------------------------------
+    stages.set_stage("ia", stages.CARRYING_TO_WORKER,
+                     f"Taking the brief to MUSE: {(location or angle)[:60]}")
+    time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
+    stages.set_stage("ia", stages.BRIEFING,
+                     f"MUSE, shoot this one: {(location or angle)[:110]}")
+    time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
+
+    worker = enqueue_job(
+        "muse",
+        json.dumps({"brief_path": str(output_path), "location": location,
+                    "region": region, "angle": angle, "origin_job": job["id"]}),
+        mode="execute",
+        tier="fast",
+    )
+
+    stages.set_stage("ia", stages.AWAITING_WORKER,
+                     "Waiting on MUSE to produce the reel",
+                     worker_job=worker["id"])
+
+    result["handed_to"] = {"agent": "MUSE", "job_id": worker["id"]}
+    result["note"] = (
+        "Brief handed to MUSE, who will run LAO's ImagineIndia reel pipeline "
+        "to completion and hand the finished reel back."
+    )
+    return result
+
+
+def _iris_report(job: dict[str, Any]) -> dict[str, Any]:
+    """Third leg: MUSE has delivered, IRIS reports the result upward."""
+    stages.set_stage("ia", stages.REPORTING, "Reporting the finished reel")
+    try:
+        payload = json.loads(str(job.get("task") or "{}"))
+    except json.JSONDecodeError:
+        payload = {}
+
+    run_dir = payload.get("run_dir") or "(not reported by LAO)"
+    title = payload.get("title") or "(details in the run folder)"
+    published = bool(payload.get("published"))
+
+    message = (
+        f"Sir, the reel is finished. MUSE has handed it over.\n\n"
+        f"Reel: {title}\n"
+        f"Location: {run_dir}\n\n"
+        + ("It has been published to Instagram by the pipeline."
+           if published else
+           "It is produced and ready — publishing is whatever the LAO package "
+           "is configured to do; I have not touched it by hand.")
+    )
+
+    output_dir = _home() / "agent_outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{job['id']}.md"
+    output_path.write_text(f"# IRIS — Delivery Report\n\n{message}\n", encoding="utf-8")
+
+    remembered = memory.remember(
+        agent="IRIS", floor_id="4", floor_name="Media & Content (ImagineIndia)",
+        kind="Delivery Report",
+        body=f"{message}\n\nANGLE: {title}\n",
+        tags=["imagineindia", "media", "reel", "delivered"],
+    )
+
+    time.sleep(2.0)
+    stages.clear_stage("ia")
+    return {
+        "agent": "IRIS",
+        "mode": "report",
+        "content": message,
+        "run_dir": run_dir,
+        "title": title,
+        "published": published,
+        "output": str(output_path),
+        "vault_note": remembered.get("path"),
+    }
+
+
+def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 4 worker - runs LAO's ImagineIndia pipeline and waits for the reel.
+
+    Same shape as _run_scribe on Floor 5: this blocks on a long external LAO
+    job and polls it, so the floor genuinely shows the worker busy for as long
+    as the reel actually takes.
+    """
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+
+    try:
+        brief = json.loads(str(job.get("task") or "{}"))
+    except json.JSONDecodeError:
+        brief = {}
+    location = str(brief.get("location") or "").strip()
+    region = brief.get("region") or "india"
+    angle = str(brief.get("angle") or "").strip()
+    headline = location or angle
+
+    stages.set_stage("muse", stages.RECEIVING,
+                     f"Got it — {headline[:110]}" if headline
+                     else "Taking the brief from IRIS")
+    time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
+
+    tool = LaoOrchestratorTool()
+    process_name = os.environ.get("LAO_IA_PROCESS", IA_PROCESS_NAME)
+
+    stages.set_stage("muse", stages.EXECUTING,
+                     f"Starting the reel: {headline[:110]}" if headline
+                     else "Starting LAO ImagineIndia pipeline")
+
+    # The package normally picks its own location from IA_Locations.json via
+    # its day-of-week rotation. Passing locationOverride only when IRIS
+    # actually named one keeps the untouched scheduled runs behaving exactly
+    # as before -- an empty override must never blank out the rotation.
+    input_args: dict[str, Any] = {"region": region}
+    if location:
+        input_args["locationOverride"] = location
+    if angle:
+        input_args["angleOverride"] = angle
+
+    started = tool.execute(
+        action="start", mode="production", process_name=process_name,
+        scope="production",
+        input_args=input_args,
+    )
+    if not started.success:
+        stages.clear_stage("muse")
+        stages.clear_stage("ia")
+        raise RuntimeError(f"LAO refused the ImagineIndia run: {started.content}")
+    try:
+        start_payload = json.loads(started.content)
+    except json.JSONDecodeError:
+        start_payload = {"raw": started.content}
+    lao_job_id = ((start_payload.get("job") or {}).get("id")) or ""
+
+    # --- wait for the reel ------------------------------------------------
+    poll_seconds = float(os.environ.get("ONE_LAO_POLL_SECONDS", "30"))
+    max_wait = float(os.environ.get("ONE_IA_MAX_WAIT_SECONDS", "5400"))  # 1.5h
+    deadline = time.time() + max_wait
+    terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
+    status = "Pending"
+    last: dict[str, Any] = {}
+
+    while time.time() < deadline:
+        time.sleep(poll_seconds)
+        probe = tool.execute(action="status", process_name=process_name,
+                             scope="production", job_id=lao_job_id)
+        try:
+            last = json.loads(probe.content)
+        except json.JSONDecodeError:
+            last = {"raw": probe.content}
+        status = str((last.get("job") or {}).get("status") or status)
+        elapsed = int((time.time() - (deadline - max_wait)) // 60)
+        stages.set_stage(
+            "muse", stages.EXECUTING,
+            (f"Shooting “{headline[:70]}” · LAO {status} · {elapsed}m" if headline
+             else f"LAO job {status} · {elapsed}m"),
+            lao_job=lao_job_id)
+        if status in terminal:
+            break
+    else:
+        stages.clear_stage("muse")
+        stages.clear_stage("ia")
+        raise RuntimeError(
+            f"LAO ImagineIndia job did not finish within {max_wait/3600:.1f}h "
+            f"(last status: {status})"
+        )
+
+    if status != "Successful":
+        stages.clear_stage("muse")
+        stages.clear_stage("ia")
+        raise RuntimeError(f"LAO ImagineIndia job ended as {status}")
+
+    # Trust LAO's own response for what it produced -- same reasoning as
+    # SCRIBE: this process runs under a sandboxed runtime_home, so
+    # re-discovering the output folder locally would look in the wrong place.
+    out = ((last.get("job") or {}).get("output_result") or {})
+    reel = out.get("reel") or out.get("meta_publish") or {}
+    run_dir = str(reel.get("run_dir") or reel.get("output_dir") or "")
+    title = str(reel.get("title") or reel.get("location") or headline or "")
+    published = bool(reel.get("published") or reel.get("permalink"))
+
+    if not title:
+        # LAO said Successful but told us nothing identifiable -- report the
+        # job id rather than walking a phantom reel across the floor.
+        title = f"ImagineIndia reel (LAO job {lao_job_id[:8]})"
+
+    # --- walk the finished reel back to the floor head --------------------
+    stages.set_stage("muse", stages.CARRYING_TO_HEAD, f"Delivering: {title}")
+    time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
+    stages.set_stage("muse", stages.DELIVERING,
+                     f"It's done — “{title}” is finished.")
+    time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
+
+    celebration = f"“{title}” shipped! 🎉"
+    stages.set_stage("muse", stages.CELEBRATING, celebration)
+    stages.set_stage("ia", stages.CELEBRATING, celebration)
+    time.sleep(float(os.environ.get("ONE_CELEBRATION_SECONDS", "5")))
+
+    memory.remember(
+        agent="MUSE", floor_id="4", floor_name="Media & Content (ImagineIndia)",
+        kind="Production Run",
+        body=(f"Ran LAO's ImagineIndia reel pipeline to completion.\n\n"
+              f"- LAO job: `{lao_job_id}` — {status}\n"
+              f"- Output folder: `{run_dir or '(not reported)'}`\n"
+              f"- Reel: {title}\n\n"
+              "Handed the finished reel to IRIS."),
+        task=f"{location or 'rotation pick'} / {region}",
+        tags=["imagineindia", "media", "reel", "production"],
+    )
+
+    enqueue_job(
+        "ia",
+        json.dumps({"run_dir": run_dir, "title": title,
+                    "published": published, "lao_job": lao_job_id}),
+        mode="report", tier="fast",
+    )
+    stages.clear_stage("muse")
+
+    return {
+        "agent": "MUSE",
+        "mode": job.get("mode"),
+        "lao_job": lao_job_id,
+        "status": status,
+        "run_dir": run_dir,
+        "title": title,
+        "published": published,
+        "content": f"Reel finished: {title}",
+        "handed_to": {"agent": "IRIS"},
+    }
 
 
 def execute_job(job: dict[str, Any]) -> dict[str, Any]:
@@ -937,6 +1268,7 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         "hermes": _run_hermes,
         "scribe": _run_scribe,
         "ia": _run_iris,
+        "muse": _run_muse,
         "ares": _run_ares,
         "alfa": _run_alfa,
         "poseidon": _run_poseidon,
