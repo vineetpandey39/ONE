@@ -1747,7 +1747,13 @@ export function OneCockpit() {
           {!latestJobs.length && <p>No missions yet. Activate an agent by voice.</p>}
           {latestJobs.map((job) => (
             <article key={job.id} className={job.status}>
-              <div><strong>{job.agent_id.toUpperCase()}</strong><span>{job.status}</span></div>
+              {/* Show the agent's DISPLAY name, not its internal key. Several
+                  agents' keys are legacy and don't match what they're called:
+                  "ia" is IRIS, "jobhunt" is DAEDALUS. Rendering the raw key
+                  made a dispatch to IRIS show up as "IA" (reported live
+                  2026-08-15). The execution grid below already did this
+                  correctly via agent.name; this strip was the odd one out. */}
+              <div><strong>{status.agents.find((a) => a.id === job.agent_id)?.name ?? job.agent_id.toUpperCase()}</strong><span>{job.status}</span></div>
               <p>{job.task}</p>
               {jobResult(job) && <small className="one-alfa-result">{jobResult(job)}</small>}
               <div className="one-progress"><i style={{ width: `${job.progress}%` }} /></div>
