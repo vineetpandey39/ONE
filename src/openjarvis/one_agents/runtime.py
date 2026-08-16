@@ -314,6 +314,61 @@ def fail_job(job_id: str, error: Exception) -> None:
             pass
 
 
+def cancel_job(job_id: str) -> dict[str, Any]:
+    """User-initiated kill from the dashboard, for a job stuck queued/running
+    (e.g. a polling loop that went stale across a system sleep/wake cycle --
+    confirmed live 2026-08-16: a SCRIBE job's own row never advanced past
+    'running' even though the LAO job it was polling had long since finished,
+    because sleep/wake killed the polling coroutine without ever raising an
+    exception the normal fail_job() path would have caught).
+
+    Reuses the existing 'failed' status (already rendered correctly
+    everywhere -- the dashboard's job cards, the agent-execution grid) rather
+    than introducing a new status value that would need matching UI/CSS
+    support nobody has written yet.
+
+    If this is a SCRIBE job with a LAO job attached (recorded in
+    agent_stages.json while `_run_scribe` polls), also asks LAO to stop that
+    job -- otherwise the underlying multi-hour pipeline just keeps running
+    unattended even after the dashboard says it's dead. Best-effort: a LAO
+    API failure here still lets the local job get marked cancelled.
+    """
+    job = get_job(job_id)
+    if not job:
+        raise ValueError(f"Unknown job: {job_id}")
+    if job["status"] not in {"queued", "running"}:
+        raise ValueError(f"Job {job_id} is already {job['status']}, nothing to cancel")
+
+    lao_job_id = ""
+    if job["agent_id"] == "scribe":
+        scribe_stage = stages.get_stages().get("scribe") or {}
+        if scribe_stage.get("worker_job") == job_id or not scribe_stage.get("worker_job"):
+            lao_job_id = str(scribe_stage.get("lao_job") or "")
+
+    if lao_job_id:
+        try:
+            from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+
+            process_name = os.environ.get("LAO_KDP_PROCESS", KDP_PROCESS_NAME)
+            LaoOrchestratorTool().execute(
+                action="stop", process_name=process_name, scope="production", job_id=lao_job_id,
+            )
+        except Exception:  # noqa: BLE001 - local cancel must still succeed even if LAO is unreachable
+            pass
+
+    with _connect() as db:
+        db.execute(
+            "UPDATE jobs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?",
+            (f"Cancelled by user from the dashboard{' (LAO job ' + lao_job_id + ' stop requested)' if lao_job_id else ''}", _now(), job_id),
+        )
+
+    stages.clear_stage(job["agent_id"])
+    if job["agent_id"] == "scribe":
+        stages.clear_stage("hermes")
+
+    return get_job(job_id) or {}
+
+
 def _resolve_planner_model(tier: str) -> tuple[str, str]:
     """Resolve (model, engine) for a planner call.
 

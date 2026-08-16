@@ -474,6 +474,28 @@ export function OneCockpit() {
     }
   }, []);
 
+  // Dashboard "kill job" action. A queued/running job can get stuck forever
+  // if the process polling it goes stale -- confirmed live 2026-08-16: a
+  // system sleep/wake cycle killed a SCRIBE job's polling loop without ever
+  // raising the exception that would have marked it failed normally, so it
+  // sat showing RUNNING for hours after the underlying LAO pipeline had
+  // actually finished. Previously the only fix was asking Claude Code to
+  // manually poke the sqlite row.
+  const cancelJob = useCallback(async (jobId: string) => {
+    try {
+      const response = await coreFetch(`/v1/one/jobs/${jobId}/cancel`, { method: 'POST' });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        window.alert(`Could not cancel job: ${body.detail || response.statusText}`);
+        return;
+      }
+    } catch {
+      window.alert('Could not reach ONE to cancel the job.');
+      return;
+    }
+    refreshStatus();
+  }, [refreshStatus]);
+
   const refreshMemoryGraph = useCallback(async () => {
     try {
       const response = await coreFetch('/v1/one/memory-graph?limit=95', { cache: 'no-store' });
@@ -1753,7 +1775,20 @@ export function OneCockpit() {
                   made a dispatch to IRIS show up as "IA" (reported live
                   2026-08-15). The execution grid below already did this
                   correctly via agent.name; this strip was the odd one out. */}
-              <div><strong>{status.agents.find((a) => a.id === job.agent_id)?.name ?? job.agent_id.toUpperCase()}</strong><span>{job.status}</span></div>
+              <div>
+                <strong>{status.agents.find((a) => a.id === job.agent_id)?.name ?? job.agent_id.toUpperCase()}</strong>
+                <span>{job.status}</span>
+                {(job.status === 'running' || job.status === 'queued') && (
+                  <button
+                    type="button"
+                    className="one-job-kill"
+                    title="Cancel this stuck/running job"
+                    onClick={() => { if (window.confirm('Kill this job? If it has an in-progress LAO run attached, that gets stopped too.')) cancelJob(job.id); }}
+                  >
+                    Kill
+                  </button>
+                )}
+              </div>
               <p>{job.task}</p>
               {jobResult(job) && <small className="one-alfa-result">{jobResult(job)}</small>}
               <div className="one-progress"><i style={{ width: `${job.progress}%` }} /></div>
@@ -1774,7 +1809,20 @@ export function OneCockpit() {
               </div>
               {jobs.map((job) => (
                 <div key={job.id} className={`one-agent-run ${job.status}`}>
-                  <div><strong>{job.mode}</strong><span>{job.status}</span></div>
+                  <div>
+                    <strong>{job.mode}</strong>
+                    <span>{job.status}</span>
+                    {(job.status === 'running' || job.status === 'queued') && (
+                      <button
+                        type="button"
+                        className="one-job-kill"
+                        title="Cancel this stuck/running job"
+                        onClick={() => { if (window.confirm('Kill this job? If it has an in-progress LAO run attached, that gets stopped too.')) cancelJob(job.id); }}
+                      >
+                        Kill
+                      </button>
+                    )}
+                  </div>
                   <p>{job.task}</p>
                   {jobResult(job) && <small>{jobResult(job)}</small>}
                   {job.error && <em>{job.error}</em>}

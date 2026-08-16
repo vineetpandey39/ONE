@@ -150,9 +150,11 @@ body { margin: 0; background: #02060b; }
 .one-job-strip article { min-height: 114px; border: 1px solid #17384f; background: #050d17cc; padding: 13px; border-radius: 6px; }
 .one-job-strip article.running, .one-job-strip article.queued { border-color: #1e83b7; }
 .one-job-strip article.failed { border-color: #7a2c3b; }
-.one-job-strip article > div:first-child { display: flex; justify-content: space-between; }
+.one-job-strip article > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .one-job-strip strong { color: #73d9ff; font-size: 12px; letter-spacing: 1px; }
 .one-job-strip span { color: #7693a7; font-size: 9px; text-transform: uppercase; }
+.one-job-kill, .one-agent-execution-head + div .one-job-kill { margin-left: auto; border: 1px solid #7a2c3b; border-radius: 4px; background: #1a0a0e; color: #ff8795; font-size: 9px; letter-spacing: 0.5px; text-transform: uppercase; padding: 3px 7px; cursor: pointer; }
+.one-job-kill:hover { background: #7a2c3b; color: #fff; }
 .one-job-strip p { color: #a8c1d1; font-size: 11px; line-height: 1.35; height: 31px; overflow: hidden; }
 .one-job-strip em { color: #ff8795; font-size: 10px; }
 .one-alfa-result { display: block; margin: 5px 0 8px; color: #62e4ae; font-size: 10px; }

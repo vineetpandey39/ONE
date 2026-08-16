@@ -294,6 +294,21 @@ async def one_jobs():
     return {"jobs": list_jobs(30)}
 
 
+@router.post("/v1/one/jobs/{job_id}/cancel")
+async def one_cancel_job(job_id: str):
+    """Dashboard 'kill job' action -- a queued/running job can get stuck
+    forever if the process polling it goes stale (confirmed live
+    2026-08-16: a system sleep/wake cycle killed a SCRIBE job's polling loop
+    without ever raising the exception that would have marked it failed
+    normally). See runtime.cancel_job for what this actually does."""
+    from openjarvis.one_agents.runtime import cancel_job
+
+    try:
+        return cancel_job(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/v1/jobhunt/board")
 async def jobhunt_board(limit: int = 50):
     from openjarvis.one_agents.jobhunt import jobhunt_board as build_jobhunt_board
