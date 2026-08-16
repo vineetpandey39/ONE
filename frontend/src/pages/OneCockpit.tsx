@@ -251,7 +251,7 @@ export function OneCockpit() {
   // mouse but made this untestable via CDP automation (confirmed live
   // 2026-08-16: Input.dispatchMouseEvent and even a synthesized Return
   // keypress both timed out against an open confirm() dialog). Clicking
-  // Kill once arms it; a second click within 4s actually cancels; anything
+  // Kill once arms it; a second click within 6s actually cancels; anything
   // else (another click elsewhere, or the timeout) disarms it.
   const [pendingKillJobId, setPendingKillJobId] = useState<string | null>(null);
   const [command, setCommand] = useState('');
@@ -506,7 +506,7 @@ export function OneCockpit() {
     refreshStatus();
   }, [refreshStatus]);
 
-  // Click 1 arms the kill (shows "Confirm?"); click 2 within 4s fires it.
+  // Click 1 arms the kill (shows "Confirm?"); click 2 within 6s fires it.
   const handleKillClick = useCallback((jobId: string) => {
     if (pendingKillJobId === jobId) {
       cancelJob(jobId);
@@ -515,7 +515,7 @@ export function OneCockpit() {
     setPendingKillJobId(jobId);
     window.setTimeout(() => {
       setPendingKillJobId((current) => (current === jobId ? null : current));
-    }, 4000);
+    }, 6000);
   }, [pendingKillJobId, cancelJob]);
 
   const refreshMemoryGraph = useCallback(async () => {
