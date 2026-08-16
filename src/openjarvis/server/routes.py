@@ -664,8 +664,31 @@ def _one_agent_command(text: str) -> str | None:
     )
     if re.search(r"\b(publish|post)\b", lowered) and not publish_is_negated:
         mode = "publish"
-    elif re.search(r"\b(execute|generate|create|run)\b", lowered) and not re.search(r"\b(plan|draft|prepare)\b", lowered):
-        mode = "execute"
+    else:
+        # A bare mention of "plan"/"draft"/"prepare" only means "stay in plan
+        # mode" when it isn't itself negated. "Not just plan, execute" / "sirf
+        # plan nahi, execute karo" was being read as a plan-mode signal purely
+        # because the word "plan" appears in it, even though the sentence is
+        # explicitly asking for the opposite -- confirmed live (2026-08-16):
+        # every attempt to explicitly request execute mode by saying "not
+        # plan" stayed stuck in plan mode because of this. Also widened past
+        # the original execute|generate|create|run set to the same
+        # real-work verbs (commission/build/write/produce/deliver/finish/
+        # activate/dispatch) has_dispatch_verb above already treats as
+        # meaning "do the job", since e.g. "have it generated through his
+        # intern" or "commission SCRIBE to write it" clearly isn't a
+        # planning-only request either.
+        plan_signal = re.search(r"\b(plan|draft|prepare)\b", lowered)
+        plan_is_negated = bool(
+            re.search(r"\b(not|nahi|na)\s+(just\s+)?(plan|draft|prepare)\b", lowered)
+            or re.search(r"\b(plan|draft|prepare)\b\s+(nahi|na|not)\b", lowered)
+        )
+        execute_signal = re.search(
+            r"\b(execute|generate|create|run|commission|build|write|produce|deliver|finish|activate|dispatch)\b",
+            lowered,
+        )
+        if execute_signal and (not plan_signal or plan_is_negated):
+            mode = "execute"
 
     # Heavy tier is opt-in only — escalating to the cloud Nemotron model costs
     # NVIDIA NIM credits, so it must be asked for explicitly, not inferred.
