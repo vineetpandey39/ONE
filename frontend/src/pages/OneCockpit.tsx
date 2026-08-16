@@ -245,6 +245,15 @@ const CONNECTION_PRESETS: ConnectionPreset[] = [
 
 export function OneCockpit() {
   const [status, setStatus] = useState<OneStatus>(DEFAULT_STATUS);
+  // Two-click confirm for the dashboard "kill job" button, tracked in state
+  // rather than window.confirm() -- a native dialog blocks the page's JS
+  // thread while open, which is fine for a person clicking with a real
+  // mouse but made this untestable via CDP automation (confirmed live
+  // 2026-08-16: Input.dispatchMouseEvent and even a synthesized Return
+  // keypress both timed out against an open confirm() dialog). Clicking
+  // Kill once arms it; a second click within 4s actually cancels; anything
+  // else (another click elsewhere, or the timeout) disarms it.
+  const [pendingKillJobId, setPendingKillJobId] = useState<string | null>(null);
   const [command, setCommand] = useState('');
   const [lines, setLines] = useState<Line[]>([
     { role: 'one', text: 'ONE command core ready. Speak or type a command.' },
@@ -482,19 +491,32 @@ export function OneCockpit() {
   // actually finished. Previously the only fix was asking Claude Code to
   // manually poke the sqlite row.
   const cancelJob = useCallback(async (jobId: string) => {
+    setPendingKillJobId(null);
     try {
       const response = await coreFetch(`/v1/one/jobs/${jobId}/cancel`, { method: 'POST' });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
-        window.alert(`Could not cancel job: ${body.detail || response.statusText}`);
+        console.error('Could not cancel job:', body.detail || response.statusText);
         return;
       }
-    } catch {
-      window.alert('Could not reach ONE to cancel the job.');
+    } catch (err) {
+      console.error('Could not reach ONE to cancel the job:', err);
       return;
     }
     refreshStatus();
   }, [refreshStatus]);
+
+  // Click 1 arms the kill (shows "Confirm?"); click 2 within 4s fires it.
+  const handleKillClick = useCallback((jobId: string) => {
+    if (pendingKillJobId === jobId) {
+      cancelJob(jobId);
+      return;
+    }
+    setPendingKillJobId(jobId);
+    window.setTimeout(() => {
+      setPendingKillJobId((current) => (current === jobId ? null : current));
+    }, 4000);
+  }, [pendingKillJobId, cancelJob]);
 
   const refreshMemoryGraph = useCallback(async () => {
     try {
@@ -1781,11 +1803,11 @@ export function OneCockpit() {
                 {(job.status === 'running' || job.status === 'queued') && (
                   <button
                     type="button"
-                    className="one-job-kill"
-                    title="Cancel this stuck/running job"
-                    onClick={() => { if (window.confirm('Kill this job? If it has an in-progress LAO run attached, that gets stopped too.')) cancelJob(job.id); }}
+                    className={`one-job-kill${pendingKillJobId === job.id ? ' confirm' : ''}`}
+                    title={pendingKillJobId === job.id ? 'Click again to confirm' : 'Cancel this stuck/running job'}
+                    onClick={() => handleKillClick(job.id)}
                   >
-                    Kill
+                    {pendingKillJobId === job.id ? 'Confirm?' : 'Kill'}
                   </button>
                 )}
               </div>
@@ -1815,11 +1837,11 @@ export function OneCockpit() {
                     {(job.status === 'running' || job.status === 'queued') && (
                       <button
                         type="button"
-                        className="one-job-kill"
-                        title="Cancel this stuck/running job"
-                        onClick={() => { if (window.confirm('Kill this job? If it has an in-progress LAO run attached, that gets stopped too.')) cancelJob(job.id); }}
+                        className={`one-job-kill${pendingKillJobId === job.id ? ' confirm' : ''}`}
+                        title={pendingKillJobId === job.id ? 'Click again to confirm' : 'Cancel this stuck/running job'}
+                        onClick={() => handleKillClick(job.id)}
                       >
-                        Kill
+                        {pendingKillJobId === job.id ? 'Confirm?' : 'Kill'}
                       </button>
                     )}
                   </div>
