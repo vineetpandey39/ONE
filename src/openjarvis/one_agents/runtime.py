@@ -687,6 +687,7 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     the worker is genuinely busy for as long as the book takes.
     """
     from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+    from openjarvis.one_agents import lao_healer
 
     try:
         brief = json.loads(str(job.get("task") or "{}"))
@@ -706,9 +707,6 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
 
     # dryRun stays True: it still produces the full manuscript + images, and
     # KDP upload is a manual human gate that must never be automated.
-    stages.set_stage("scribe", stages.EXECUTING,
-                     f"Starting the book: {angle[:110]}" if angle
-                     else "Starting LAO KDP Book Factory")
     # LAO's workflow.yaml unconditionally runs its own trend research as its
     # first step and always overwrites the trend_snapshot the book-writing
     # step reads -- passing trend_snapshot directly in input_args never
@@ -721,80 +719,126 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     if angle:
         input_args["topicOverride"] = angle
 
-    started = tool.execute(
-        action="start", mode="dry_run", process_name=process_name,
-        scope="production",
-        input_args=input_args,
-    )
-    if not started.success:
-        stages.clear_stage("scribe")
-        stages.clear_stage("hermes")
-        raise RuntimeError(f"LAO refused the KDP run: {started.content}")
-    try:
-        start_payload = json.loads(started.content)
-    except json.JSONDecodeError:
-        start_payload = {"raw": started.content}
-    lao_job_id = ((start_payload.get("job") or {}).get("id")) or ""
-
-    # --- wait for the book ------------------------------------------------
-    poll_seconds = float(os.environ.get("ONE_LAO_POLL_SECONDS", "30"))
-    max_wait = float(os.environ.get("ONE_LAO_MAX_WAIT_SECONDS", "10800"))  # 3h
-    deadline = time.time() + max_wait
-    terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
-    status = "Pending"
+    # Declared before the nested attempt function and mutated via `nonlocal`
+    # (not returned) so a heal-and-retry cycle can still see the latest
+    # known job id / status payload even when an attempt raises instead of
+    # returning normally -- e.g. a file-lock heal needs the run_dir from
+    # the attempt that just failed, which only exists in that payload.
     last: dict[str, Any] = {}
-    consecutive_probe_failures = 0
-    # See the matching comment in _run_muse -- without this check, a failed
-    # status probe silently kept the last-known status forever instead of
-    # ever surfacing that polling itself had stopped succeeding.
-    max_consecutive_probe_failures = 5
+    lao_job_id = ""
 
-    while time.time() < deadline:
-        time.sleep(poll_seconds)
-        probe = tool.execute(action="status", process_name=process_name,
-                             scope="production", job_id=lao_job_id)
-        if not probe.success:
-            consecutive_probe_failures += 1
+    def _attempt_lao_run() -> tuple[str, dict[str, Any], str]:
+        """One full start+poll+terminal-status attempt. Raises RuntimeError
+        on any failure. Deliberately does NOT clear stages itself -- a
+        healed retry should keep SCRIBE visibly at work instead of
+        flickering back to idle between attempts."""
+        nonlocal last, lao_job_id
+        stages.set_stage("scribe", stages.EXECUTING,
+                         f"Starting the book: {angle[:110]}" if angle
+                         else "Starting LAO KDP Book Factory")
+        started = tool.execute(
+            action="start", mode="dry_run", process_name=process_name,
+            scope="production",
+            input_args=input_args,
+        )
+        if not started.success:
+            raise RuntimeError(f"LAO refused the KDP run: {started.content}")
+        try:
+            start_payload = json.loads(started.content)
+        except json.JSONDecodeError:
+            start_payload = {"raw": started.content}
+        lao_job_id = ((start_payload.get("job") or {}).get("id")) or ""
+
+        # --- wait for the book ---------------------------------------------
+        poll_seconds = float(os.environ.get("ONE_LAO_POLL_SECONDS", "30"))
+        max_wait = float(os.environ.get("ONE_LAO_MAX_WAIT_SECONDS", "10800"))  # 3h
+        deadline = time.time() + max_wait
+        terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
+        status = "Pending"
+        consecutive_probe_failures = 0
+        # See the matching comment in _run_muse -- without this check, a failed
+        # status probe silently kept the last-known status forever instead of
+        # ever surfacing that polling itself had stopped succeeding.
+        max_consecutive_probe_failures = 5
+
+        while time.time() < deadline:
+            time.sleep(poll_seconds)
+            probe = tool.execute(action="status", process_name=process_name,
+                                 scope="production", job_id=lao_job_id)
+            if not probe.success:
+                consecutive_probe_failures += 1
+                stages.set_stage(
+                    "scribe", stages.EXECUTING,
+                    f"Lost contact with LAO, retrying ({consecutive_probe_failures}/{max_consecutive_probe_failures})…",
+                    lao_job=lao_job_id)
+                if consecutive_probe_failures >= max_consecutive_probe_failures:
+                    raise RuntimeError(
+                        f"Lost contact with LAO after {consecutive_probe_failures} consecutive "
+                        f"failed status polls (last: {probe.content[:200]}) -- cannot confirm "
+                        "whether the underlying LAO job is still running."
+                    )
+                continue
+            consecutive_probe_failures = 0
+            try:
+                last = json.loads(probe.content)
+            except json.JSONDecodeError:
+                last = {"raw": probe.content}
+            status = str((last.get("job") or {}).get("status") or status)
+            # Keep the bubble beside SCRIBE honest about the long wait: what it is
+            # writing, and where LAO actually is.
+            elapsed = int((time.time() - (deadline - max_wait)) // 60)
             stages.set_stage(
                 "scribe", stages.EXECUTING,
-                f"Lost contact with LAO, retrying ({consecutive_probe_failures}/{max_consecutive_probe_failures})…",
+                (f"Writing “{angle[:70]}” · LAO {status} · {elapsed}m" if angle
+                 else f"LAO job {status} · {elapsed}m"),
                 lao_job=lao_job_id)
-            if consecutive_probe_failures >= max_consecutive_probe_failures:
-                stages.clear_stage("scribe")
-                stages.clear_stage("hermes")
-                raise RuntimeError(
-                    f"Lost contact with LAO after {consecutive_probe_failures} consecutive "
-                    f"failed status polls (last: {probe.content[:200]}) -- cannot confirm "
-                    "whether the underlying LAO job is still running."
-                )
-            continue
-        consecutive_probe_failures = 0
-        try:
-            last = json.loads(probe.content)
-        except json.JSONDecodeError:
-            last = {"raw": probe.content}
-        status = str((last.get("job") or {}).get("status") or status)
-        # Keep the bubble beside SCRIBE honest about the long wait: what it is
-        # writing, and where LAO actually is.
-        elapsed = int((time.time() - (deadline - max_wait)) // 60)
-        stages.set_stage(
-            "scribe", stages.EXECUTING,
-            (f"Writing “{angle[:70]}” · LAO {status} · {elapsed}m" if angle
-             else f"LAO job {status} · {elapsed}m"),
-            lao_job=lao_job_id)
-        if status in terminal:
-            break
-    else:
-        stages.clear_stage("scribe")
-        stages.clear_stage("hermes")
-        raise RuntimeError(
-            f"LAO KDP job did not finish within {max_wait/3600:.1f}h (last status: {status})"
-        )
+            if status in terminal:
+                break
+        else:
+            raise RuntimeError(
+                f"LAO KDP job did not finish within {max_wait/3600:.1f}h (last status: {status})"
+            )
 
-    if status != "Successful":
+        if status != "Successful":
+            raise RuntimeError(f"LAO KDP job ended as {status}")
+
+        return status, last, lao_job_id
+
+    # Up to 3 attempts total: the infrastructure failures lao_healer.heal()
+    # recognizes (stuck-busy robot, stale-code rejection, orphaned file
+    # lock) are transient and self-resolve once fixed, so a fresh attempt
+    # right after healing usually just works -- see lao_healer.py for why
+    # this exists instead of failing straight to a human every time.
+    max_attempts = 3
+    status = ""
+    final_error: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            status, last, lao_job_id = _attempt_lao_run()
+            final_error = None
+            break
+        except RuntimeError as exc:
+            final_error = exc
+            if attempt >= max_attempts:
+                break
+            heal_run_dir = str(
+                ((last.get("job") or {}).get("output_result") or {})
+                .get("book_draft", {})
+                .get("run_dir") or ""
+            )
+            healing = lao_healer.heal(str(exc), heal_run_dir)
+            stages.set_stage(
+                "scribe", stages.EXECUTING,
+                f"Hit a snag ({str(exc)[:60]}) — {healing['diagnosis'][:90]}",
+            )
+            if not healing["healed"]:
+                break
+            time.sleep(5)
+
+    if final_error is not None:
         stages.clear_stage("scribe")
         stages.clear_stage("hermes")
-        raise RuntimeError(f"LAO KDP job ended as {status}")
+        raise final_error
 
     # Prefer the run_dir/title LAO's own status response already carries --
     # it is authoritative (LAO's robot-worker knows exactly what it wrote)
