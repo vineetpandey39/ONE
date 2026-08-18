@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from openjarvis.one_agents import memory, stages
+from openjarvis.one_agents import floors_bridge, memory, stages
 
 
 AGENTS: dict[str, dict[str, str]] = {
@@ -35,6 +35,12 @@ AGENTS: dict[str, dict[str, str]] = {
     # walks the finished reel back. ImagineIndia's own 3x/day LAO triggers are
     # untouched; this is a second, on-demand way to run it through the floor.
     "muse": {"name": "MUSE", "role": "ImagineIndia reel production worker", "floor_id": "4", "floor_name": "Media & Content (ImagineIndia)", "division": "media", "seat": "worker", "reports_to": "ia"},
+    # Floor 4's second worker, added 2026-08-19. IRIS now serves two brands:
+    # MUSE produces ImagineIndia reels, KAIROS produces posts for the founder's
+    # own @aibyvineet channel. Which one gets a job is decided by the brand
+    # router in one-company/floors/floor_04_media, never by preference order --
+    # guessing wrong here means posting to the wrong account.
+    "kairos": {"name": "KAIROS", "role": "aibyvineet channel content production worker", "floor_id": "4", "floor_name": "Media & Content", "division": "media", "seat": "worker", "reports_to": "ia"},
     "ares": {"name": "ARES", "role": "SEO, social, and cross-floor distribution operator", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth"},
     "alfa": {"name": "ALFA", "role": "Pricing, funnels, and revenue-attribution operator", "floor_id": "2", "floor_name": "Commerce & Monetization", "division": "commerce"},
     "poseidon": {"name": "POSEIDON", "role": "Finance, HR, Admin, and Legal/Compliance operator", "floor_id": "1", "floor_name": "Corporate Services", "division": "corporate"},
@@ -1065,6 +1071,17 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     if mode == "report":
         return _iris_report(job)
 
+    # Floor 4 serves two brands with two workers. This routing is deliberately
+    # additive: an ImagineIndia request -- or anything the floors tree cannot
+    # answer -- falls straight through to the original path below, unchanged.
+    brand, question = floors_bridge.route_media(task, job)
+    if question:
+        return {"agent": "IRIS", "mode": mode, "content": question,
+                "handed_to": None,
+                "note": "Nothing dispatched - the brand was unclear."}
+    if brand and brand.get("slug") != "imagineindia":
+        return _iris_dispatch_brand(job, brand)
+
     stages.set_stage("ia", stages.RESEARCHING,
                      task.strip()[:180] or "Choosing the next ImagineIndia reel")
 
@@ -1418,6 +1435,102 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str, Any]:
+    """Hand a non-ImagineIndia Floor 4 brand to that brand's own worker.
+
+    Deliberately a separate path from the ImagineIndia flow in _run_iris: that
+    flow is live and produces real reels, so it is left exactly as it was.
+
+    IRIS coordinates here rather than producing. It does not run its own
+    research call for this brand -- the worker does that once, which is the
+    whole point of having a worker -- so a post costs one model call, not two.
+    """
+    task = str(job.get("task") or "")
+    mode = str(job.get("mode") or "plan").strip().lower()
+    worker_id = brand["worker_agent_id"]
+    display = brand.get("display_name", brand["slug"])
+
+    # stages.set_stage() keeps one record per agent_id, so a second concurrent
+    # flow would overwrite this head's own worker_job pointer and make the
+    # first flow invisible in the building. Decline with a reason instead.
+    busy = floors_bridge.media_head_busy("ia")
+    if busy:
+        detail = str(busy.get("detail") or "").strip()
+        return {
+            "agent": "IRIS", "mode": mode, "handed_to": None,
+            "content": (
+                f"I'm already mid-flow on the other brand ({busy.get('stage')}"
+                + (f" - {detail}" if detail else "")
+                + f"). Ask me again for {display} once that one lands; running "
+                "both at once would hide one of them."
+            ),
+            "note": "Declined to start a second Floor 4 flow.",
+        }
+
+    stages.set_stage("ia", stages.RESEARCHING,
+                     task.strip()[:180] or f"Choosing the next {display} post")
+
+    # Per-brand history, never the floor's. Reading ImagineIndia's titles here
+    # would make IRIS refuse an angle this channel has never published.
+    prior = memory.prior_titles("4", brand["vault_floor_name"])
+
+    stages.set_stage("ia", stages.CARRYING_TO_WORKER,
+                     f"Taking the {display} brief to {worker_id.upper()}")
+    time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
+    stages.set_stage("ia", stages.BRIEFING,
+                     f"{worker_id.upper()}, next {display} post: {task.strip()[:110]}")
+    time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
+
+    worker = enqueue_job(
+        worker_id,
+        json.dumps({"brand": brand["slug"], "angle": task.strip(),
+                    "priority": "", "prior_angles": prior[:15],
+                    "origin_job": job["id"]}),
+        mode="execute",
+        tier="fast",
+    )
+
+    stages.set_stage("ia", stages.AWAITING_WORKER,
+                     f"Waiting on {worker_id.upper()} to produce the {display} post",
+                     worker_job=worker["id"])
+
+    return {
+        "agent": "IRIS",
+        "mode": mode,
+        "brand": brand["slug"],
+        "content": f"Briefed {worker_id.upper()} on the next {display} post.",
+        "prior_posts_considered": len(prior),
+        "handed_to": {"agent": worker_id.upper(), "job_id": worker["id"]},
+        "note": (
+            f"{worker_id.upper()} will produce the plan and hand it back. "
+            "Nothing is published: that needs the channel registered in the "
+            "vault and OLYMPUS sign-off."
+        ),
+    }
+
+
+def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 4 worker for aibyvineet. Its logic lives in one-company/floors.
+
+    If that tree is unavailable this degrades to the local planner rather than
+    failing the job, so this repository still runs on its own.
+    """
+    kairos = floors_bridge.load("floor_04_media", "kairos_agent")
+    if kairos is None:
+        return _local_plan(job)
+    return kairos.run(
+        job,
+        kairos.Ports(
+            research=_claude_research,
+            remember=memory.remember,
+            set_stage=stages.set_stage,
+            clear_stage=stages.clear_stage,
+            enqueue=enqueue_job,
+            output_dir=_home() / "agent_outputs",
+        ),
+    )
+
+
 def execute_job(job: dict[str, Any]) -> dict[str, Any]:
     handlers = {
         "zeus": _run_zeus,
@@ -1430,6 +1543,7 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         "scribe": _run_scribe,
         "ia": _run_iris,
         "muse": _run_muse,
+        "kairos": _run_kairos,
         "ares": _run_ares,
         "alfa": _run_alfa,
         "poseidon": _run_poseidon,
