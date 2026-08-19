@@ -1474,11 +1474,18 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
     # would make IRIS refuse an angle this channel has never published.
     prior = memory.prior_titles("4", brand["vault_floor_name"])
 
+    # ``worker`` names who this handover is actually for. Without it the
+    # building can only guess, and a head briefing its second worker walks to
+    # the first worker's desk instead. Carried on the walking and briefing
+    # stages because that is exactly when the destination has to be known --
+    # worker_job below only exists after the job has been queued.
     stages.set_stage("ia", stages.CARRYING_TO_WORKER,
-                     f"Taking the {display} brief to {worker_id.upper()}")
+                     f"Taking the {display} brief to {worker_id.upper()}",
+                     worker=worker_id)
     time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
     stages.set_stage("ia", stages.BRIEFING,
-                     f"{worker_id.upper()}, next {display} post: {task.strip()[:110]}")
+                     f"{worker_id.upper()}, next {display} post: {task.strip()[:110]}",
+                     worker=worker_id)
     time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
 
     worker = enqueue_job(
@@ -1492,7 +1499,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
 
     stages.set_stage("ia", stages.AWAITING_WORKER,
                      f"Waiting on {worker_id.upper()} to produce the {display} post",
-                     worker_job=worker["id"])
+                     worker=worker_id, worker_job=worker["id"])
 
     return {
         "agent": "IRIS",
