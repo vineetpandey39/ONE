@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from openjarvis.one_agents import floors_bridge, memory, stages
+from openjarvis.one_agents import floors_bridge, job_recovery, memory, stages
 
 
 AGENTS: dict[str, dict[str, str]] = {
@@ -95,6 +95,9 @@ def _connect() -> sqlite3.Connection:
             connection.execute("ALTER TABLE jobs ADD COLUMN tier TEXT NOT NULL DEFAULT 'fast'")
         except sqlite3.OperationalError:
             pass  # Another worker already added it.
+    # Columns that let a job survive the worker process dying mid-poll. Same
+    # additive pattern as `tier` above; see job_recovery for what they carry.
+    job_recovery.ensure_columns(connection)
     connection.commit()
     return connection
 
@@ -788,27 +791,43 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     last: dict[str, Any] = {}
     lao_job_id = ""
 
-    def _attempt_lao_run() -> tuple[str, dict[str, Any], str]:
+    def _attempt_lao_run(resume_id: str = "") -> tuple[str, dict[str, Any], str]:
         """One full start+poll+terminal-status attempt. Raises RuntimeError
         on any failure. Deliberately does NOT clear stages itself -- a
         healed retry should keep SCRIBE visibly at work instead of
-        flickering back to idle between attempts."""
+        flickering back to idle between attempts.
+
+        With resume_id set, the start is skipped entirely and this polls a LAO
+        job that is already running -- the recovery path after a restart. The
+        poll loop below is identical either way, which is the point: recovery
+        reuses the ordinary path rather than a parallel one."""
         nonlocal last, lao_job_id
-        stages.set_stage("scribe", stages.EXECUTING,
-                         f"Starting the book: {angle[:110]}" if angle
-                         else "Starting LAO KDP Book Factory")
-        started = tool.execute(
-            action="start", mode="dry_run", process_name=process_name,
-            scope="production",
-            input_args=input_args,
-        )
-        if not started.success:
-            raise RuntimeError(f"LAO refused the KDP run: {started.content}")
-        try:
-            start_payload = json.loads(started.content)
-        except json.JSONDecodeError:
-            start_payload = {"raw": started.content}
-        lao_job_id = ((start_payload.get("job") or {}).get("id")) or ""
+        if resume_id:
+            lao_job_id = resume_id
+            stages.set_stage(
+                "scribe", stages.EXECUTING,
+                f"Picking the book back up — LAO job {resume_id[:8]} after a restart",
+                lao_job=resume_id)
+        else:
+            stages.set_stage("scribe", stages.EXECUTING,
+                             f"Starting the book: {angle[:110]}" if angle
+                             else "Starting LAO KDP Book Factory")
+            started = tool.execute(
+                action="start", mode="dry_run", process_name=process_name,
+                scope="production",
+                input_args=input_args,
+            )
+            if not started.success:
+                raise RuntimeError(f"LAO refused the KDP run: {started.content}")
+            try:
+                start_payload = json.loads(started.content)
+            except json.JSONDecodeError:
+                start_payload = {"raw": started.content}
+            lao_job_id = ((start_payload.get("job") or {}).get("id")) or ""
+            # Recorded before the first poll, not after it: the gap between
+            # starting the job and writing down its id is exactly the window
+            # where a restart loses the reference and the book is orphaned.
+            job_recovery.attach(_connect, job["id"], lao_job_id)
 
         # --- wait for the book ---------------------------------------------
         poll_seconds = float(os.environ.get("ONE_LAO_POLL_SECONDS", "30"))
@@ -824,6 +843,9 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
 
         while time.time() < deadline:
             time.sleep(poll_seconds)
+            # Says "this worker is still alive" to the restart sweep. Without
+            # it a long healthy poll looks exactly like an orphan.
+            job_recovery.heartbeat(_connect, job["id"])
             probe = tool.execute(action="status", process_name=process_name,
                                  scope="production", job_id=lao_job_id)
             if not probe.success:
@@ -875,7 +897,12 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     final_error: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
-            status, last, lao_job_id = _attempt_lao_run()
+            # Only the first attempt resumes. If that fails and the healer
+            # runs, the retry starts a genuinely fresh LAO job rather than
+            # re-attaching to one that just went wrong.
+            status, last, lao_job_id = _attempt_lao_run(
+                job_recovery.resume_target(job) if attempt == 1 else ""
+            )
             final_error = None
             break
         except RuntimeError as exc:
@@ -1361,20 +1388,34 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     # mode="dry_run" only avoids the tool's publish gate (mode="publish"
     # demands confirm_publish=true). What actually gets published is the
     # package's own publishMode default, which is manual_review.
-    started = tool.execute(
-        action="start", mode="dry_run", process_name=process_name,
-        scope="production",
-        input_args={},
-    )
-    if not started.success:
-        stages.clear_stage("muse")
-        stages.clear_stage("ia")
-        raise RuntimeError(f"LAO refused the ImagineIndia run: {started.content}")
-    try:
-        start_payload = json.loads(started.content)
-    except json.JSONDecodeError:
-        start_payload = {"raw": started.content}
-    lao_job_id = ((start_payload.get("job") or {}).get("id")) or ""
+    # A restart while this was polling leaves the LAO id on the job row. When
+    # it is there, re-attach to that run instead of starting a second one --
+    # the poll loop below is the same either way.
+    resume_id = job_recovery.resume_target(job)
+    if resume_id:
+        lao_job_id = resume_id
+        stages.set_stage(
+            "muse", stages.EXECUTING,
+            f"Picking the reel back up — LAO job {resume_id[:8]} after a restart",
+            lao_job=resume_id)
+    else:
+        started = tool.execute(
+            action="start", mode="dry_run", process_name=process_name,
+            scope="production",
+            input_args={},
+        )
+        if not started.success:
+            stages.clear_stage("muse")
+            stages.clear_stage("ia")
+            raise RuntimeError(f"LAO refused the ImagineIndia run: {started.content}")
+        try:
+            start_payload = json.loads(started.content)
+        except json.JSONDecodeError:
+            start_payload = {"raw": started.content}
+        lao_job_id = ((start_payload.get("job") or {}).get("id")) or ""
+        # Recorded before the first poll: the window between starting the run
+        # and writing down its id is where a restart orphans the reel.
+        job_recovery.attach(_connect, job["id"], lao_job_id)
 
     # --- wait for the reel ------------------------------------------------
     poll_seconds = float(os.environ.get("ONE_LAO_POLL_SECONDS", "30"))
@@ -1398,6 +1439,9 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
 
     while time.time() < deadline:
         time.sleep(poll_seconds)
+        # Says "this worker is still alive" to the restart sweep. Without it a
+        # long healthy poll looks exactly like an orphan.
+        job_recovery.heartbeat(_connect, job["id"])
         probe = tool.execute(action="status", process_name=process_name,
                              scope="production", job_id=lao_job_id)
         if not probe.success:
@@ -1662,6 +1706,23 @@ def _job_watchdog_seconds(job: dict[str, Any] | None = None) -> float:
 
 def run_worker(poll_seconds: float = 2.0) -> None:
     import threading
+
+    # A worker that dies mid-poll leaves its job in 'running' forever, because
+    # claim_job() only ever selects 'queued'. That is how every MUSE run and
+    # most SCRIBE runs were lost: the LAO job carried on and finished into a
+    # folder nothing collected. Sweep those before taking new work - a job with
+    # a recorded LAO id goes back to the queue and its handler re-attaches to
+    # the same external job, and one without a recorded id is failed rather
+    # than risking a duplicate multi-hour run.
+    try:
+        recovered = job_recovery.sweep(_connect)
+        for entry in recovered["resumed"] + recovered["failed"]:
+            stages.clear_stage(entry["agent_id"])
+        line = job_recovery.describe(recovered)
+        if line:
+            print(f"[one-agents] restart recovery -- {line}", flush=True)
+    except Exception as exc:  # noqa: BLE001 - recovery must never stop the worker
+        print(f"[one-agents] restart recovery skipped: {exc}", flush=True)
 
     last_schedule_check = 0.0
     while True:
