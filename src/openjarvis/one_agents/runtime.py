@@ -1069,6 +1069,14 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     mode = str(job.get("mode") or "plan").strip().lower()
 
     if mode == "report":
+        # The hand-back leg has to be routed too. _iris_report below is written
+        # for ImagineIndia specifically -- its wording, tags and vault folder
+        # are all that brand -- so a report from another brand's worker filed
+        # there wrongly, and its ANGLE line then polluted ImagineIndia's own
+        # dedupe history. Confirmed live 2026-08-20 on job kairos-2d421bff5888.
+        report_brand, _ = floors_bridge.route_media("", job)
+        if report_brand and report_brand.get("slug") != "imagineindia":
+            return _iris_report_brand(job, report_brand)
         return _iris_report(job)
 
     # Floor 4 serves two brands with two workers. This routing is deliberately
@@ -1242,6 +1250,64 @@ def _iris_report(job: dict[str, Any]) -> dict[str, Any]:
         "content": message,
         "run_dir": run_dir,
         "title": title,
+        "published": published,
+        "output": str(output_path),
+        "vault_note": remembered.get("path"),
+    }
+
+
+def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str, Any]:
+    """Third leg for a Floor 4 brand that is not ImagineIndia.
+
+    Same shape as _iris_report, but every brand-specific detail comes from the
+    brand record instead of being hardcoded: the vault folder, the tags, and
+    the wording. Keeping this separate leaves the ImagineIndia report exactly
+    as it was rather than making one function serve two voices badly.
+    """
+    stages.set_stage("ia", stages.REPORTING,
+                     f"Reporting the finished {brand.get('display_name', brand['slug'])} post")
+    try:
+        payload = json.loads(str(job.get("task") or "{}"))
+    except json.JSONDecodeError:
+        payload = {}
+
+    display = brand.get("display_name", brand["slug"])
+    worker = str(payload.get("worker") or brand["worker_agent_id"]).upper()
+    title = payload.get("title") or "(details in the plan)"
+    fmt = payload.get("format") or "post"
+    output = payload.get("output") or "(not reported)"
+    published = bool(payload.get("published"))
+    blocked = payload.get("publish_blocked_reason") or ""
+
+    message = (
+        f"Sir, the {display} {fmt} is ready. {worker} has handed it over.\n\n"
+        f"Angle: {title}\n"
+        f"Plan: {output}\n\n"
+        + ("It has been published." if published else
+           f"It is not published. {blocked}".strip())
+    )
+
+    output_dir = _home() / "agent_outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{job['id']}.md"
+    output_path.write_text(f"# IRIS — Delivery Report ({display})\n\n{message}\n", encoding="utf-8")
+
+    remembered = memory.remember(
+        agent="IRIS", floor_id="4", floor_name=brand["vault_floor_name"],
+        kind="Delivery Report",
+        body=f"{message}\n\nANGLE: {title}\n",
+        tags=[brand["slug"], "media", str(fmt).lower(), "delivered"],
+    )
+
+    time.sleep(2.0)
+    stages.clear_stage("ia")
+    return {
+        "agent": "IRIS",
+        "mode": "report",
+        "brand": brand["slug"],
+        "content": message,
+        "title": title,
+        "format": fmt,
         "published": published,
         "output": str(output_path),
         "vault_note": remembered.get("path"),
