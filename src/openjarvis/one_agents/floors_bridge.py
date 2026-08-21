@@ -29,6 +29,40 @@ def floors_root() -> Path:
     return Path(override) if override else _DEFAULT_ROOT
 
 
+def registry() -> Any | None:
+    """The compiled floors index, or None when it cannot be trusted.
+
+    Returns None in three cases, all of them deliberate: the floors tree is
+    absent, the index has never been built, or the index is stale because the
+    tree changed after it was compiled. A stale registry is worse than no
+    registry - it answers confidently and wrongly - so this refuses it rather
+    than passing it on. Rebuild with ``python _registry/build_index.py``.
+
+    The module it returns is standard-library only, so it works in a process
+    that has no PyYAML.
+    """
+    registry_dir = floors_root() / "_registry"
+    module_path = registry_dir / "registry.py"
+    if not module_path.is_file():
+        return None
+    try:
+        if str(registry_dir) not in sys.path:
+            sys.path.insert(0, str(registry_dir))
+        spec = importlib.util.spec_from_file_location("one_floors_registry", module_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = sys.modules.get("one_floors_registry")
+        if module is None:
+            module = importlib.util.module_from_spec(spec)
+            sys.modules["one_floors_registry"] = module
+            spec.loader.exec_module(module)
+        module.check_fresh()
+        return module
+    except Exception:  # noqa: BLE001 - a broken registry must never break the queue
+        sys.modules.pop("one_floors_registry", None)
+        return None
+
+
 def load(floor_dir: str, module_name: str) -> Any | None:
     """Import ``<floors_root>/<floor_dir>/lib/<module_name>.py``.
 
