@@ -11,6 +11,51 @@ $pidFile = Join-Path $oneRoot "one-server.pid"
 $workerPidFile = Join-Path $oneRoot "one-worker.pid"
 $companyPidFile = Join-Path $oneRoot "one-company.pid"
 
+function Test-ProcessAlreadyRunning {
+    <#
+      Defense-in-depth check ON TOP OF the .pid file, keyed on what a
+      process ACTUALLY is (its command line / listening port) rather than
+      trusting a saved pid alone.
+
+      Confirmed live 2026-08-22: openjarvis serve, one_agent_worker.py and
+      one-company/server.py were each found running TWICE simultaneously --
+      once via .venv\Scripts\python.exe, once via the bundled
+      .python\cpython-...\python.exe. $pythonExe only ever resolves to ONE
+      of those per invocation (venv preferred if it exists), so a single
+      run of this script can't itself cause that pairing -- but the
+      Scheduled Task (ONE-AutoStart, fires at logon) can run this script
+      before the venv is ready (e.g. right after a fresh checkout/restore),
+      recording the *bundled* python's pid into the .pid file. Any later
+      run then finds venvPython exists, resolves $pythonExe to the venv
+      copy, reads the .pid file, sees the bundled-python pid is still
+      alive (Get-Process -Id only checks "does a process with this pid
+      exist", not "is it actually still this role"), so $running looks
+      true... except that specific edge only protects re-runs -- the FIRST
+      time the mismatch happens (or if the .pid file is stale/missing) the
+      pid-only check has nothing to compare against and launches a second
+      copy via whichever python resolves at that moment. Checking the
+      actual command line (or listening port) directly closes that gap
+      regardless of which python.exe wrote the .pid file, or whether it
+      wrote one at all.
+
+      Returns the matching pid (>0) if something is already running the
+      given role, 0 otherwise.
+    #>
+    param(
+        [string]$CommandLineMatch,
+        [int]$ListenPort = 0
+    )
+    if ($ListenPort -gt 0) {
+        $conn = Get-NetTCPConnection -LocalPort $ListenPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($conn) { return $conn.OwningProcess }
+    }
+    $match = Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine -like $CommandLineMatch } |
+        Select-Object -First 1
+    if ($match) { return $match.ProcessId }
+    return 0
+}
+
 function Get-SavedPid {
     <#
       Reads a .pid file and returns the pid, or 0 if there isn't a usable one.
@@ -135,6 +180,13 @@ $savedPid = Get-SavedPid $pidFile
 if ($savedPid -gt 0) {
     $running = $null -ne (Get-Process -Id $savedPid -ErrorAction SilentlyContinue)
 }
+if (-not $running) {
+    $foundPid = Test-ProcessAlreadyRunning -CommandLineMatch "*openjarvis.cli*serve*" -ListenPort 8000
+    if ($foundPid -gt 0) {
+        $running = $true
+        Set-Content -Path $pidFile -Value $foundPid
+    }
+}
 
 if (-not $running) {
     $process = Start-Process -FilePath $pythonExe `
@@ -151,6 +203,13 @@ $workerRunning = $false
 $savedWorkerPid = Get-SavedPid $workerPidFile
 if ($savedWorkerPid -gt 0) {
     $workerRunning = $null -ne (Get-Process -Id $savedWorkerPid -ErrorAction SilentlyContinue)
+}
+if (-not $workerRunning) {
+    $foundWorkerPid = Test-ProcessAlreadyRunning -CommandLineMatch "*one_agent_worker.py*"
+    if ($foundWorkerPid -gt 0) {
+        $workerRunning = $true
+        Set-Content -Path $workerPidFile -Value $foundWorkerPid
+    }
 }
 if (-not $workerRunning) {
     $worker = Start-Process -FilePath $pythonExe `
@@ -174,6 +233,13 @@ if (Test-Path $companyServer) {
         $savedCompanyPid = Get-SavedPid $companyPidFile
         if ($savedCompanyPid -gt 0) {
             $companyRunning = $null -ne (Get-Process -Id $savedCompanyPid -ErrorAction SilentlyContinue)
+        }
+        if (-not $companyRunning) {
+            $foundCompanyPid = Test-ProcessAlreadyRunning -CommandLineMatch "*one-company*server.py*" -ListenPort 8200
+            if ($foundCompanyPid -gt 0) {
+                $companyRunning = $true
+                Set-Content -Path $companyPidFile -Value $foundCompanyPid
+            }
         }
         if (-not $companyRunning) {
             $company = Start-Process -FilePath $pythonExe `
