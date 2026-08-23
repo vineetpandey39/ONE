@@ -670,35 +670,22 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     # --- the handoff ------------------------------------------------------
     # HERMES leaves its desk and walks the brief across the floor. These two
     # stages are short by nature; the building animates the walk between them.
-    stages.set_stage("hermes", stages.CARRYING_TO_WORKER,
-                     f"Taking the brief to SCRIBE: {angle[:60]}")
-    time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
-    stages.set_stage("hermes", stages.BRIEFING,
-                     f"SCRIBE, build this one: {angle[:110]}")
-    # Confirmed live (2026-08-22): SCRIBE's own RECEIVING stage used to only
-    # get set inside _run_scribe(), which doesn't run until the job queue
-    # worker (a separate process, polling on its own interval) actually
-    # dequeues the job below -- well after HERMES's BRIEFING sleep here has
-    # already finished and it's moved on to walking back. The building
-    # showed HERMES leaving before SCRIBE ever reacted. Set it here too, at
-    # the exact moment HERMES starts briefing, so both agents animate
-    # standing together instead of sequentially with a visible gap.
-    stages.set_stage("scribe", stages.RECEIVING,
-                     f"Taking the brief from HERMES: {angle[:110]}")
-    time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
-
-    worker = enqueue_job(
-        "scribe",
-        json.dumps({"brief_path": str(output_path), "kdp_mode": kdp_mode,
-                    "region": region, "angle": angle, "origin_job": job["id"]}),
-        mode="execute",
-        tier="fast",
+    # head_briefs_worker (stages.py) owns the CARRYING_TO_WORKER/BRIEFING/
+    # RECEIVING/AWAITING_WORKER choreography -- see its docstring for why
+    # this can't just be a bare set_stage/sleep/enqueue sequence per floor.
+    worker = stages.head_briefs_worker(
+        "hermes", "scribe",
+        carrying_detail=f"Taking the brief to SCRIBE: {angle[:60]}",
+        briefing_detail=f"SCRIBE, build this one: {angle[:110]}",
+        awaiting_detail="Waiting on SCRIBE to produce the manuscript",
+        enqueue=lambda: enqueue_job(
+            "scribe",
+            json.dumps({"brief_path": str(output_path), "kdp_mode": kdp_mode,
+                        "region": region, "angle": angle, "origin_job": job["id"]}),
+            mode="execute",
+            tier="fast",
+        ),
     )
-
-    # HERMES is now blocked on the worker — back at its desk, not idle.
-    stages.set_stage("hermes", stages.AWAITING_WORKER,
-                     "Waiting on SCRIBE to produce the manuscript",
-                     worker_job=worker["id"])
 
     result["handed_to"] = {"agent": "SCRIBE", "job_id": worker["id"]}
     result["note"] = (
@@ -771,13 +758,10 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     region = brief.get("region") or "global"
     angle = str(brief.get("angle") or "").strip()
 
-    # RECEIVING was already set (and its visual pause already happened)
-    # synchronously from HERMES's own handoff call above, before this job
-    # even reached the queue -- refresh the detail text now that we're
-    # actually processing it, but don't sleep again on top of that pause.
-    stages.set_stage("scribe", stages.RECEIVING,
-                     f"Got it — {angle[:110]}" if angle
-                     else "Taking the brief from HERMES")
+    stages.worker_confirms_receipt(
+        "scribe",
+        f"Got it — {angle[:110]}" if angle else "Taking the brief from HERMES",
+    )
 
     tool = LaoOrchestratorTool()
     process_name = os.environ.get("LAO_KDP_PROCESS", KDP_PROCESS_NAME)
@@ -1221,34 +1205,22 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         return result
 
     # --- the handoff ------------------------------------------------------
-    stages.set_stage("ia", stages.CARRYING_TO_WORKER,
-                     f"Taking the brief to MUSE: {(priority or angle)[:60]}")
-    time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
-    stages.set_stage("ia", stages.BRIEFING,
-                     f"MUSE, run the next reel: {(priority or angle)[:110]}")
-    # Confirmed live (2026-08-22): MUSE's own RECEIVING stage used to only
-    # get set inside _run_muse(), which doesn't run until the job queue
-    # worker (a separate process, polling on its own interval) actually
-    # dequeues the job below -- well after IRIS's BRIEFING sleep here has
-    # already finished and it's moved on to walking back. The building
-    # showed IRIS leaving before MUSE ever reacted. Set it here too, at the
-    # exact moment IRIS starts briefing, so both agents animate standing
-    # together instead of sequentially with a visible gap.
-    stages.set_stage("muse", stages.RECEIVING,
-                     f"Taking the brief from IRIS: {(priority or angle)[:110]}")
-    time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
-
-    worker = enqueue_job(
-        "muse",
-        json.dumps({"brief_path": str(output_path), "priority": priority,
-                    "region": region, "angle": angle, "origin_job": job["id"]}),
-        mode="execute",
-        tier="fast",
+    # head_briefs_worker (stages.py) owns the CARRYING_TO_WORKER/BRIEFING/
+    # RECEIVING/AWAITING_WORKER choreography -- see its docstring for why
+    # this can't just be a bare set_stage/sleep/enqueue sequence per floor.
+    worker = stages.head_briefs_worker(
+        "ia", "muse",
+        carrying_detail=f"Taking the brief to MUSE: {(priority or angle)[:60]}",
+        briefing_detail=f"MUSE, run the next reel: {(priority or angle)[:110]}",
+        awaiting_detail="Waiting on MUSE to produce the reel",
+        enqueue=lambda: enqueue_job(
+            "muse",
+            json.dumps({"brief_path": str(output_path), "priority": priority,
+                        "region": region, "angle": angle, "origin_job": job["id"]}),
+            mode="execute",
+            tier="fast",
+        ),
     )
-
-    stages.set_stage("ia", stages.AWAITING_WORKER,
-                     "Waiting on MUSE to produce the reel",
-                     worker_job=worker["id"])
 
     result["handed_to"] = {"agent": "MUSE", "job_id": worker["id"]}
     result["note"] = (
@@ -1382,13 +1354,10 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     angle = str(brief.get("angle") or "").strip()
     headline = angle or priority
 
-    # RECEIVING was already set (and its visual pause already happened)
-    # synchronously from IRIS's own handoff call above, before this job even
-    # reached the queue -- refresh the detail text now that we're actually
-    # processing it, but don't sleep again on top of that pause.
-    stages.set_stage("muse", stages.RECEIVING,
-                     f"Got it — {headline[:110]}" if headline
-                     else "Taking the brief from IRIS")
+    stages.worker_confirms_receipt(
+        "muse",
+        f"Got it — {headline[:110]}" if headline else "Taking the brief from IRIS",
+    )
 
     tool = LaoOrchestratorTool()
     process_name = os.environ.get("LAO_IA_PROCESS", IA_PROCESS_NAME)
@@ -1615,33 +1584,25 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
     # the first worker's desk instead. Carried on the walking and briefing
     # stages because that is exactly when the destination has to be known --
     # worker_job below only exists after the job has been queued.
-    stages.set_stage("ia", stages.CARRYING_TO_WORKER,
-                     f"Taking the {display} brief to {worker_id.upper()}",
-                     worker=worker_id)
-    time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
-    stages.set_stage("ia", stages.BRIEFING,
-                     f"{worker_id.upper()}, next {display} post: {task.strip()[:110]}",
-                     worker=worker_id)
-    # Same fix as the reel-flow handoff above: set the worker's RECEIVING
-    # stage synchronously here, at the moment IRIS starts briefing, instead
-    # of leaving it to _run_muse() (which only fires once the async job
-    # queue worker dequeues the job -- after IRIS has already moved on).
-    stages.set_stage(worker_id, stages.RECEIVING,
-                     f"Taking the {display} brief from IRIS: {task.strip()[:110]}")
-    time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
-
-    worker = enqueue_job(
-        worker_id,
-        json.dumps({"brand": brand["slug"], "angle": task.strip(),
-                    "priority": "", "prior_angles": prior[:15],
-                    "origin_job": job["id"]}),
-        mode="execute",
-        tier="fast",
+    # head_briefs_worker (stages.py) owns the CARRYING_TO_WORKER/BRIEFING/
+    # RECEIVING/AWAITING_WORKER choreography, including passing `worker=`
+    # through the walking/briefing stages so the building knows which desk
+    # to walk to -- see its docstring for why this can't just be a bare
+    # set_stage/sleep/enqueue sequence per floor.
+    worker = stages.head_briefs_worker(
+        "ia", worker_id,
+        carrying_detail=f"Taking the {display} brief to {worker_id.upper()}",
+        briefing_detail=f"{worker_id.upper()}, next {display} post: {task.strip()[:110]}",
+        awaiting_detail=f"Waiting on {worker_id.upper()} to produce the {display} post",
+        enqueue=lambda: enqueue_job(
+            worker_id,
+            json.dumps({"brand": brand["slug"], "angle": task.strip(),
+                        "priority": "", "prior_angles": prior[:15],
+                        "origin_job": job["id"]}),
+            mode="execute",
+            tier="fast",
+        ),
     )
-
-    stages.set_stage("ia", stages.AWAITING_WORKER,
-                     f"Waiting on {worker_id.upper()} to produce the {display} post",
-                     worker=worker_id, worker_job=worker["id"])
 
     return {
         "agent": "IRIS",
