@@ -675,6 +675,16 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
     stages.set_stage("hermes", stages.BRIEFING,
                      f"SCRIBE, build this one: {angle[:110]}")
+    # Confirmed live (2026-08-22): SCRIBE's own RECEIVING stage used to only
+    # get set inside _run_scribe(), which doesn't run until the job queue
+    # worker (a separate process, polling on its own interval) actually
+    # dequeues the job below -- well after HERMES's BRIEFING sleep here has
+    # already finished and it's moved on to walking back. The building
+    # showed HERMES leaving before SCRIBE ever reacted. Set it here too, at
+    # the exact moment HERMES starts briefing, so both agents animate
+    # standing together instead of sequentially with a visible gap.
+    stages.set_stage("scribe", stages.RECEIVING,
+                     f"Taking the brief from HERMES: {angle[:110]}")
     time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
 
     worker = enqueue_job(
@@ -761,10 +771,13 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     region = brief.get("region") or "global"
     angle = str(brief.get("angle") or "").strip()
 
+    # RECEIVING was already set (and its visual pause already happened)
+    # synchronously from HERMES's own handoff call above, before this job
+    # even reached the queue -- refresh the detail text now that we're
+    # actually processing it, but don't sleep again on top of that pause.
     stages.set_stage("scribe", stages.RECEIVING,
                      f"Got it — {angle[:110]}" if angle
                      else "Taking the brief from HERMES")
-    time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
 
     tool = LaoOrchestratorTool()
     process_name = os.environ.get("LAO_KDP_PROCESS", KDP_PROCESS_NAME)
@@ -1213,6 +1226,16 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
     stages.set_stage("ia", stages.BRIEFING,
                      f"MUSE, run the next reel: {(priority or angle)[:110]}")
+    # Confirmed live (2026-08-22): MUSE's own RECEIVING stage used to only
+    # get set inside _run_muse(), which doesn't run until the job queue
+    # worker (a separate process, polling on its own interval) actually
+    # dequeues the job below -- well after IRIS's BRIEFING sleep here has
+    # already finished and it's moved on to walking back. The building
+    # showed IRIS leaving before MUSE ever reacted. Set it here too, at the
+    # exact moment IRIS starts briefing, so both agents animate standing
+    # together instead of sequentially with a visible gap.
+    stages.set_stage("muse", stages.RECEIVING,
+                     f"Taking the brief from IRIS: {(priority or angle)[:110]}")
     time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
 
     worker = enqueue_job(
@@ -1359,10 +1382,13 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     angle = str(brief.get("angle") or "").strip()
     headline = angle or priority
 
+    # RECEIVING was already set (and its visual pause already happened)
+    # synchronously from IRIS's own handoff call above, before this job even
+    # reached the queue -- refresh the detail text now that we're actually
+    # processing it, but don't sleep again on top of that pause.
     stages.set_stage("muse", stages.RECEIVING,
                      f"Got it — {headline[:110]}" if headline
                      else "Taking the brief from IRIS")
-    time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
 
     tool = LaoOrchestratorTool()
     process_name = os.environ.get("LAO_IA_PROCESS", IA_PROCESS_NAME)
@@ -1596,6 +1622,12 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
     stages.set_stage("ia", stages.BRIEFING,
                      f"{worker_id.upper()}, next {display} post: {task.strip()[:110]}",
                      worker=worker_id)
+    # Same fix as the reel-flow handoff above: set the worker's RECEIVING
+    # stage synchronously here, at the moment IRIS starts briefing, instead
+    # of leaving it to _run_muse() (which only fires once the async job
+    # queue worker dequeues the job -- after IRIS has already moved on).
+    stages.set_stage(worker_id, stages.RECEIVING,
+                     f"Taking the {display} brief from IRIS: {task.strip()[:110]}")
     time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
 
     worker = enqueue_job(
