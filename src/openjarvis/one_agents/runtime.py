@@ -28,6 +28,13 @@ AGENTS: dict[str, dict[str, str]] = {
     # First worker agent under a floor head — sits at an open desk on Floor 5
     # and is the one that actually drives LAO's KDP factory to completion.
     "scribe": {"name": "SCRIBE", "role": "KDP manuscript production worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
+    # Floor 5's second worker, added 2026-08-26. Starts only after HERMES
+    # reports a finished book (the report leg SCRIBE hands back), same
+    # dual-worker-under-one-head shape as IRIS/MUSE/KAIROS on Floor 4.
+    # Deliberately a stub for now -- it proves the seat (receives the
+    # handoff, notes the book, clears back to idle) without inventing the
+    # actual lead-generation logic, which is a separate, later step.
+    "peitho": {"name": "PEITHO", "role": "KDP lead-generation and marketing worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
     "ia": {"name": "IRIS", "role": "Media and content production/distribution operator across ImagineIndia and future brands", "floor_id": "4", "floor_name": "Media & Content (ImagineIndia)", "division": "media", "seat": "head"},
     # Floor 4's worker seat, added 2026-08-14 -- deliberately the same
     # arrangement as HERMES/SCRIBE one floor up: IRIS decides what to shoot,
@@ -726,8 +733,27 @@ def _hermes_report(job: dict[str, Any]) -> dict[str, Any]:
         tags=["kdp", "publishing", "delivered", "awaiting-upload"],
     )
 
-    time.sleep(2.0)
-    stages.clear_stage("hermes")
+    # --- second handoff: HERMES walks the finished book to PEITHO ---------
+    # Same choreography as HERMES->SCRIBE in _run_hermes (head_briefs_worker
+    # owns the CARRYING/BRIEFING/RECEIVING/AWAITING_WORKER sequence -- see
+    # its docstring). Deliberately does NOT clear_stage("hermes") itself
+    # afterward: head_briefs_worker just set hermes to AWAITING_WORKER, and
+    # clearing it right back to idle here would erase that on the very next
+    # line -- the same "head leaves before worker reacts" bug this exists to
+    # prevent. PEITHO's own stub clears both stages once it (instantly, for
+    # now) finishes.
+    peitho_job = stages.head_briefs_worker(
+        "hermes", "peitho",
+        carrying_detail=f"Taking the finished book to PEITHO: {title[:60]}",
+        briefing_detail=f"PEITHO, the book's done -- start on {title[:100]}",
+        awaiting_detail="Reported to the Chairman; PEITHO is starting on it",
+        enqueue=lambda: enqueue_job(
+            "peitho",
+            json.dumps({"run_dir": run_dir, "title": title, "origin_job": job["id"]}),
+            mode="execute", tier="fast",
+        ),
+    )
+
     return {
         "agent": "HERMES",
         "mode": "report",
@@ -737,6 +763,57 @@ def _hermes_report(job: dict[str, Any]) -> dict[str, Any]:
         "output": str(output_path),
         "vault_note": remembered.get("path"),
         "requires_human": "Amazon KDP upload",
+        "handed_to": {"agent": "PEITHO", "job_id": peitho_job["id"]},
+    }
+
+
+def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 5's second worker -- starts once HERMES reports a finished book.
+
+    Deliberately a stub, per direct instruction (2026-08-26: "baithao desk
+    pe and then aage ka kaam karte hai" -- seat the worker now, design the
+    actual lead-generation logic later). This proves the seat is real: it
+    receives HERMES's handoff, records what it was given, and clears back
+    to idle -- without inventing reel-hook/ad-copy generation that hasn't
+    been designed yet. It also clears HERMES's AWAITING_WORKER stage, since
+    HERMES's own report job intentionally left it set (see the handoff
+    block in _hermes_report for why).
+    """
+    try:
+        payload = json.loads(str(job.get("task") or "{}"))
+    except json.JSONDecodeError:
+        payload = {}
+    title = str(payload.get("title") or "(untitled)")
+    run_dir = str(payload.get("run_dir") or "")
+
+    stages.worker_confirms_receipt("peitho", f"Got it -- starting on marketing for “{title}”")
+    stages.set_stage("peitho", stages.EXECUTING, f"Reviewing “{title}” for lead-generation hooks")
+    time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
+
+    remembered = memory.remember(
+        agent="PEITHO", floor_id="5", floor_name="Book Publishing (KDP)",
+        kind="Marketing Intake",
+        body=(
+            f"Received the finished book from HERMES.\n\n"
+            f"Title: {title}\nRun folder: {run_dir}\n\n"
+            "Lead-generation work (reel hooks, ad copy, distribution strategy) "
+            "is not yet implemented -- this run is the handoff seat only."
+        ),
+        task=f"book delivered: {title}",
+        tags=["kdp", "publishing", "marketing", "stub"],
+    )
+
+    stages.clear_stage("peitho")
+    stages.clear_stage("hermes")
+
+    return {
+        "agent": "PEITHO",
+        "mode": job.get("mode"),
+        "title": title,
+        "run_dir": run_dir,
+        "content": f"Received “{title}” from HERMES. Lead-generation logic not yet implemented.",
+        "vault_note": remembered.get("path"),
+        "note": "Stub worker -- seated and reachable, no content-generation logic yet.",
     }
 
 
@@ -1651,6 +1728,7 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         "apollo": _run_apollo,
         "hermes": _run_hermes,
         "scribe": _run_scribe,
+        "peitho": _run_peitho,
         "ia": _run_iris,
         "muse": _run_muse,
         "kairos": _run_kairos,
