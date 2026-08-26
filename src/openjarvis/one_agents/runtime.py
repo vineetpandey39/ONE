@@ -315,6 +315,81 @@ def finish_job(job_id: str, result: dict[str, Any]) -> None:
             pass
 
 
+def mark_awaiting_upload(job_id: str, result: dict[str, Any]) -> None:
+    """SCRIBE's own execution is done, but the real-world action -- uploading
+    to kdp.amazon.com by hand, since there's no KDP API and automating that
+    submit is explicitly off the table (see _generate_kdp_packet) -- hasn't
+    happened yet. This holds the job open as 'awaiting_upload' instead of
+    'completed', so the dashboard keeps showing SCRIBE waiting rather than
+    looking finished while the actual publish step still sits with a human.
+    confirm_scribe_upload is what actually closes it out.
+    """
+    with _connect() as db:
+        db.execute(
+            "UPDATE jobs SET status = 'awaiting_upload', progress = 95, result = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(result, ensure_ascii=True), _now(), job_id),
+        )
+
+
+def confirm_scribe_upload(job_id: str) -> dict[str, Any]:
+    """Dashboard 'mark uploaded' action -- the Chairman confirms they actually
+    submitted the book on kdp.amazon.com by hand. Explicit call, 2026-08-26:
+    "jab book upload ho jayegi to SCRIBE ko message bhi dena hai ki wo book
+    handover kar sakta hai PEITHO ko tabhi database mn bhi update hoga" --
+    only this action enqueues PEITHO's job and finishes SCRIBE's; nothing
+    else does. Starting PEITHO before this (post-publish marketing) would
+    have nothing real to work from, since the book isn't actually live yet.
+    """
+    job = get_job(job_id)
+    if not job:
+        raise ValueError(f"Unknown job: {job_id}")
+    if job["agent_id"] != "scribe":
+        raise ValueError(f"Job {job_id} belongs to {job['agent_id']}, not scribe")
+    if job["status"] != "awaiting_upload":
+        raise ValueError(f"Job {job_id} is {job['status']}, not awaiting an upload confirmation")
+
+    try:
+        result = json.loads(job.get("result") or "{}")
+    except json.JSONDecodeError:
+        result = {}
+    run_dir = str(result.get("run_dir") or "")
+    title = str(result.get("title") or "")
+    lao_job_id = str(result.get("lao_job") or "")
+    kdp_packet_path = str((result.get("kdp_packet") or {}).get("path") or "")
+
+    celebration = f"“{title}” is live! 🎉" if title else "It's live! 🎉"
+    stages.set_stage("scribe", stages.CELEBRATING, celebration)
+    stages.set_stage("peitho", stages.CELEBRATING, celebration)
+    time.sleep(float(os.environ.get("ONE_CELEBRATE_SECONDS", "9")))
+    stages.clear_stage("scribe")
+
+    peitho_job = enqueue_job(
+        "peitho",
+        json.dumps({
+            "run_dir": run_dir, "title": title, "lao_job": lao_job_id,
+            "kdp_packet_path": kdp_packet_path,
+        }),
+        mode="execute", tier="fast",
+    )
+
+    result["uploaded_confirmed_at"] = _now()
+    result["handed_to"] = {"agent": "PEITHO", "job_id": peitho_job["id"]}
+    with _connect() as db:
+        db.execute(
+            "UPDATE jobs SET status = 'completed', progress = 100, result = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(result, ensure_ascii=True), _now(), job_id),
+        )
+
+    memory.remember(
+        agent="SCRIBE", floor_id="5", floor_name="Book Publishing (KDP)",
+        kind="Upload Confirmed",
+        body=f"Chairman confirmed “{title}” is live on Amazon KDP. Handed off to PEITHO.",
+        task=title, tags=["kdp", "publishing", "uploaded"],
+    )
+
+    return {"scribe_job": get_job(job_id), "peitho_job": peitho_job}
+
+
 def fail_job(job_id: str, error: Exception) -> None:
     with _connect() as db:
         db.execute(
@@ -733,27 +808,8 @@ def _hermes_report(job: dict[str, Any]) -> dict[str, Any]:
         tags=["kdp", "publishing", "delivered", "awaiting-upload"],
     )
 
-    # --- second handoff: HERMES walks the finished book to PEITHO ---------
-    # Same choreography as HERMES->SCRIBE in _run_hermes (head_briefs_worker
-    # owns the CARRYING/BRIEFING/RECEIVING/AWAITING_WORKER sequence -- see
-    # its docstring). Deliberately does NOT clear_stage("hermes") itself
-    # afterward: head_briefs_worker just set hermes to AWAITING_WORKER, and
-    # clearing it right back to idle here would erase that on the very next
-    # line -- the same "head leaves before worker reacts" bug this exists to
-    # prevent. PEITHO's own stub clears both stages once it (instantly, for
-    # now) finishes.
-    peitho_job = stages.head_briefs_worker(
-        "hermes", "peitho",
-        carrying_detail=f"Taking the finished book to PEITHO: {title[:60]}",
-        briefing_detail=f"PEITHO, the book's done -- start on {title[:100]}",
-        awaiting_detail="Reported to the Chairman; PEITHO is starting on it",
-        enqueue=lambda: enqueue_job(
-            "peitho",
-            json.dumps({"run_dir": run_dir, "title": title, "origin_job": job["id"]}),
-            mode="execute", tier="fast",
-        ),
-    )
-
+    time.sleep(2.0)
+    stages.clear_stage("hermes")
     return {
         "agent": "HERMES",
         "mode": "report",
@@ -763,21 +819,25 @@ def _hermes_report(job: dict[str, Any]) -> dict[str, Any]:
         "output": str(output_path),
         "vault_note": remembered.get("path"),
         "requires_human": "Amazon KDP upload",
-        "handed_to": {"agent": "PEITHO", "job_id": peitho_job["id"]},
     }
 
 
 def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
-    """Floor 5's second worker -- starts once HERMES reports a finished book.
+    """Floor 5's second worker -- starts once SCRIBE delivers a finished book.
 
-    Deliberately a stub, per direct instruction (2026-08-26: "baithao desk
-    pe and then aage ka kaam karte hai" -- seat the worker now, design the
-    actual lead-generation logic later). This proves the seat is real: it
-    receives HERMES's handoff, records what it was given, and clears back
-    to idle -- without inventing reel-hook/ad-copy generation that hasn't
-    been designed yet. It also clears HERMES's AWAITING_WORKER stage, since
-    HERMES's own report job intentionally left it set (see the handoff
-    block in _hermes_report for why).
+    Hands off directly from SCRIBE, not through HERMES (explicit call,
+    2026-08-26: "wo book ab dega le jake PEITHO ko instead of HERMES") --
+    KDP upload has no official API and stays a manual human step (see the
+    KDP submission packet SCRIBE prepares in _generate_kdp_packet), so
+    HERMES's "ready for upload" report has nothing new to add to this leg;
+    SCRIBE walks the book straight to PEITHO instead.
+
+    Deliberately a stub otherwise, per direct instruction (2026-08-26:
+    "baithao desk pe and then aage ka kaam karte hai" -- seat the worker
+    now, design the actual lead-generation logic later). This proves the
+    seat is real: it receives SCRIBE's handoff (including the KDP packet),
+    records what it was given, and clears back to idle -- without inventing
+    reel-hook/ad-copy generation that hasn't been designed yet.
     """
     try:
         payload = json.loads(str(job.get("task") or "{}"))
@@ -785,6 +845,7 @@ def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
         payload = {}
     title = str(payload.get("title") or "(untitled)")
     run_dir = str(payload.get("run_dir") or "")
+    kdp_packet_path = str(payload.get("kdp_packet_path") or "")
 
     stages.worker_confirms_receipt("peitho", f"Got it -- starting on marketing for “{title}”")
     stages.set_stage("peitho", stages.EXECUTING, f"Reviewing “{title}” for lead-generation hooks")
@@ -794,8 +855,9 @@ def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
         agent="PEITHO", floor_id="5", floor_name="Book Publishing (KDP)",
         kind="Marketing Intake",
         body=(
-            f"Received the finished book from HERMES.\n\n"
-            f"Title: {title}\nRun folder: {run_dir}\n\n"
+            f"Received the finished book from SCRIBE.\n\n"
+            f"Title: {title}\nRun folder: {run_dir}\n"
+            f"KDP submission packet: {kdp_packet_path or '(not generated)'}\n\n"
             "Lead-generation work (reel hooks, ad copy, distribution strategy) "
             "is not yet implemented -- this run is the handoff seat only."
         ),
@@ -804,17 +866,69 @@ def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
     )
 
     stages.clear_stage("peitho")
-    stages.clear_stage("hermes")
 
     return {
         "agent": "PEITHO",
         "mode": job.get("mode"),
         "title": title,
         "run_dir": run_dir,
-        "content": f"Received “{title}” from HERMES. Lead-generation logic not yet implemented.",
+        "kdp_packet_path": kdp_packet_path,
+        "content": f"Received “{title}” from SCRIBE. Lead-generation logic not yet implemented.",
         "vault_note": remembered.get("path"),
         "note": "Stub worker -- seated and reachable, no content-generation logic yet.",
     }
+
+
+def _generate_kdp_packet(title: str, kdp_mode: str, region: str, angle: str, run_dir: str) -> dict[str, Any]:
+    """Everything a human needs to paste into KDP's own wizard by hand.
+
+    Amazon has no API for KDP uploads/metadata (confirmed 2026-08-26 --
+    only Ads/Attribution APIs exist, and SP-API explicitly excludes KDP
+    data). The only way to fully automate the real submit is a headless
+    browser riding a live authenticated session to dodge Amazon's bot
+    detection -- a call the Chairman made explicitly not to build, even
+    with account-loss risk accepted, because it is standing automation of
+    a real form-submission/account action and a detection-evasion pattern,
+    neither of which per-instance authorization unlocks. So this is as far
+    as automation goes: SCRIBE prepares every field a human would otherwise
+    have to write from scratch, and a human still does the clicking.
+    """
+    packet, note = _claude_research(
+        "You are SCRIBE, producing the exact fields a human will paste into "
+        "Amazon KDP's Kindle eBook setup wizard for a finished manuscript. "
+        "There is no KDP API -- this packet is what gets typed in by hand.\n\n"
+        f"Title: {title}\nMode: {kdp_mode}\nRegion: {region}\nAngle: {angle}\n\n"
+        "Ground every field in what actually sells on KDP right now, not "
+        "generic advice. Reply in exactly this shape:\n"
+        "SUBTITLE: <or NONE>\n"
+        "DESCRIPTION:\n<150-300 word back-cover description in KDP's rich-"
+        "text style -- short paragraphs, one bolded hook line, plain text, "
+        "no markdown asterisks>\n"
+        "CATEGORIES:\n<3 real Amazon Kindle Store browse-category paths this "
+        "book fits, most-specific first, one per line>\n"
+        "KEYWORDS:\n<7 search-term phrases, one per line, each under 50 "
+        "characters, no repetition of words already in the title>\n"
+        "PRICE_USD: <a single list price, matching the current 70%-royalty "
+        "band $2.99-$12.99 on Amazon.com, calibrated to what comparable "
+        "titles in this genre/region actually sell at>\n"
+        "ROYALTY_PLAN: 70 | 35\n"
+    )
+    if not packet:
+        return {"generated": False, "note": note, "path": ""}
+
+    output_dir = _home() / "agent_outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    packet_path = output_dir / f"kdp-packet-{uuid.uuid4().hex[:8]}.md"
+    packet_path.write_text(
+        f"# KDP Submission Packet — {title}\n\n"
+        f"Run folder: {run_dir}\n\n"
+        "Paste these fields into kdp.amazon.com's Kindle eBook wizard by "
+        "hand -- there is no KDP API and the actual submit stays a manual "
+        "step.\n\n"
+        f"{packet}\n",
+        encoding="utf-8",
+    )
+    return {"generated": True, "content": packet, "path": str(packet_path)}
 
 
 def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
@@ -1019,23 +1133,18 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
         except RuntimeError:
             # LAO said "Successful" but the output can't actually be
             # confirmed -- do not walk a phantom book across the floor.
+            # HERMES, not PEITHO, is who's still blocked here -- the
+            # SCRIBE->PEITHO leg only exists after a successful handoff,
+            # which this failure never reaches.
             stages.clear_stage("scribe")
             stages.clear_stage("hermes")
             raise
 
-    # --- walk the finished book back to the floor head --------------------
-    stages.set_stage("scribe", stages.CARRYING_TO_HEAD, f"Delivering: {title}")
-    time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
-    stages.set_stage("scribe", stages.DELIVERING,
-                     f"It's done — “{title}” is finished.")
-    time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
-
-    # Both of them mark the moment. HERMES has been blocked on this since the
-    # briefing, so it drops AWAITING_WORKER and celebrates alongside SCRIBE.
-    celebration = f"“{title}” shipped! 🎉"
-    stages.set_stage("scribe", stages.CELEBRATING, celebration)
-    stages.set_stage("hermes", stages.CELEBRATING, celebration)
-    time.sleep(float(os.environ.get("ONE_CELEBRATE_SECONDS", "9")))
+    # KDP has no upload/metadata API (confirmed 2026-08-26) and the real
+    # submit stays a manual human step -- see _generate_kdp_packet's
+    # docstring for why. This is SCRIBE's actual deliverable for that step:
+    # every field a human needs, pre-written, ready to paste.
+    kdp_packet = _generate_kdp_packet(title, kdp_mode, region, angle, run_dir)
 
     memory.remember(
         agent="SCRIBE", floor_id="5", floor_name="Book Publishing (KDP)",
@@ -1043,18 +1152,33 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
         body=(f"Ran LAO's KDP Book Factory to completion.\n\n"
               f"- LAO job: `{lao_job_id}` — {status}\n"
               f"- Output folder: `{run_dir}`\n"
-              f"- Title: {title}\n\n"
-              "Handed the finished book to HERMES."),
+              f"- Title: {title}\n"
+              f"- KDP packet: {kdp_packet.get('path') or '(not generated: ' + str(kdp_packet.get('note')) + ')'}\n\n"
+              "Waiting on the Chairman to upload it to KDP by hand -- PEITHO's "
+              "post-publish work has nothing real to start on until then."),
         task=f"{kdp_mode} / {region}",
-        tags=["kdp", "publishing", "production"],
+        tags=["kdp", "publishing", "production", "awaiting-upload"],
     )
 
-    enqueue_job(
-        "hermes",
-        json.dumps({"run_dir": run_dir, "title": title, "lao_job": lao_job_id}),
-        mode="report", tier="fast",
+    # --- hold here; do NOT hand off to PEITHO yet --------------------------
+    # Explicit call, 2026-08-26: "SCRIBE ke pas se message tab tak na hate
+    # jab tak ye book upload na ho jaye" -- PEITHO's job is post-publish
+    # marketing, so starting it before the book is actually live on Amazon
+    # would have nothing real to work from. SCRIBE's stage stays set (not
+    # cleared) and its job stays open (not finished) until the Chairman
+    # confirms the upload via confirm_scribe_upload -- that is what actually
+    # celebrates with PEITHO, enqueues its job, and closes this one out. This
+    # deliberately does NOT block this thread waiting for that confirmation:
+    # the outer job watchdog (_job_watchdog_seconds) would eventually kill a
+    # thread that blocks for however long a human upload takes and mark it
+    # failed, which is exactly the "looks done, actually still running"
+    # confusion this whole mechanism exists to avoid. Returning here lets
+    # run_worker mark the row 'awaiting_upload' via the _await_human_upload
+    # flag below and free the worker thread immediately.
+    stages.set_stage(
+        "scribe", stages.AWAITING_UPLOAD,
+        f"“{title}” is ready — KDP packet done. Upload it, then mark it uploaded.",
     )
-    stages.clear_stage("scribe")
 
     return {
         "agent": "SCRIBE",
@@ -1063,7 +1187,11 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
         "lao_status": status,
         "run_dir": run_dir,
         "title": title,
-        "delivered_to": "HERMES",
+        "kdp_mode": kdp_mode,
+        "region": region,
+        "kdp_packet": kdp_packet,
+        "requires_human": "Amazon KDP upload -- mark it uploaded from the dashboard to hand off to PEITHO",
+        "_await_human_upload": True,
     }
 
 
@@ -1841,4 +1969,8 @@ def run_worker(poll_seconds: float = 2.0) -> None:
         if "error" in outcome:
             fail_job(job["id"], outcome["error"])
         else:
-            finish_job(job["id"], outcome.get("result", {}))
+            result = outcome.get("result", {})
+            if result.pop("_await_human_upload", False):
+                mark_awaiting_upload(job["id"], result)
+            else:
+                finish_job(job["id"], result)

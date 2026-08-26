@@ -254,6 +254,10 @@ export function OneCockpit() {
   // Kill once arms it; a second click within 6s actually cancels; anything
   // else (another click elsewhere, or the timeout) disarms it.
   const [pendingKillJobId, setPendingKillJobId] = useState<string | null>(null);
+  // In-flight guard for the "Mark Uploaded" button (SCRIBE, awaiting_upload
+  // jobs only) -- see confirmUpload below for why this doesn't need the
+  // two-click pattern pendingKillJobId uses.
+  const [confirmingUploadJobId, setConfirmingUploadJobId] = useState<string | null>(null);
   const [command, setCommand] = useState('');
   const [lines, setLines] = useState<Line[]>([
     { role: 'one', text: 'ONE command core ready. Speak or type a command.' },
@@ -517,6 +521,30 @@ export function OneCockpit() {
       setPendingKillJobId((current) => (current === jobId ? null : current));
     }, 6000);
   }, [pendingKillJobId, cancelJob]);
+
+  // Single click, unlike Kill -- this confirms real-world progress (the
+  // Chairman already uploaded the book), it doesn't destroy anything, so
+  // there's no accidental-click blast radius worth a two-click guard.
+  // The backend holds it a few seconds for the SCRIBE/PEITHO celebration
+  // choreography, so this tracks in-flight to disable the button meanwhile
+  // rather than letting a second click race the first.
+  const confirmUpload = useCallback(async (jobId: string) => {
+    setConfirmingUploadJobId(jobId);
+    try {
+      const response = await coreFetch(`/v1/one/jobs/${jobId}/confirm-upload`, { method: 'POST' });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        console.error('Could not confirm the upload:', body.detail || response.statusText);
+        return;
+      }
+    } catch (err) {
+      console.error('Could not reach ONE to confirm the upload:', err);
+      return;
+    } finally {
+      setConfirmingUploadJobId(null);
+    }
+    refreshStatus();
+  }, [refreshStatus]);
 
   const refreshMemoryGraph = useCallback(async () => {
     try {
@@ -1810,6 +1838,17 @@ export function OneCockpit() {
                     {pendingKillJobId === job.id ? 'Confirm?' : 'Kill'}
                   </button>
                 )}
+                {job.status === 'awaiting_upload' && (
+                  <button
+                    type="button"
+                    className="one-job-upload"
+                    title="Confirm you uploaded this book to kdp.amazon.com by hand, and hand it to PEITHO"
+                    disabled={confirmingUploadJobId === job.id}
+                    onClick={() => confirmUpload(job.id)}
+                  >
+                    {confirmingUploadJobId === job.id ? 'Confirming…' : 'Mark Uploaded'}
+                  </button>
+                )}
               </div>
               <p>{job.task}</p>
               {jobResult(job) && <small className="one-alfa-result">{jobResult(job)}</small>}
@@ -1842,6 +1881,17 @@ export function OneCockpit() {
                         onClick={() => handleKillClick(job.id)}
                       >
                         {pendingKillJobId === job.id ? 'Confirm?' : 'Kill'}
+                      </button>
+                    )}
+                    {job.status === 'awaiting_upload' && (
+                      <button
+                        type="button"
+                        className="one-job-upload"
+                        title="Confirm you uploaded this book to kdp.amazon.com by hand, and hand it to PEITHO"
+                        disabled={confirmingUploadJobId === job.id}
+                        onClick={() => confirmUpload(job.id)}
+                      >
+                        {confirmingUploadJobId === job.id ? 'Confirming…' : 'Mark Uploaded'}
                       </button>
                     )}
                   </div>

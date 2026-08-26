@@ -309,6 +309,21 @@ async def one_cancel_job(job_id: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/v1/one/jobs/{job_id}/confirm-upload")
+async def one_confirm_upload(job_id: str):
+    """Dashboard 'mark uploaded' action -- SCRIBE holds a finished book at
+    'awaiting_upload' (KDP has no upload API, so the Chairman does the real
+    submit by hand) instead of finishing its job outright. This is the only
+    thing that actually hands the book to PEITHO. See
+    runtime.confirm_scribe_upload for what it does."""
+    from openjarvis.one_agents.runtime import confirm_scribe_upload
+
+    try:
+        return confirm_scribe_upload(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/v1/jobhunt/board")
 async def jobhunt_board(limit: int = 50):
     from openjarvis.one_agents.jobhunt import jobhunt_board as build_jobhunt_board

@@ -35,6 +35,7 @@ CARRYING_TO_HEAD = "carrying_to_head"        # worker walking back, book in hand
 DELIVERING = "delivering"          # worker at the head's desk, handing over
 CELEBRATING = "celebrating"        # both of them, the moment a book ships
 REPORTING = "reporting"            # head reporting the result upward
+AWAITING_UPLOAD = "awaiting_upload"  # work is done; blocked on a human's real-world action (e.g. KDP upload)
 
 _TERMINAL = {IDLE}
 
