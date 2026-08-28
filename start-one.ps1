@@ -155,9 +155,12 @@ if (($env:ONE_FLUX_AUTOSTART -eq "true") -or ($env:ONE_IMAGE_PROVIDER -eq "flux"
         try {
             $fluxPidFile = Join-Path $oneRoot "one-flux.pid"
             $fluxRunning = $false
-            $savedFluxPid = Get-SavedPid $fluxPidFile
-            if ($savedFluxPid -gt 0) {
-                $fluxRunning = $null -ne (Get-Process -Id $savedFluxPid -ErrorAction SilentlyContinue)
+            $foundFluxPid = Test-ProcessAlreadyRunning -CommandLineMatch "*one_flux_server*" -ListenPort 8188
+            if ($foundFluxPid -gt 0) {
+                $fluxRunning = $true
+                Set-Content -Path $fluxPidFile -Value $foundFluxPid
+            } elseif (Test-Path $fluxPidFile) {
+                Remove-Item $fluxPidFile -Force -ErrorAction SilentlyContinue
             }
             if (-not $fluxRunning) {
                 $flux = Start-Process -FilePath $pythonExe `
@@ -175,17 +178,19 @@ if (($env:ONE_FLUX_AUTOSTART -eq "true") -or ($env:ONE_IMAGE_PROVIDER -eq "flux"
     }
 }
 
+# Identity is the ONLY authority for "is this already running". A saved pid
+# on its own proves nothing: Windows recycles pids, and on 2026-08-29 the
+# company building's .pid file held 1408, which the OS had since handed to
+# `wininit`. Get-Process -Id 1408 succeeded, so the old code concluded the
+# building was up and skipped starting it -- on every single boot. The .pid
+# file is now only ever WRITTEN from what we actually found, never trusted.
 $running = $false
-$savedPid = Get-SavedPid $pidFile
-if ($savedPid -gt 0) {
-    $running = $null -ne (Get-Process -Id $savedPid -ErrorAction SilentlyContinue)
-}
-if (-not $running) {
-    $foundPid = Test-ProcessAlreadyRunning -CommandLineMatch "*openjarvis.cli*serve*" -ListenPort 8000
-    if ($foundPid -gt 0) {
-        $running = $true
-        Set-Content -Path $pidFile -Value $foundPid
-    }
+$foundPid = Test-ProcessAlreadyRunning -CommandLineMatch "*openjarvis.cli*serve*" -ListenPort 8000
+if ($foundPid -gt 0) {
+    $running = $true
+    Set-Content -Path $pidFile -Value $foundPid
+} elseif (Test-Path $pidFile) {
+    Remove-Item $pidFile -Force -ErrorAction SilentlyContinue   # stale
 }
 
 if (-not $running) {
@@ -200,16 +205,12 @@ if (-not $running) {
 }
 
 $workerRunning = $false
-$savedWorkerPid = Get-SavedPid $workerPidFile
-if ($savedWorkerPid -gt 0) {
-    $workerRunning = $null -ne (Get-Process -Id $savedWorkerPid -ErrorAction SilentlyContinue)
-}
-if (-not $workerRunning) {
-    $foundWorkerPid = Test-ProcessAlreadyRunning -CommandLineMatch "*one_agent_worker.py*"
-    if ($foundWorkerPid -gt 0) {
-        $workerRunning = $true
-        Set-Content -Path $workerPidFile -Value $foundWorkerPid
-    }
+$foundWorkerPid = Test-ProcessAlreadyRunning -CommandLineMatch "*one_agent_worker.py*"
+if ($foundWorkerPid -gt 0) {
+    $workerRunning = $true
+    Set-Content -Path $workerPidFile -Value $foundWorkerPid
+} elseif (Test-Path $workerPidFile) {
+    Remove-Item $workerPidFile -Force -ErrorAction SilentlyContinue
 }
 if (-not $workerRunning) {
     $worker = Start-Process -FilePath $pythonExe `
@@ -229,17 +230,15 @@ $companyRoot = Join-Path $oneRoot "one-company"
 $companyServer = Join-Path $companyRoot "server.py"
 if (Test-Path $companyServer) {
     try {
+        # This is the block the recycled-pid bug actually broke: see the note
+        # above the ONE server check.
         $companyRunning = $false
-        $savedCompanyPid = Get-SavedPid $companyPidFile
-        if ($savedCompanyPid -gt 0) {
-            $companyRunning = $null -ne (Get-Process -Id $savedCompanyPid -ErrorAction SilentlyContinue)
-        }
-        if (-not $companyRunning) {
-            $foundCompanyPid = Test-ProcessAlreadyRunning -CommandLineMatch "*one-company*server.py*" -ListenPort 8200
-            if ($foundCompanyPid -gt 0) {
-                $companyRunning = $true
-                Set-Content -Path $companyPidFile -Value $foundCompanyPid
-            }
+        $foundCompanyPid = Test-ProcessAlreadyRunning -CommandLineMatch "*one-company*server.py*" -ListenPort 8200
+        if ($foundCompanyPid -gt 0) {
+            $companyRunning = $true
+            Set-Content -Path $companyPidFile -Value $foundCompanyPid
+        } elseif (Test-Path $companyPidFile) {
+            Remove-Item $companyPidFile -Force -ErrorAction SilentlyContinue
         }
         if (-not $companyRunning) {
             $company = Start-Process -FilePath $pythonExe `
