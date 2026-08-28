@@ -42,8 +42,19 @@ def registry() -> Any | None:
     that has no PyYAML.
     """
     registry_dir = floors_root() / "_registry"
-    module_path = registry_dir / "registry.py"
-    if not module_path.is_file():
+    # floor_registry.py first. It was called registry.py until a safety check
+    # found it colliding with _services/products/registry.py in a tree that
+    # imports flatly - whichever loaded first won, and gate.py's bare
+    # ``import registry`` could get the wrong one. The rename fixed that and
+    # silently broke this bridge, because a missing file returns None here by
+    # design and nothing complains. Both names are accepted now, so neither
+    # tree can disconnect the other by renaming alone.
+    module_path = next(
+        (p for p in (registry_dir / "floor_registry.py", registry_dir / "registry.py")
+         if p.is_file()),
+        None,
+    )
+    if module_path is None:
         return None
     try:
         if str(registry_dir) not in sys.path:
@@ -60,6 +71,178 @@ def registry() -> Any | None:
         return module
     except Exception:  # noqa: BLE001 - a broken registry must never break the queue
         sys.modules.pop("one_floors_registry", None)
+        return None
+
+
+def needs_approval(agent_id: str, action: str) -> bool | None:
+    """Does this agent need OLYMPUS before performing this action?
+
+    True  - stop and ask. The action is amber or red for this agent.
+    False - proceed. The agent's own permissions allow it outright.
+    None  - the floors tree is absent or its registry is stale, so this
+            cannot be answered. The caller decides what to do with that;
+            this module never raises and never guesses.
+
+    None is deliberately not False. An unanswerable question is not
+    permission, and a caller that treats it as permission has turned a
+    missing registry into an open door.
+    """
+    reg = registry()
+    if reg is None:
+        return None
+    try:
+        return bool(reg.needs_approval(agent_id, action))
+    except Exception:  # noqa: BLE001 - a broken registry must never break the queue
+        return None
+
+
+def agent_is_defined(agent_id: str) -> bool | None:
+    """Does this agent exist on a floor?
+
+    True  - it has a definition and the registry can see it.
+    False - the registry works and has never heard of this agent. It was
+            wired without being defined, so it carries no capabilities, no
+            approval tier and no audit.
+    None  - there is no floors tree, or its index is stale, so the question
+            cannot be answered here.
+
+    Callers must decide what None means for them; it is not the same answer
+    in every place. Dispatch treats it as allow, because a public clone has
+    no floors tree by design and refusing would stop every agent. The publish
+    gate treats it as hold, because refusing to publish costs a delay and
+    publishing wrongly cannot be undone.
+    """
+    reg = registry()
+    if reg is None:
+        return None
+    try:
+        return agent_id in reg.agents()
+    except Exception:  # noqa: BLE001 - a broken registry must never break the queue
+        return None
+
+
+def _service(package: str, module: str) -> Any | None:
+    """Import one module out of floors/_services, or None.
+
+    The services import each other flatly - `import ledger`, `import limits` -
+    so the package directory goes on sys.path rather than being imported as a
+    package. Same degradation rule as everything else here: absent tree, no
+    exception, None.
+    """
+    directory = floors_root() / "_services" / package
+    path = directory / f"{module}.py"
+    if not path.is_file():
+        return None
+    try:
+        if str(directory) not in sys.path:
+            sys.path.insert(0, str(directory))
+        key = f"one_floors_{package}_{module}"
+        cached = sys.modules.get(key)
+        if cached is not None:
+            return cached
+        spec = importlib.util.spec_from_file_location(key, path)
+        if spec is None or spec.loader is None:
+            return None
+        loaded = importlib.util.module_from_spec(spec)
+        sys.modules[key] = loaded
+        spec.loader.exec_module(loaded)
+        return loaded
+    except Exception:  # noqa: BLE001 - a broken service must never break the queue
+        sys.modules.pop(f"one_floors_{package}_{module}", None)
+        return None
+
+
+def may(agent_id: str, capability: str) -> bool | None:
+    """Is this agent allowed to use this capability?
+
+    True / False from the agent's own capabilities.yaml, which denies by
+    default. None when the registry cannot answer.
+
+    Callers on the execution path should treat None as allow, for the same
+    reason dispatch does: a public clone has no floors tree and refusing every
+    capability would stop the whole application. False is the answer that
+    means something - the agent's own file says no.
+    """
+    reg = registry()
+    if reg is None:
+        return None
+    try:
+        return bool(reg.may(agent_id, capability))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def audit(**fields: Any) -> bool:
+    """Append one record to the company's hash-chained audit log.
+
+    Returns True when it was written. Never raises, and never blocks the work
+    it is recording - an audit that can stop a job is a new way for the job to
+    fail, and this exists to observe rather than to interfere.
+
+    The record is validated before it is written, and validation refuses a
+    credential in any field, so a secret cannot be recorded by accident.
+    """
+    record = _service("audit", "record")
+    store = _service("audit", "store")
+    if record is None or store is None:
+        return False
+    try:
+        store.AuditStore().append(record.build(**fields))
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def budget_verdict(agent_id: str, floor_id: str | None = None,
+                   projected_cost: float | None = None,
+                   job: dict[str, Any] | None = None) -> Any | None:
+    """What the budget guard says about work that has not happened yet.
+
+    Returns the guard's own Verdict - it carries .allowed() and .explain() -
+    or None when the guard cannot be reached. The decision on projected spend
+    is checked before the call is made, because a limit discovered after the
+    money is gone is a report rather than a guardrail.
+    """
+    guard = _service("budget", "guard")
+    limits_mod = _service("budget", "limits")
+    audit_store = _service("audit", "store")
+    if guard is None or limits_mod is None or audit_store is None:
+        return None
+    try:
+        return guard.check(
+            limits=limits_mod.Limits(),
+            store=audit_store.AuditStore(),
+            agent_id=agent_id,
+            floor_id=floor_id,
+            job=job,
+            projected_cost=projected_cost,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def claim_once(idempotency_key: str, event_type: str | None = None) -> bool | None:
+    """Has this exact work already been claimed?
+
+    True  - first time, go ahead.
+    False - seen before, and doing it again would repeat a real effect.
+    None  - the dedupe store cannot be reached, so the question is unanswered.
+
+    A caller deciding what None means should think about what repeating costs.
+    Repeating a read is free; repeating a paid generation is not.
+    """
+    dedupe = _service("idempotency", "dedupe")
+    if dedupe is None:
+        return None
+    try:
+        claim = dedupe.DedupeStore().claim(idempotency_key, event_type=event_type)
+        # should_act is a property, not a method. Calling it raised
+        # TypeError: 'bool' object is not callable, which this module's own
+        # except swallowed into None - so the dedupe looked unreachable when
+        # it was working perfectly. Degrading quietly hides your own bugs as
+        # readily as somebody else's.
+        return bool(claim.should_act)
+    except Exception:  # noqa: BLE001
         return None
 
 

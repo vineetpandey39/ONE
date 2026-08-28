@@ -165,6 +165,32 @@ def enqueue_job(agent_id: str, task: str, mode: str = "plan", tier: str = "fast"
     agent_id = agent_id.strip().lower()
     if agent_id not in AGENTS:
         raise ValueError(f"Unknown agent: {agent_id}")
+
+    # Every job in ONE passes through here, which makes it the one place where
+    # "an agent must be defined on a floor before it can work" can be true by
+    # construction rather than by anybody remembering it.
+    #
+    # PEITHO was added straight to AGENTS with no floor definition and ran for
+    # days. A safety check found it afterwards, which is the only time a
+    # checker can find anything. This refuses it at the moment of dispatch.
+    #
+    # The None case is deliberately the opposite of the publish gate's, and the
+    # asymmetry is the point. There, None means "cannot tell whether this needs
+    # a person" and it holds, because refusing to publish costs a delay and
+    # publishing wrongly cannot be undone. Here, None means "there is no floors
+    # tree" - the ordinary state of a public clone, since that folder is not
+    # mirrored - and refusing would make the open-source repository unable to
+    # run any agent at all. So an absent registry allows, and a present one
+    # that has never heard of this agent refuses.
+    known = floors_bridge.agent_is_defined(agent_id)
+    if known is False:
+        raise ValueError(
+            f"{agent_id} has no floor definition. Define it under "
+            f"one-company/floors/floor_NN_*/agents/{agent_id}/ with agent.yaml, "
+            f"capabilities.yaml and permissions.yaml, rebuild the index with "
+            f"_registry/build_index.py, then dispatch. An agent wired without a "
+            f"floor inherits no capability check, no approval tier and no audit."
+        )
     mode = mode.strip().lower()
     # "report" is a real, implemented mode: _run_hermes dispatches it to
     # _hermes_report(), and SCRIBE enqueues it as the hand-back leg once a
@@ -832,12 +858,11 @@ def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
     HERMES's "ready for upload" report has nothing new to add to this leg;
     SCRIBE walks the book straight to PEITHO instead.
 
-    Deliberately a stub otherwise, per direct instruction (2026-08-26:
-    "baithao desk pe and then aage ka kaam karte hai" -- seat the worker
-    now, design the actual lead-generation logic later). This proves the
-    seat is real: it receives SCRIBE's handoff (including the KDP packet),
-    records what it was given, and clears back to idle -- without inventing
-    reel-hook/ad-copy generation that hasn't been designed yet.
+    Phase 1 of the lead-gen pipeline (2026-08-27 plan): writes 4 reel hook
+    scripts from the book's own outline via _generate_peitho_reel_scripts.
+    Phase 2 (actual video generation + Instagram auto-post) and Phase 3
+    (YouTube Shorts upload) are separate, larger builds -- see the plan doc
+    for why, and PEITHO's memory note below for what's still missing.
     """
     try:
         payload = json.loads(str(job.get("task") or "{}"))
@@ -848,9 +873,14 @@ def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
     kdp_packet_path = str(payload.get("kdp_packet_path") or "")
 
     stages.worker_confirms_receipt("peitho", f"Got it -- starting on marketing for “{title}”")
-    stages.set_stage("peitho", stages.EXECUTING, f"Reviewing “{title}” for lead-generation hooks")
-    time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
+    stages.set_stage("peitho", stages.EXECUTING, f"Writing reel hook scripts for “{title}”")
 
+    reel_scripts = _generate_peitho_reel_scripts(run_dir, title) if run_dir else {"generated": False, "note": "no run_dir", "angles": []}
+
+    generated_count = sum(1 for a in reel_scripts.get("angles", []) if a.get("generated"))
+    hooks_summary = "\n".join(
+        f"  {a['angle']}. {a.get('hook', '(failed)')[:100]}" for a in reel_scripts.get("angles", [])
+    )
     remembered = memory.remember(
         agent="PEITHO", floor_id="5", floor_name="Book Publishing (KDP)",
         kind="Marketing Intake",
@@ -858,11 +888,14 @@ def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
             f"Received the finished book from SCRIBE.\n\n"
             f"Title: {title}\nRun folder: {run_dir}\n"
             f"KDP submission packet: {kdp_packet_path or '(not generated)'}\n\n"
-            "Lead-generation work (reel hooks, ad copy, distribution strategy) "
-            "is not yet implemented -- this run is the handoff seat only."
+            f"Wrote {generated_count}/4 reel hook scripts to "
+            f"{reel_scripts.get('dir') or '(not generated)'}:\n{hooks_summary}\n\n"
+            "Phase 1 only (text scripts). Actual video generation + Instagram "
+            "auto-post (Phase 2) and YouTube Shorts upload (Phase 3) are "
+            "separate builds, not implemented yet -- see the PEITHO plan doc."
         ),
         task=f"book delivered: {title}",
-        tags=["kdp", "publishing", "marketing", "stub"],
+        tags=["kdp", "publishing", "marketing", "reel-scripts"],
     )
 
     stages.clear_stage("peitho")
@@ -873,10 +906,108 @@ def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
         "title": title,
         "run_dir": run_dir,
         "kdp_packet_path": kdp_packet_path,
-        "content": f"Received “{title}” from SCRIBE. Lead-generation logic not yet implemented.",
+        "reel_scripts": reel_scripts,
+        "content": f"Wrote {generated_count}/4 reel hook scripts for “{title}”.",
         "vault_note": remembered.get("path"),
-        "note": "Stub worker -- seated and reachable, no content-generation logic yet.",
+        "note": "Phase 1 (text scripts) done. Video generation/posting is Phase 2/3, not built yet.",
     }
+
+
+_PEITHO_ANGLE_ENTRY_POINTS = [
+    "Enter through the story's opening inciting incident -- ground it in the "
+    "first 1-3 beats of the outline below, the moment that kicks everything off.",
+    "Enter through a mid-story revelation or twist -- pull from the middle "
+    "beats of the outline, a moment where something the reader thought was "
+    "true turns out not to be.",
+    "Enter through a specific supporting character's discovery or point of "
+    "view -- find a beat where someone OTHER than the protagonist learns "
+    "something that changes the stakes.",
+    "Enter through how far this goes -- pull from the outline's final beats "
+    "(without spelling out the actual ending) to frame 'here's what she's up "
+    "against by the end', as a tension-raiser, not a spoiler.",
+]
+
+
+def _generate_peitho_reel_scripts(run_dir: str, title: str) -> dict[str, Any]:
+    """Four short-form video hook scripts, cut from the finished book's own
+    outline -- one Claude call per angle, not one call for all four.
+
+    Confirmed live 2026-08-27 on the KDP packet's own hybrid pipeline: a
+    single response asked to fill ~20 marked sections at once starts
+    literally echoing the placeholder syntax back instead of generating
+    real content for most of them. Four small, focused calls (one angle
+    each) don't hit that failure mode, and each angle gets its own
+    structural entry point (see _PEITHO_ANGLE_ENTRY_POINTS) so the four
+    don't all retread the same beat.
+
+    Reads outline.json (chapter-by-chapter beats -- already written by
+    SCRIBE's book-writing stage) rather than the full ~13-14k word
+    manuscript: the beats are exactly what a hook script needs, and keep
+    every prompt small. No video/image generation or posting happens here
+    -- see PEITHO's plan doc for why that's Phase 2, a separate build.
+    """
+    outline_path = Path(run_dir) / "outline.json"
+    try:
+        outline_data = json.loads(outline_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        return {"generated": False, "note": f"Could not read outline.json: {exc}", "angles": []}
+
+    genre = outline_data.get("genre", "")
+    tropes = outline_data.get("tropes", "")
+    premise = outline_data.get("premise", "")
+    outline_text = outline_data.get("outline", "")
+
+    scripts_dir = Path(run_dir) / "reel_scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+
+    angles: list[dict[str, Any]] = []
+    for i, entry_point in enumerate(_PEITHO_ANGLE_ENTRY_POINTS, start=1):
+        prompt = (
+            f"You are PEITHO, writing a short-form video (Instagram Reel / "
+            f"YouTube Short) hook script to sell the finished book \"{title}\", "
+            f"genre {genre}, tropes {tropes}.\n\n"
+            f"Premise: {premise}\n\nFull chapter outline:\n{outline_text}\n\n"
+            f"For THIS script: {entry_point}\n\n"
+            "Ground every beat in specific named characters/events from the "
+            "outline above -- never generic teaser language. The whole point "
+            "is a viewer feels they NEED to know what happens next and only "
+            "the book tells them. Never reveal how the story actually ends.\n\n"
+            "Reply in exactly this shape:\n"
+            "HOOK:\n<one line, the first 1-2 seconds on screen -- a pattern-"
+            "interrupt, not a scene-setter>\n"
+            "BEATS:\n<4-6 short lines, one beat per line, building tension in "
+            "order>\n"
+            "CLIFFHANGER:\n<one line, the cut -- ends mid-tension, not "
+            "resolved>\n"
+            "CAPTION:\n<1-2 sentence social caption>\n"
+            "HASHTAGS:\n<7 hashtags, one per line, no # repeated across "
+            "generic filler like #book #reading -- specific to this story's "
+            "genre/tropes>\n"
+            "CTA:\n<one line telling the viewer how to find the book>"
+        )
+        content, note = _claude_research(prompt, max_tokens=700)
+        if not content:
+            angles.append({"angle": i, "generated": False, "note": note, "path": ""})
+            continue
+
+        def extract(tag: str) -> str:
+            m = re.search(rf"{tag}:\s*\n?(.*?)(?=\n[A-Z]+:|\Z)", content, re.S)
+            return m.group(1).strip() if m else ""
+
+        angle_path = scripts_dir / f"angle-{i}.md"
+        angle_path.write_text(
+            f"# Reel Hook — Angle {i} — {title}\n\n"
+            f"**Hook:** {extract('HOOK')}\n\n"
+            f"**Beats:**\n{extract('BEATS')}\n\n"
+            f"**Cliffhanger:** {extract('CLIFFHANGER')}\n\n"
+            f"**Caption:** {extract('CAPTION')}\n\n"
+            f"**Hashtags:**\n{extract('HASHTAGS')}\n\n"
+            f"**CTA:** {extract('CTA')}\n",
+            encoding="utf-8",
+        )
+        angles.append({"angle": i, "generated": True, "path": str(angle_path), "hook": extract("HOOK")})
+
+    return {"generated": any(a.get("generated") for a in angles), "angles": angles, "dir": str(scripts_dir)}
 
 
 def _generate_kdp_packet(title: str, kdp_mode: str, region: str, angle: str, run_dir: str) -> dict[str, Any]:
@@ -1857,7 +1988,99 @@ def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+# The capability check asks whether an agent holds *any* capability, not
+# whether it holds one particular one.
+#
+# The first version required tool:invoke from everybody. That was wrong and
+# would have refused PEITHO on its first run: PEITHO does memory work, holds
+# memory:read and memory:write deliberately, and needs no tools at all. It
+# would have been refused for the wrong reason - not "this agent may not do
+# that" but "I checked the wrong thing" - which is the worse of the two,
+# because from outside the two look identical.
+#
+# _govern cannot know which capability a handler will reach for before it
+# runs, so it asks the only question it can honestly answer here: is this
+# agent capable of anything at all. That still refuses PIXEL, which is dormant
+# and declares nothing. Per-capability enforcement belongs at the point of
+# use, and is not pretended at from this distance.
+KNOWN_CAPABILITIES = (
+    "file:read", "file:write", "memory:read", "memory:write",
+    "tool:invoke", "network:fetch", "code:execute", "channel:send",
+    "schedule:create", "system:admin",
+)
+
+# Controls that do not belong on this path, tagged rather than left to look
+# like an oversight. NOT_APPLICABLE is not PASS, and the gate checker prints
+# it as its own outcome for the same reason the ledger keeps unpriced apart
+# from zero: an absence and a clean result are different facts.
+NOT_APPLICABLE: dict[str, str] = {
+    "release_gate": (
+        "certifies a product for release after a security and privacy review. "
+        "A KDP manuscript is not reviewed by ARGUS or AEGIS and never enters "
+        "the app lifecycle, so there is nothing here for the gate to certify."
+    ),
+    "event_taxonomy": (
+        "validates events against _contracts/events/taxonomy.yaml. This "
+        "runtime publishes no events at all - there is no bus - so validation "
+        "would have nothing to read. Adding one is a separate decision."
+    ),
+    "product_registry": (
+        "holds products with a lifecycle, cost and financials. Books are not "
+        "registered as products and the KDP path has no product_id. Whether "
+        "they should be is a modelling question, not a control that is missing."
+    ),
+}
+
+
+def _govern(job: dict[str, Any]) -> dict[str, Any] | None:
+    """Run every applicable control before the work happens.
+
+    Returns None to proceed, or a result dict that ends the job without the
+    handler ever running. Nothing here raises: a control that can crash the
+    worker is a new way to lose a job, and these exist to govern work rather
+    than to endanger it.
+
+    The order is deliberate. Idempotency first, because the cheapest thing to
+    get right is not doing paid work twice. Then capability, which is a flat
+    refusal. Then budget, which is the only one that can say "not now" rather
+    than "not you".
+    """
+    agent_id = job.get("agent_id", "")
+    job_id = job.get("id", "")
+
+    repeat = floors_bridge.claim_once(f"job:{job_id}", event_type="job.execute")
+    if repeat is False:
+        return {"governed": "refused",
+                "reason": "this job id has already been executed; repeating it "
+                          "would repeat whatever it paid for"}
+
+    answers = [floors_bridge.may(agent_id, c) for c in KNOWN_CAPABILITIES]
+    if any(a is None for a in answers):
+        pass                       # registry cannot answer; dispatch already allowed
+    elif not any(answers):
+        return {"governed": "refused",
+                "reason": f"{agent_id} holds no capability at all in its own "
+                          f"capabilities.yaml, which denies by default. An agent "
+                          f"that declares nothing can do nothing - which is what "
+                          f"dormant means, and it is a declaration rather than an "
+                          f"oversight."}
+
+    verdict = floors_bridge.budget_verdict(agent_id, str(job.get("floor_id") or ""), job=job)
+    if verdict is not None and not verdict.allowed:
+        return {"governed": "refused", "reason": verdict.explain()}
+
+    floors_bridge.audit(agent_id=agent_id, floor_id=str(job.get("floor_id") or "1"),
+                        job_id=job_id, correlation_id=job_id,
+                        action=job.get("mode") or "execute",
+                        approval_level="A0", status="started")
+    return None
+
+
 def execute_job(job: dict[str, Any]) -> dict[str, Any]:
+    refusal = _govern(job)
+    if refusal is not None:
+        return refusal
+
     handlers = {
         "zeus": _run_zeus,
         "athena": _run_athena,
@@ -1878,7 +2101,23 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         "argus": _run_argus,
     }
     handler = handlers.get(job["agent_id"], _local_plan)
-    return handler(job)
+    try:
+        result = handler(job)
+    except Exception as exc:  # noqa: BLE001 - recorded, then re-raised unchanged
+        floors_bridge.audit(agent_id=job.get("agent_id", ""),
+                            floor_id=str(job.get("floor_id") or "1"),
+                            job_id=job.get("id", ""), correlation_id=job.get("id", ""),
+                            action=job.get("mode") or "execute",
+                            approval_level="A0", status="failed",
+                            result=type(exc).__name__)
+        raise
+    floors_bridge.audit(agent_id=job.get("agent_id", ""),
+                        floor_id=str(job.get("floor_id") or "1"),
+                        job_id=job.get("id", ""), correlation_id=job.get("id", ""),
+                        action=job.get("mode") or "execute",
+                        approval_level="A0", status="succeeded",
+                        cost=result.get("cost_usd") if isinstance(result, dict) else None)
+    return result
 
 
 def _job_watchdog_seconds(job: dict[str, Any] | None = None) -> float:
@@ -1981,7 +2220,25 @@ def run_worker(poll_seconds: float = 2.0) -> None:
             fail_job(job["id"], outcome["error"])
         else:
             result = outcome.get("result", {})
+            # The gate is asked for, not asserted.
+            #
+            # _await_human_upload is the handler saying "I have reached the
+            # point where a person uploads this by hand". Whether that needs a
+            # person is not the handler's call - it is declared in the agent's
+            # permissions.yaml and resolved through the floors registry, where
+            # publish_to_store is red for SCRIBE. A handler that asserts its
+            # own gate is the same shape as an agent asserting its own
+            # privileges, and it fails the same way: silently, on the day
+            # somebody edits it.
+            #
+            # None means the registry could not answer - tree absent, index
+            # stale - and None is not permission. Hold, and let a person look.
             if result.pop("_await_human_upload", False):
-                mark_awaiting_upload(job["id"], result)
+                gated = floors_bridge.needs_approval(
+                    job.get("agent_id", ""), "publish_to_store")
+                if gated is False:
+                    finish_job(job["id"], result)
+                else:
+                    mark_awaiting_upload(job["id"], result)
             else:
                 finish_job(job["id"], result)
