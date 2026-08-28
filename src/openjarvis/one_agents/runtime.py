@@ -691,42 +691,6 @@ def _claude_research(prompt: str, max_tokens: int = 1400, model: str = "") -> tu
         return "", f"Claude call failed ({model}): {exc}"
 
 
-def _openai_research(prompt: str, max_tokens: int = 1400, model: str = "gpt-4o") -> tuple[str, str]:
-    """Ask OpenAI's API directly. Returns (text, failure_note); never raises.
-
-    Added 2026-08-28 after the Chairman rejected Claude/Haiku's reel-hook
-    scripts as flat book-blurb prose and, when I drove an actual chatgpt.com
-    session by hand per his direct instruction ("chatgpt karo... session
-    open karlo"), the web UI's output was genuinely better -- punchier,
-    more grounded. Browser-automating chatgpt.com for this on a schedule
-    isn't buildable right now (LAO's package/workflow.yaml authoring needs
-    a robot session token this session doesn't have -- confirmed via a
-    real 403 on the packages download endpoint, not a guess). Calling the
-    same company's models through their own API, using the OPENAI_API_KEY
-    already live in the vault for image-gen fallback (see tools/image_tool.py
-    for the identical client pattern), gets the same model family without
-    needing browser automation or LAO package access at all.
-    """
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        return "", "OPENAI_API_KEY is not in ONE's credential vault"
-    try:
-        import openai
-    except ImportError as exc:  # optional dep — surface it, never swallow
-        return "", f"openai package unavailable: {exc}"
-    try:
-        client = openai.OpenAI(api_key=api_key, http_client=httpx.Client(verify=False, timeout=90.0))
-        response = client.chat.completions.create(
-            model=model,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = (response.choices[0].message.content or "").strip()
-        return (text, "") if text else ("", f"{model} returned no text")
-    except Exception as exc:  # noqa: BLE001 - reported, not hidden
-        return "", f"OpenAI call failed ({model}): {exc}"
-
-
 def _marker(text: str, key: str, default: str = "") -> str:
     match = re.search(rf"^{key}:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
     return match.group(1).strip() if match else default
@@ -993,9 +957,130 @@ _PEITHO_ANGLE_ENTRY_POINTS = [
 ]
 
 
+# Same folder every existing chatgptLogin-using LAO process (KDP Book
+# Factory, ImagineIndia Reel, Daily LinkedIn Authority Post) already runs
+# under -- confirmed live via GET /processes 2026-08-29. get_credential
+# resolves assetName against whatever folder_id the job carries, so this
+# has to match or "chatgptLogin" won't be found.
+_PEITHO_LAO_FOLDER_ID = "446427d7-5722-4d59-a487-8de321325cbc"
+
+
+def _peitho_angle_prompt(title: str, genre: str, tropes: str, premise: str, outline_text: str, entry_point: str) -> str:
+    return (
+        f"You are a viral short-form video scriptwriter -- the kind who "
+        f"writes for creators with millions of followers, not a "
+        f"copywriter. Write a hook script to sell the finished book "
+        f"\"{title}\", genre {genre}, tropes {tropes}.\n\n"
+        f"Premise: {premise}\n\nFull chapter outline:\n{outline_text}\n\n"
+        f"For THIS script: {entry_point}\n\n"
+        "STYLE -- this is the part that actually matters. Every reel that "
+        "works sounds like someone talking fast and urgent, not a book "
+        "blurb read aloud:\n"
+        "- Short fragments. Not flowing sentences with commas stacked up. "
+        "Each beat is its own punch, one breath long.\n"
+        "- Second person or direct address where it lands harder: \"She "
+        "trusted him with everything.\" beats \"Nora Kessler had spent "
+        "three years confessing her deepest secrets to Dr. Voss.\"\n"
+        "- Open with a stopping-power line, not a scene-setter. Compare: "
+        "'He wasn't treating her. He was writing about her.' vs 'Dr. Voss "
+        "was her confidant for years.' The first one stops a thumb "
+        "mid-scroll. The second one is a synopsis.\n"
+        "- Cut fast between beats. No connective tissue like 'and then' "
+        "or 'as a result' -- just the next punch.\n"
+        "- Read every line out loud in your head before writing the next "
+        "one: if it sounds like it belongs on the back of the book "
+        "instead of spoken over a jump-cut, rewrite it.\n\n"
+        "Ground every beat in specific named characters/events from the "
+        "outline above -- never generic teaser language. The whole point "
+        "is a viewer feels they NEED to know what happens next and only "
+        "the book tells them. Never reveal how the story actually ends.\n\n"
+        "Reply in exactly this shape:\n"
+        "HOOK:\n<one line, the first 1-2 seconds on screen -- a "
+        "stopping-power line per the style notes above, not a "
+        "scene-setter>\n"
+        "BEATS:\n<4-6 short fragment lines, one beat per line, no "
+        "connective tissue, building tension in order>\n"
+        "CLIFFHANGER:\n<one line, the cut -- ends mid-tension, not "
+        "resolved>\n"
+        "CAPTION:\n<1-2 sentence social caption, same punchy register as "
+        "the hook, not a blurb>\n"
+        "HASHTAGS:\n<7 hashtags, one per line, no # repeated across "
+        "generic filler like #book #reading -- specific to this story's "
+        "genre/tropes>\n"
+        "CTA:\n<one line telling the viewer how to find the book>"
+    )
+
+
+def _run_peitho_lao_draft(angle_prompts: list[str]) -> tuple[dict[str, str], str]:
+    """Run all 4 angle prompts through LAO's own, already-logged-in ChatGPT
+    session -- reuses the exact `chatgptLogin` credential and production-
+    hardened `ask_chatgpt` action ImagineIndia and KDP Book Factory already
+    depend on daily, via LAO Studio's studio/run-draft endpoint (a raw step
+    list dispatched as a one-off job, no package/workflow.yaml authoring
+    needed). Returns ({angle_1: text, ...}, failure_note); failure_note is
+    "" on success.
+
+    Added 2026-08-29, replacing an earlier draft of this feature that stood
+    up a SECOND, separate ChatGPT browser profile inside ONE itself -- the
+    Chairman's own correction ("jo humara LAO wala hai usi ko use karo"):
+    LAO's robot already keeps a persistent, logged-in Chrome session for
+    exactly this, so there was nothing to duplicate.
+    """
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+
+    steps: list[dict[str, Any]] = [
+        {"action": "open_browser"},
+        {"action": "get_credential", "args": {"assetName": "chatgptLogin", "as": "credential"}},
+        {"action": "chatgpt_login_with_credential", "args": {"credential": "{{credential}}"}},
+    ]
+    for i, prompt in enumerate(angle_prompts, start=1):
+        if i > 1:
+            # A fresh chat per angle -- otherwise angle 2-4 would be written
+            # with angle 1's beats still in the same conversation's context.
+            steps.append({"action": "navigate", "args": {"url": "https://chatgpt.com/"}})
+        steps.append({"action": "ask_chatgpt", "args": {"prompt": prompt, "timeout_ms": 120000, "as": f"angle_{i}"}})
+
+    tool = LaoOrchestratorTool()
+    started = tool.execute(
+        action="run_draft", steps=steps,
+        draft_name="peitho-reel-hooks", folder_id=_PEITHO_LAO_FOLDER_ID,
+    )
+    if not started.success:
+        return {}, f"LAO draft dispatch failed: {started.content}"
+    try:
+        start_payload = json.loads(started.content)
+    except json.JSONDecodeError:
+        return {}, f"LAO draft dispatch returned unparseable response: {started.content[:300]}"
+    job_id = ((start_payload.get("job") or {}).get("id")) or ""
+    if not job_id:
+        return {}, f"LAO draft dispatch returned no job id: {started.content[:300]}"
+
+    poll_seconds = 15.0
+    max_wait_seconds = 900.0  # login + 4 chat turns; generous but not open-ended
+    deadline = time.time() + max_wait_seconds
+    terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
+    status = "Pending"
+    while time.time() < deadline:
+        time.sleep(poll_seconds)
+        probe = tool.execute(action="status", job_id=job_id, process_name="")
+        if not probe.success:
+            continue
+        try:
+            probe_payload = json.loads(probe.content)
+        except json.JSONDecodeError:
+            continue
+        job = probe_payload.get("job") or {}
+        status = str(job.get("status") or status)
+        if status in terminal:
+            if status != "Successful":
+                return {}, f"LAO draft job {job_id} ended as {status}"
+            return dict(job.get("output_result") or {}), ""
+    return {}, f"LAO draft job {job_id} did not finish within {max_wait_seconds:.0f}s (last status: {status})"
+
+
 def _generate_peitho_reel_scripts(run_dir: str, title: str) -> dict[str, Any]:
     """Four short-form video hook scripts, cut from the finished book's own
-    outline -- one Claude call per angle, not one call for all four.
+    outline -- one ChatGPT call per angle, not one call for all four.
 
     Confirmed live 2026-08-27 on the KDP packet's own hybrid pipeline: a
     single response asked to fill ~20 marked sections at once starts
@@ -1010,6 +1095,16 @@ def _generate_peitho_reel_scripts(run_dir: str, title: str) -> dict[str, Any]:
     manuscript: the beats are exactly what a hook script needs, and keep
     every prompt small. No video/image generation or posting happens here
     -- see PEITHO's plan doc for why that's Phase 2, a separate build.
+
+    Generation itself runs through LAO's own ChatGPT session (see
+    _run_peitho_lao_draft) -- the Chairman compared Claude, the OpenAI API,
+    and ChatGPT-the-product for this exact job and asked specifically for
+    the product, reached through LAO's existing credential rather than a
+    new login of our own. No direct-API fallback: PEITHO holds no
+    OPENAI_API_KEY/ANTHROPIC_API_KEY of its own (the vault rule enforced in
+    one-company/floors/_registry/validate.py), so if the LAO job fails this
+    stage fails loud with the real reason instead of quietly reaching past
+    that boundary.
     """
     outline_path = Path(run_dir) / "outline.json"
     try:
@@ -1025,66 +1120,26 @@ def _generate_peitho_reel_scripts(run_dir: str, title: str) -> dict[str, Any]:
     scripts_dir = Path(run_dir) / "reel_scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
 
+    angle_prompts = [
+        _peitho_angle_prompt(title, genre, tropes, premise, outline_text, entry_point)
+        for entry_point in _PEITHO_ANGLE_ENTRY_POINTS
+    ]
+
+    lao_results, lao_note = _run_peitho_lao_draft(angle_prompts)
+
+    # No direct-API fallback here on purpose: the vault rule this codebase
+    # enforces elsewhere (one-company/floors/_registry/validate.py -- "no
+    # agent declares SECRET data access, the credential vault is read by no
+    # agent") means PEITHO itself must never hold an OPENAI_API_KEY/
+    # ANTHROPIC_API_KEY read of its own, direct-env-read fallback included.
+    # LAO's own get_credential/resolve_asset step is the one sanctioned
+    # bridge pattern (same shape as SCRIBE's LAO token) -- if that job
+    # fails, this stage fails loud with the real reason instead of quietly
+    # reaching for a secret PEITHO was never granted.
     angles: list[dict[str, Any]] = []
-    for i, entry_point in enumerate(_PEITHO_ANGLE_ENTRY_POINTS, start=1):
-        prompt = (
-            f"You are a viral short-form video scriptwriter -- the kind who "
-            f"writes for creators with millions of followers, not a "
-            f"copywriter. Write a hook script to sell the finished book "
-            f"\"{title}\", genre {genre}, tropes {tropes}.\n\n"
-            f"Premise: {premise}\n\nFull chapter outline:\n{outline_text}\n\n"
-            f"For THIS script: {entry_point}\n\n"
-            "STYLE -- this is the part that actually matters. Every reel that "
-            "works sounds like someone talking fast and urgent, not a book "
-            "blurb read aloud:\n"
-            "- Short fragments. Not flowing sentences with commas stacked up. "
-            "Each beat is its own punch, one breath long.\n"
-            "- Second person or direct address where it lands harder: \"She "
-            "trusted him with everything.\" beats \"Nora Kessler had spent "
-            "three years confessing her deepest secrets to Dr. Voss.\"\n"
-            "- Open with a stopping-power line, not a scene-setter. Compare: "
-            "'He wasn't treating her. He was writing about her.' vs 'Dr. Voss "
-            "was her confidant for years.' The first one stops a thumb "
-            "mid-scroll. The second one is a synopsis.\n"
-            "- Cut fast between beats. No connective tissue like 'and then' "
-            "or 'as a result' -- just the next punch.\n"
-            "- Read every line out loud in your head before writing the next "
-            "one: if it sounds like it belongs on the back of the book "
-            "instead of spoken over a jump-cut, rewrite it.\n\n"
-            "Ground every beat in specific named characters/events from the "
-            "outline above -- never generic teaser language. The whole point "
-            "is a viewer feels they NEED to know what happens next and only "
-            "the book tells them. Never reveal how the story actually ends.\n\n"
-            "Reply in exactly this shape:\n"
-            "HOOK:\n<one line, the first 1-2 seconds on screen -- a "
-            "stopping-power line per the style notes above, not a "
-            "scene-setter>\n"
-            "BEATS:\n<4-6 short fragment lines, one beat per line, no "
-            "connective tissue, building tension in order>\n"
-            "CLIFFHANGER:\n<one line, the cut -- ends mid-tension, not "
-            "resolved>\n"
-            "CAPTION:\n<1-2 sentence social caption, same punchy register as "
-            "the hook, not a blurb>\n"
-            "HASHTAGS:\n<7 hashtags, one per line, no # repeated across "
-            "generic filler like #book #reading -- specific to this story's "
-            "genre/tropes>\n"
-            "CTA:\n<one line telling the viewer how to find the book>"
-        )
-        # The real chatgpt.com product first -- the Chairman compared it
-        # against both Claude and the OpenAI API for this exact job
-        # (2026-08-28) and asked specifically for the product to be
-        # automated. Falls through to the OpenAI API (still same model
-        # family, just metered) and then Claude, so this stage still
-        # produces something rather than going silent if the browser
-        # profile's login ever expires (see chatgpt_browser_login.py).
-        content, note = _chatgpt_browser_research(prompt, timeout_seconds=150)
-        if not content:
-            browser_note = note
-            content, note = _openai_research(prompt, max_tokens=700, model="gpt-4o")
-            if content:
-                note = f"(chatgpt.com browser unavailable: {browser_note}; used OpenAI API instead)"
-        if not content:
-            content, note = _claude_research(prompt, max_tokens=700, model="claude-sonnet-4-5")
+    for i, prompt in enumerate(angle_prompts, start=1):
+        content = str(lao_results.get(f"angle_{i}") or "").strip()
+        note = lao_note
         if not content:
             angles.append({"angle": i, "generated": False, "note": note, "path": ""})
             continue
