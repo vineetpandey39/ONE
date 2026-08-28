@@ -916,12 +916,14 @@ def _generate_kdp_packet(title: str, kdp_mode: str, region: str, angle: str, run
     if not packet:
         return {"generated": False, "note": note, "path": ""}
 
-    output_dir = _home() / "agent_outputs"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    packet_path = output_dir / f"kdp-packet-{uuid.uuid4().hex[:8]}.md"
+    # Written straight into the book's own run_dir (next to book.md,
+    # cover.jpg, KDP_Book_Professional.docx, ...), not ONE's own
+    # agent_outputs -- confirmed live 2026-08-27: the Chairman does the
+    # actual upload by hand from that folder, and a packet saved anywhere
+    # else is a packet he can't find when he goes looking for it.
+    packet_path = Path(run_dir) / "kdp_submission_packet.md"
     packet_path.write_text(
         f"# KDP Submission Packet — {title}\n\n"
-        f"Run folder: {run_dir}\n\n"
         "Paste these fields into kdp.amazon.com's Kindle eBook wizard by "
         "hand -- there is no KDP API and the actual submit stays a manual "
         "step.\n\n"
