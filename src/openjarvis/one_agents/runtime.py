@@ -691,6 +691,42 @@ def _claude_research(prompt: str, max_tokens: int = 1400, model: str = "") -> tu
         return "", f"Claude call failed ({model}): {exc}"
 
 
+def _openai_research(prompt: str, max_tokens: int = 1400, model: str = "gpt-4o") -> tuple[str, str]:
+    """Ask OpenAI's API directly. Returns (text, failure_note); never raises.
+
+    Added 2026-08-28 after the Chairman rejected Claude/Haiku's reel-hook
+    scripts as flat book-blurb prose and, when I drove an actual chatgpt.com
+    session by hand per his direct instruction ("chatgpt karo... session
+    open karlo"), the web UI's output was genuinely better -- punchier,
+    more grounded. Browser-automating chatgpt.com for this on a schedule
+    isn't buildable right now (LAO's package/workflow.yaml authoring needs
+    a robot session token this session doesn't have -- confirmed via a
+    real 403 on the packages download endpoint, not a guess). Calling the
+    same company's models through their own API, using the OPENAI_API_KEY
+    already live in the vault for image-gen fallback (see tools/image_tool.py
+    for the identical client pattern), gets the same model family without
+    needing browser automation or LAO package access at all.
+    """
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return "", "OPENAI_API_KEY is not in ONE's credential vault"
+    try:
+        import openai
+    except ImportError as exc:  # optional dep — surface it, never swallow
+        return "", f"openai package unavailable: {exc}"
+    try:
+        client = openai.OpenAI(api_key=api_key, http_client=httpx.Client(verify=False, timeout=90.0))
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = (response.choices[0].message.content or "").strip()
+        return (text, "") if text else ("", f"{model} returned no text")
+    except Exception as exc:  # noqa: BLE001 - reported, not hidden
+        return "", f"OpenAI call failed ({model}): {exc}"
+
+
 def _marker(text: str, key: str, default: str = "") -> str:
     match = re.search(rf"^{key}:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
     return match.group(1).strip() if match else default
@@ -1034,7 +1070,13 @@ def _generate_peitho_reel_scripts(run_dir: str, title: str) -> dict[str, Any]:
             "genre/tropes>\n"
             "CTA:\n<one line telling the viewer how to find the book>"
         )
-        content, note = _claude_research(prompt, max_tokens=700, model="claude-sonnet-4-5")
+        # OpenAI first -- the Chairman explicitly rejected Claude's output for
+        # this specific job (2026-08-28: "chatgpt se generate karao"). Falls
+        # back to Claude only if OPENAI_API_KEY is ever pulled from the vault,
+        # so this stage still produces something rather than going silent.
+        content, note = _openai_research(prompt, max_tokens=700, model="gpt-4o")
+        if not content:
+            content, note = _claude_research(prompt, max_tokens=700, model="claude-sonnet-4-5")
         if not content:
             angles.append({"angle": i, "generated": False, "note": note, "path": ""})
             continue
