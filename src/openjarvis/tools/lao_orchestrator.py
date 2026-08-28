@@ -146,7 +146,7 @@ class LaoOrchestratorTool(BaseTool):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["list_processes", "start", "status", "logs", "stop"],
+                        "enum": ["list_processes", "start", "status", "logs", "stop", "run_draft"],
                         "default": "status",
                     },
                     "mode": {"type": "string", "enum": ["dry_run", "publish"], "default": "dry_run"},
@@ -156,6 +156,22 @@ class LaoOrchestratorTool(BaseTool):
                     "include_logs": {"type": "boolean", "default": False},
                     "confirm_publish": {"type": "boolean", "default": False},
                     "input_args": {"type": "object"},
+                    "steps": {
+                        "type": "array",
+                        "description": (
+                            "run_draft only: a raw list of {action, args} workflow "
+                            "steps, run once via LAO's studio/run-draft endpoint -- "
+                            "no package upload needed. Any action already registered "
+                            "in the robot's workflow_engine.py dispatch table works "
+                            "(get_credential, chatgpt_login_with_credential, "
+                            "ask_chatgpt, ...)."
+                        ),
+                    },
+                    "draft_name": {"type": "string", "default": "one-studio-draft"},
+                    "folder_id": {
+                        "type": "string",
+                        "description": "run_draft only: folder to resolve get_credential assets against.",
+                    },
                 },
                 "required": ["action"],
             },
@@ -179,6 +195,28 @@ class LaoOrchestratorTool(BaseTool):
             if action == "list_processes":
                 processes = client.list_processes(scope)
                 return _json_result({"action": action, "scope": scope, "processes": processes})
+
+            if action == "run_draft":
+                # No package/workflow.yaml authoring needed -- LAO Studio's own
+                # draft-run endpoint takes a raw step list and dispatches it as
+                # a one-off job to whichever robot is already polling for
+                # studio jobs. Added for PEITHO's reel-hook scripts (2026-08-29):
+                # reuses LAO's already-logged-in chatgptLogin credential and
+                # production-hardened ask_chatgpt action instead of standing up
+                # a second, separate ChatGPT browser session in ONE itself.
+                steps = params.get("steps") or []
+                if not steps:
+                    return _json_result({"action": action, "error": "steps is required and must be non-empty."}, success=False)
+                draft_payload: dict[str, Any] = {
+                    "name": str(params.get("draft_name") or "one-studio-draft"),
+                    "steps": steps,
+                    "input_args": params.get("input_args") or {},
+                }
+                folder_id = params.get("folder_id")
+                if folder_id:
+                    draft_payload["folder_id"] = folder_id
+                draft = client.post("/studio/run-draft", draft_payload)
+                return _json_result({"action": action, "draft": draft, "job": draft.get("job")})
 
             process: dict[str, Any] | None = None
             resolved_scope = scope

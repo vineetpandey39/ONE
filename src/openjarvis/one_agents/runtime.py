@@ -727,30 +727,6 @@ def _openai_research(prompt: str, max_tokens: int = 1400, model: str = "gpt-4o")
         return "", f"OpenAI call failed ({model}): {exc}"
 
 
-def _chatgpt_browser_research(prompt: str, timeout_seconds: float = 120) -> tuple[str, str]:
-    """Ask the real chatgpt.com product (not the API) via a persistently
-    logged-in browser profile. Returns (text, failure_note); never raises.
-
-    Added 2026-08-28 per the Chairman's explicit direction: he compared
-    ChatGPT's own product against both Claude and the OpenAI API for this
-    exact job and wanted the product itself automated, not a metered API
-    call riding the same model -- see tools/chatgpt_browser_tool.py for the
-    full reasoning and scripts/chatgpt_browser_login.py for the one-time
-    manual login this depends on.
-    """
-    try:
-        from openjarvis.tools.chatgpt_browser_tool import ChatGptBrowserAskTool
-    except ImportError as exc:  # noqa: BLE001
-        return "", f"chatgpt_browser_tool unavailable: {exc}"
-    try:
-        result = ChatGptBrowserAskTool().execute(prompt=prompt, headless=True, timeout_seconds=timeout_seconds)
-    except Exception as exc:  # noqa: BLE001 - reported, not hidden
-        return "", f"ChatGPT browser call failed: {exc}"
-    if not result.success:
-        return "", result.content
-    return result.content.strip(), ""
-
-
 def _marker(text: str, key: str, default: str = "") -> str:
     match = re.search(rf"^{key}:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
     return match.group(1).strip() if match else default

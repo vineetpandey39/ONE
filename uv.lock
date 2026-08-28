@@ -4709,6 +4709,27 @@ vision-ocr = [
 dev = [
     { name = "maturin" },
 ]
+runtime = [
+    { name = "anthropic" },
+    { name = "croniter" },
+    { name = "ddgs" },
+    { name = "deepgram-sdk" },
+    { name = "fal-client" },
+    { name = "fastapi" },
+    { name = "faster-whisper" },
+    { name = "google-genai" },
+    { name = "openai" },
+    { name = "paddleocr" },
+    { name = "paddlepaddle" },
+    { name = "pdfplumber" },
+    { name = "playwright" },
+    { name = "pydantic" },
+    { name = "python-multipart" },
+    { name = "python-telegram-bot" },
+    { name = "tavily-python" },
+    { name = "textual" },
+    { name = "uvicorn" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -4826,6 +4847,27 @@ provides-extras = ["browser", "channel-discord", "channel-gmail", "channel-line"
 
 [package.metadata.requires-dev]
 dev = [{ name = "maturin", specifier = ">=1.12.6" }]
+runtime = [
+    { name = "anthropic", specifier = ">=0.30" },
+    { name = "croniter", specifier = ">=2.0" },
+    { name = "ddgs", specifier = ">=9.11.4" },
+    { name = "deepgram-sdk", specifier = ">=7.0" },
+    { name = "fal-client", specifier = ">=0.5" },
+    { name = "fastapi", specifier = ">=0.110" },
+    { name = "faster-whisper", specifier = ">=1.0" },
+    { name = "google-genai", specifier = ">=1.0" },
+    { name = "openai", specifier = ">=1.30" },
+    { name = "paddleocr", specifier = ">=3.7.0" },
+    { name = "paddlepaddle", specifier = ">=3.3.1" },
+    { name = "pdfplumber", specifier = ">=0.10" },
+    { name = "playwright", specifier = ">=1.40" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "python-telegram-bot", specifier = ">=21.0" },
+    { name = "tavily-python", specifier = ">=0.3" },
+    { name = "textual", specifier = ">=0.80" },
+    { name = "uvicorn", specifier = ">=0.30" },
+]
 
 [[package]]
 name = "openpyxl"

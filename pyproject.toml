@@ -206,6 +206,53 @@ openjarvis-eval = "openjarvis.evals.cli:main"
 # `vX.Y.Z.devN` tags are deliberately EXCLUDED from version derivation here; the
 # base is taken from the latest plain release tag (vX.Y.Z) and the dev distance
 # is computed from commit count since that release.
+# Extras this deployment actually runs on, so a bare `uv sync` installs them
+# instead of pruning them.
+#
+# `uv sync` is declarative: it uninstalls anything outside the selected set.
+# On 2026-08-28 a plain `uv sync` run here stripped fastapi/uvicorn (ONE then
+# refused to boot: "Server dependencies not installed"), the Deepgram SDK and
+# faster-whisper (the whole STT path), croniter, paddleocr, google-genai and
+# playwright — while looking like a perfectly successful command. Several
+# sessions share this one venv, so whoever syncs next silently breaks everyone
+# else's subsystem unless the defaults below cover them.
+#
+# Anything genuinely optional (dev, vllm/mlx, the other channel-*, memory-*)
+# is deliberately left out and stays an explicit `--extra`.
+#
+# This mirrors the extras listed in the trailing comments. uv has no
+# `default-extras`, so a dependency group is the only way to make a bare
+# `uv sync` keep them; the extras stay as-is for anyone installing the
+# published package.
+[dependency-groups]
+runtime = [
+    "fastapi>=0.110",                    # server
+    "uvicorn>=0.30",                     # server
+    "pydantic>=2.0",                     # server
+    "python-multipart>=0.0.9",           # server
+    "openai>=1.30",                      # inference-cloud
+    "anthropic>=0.30",                   # inference-cloud
+    "google-genai>=1.0",                 # inference-google
+    "deepgram-sdk>=7.0",                 # speech-deepgram (primary STT)
+    "faster-whisper>=1.0",               # speech (local STT fallback)
+    "playwright>=1.40",                  # browser — Leonardo/ChatGPT, jobhunt
+    "tavily-python>=0.3",                # tools-search
+    "ddgs>=9.11.4",                      # tools-search
+    "croniter>=2.0",                     # scheduler
+    "paddleocr>=3.7.0",                  # vision-ocr
+    "paddlepaddle>=3.3.1",               # vision-ocr
+    "fal-client>=0.5",                   # media
+    "pdfplumber>=0.10",                  # pdf
+    "textual>=0.80",                     # dashboard
+    "python-telegram-bot>=21.0",         # channel-telegram
+]
+dev = [
+    "maturin>=1.12.6",
+]
+
+[tool.uv]
+default-groups = ["runtime"]
+
 [tool.hatch.version]
 source = "vcs"
 
@@ -266,7 +313,5 @@ select = ["E", "F", "I", "W"]
 # the ignore was missing here.
 "src/openjarvis/agents/research_loop.py" = ["E501"]
 
-[dependency-groups]
-dev = [
-    "maturin>=1.12.6",
-]
+# (the `dev` group moved up into the single [dependency-groups] table above —
+#  TOML does not allow the same table to be declared twice)
