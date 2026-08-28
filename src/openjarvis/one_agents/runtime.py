@@ -727,6 +727,30 @@ def _openai_research(prompt: str, max_tokens: int = 1400, model: str = "gpt-4o")
         return "", f"OpenAI call failed ({model}): {exc}"
 
 
+def _chatgpt_browser_research(prompt: str, timeout_seconds: float = 120) -> tuple[str, str]:
+    """Ask the real chatgpt.com product (not the API) via a persistently
+    logged-in browser profile. Returns (text, failure_note); never raises.
+
+    Added 2026-08-28 per the Chairman's explicit direction: he compared
+    ChatGPT's own product against both Claude and the OpenAI API for this
+    exact job and wanted the product itself automated, not a metered API
+    call riding the same model -- see tools/chatgpt_browser_tool.py for the
+    full reasoning and scripts/chatgpt_browser_login.py for the one-time
+    manual login this depends on.
+    """
+    try:
+        from openjarvis.tools.chatgpt_browser_tool import ChatGptBrowserAskTool
+    except ImportError as exc:  # noqa: BLE001
+        return "", f"chatgpt_browser_tool unavailable: {exc}"
+    try:
+        result = ChatGptBrowserAskTool().execute(prompt=prompt, headless=True, timeout_seconds=timeout_seconds)
+    except Exception as exc:  # noqa: BLE001 - reported, not hidden
+        return "", f"ChatGPT browser call failed: {exc}"
+    if not result.success:
+        return "", result.content
+    return result.content.strip(), ""
+
+
 def _marker(text: str, key: str, default: str = "") -> str:
     match = re.search(rf"^{key}:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
     return match.group(1).strip() if match else default
@@ -1070,11 +1094,19 @@ def _generate_peitho_reel_scripts(run_dir: str, title: str) -> dict[str, Any]:
             "genre/tropes>\n"
             "CTA:\n<one line telling the viewer how to find the book>"
         )
-        # OpenAI first -- the Chairman explicitly rejected Claude's output for
-        # this specific job (2026-08-28: "chatgpt se generate karao"). Falls
-        # back to Claude only if OPENAI_API_KEY is ever pulled from the vault,
-        # so this stage still produces something rather than going silent.
-        content, note = _openai_research(prompt, max_tokens=700, model="gpt-4o")
+        # The real chatgpt.com product first -- the Chairman compared it
+        # against both Claude and the OpenAI API for this exact job
+        # (2026-08-28) and asked specifically for the product to be
+        # automated. Falls through to the OpenAI API (still same model
+        # family, just metered) and then Claude, so this stage still
+        # produces something rather than going silent if the browser
+        # profile's login ever expires (see chatgpt_browser_login.py).
+        content, note = _chatgpt_browser_research(prompt, timeout_seconds=150)
+        if not content:
+            browser_note = note
+            content, note = _openai_research(prompt, max_tokens=700, model="gpt-4o")
+            if content:
+                note = f"(chatgpt.com browser unavailable: {browser_note}; used OpenAI API instead)"
         if not content:
             content, note = _claude_research(prompt, max_tokens=700, model="claude-sonnet-4-5")
         if not content:
