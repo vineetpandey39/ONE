@@ -1181,6 +1181,15 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
         "scribe", stages.AWAITING_UPLOAD,
         f"“{title}” is ready — KDP packet done. Upload it, then mark it uploaded.",
     )
+    # HERMES's own job (_run_hermes) set itself to AWAITING_WORKER when it
+    # briefed SCRIBE and has been blocked ever since -- that wait was only
+    # ever for the manuscript, which is done now. Nothing else clears it:
+    # this SCRIBE->PEITHO leg bypasses HERMES entirely (see confirm_
+    # scribe_upload's docstring for why), so without this line HERMES was
+    # left showing "Waiting on SCRIBE" in the building forever, confirmed
+    # live 2026-08-28 on a book that had already been uploaded and handed
+    # to PEITHO.
+    stages.clear_stage("hermes")
 
     return {
         "agent": "SCRIBE",
