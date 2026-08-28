@@ -648,12 +648,18 @@ KDP_PROCESS_NAME = "KDP Book Factory - Full Manuscript Draft"
 IA_PROCESS_NAME = "ImagineIndia Reel - Twice Daily Production"
 
 
-def _claude_research(prompt: str, max_tokens: int = 1400) -> tuple[str, str]:
+def _claude_research(prompt: str, max_tokens: int = 1400, model: str = "") -> tuple[str, str]:
     """Ask Claude directly. Returns (text, failure_note); never raises.
 
     Deliberately separate from the local Ollama planner: the 8B local model
     invents plausible-sounding infrastructure that doesn't exist, which is
     exactly the wrong failure mode for research that feeds a real book run.
+
+    `model` overrides ONE_RESEARCH_MODEL/the Haiku default for this one call
+    -- added for PEITHO's reel-hook writing (confirmed live 2026-08-28: the
+    Chairman flagged Haiku's output as flat book-blurb prose, not punchy
+    short-form-video copy; every other caller is unaffected since the
+    default behavior is unchanged when this is left empty).
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
@@ -662,7 +668,7 @@ def _claude_research(prompt: str, max_tokens: int = 1400) -> tuple[str, str]:
         import anthropic
     except ImportError as exc:  # optional dep — surface it, never swallow
         return "", f"anthropic package unavailable: {exc}"
-    model = os.environ.get("ONE_RESEARCH_MODEL", "claude-haiku-4-5")
+    model = model or os.environ.get("ONE_RESEARCH_MODEL", "claude-haiku-4-5")
     try:
         # verify=False: the same Avast SSL-interception workaround already used
         # for Deepgram, web_search and instagram_insights on this machine — a
@@ -986,29 +992,49 @@ def _generate_peitho_reel_scripts(run_dir: str, title: str) -> dict[str, Any]:
     angles: list[dict[str, Any]] = []
     for i, entry_point in enumerate(_PEITHO_ANGLE_ENTRY_POINTS, start=1):
         prompt = (
-            f"You are PEITHO, writing a short-form video (Instagram Reel / "
-            f"YouTube Short) hook script to sell the finished book \"{title}\", "
-            f"genre {genre}, tropes {tropes}.\n\n"
+            f"You are a viral short-form video scriptwriter -- the kind who "
+            f"writes for creators with millions of followers, not a "
+            f"copywriter. Write a hook script to sell the finished book "
+            f"\"{title}\", genre {genre}, tropes {tropes}.\n\n"
             f"Premise: {premise}\n\nFull chapter outline:\n{outline_text}\n\n"
             f"For THIS script: {entry_point}\n\n"
+            "STYLE -- this is the part that actually matters. Every reel that "
+            "works sounds like someone talking fast and urgent, not a book "
+            "blurb read aloud:\n"
+            "- Short fragments. Not flowing sentences with commas stacked up. "
+            "Each beat is its own punch, one breath long.\n"
+            "- Second person or direct address where it lands harder: \"She "
+            "trusted him with everything.\" beats \"Nora Kessler had spent "
+            "three years confessing her deepest secrets to Dr. Voss.\"\n"
+            "- Open with a stopping-power line, not a scene-setter. Compare: "
+            "'He wasn't treating her. He was writing about her.' vs 'Dr. Voss "
+            "was her confidant for years.' The first one stops a thumb "
+            "mid-scroll. The second one is a synopsis.\n"
+            "- Cut fast between beats. No connective tissue like 'and then' "
+            "or 'as a result' -- just the next punch.\n"
+            "- Read every line out loud in your head before writing the next "
+            "one: if it sounds like it belongs on the back of the book "
+            "instead of spoken over a jump-cut, rewrite it.\n\n"
             "Ground every beat in specific named characters/events from the "
             "outline above -- never generic teaser language. The whole point "
             "is a viewer feels they NEED to know what happens next and only "
             "the book tells them. Never reveal how the story actually ends.\n\n"
             "Reply in exactly this shape:\n"
-            "HOOK:\n<one line, the first 1-2 seconds on screen -- a pattern-"
-            "interrupt, not a scene-setter>\n"
-            "BEATS:\n<4-6 short lines, one beat per line, building tension in "
-            "order>\n"
+            "HOOK:\n<one line, the first 1-2 seconds on screen -- a "
+            "stopping-power line per the style notes above, not a "
+            "scene-setter>\n"
+            "BEATS:\n<4-6 short fragment lines, one beat per line, no "
+            "connective tissue, building tension in order>\n"
             "CLIFFHANGER:\n<one line, the cut -- ends mid-tension, not "
             "resolved>\n"
-            "CAPTION:\n<1-2 sentence social caption>\n"
+            "CAPTION:\n<1-2 sentence social caption, same punchy register as "
+            "the hook, not a blurb>\n"
             "HASHTAGS:\n<7 hashtags, one per line, no # repeated across "
             "generic filler like #book #reading -- specific to this story's "
             "genre/tropes>\n"
             "CTA:\n<one line telling the viewer how to find the book>"
         )
-        content, note = _claude_research(prompt, max_tokens=700)
+        content, note = _claude_research(prompt, max_tokens=700, model="claude-sonnet-4-5")
         if not content:
             angles.append({"angle": i, "generated": False, "note": note, "path": ""})
             continue
