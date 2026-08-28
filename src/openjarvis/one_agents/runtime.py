@@ -444,11 +444,14 @@ def cancel_job(job_id: str) -> dict[str, Any]:
     than introducing a new status value that would need matching UI/CSS
     support nobody has written yet.
 
-    If this is a SCRIBE job with a LAO job attached (recorded in
-    agent_stages.json while `_run_scribe` polls), also asks LAO to stop that
-    job -- otherwise the underlying multi-hour pipeline just keeps running
+    If this is a worker job with a LAO job attached (recorded in
+    agent_stages.json while the worker polls), also asks LAO to stop that job
+    -- otherwise the underlying multi-hour pipeline just keeps running
     unattended even after the dashboard says it's dead. Best-effort: a LAO
     API failure here still lets the local job get marked cancelled.
+
+    Also clears the floor head that was blocked waiting on this worker, so the
+    building doesn't keep showing a handover to an agent that no longer exists.
     """
     job = get_job(job_id)
     if not job:
@@ -456,17 +459,30 @@ def cancel_job(job_id: str) -> dict[str, Any]:
     if job["status"] not in {"queued", "running"}:
         raise ValueError(f"Job {job_id} is already {job['status']}, nothing to cancel")
 
+    # Generic across every worker seat, not just SCRIBE. Both halves below used
+    # to hard-code `if agent_id == "scribe"`, so cancelling any OTHER worker
+    # left its LAO job running AND stranded its floor head forever -- confirmed
+    # live 2026-08-26: MUSE was cancelled from the dashboard and IRIS sat on
+    # "Waiting on MUSE to produce the reel" with no worker left to wait for.
+    # The registry already knows both facts (`reports_to` names the head, and
+    # the worker records `lao_process` in its stage), so nothing here needs to
+    # name an agent -- a new worker seat inherits this for free.
+    agent = AGENTS.get(job["agent_id"], {})
+    worker_stage = stages.get_stages().get(job["agent_id"]) or {}
+
     lao_job_id = ""
-    if job["agent_id"] == "scribe":
-        scribe_stage = stages.get_stages().get("scribe") or {}
-        if scribe_stage.get("worker_job") == job_id or not scribe_stage.get("worker_job"):
-            lao_job_id = str(scribe_stage.get("lao_job") or "")
+    if worker_stage.get("worker_job") == job_id or not worker_stage.get("worker_job"):
+        lao_job_id = str(worker_stage.get("lao_job") or "")
 
     if lao_job_id:
         try:
             from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
 
-            process_name = os.environ.get("LAO_KDP_PROCESS", KDP_PROCESS_NAME)
+            # Recorded by the worker alongside lao_job. The KDP fallback only
+            # covers stages written before lao_process existed.
+            process_name = str(worker_stage.get("lao_process") or "").strip() or os.environ.get(
+                "LAO_KDP_PROCESS", KDP_PROCESS_NAME
+            )
             LaoOrchestratorTool().execute(
                 action="stop", process_name=process_name, scope="production", job_id=lao_job_id,
             )
@@ -480,8 +496,15 @@ def cancel_job(job_id: str) -> dict[str, Any]:
         )
 
     stages.clear_stage(job["agent_id"])
-    if job["agent_id"] == "scribe":
-        stages.clear_stage("hermes")
+    # Release the floor head that was blocked on this worker -- but only if it
+    # was actually waiting on THIS job. A head that has already moved on to
+    # something else must not be reset out from under itself.
+    head_id = str(agent.get("reports_to") or "")
+    if head_id:
+        head_stage = stages.get_stages().get(head_id) or {}
+        waiting_job = head_stage.get("worker_job")
+        if waiting_job == job_id or (waiting_job is None and head_stage.get("worker") == job["agent_id"]):
+            stages.clear_stage(head_id)
 
     return get_job(job_id) or {}
 
@@ -1174,7 +1197,7 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
                 stages.set_stage(
                     "scribe", stages.EXECUTING,
                     f"Lost contact with LAO, retrying ({consecutive_probe_failures}/{max_consecutive_probe_failures})…",
-                    lao_job=lao_job_id)
+                    lao_job=lao_job_id, lao_process=process_name)
                 if consecutive_probe_failures >= max_consecutive_probe_failures:
                     raise RuntimeError(
                         f"Lost contact with LAO after {consecutive_probe_failures} consecutive "
@@ -1195,7 +1218,7 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
                 "scribe", stages.EXECUTING,
                 (f"Writing “{angle[:70]}” · LAO {status} · {elapsed}m" if angle
                  else f"LAO job {status} · {elapsed}m"),
-                lao_job=lao_job_id)
+                lao_job=lao_job_id, lao_process=process_name)
             if status in terminal:
                 break
         else:
@@ -1791,7 +1814,7 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
             stages.set_stage(
                 "muse", stages.EXECUTING,
                 f"Lost contact with LAO, retrying ({consecutive_probe_failures}/{max_consecutive_probe_failures})…",
-                lao_job=lao_job_id)
+                lao_job=lao_job_id, lao_process=process_name)
             if consecutive_probe_failures >= max_consecutive_probe_failures:
                 stages.clear_stage("muse")
                 stages.clear_stage("ia")
@@ -1812,7 +1835,7 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
             "muse", stages.EXECUTING,
             (f"Shooting “{headline[:70]}” · LAO {status} · {elapsed}m" if headline
              else f"LAO job {status} · {elapsed}m"),
-            lao_job=lao_job_id)
+            lao_job=lao_job_id, lao_process=process_name)
         if status in terminal:
             break
     else:
