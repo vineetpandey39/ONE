@@ -131,6 +131,22 @@ def _enqueue_floor_watches() -> None:
     # declares no seat at all, so matching on seat == "head" scheduled two
     # watches and silently skipped eleven floors. Caught by testing every head
     # rather than the one being worked on.
+    # A watch that found nothing does not need a permanent row. Its real record
+    # is floor_watch's own log; the job queue is for work, and the cockpit's
+    # recent-jobs strip is the one place a human looks to see what needs them.
+    # Watches that DID find something keep their row -- that is the audit trail
+    # worth having. Without this the strip fills with "checked, all clear"
+    # cards and buries the one card that was asking for a human.
+    try:
+        with _connect() as db:
+            db.execute(
+                "DELETE FROM jobs WHERE mode = 'watch' AND status = 'completed' "
+                "AND created_at < ? AND (result LIKE '%\"findings\": 0%' OR result = '')",
+                (datetime.fromtimestamp(now_epoch - 3600, timezone.utc).isoformat(),),
+            )
+    except Exception as exc:  # noqa: BLE001 - pruning must never stop scheduling
+        print(f"[one-agents] watch prune skipped: {exc}", flush=True)
+
     heads = [agent_id for agent_id, meta in AGENTS.items() if meta.get("seat") != "worker"]
     with _connect() as db:
         for head_id in heads:
@@ -148,9 +164,17 @@ def _enqueue_floor_watches() -> None:
 
             floor_ids = floor_watch.floor_agents(head_id)
             placeholders = ",".join("?" for _ in floor_ids)
+            # mode != 'watch' or this gate defeats itself: a watch job is a job,
+            # so the first watch makes its own floor look "recently active"
+            # forever and every head keeps getting watched every interval with
+            # nothing to watch. Confirmed live 2026-08-29 -- 129 of 238 rows in
+            # the queue were watches, and they buried SCRIBE's awaiting_upload
+            # job at position 130 where the cockpit's recent-jobs strip could
+            # not show it. Third place the same mistake had to be fixed;
+            # counting a watch as floor work is the bug, in all three.
             recent = db.execute(
                 f"SELECT COUNT(*) FROM jobs WHERE agent_id IN ({placeholders}) "
-                "AND created_at >= ?",
+                "AND mode != 'watch' AND created_at >= ?",
                 (*floor_ids, datetime.fromtimestamp(now_epoch - lookback, timezone.utc).isoformat()),
             ).fetchone()[0]
             # Always move the schedule forward, even when skipping: otherwise a

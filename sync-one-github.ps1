@@ -169,6 +169,31 @@ try {
         exit 0
     }
 
+    # Verify what is actually staged, not just what we asked git to skip.
+    #
+    # Ported from scripts/one_git_autosync.ps1 (2026-08-29) before deleting it.
+    # That script was the superseded first attempt at publishing source, and it
+    # carried this check; sync-one-private.ps1 carries it too. This script --
+    # the only one of the three whose destination is PUBLIC -- was the only one
+    # without it, relying on the exclude list alone with nothing asserting the
+    # result. The excludes above are identical to the ones those scripts use,
+    # which is exactly what made the gap easy to miss: the lists agree, so it
+    # looks covered, and nothing fails loudly if a path ever slips past them.
+    #
+    # Fails closed: a hit resets the offending paths and exits non-zero, so
+    # nothing is committed or pushed. Since start-one.ps1 now launches this
+    # detached, that failure surfaces in one-sync-github-error.log instead of
+    # stopping ONE from coming online.
+    $blockedPathPattern = "(^|/)(\.env|\.env\.|one\.env|credentials\.toml|data/|ONE Vault/|\.venv/|node_modules/|dist/|__pycache__/|.*\.key$|.*\.pem$|.*\.p12$|.*\.pfx$|.*\.db$|.*\.sqlite$|.*\.log$|.*\.mp4$|.*\.webm$|.*\.wav$)"
+    $stagedNames = git diff --cached --name-only
+    $blocked = $stagedNames | Where-Object { ($_ -replace "\\", "/") -match $blockedPathPattern }
+    if ($blocked) {
+        git reset -- $blocked | Out-Null
+        Write-Host "ONE GitHub sync blocked sensitive/runtime paths and pushed nothing:" -ForegroundColor Red
+        $blocked | ForEach-Object { Write-Host " - $_" -ForegroundColor Red }
+        exit 1
+    }
+
     $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     git commit -m "Auto sync ONE clean repo $stamp"
     git push origin HEAD
