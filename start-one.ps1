@@ -10,6 +10,7 @@ $ollama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
 $pidFile = Join-Path $oneRoot "one-server.pid"
 $workerPidFile = Join-Path $oneRoot "one-worker.pid"
 $companyPidFile = Join-Path $oneRoot "one-company.pid"
+$floorsWorkerPidFile = Join-Path $oneRoot "one-floors-worker.pid"
 
 function Test-ProcessAlreadyRunning {
     <#
@@ -87,6 +88,8 @@ $logFile = Join-Path $oneRoot "one-server.log"
 $errorLogFile = Join-Path $oneRoot "one-server-error.log"
 $workerLogFile = Join-Path $oneRoot "one-worker.log"
 $workerErrorLogFile = Join-Path $oneRoot "one-worker-error.log"
+$floorsWorkerLogFile = Join-Path $oneRoot "one-floors-worker.log"
+$floorsWorkerErrorLogFile = Join-Path $oneRoot "one-floors-worker-error.log"
 
 $env:OPENJARVIS_HOME = $dataRoot
 $sourcePythonPath = Join-Path $sourceRoot "src"
@@ -267,6 +270,41 @@ if (Test-Path $companyServer) {
         }
     } catch {
         Write-Host "ONE company building skipped: $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+}
+
+# The governed dispatch pipeline's own worker (floors/_work/worker.py) - a
+# completely different process from one_agent_worker.py above, which only
+# drains ONE's runtime-plane queue. Without this running continuously, a job
+# dispatch.grant()/refuse() resumes (an OLYMPUS decision made from the
+# building's own panel, or any fresh dispatch) just sits there: nothing
+# picks it up until someone manually runs `python worker.py run`, which
+# meant every approval needed a person - or a Claude session - to
+# separately remember to advance it. `run --watch` drains every 5s forever,
+# so an approval's next hop, and any other queued work, runs on its own.
+$floorsWorkerScript = Join-Path $companyRoot "floors\_work\worker.py"
+if (Test-Path $floorsWorkerScript) {
+    try {
+        $floorsWorkerRunning = $false
+        $foundFloorsWorkerPid = Test-ProcessAlreadyRunning -CommandLineMatch "*floors*_work*worker.py*run*--watch*"
+        if ($foundFloorsWorkerPid -gt 0) {
+            $floorsWorkerRunning = $true
+            Set-Content -Path $floorsWorkerPidFile -Value $foundFloorsWorkerPid
+        } elseif (Test-Path $floorsWorkerPidFile) {
+            Remove-Item $floorsWorkerPidFile -Force -ErrorAction SilentlyContinue
+        }
+        if (-not $floorsWorkerRunning) {
+            $floorsWorker = Start-Process -FilePath $pythonExe `
+                -ArgumentList @($floorsWorkerScript, "run", "--watch") `
+                -WorkingDirectory (Join-Path $companyRoot "floors\_work") `
+                -RedirectStandardOutput $floorsWorkerLogFile `
+                -RedirectStandardError $floorsWorkerErrorLogFile `
+                -WindowStyle Hidden `
+                -PassThru
+            Set-Content -Path $floorsWorkerPidFile -Value $floorsWorker.Id
+        }
+    } catch {
+        Write-Host "Floors-tree worker skipped: $($_.Exception.Message)" -ForegroundColor DarkYellow
     }
 }
 

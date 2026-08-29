@@ -3,6 +3,7 @@ $pidFile = Join-Path $oneRoot "one-server.pid"
 $workerPidFile = Join-Path $oneRoot "one-worker.pid"
 $fluxPidFile = Join-Path $oneRoot "one-flux.pid"
 $companyPidFile = Join-Path $oneRoot "one-company.pid"
+$floorsWorkerPidFile = Join-Path $oneRoot "one-floors-worker.pid"
 
 # Stop the company building first, and by port as well as by pid: Windows
 # lets a second process bind an already-listening port, so a stale server
@@ -15,6 +16,13 @@ if (Test-Path $companyPidFile) {
 }
 Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+
+if (Test-Path $floorsWorkerPidFile) {
+    $savedFloorsWorkerPid = [int](Get-Content $floorsWorkerPidFile -Raw)
+    $floorsWorker = Get-Process -Id $savedFloorsWorkerPid -ErrorAction SilentlyContinue
+    if ($floorsWorker) { Stop-Process -Id $savedFloorsWorkerPid -Force -ErrorAction SilentlyContinue }
+    Remove-Item $floorsWorkerPidFile -Force
+}
 
 if (-not (Test-Path $pidFile)) {
     Write-Host "ONE is not running."

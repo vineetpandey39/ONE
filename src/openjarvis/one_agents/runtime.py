@@ -1308,6 +1308,122 @@ def _generate_kdp_packet(title: str, kdp_mode: str, region: str, angle: str, run
     return {"generated": True, "content": packet, "path": str(packet_path)}
 
 
+def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[str, Any]:
+    """Regenerate an existing book's cover with the current pipeline.
+
+    Works by making the run look incomplete again rather than by hand-running
+    the individual steps. LAO's KDP process already resumes the newest run that
+    is missing a required artifact, and its cover/banner prompt block is gated
+    on banner_prompt.txt -- so moving that gate file aside is enough to make the
+    resume rewrite the art prompts with the current instructions, generate fresh
+    art from them, and run the compose and full-wrap passes after it. Reusing
+    the proven process is the point: hand-assembling the same steps in a draft
+    would be a second, subtly different way to build a cover.
+
+    The old prompt files are renamed, never deleted, so a bad regeneration can
+    be compared against what shipped.
+    """
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+
+    run_dir = Path(str(brief.get("run_dir") or "").strip())
+    if not run_dir.exists():
+        stages.clear_stage("scribe")
+        raise RuntimeError(f"cover_refresh needs an existing run_dir; got {run_dir!r}")
+
+    title = str(brief.get("title") or "")
+    if not title:
+        meta = run_dir / "kdp_metadata.json"
+        if meta.exists():
+            try:
+                title = str(json.loads(meta.read_text(encoding="utf-8")).get("title") or "")
+            except Exception:  # noqa: BLE001
+                title = ""
+    label = title or run_dir.name
+
+    stages.worker_confirms_receipt("scribe", f"Redoing the cover for “{label[:80]}”")
+    stages.set_stage("scribe", stages.EXECUTING, f"Clearing the old cover prompts for “{label[:70]}”")
+
+    visual = run_dir / "visual_assets"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    moved: list[str] = []
+    for name in ("banner_prompt.txt", "banner_prompt.md", "cover_prompt.txt", "cover_prompt.md"):
+        src = visual / name
+        if src.exists():
+            src.rename(visual / f"{name}.{stamp}.bak")
+            moved.append(name)
+
+    tool = LaoOrchestratorTool()
+    process_name = os.environ.get("LAO_KDP_PROCESS", KDP_PROCESS_NAME)
+    stages.set_stage("scribe", stages.EXECUTING, f"LAO is regenerating the cover for “{label[:70]}”")
+
+    started = tool.execute(action="start", mode="dry_run", process_name=process_name,
+                           scope="production", input_args={})
+    if not started.success:
+        stages.clear_stage("scribe")
+        raise RuntimeError(f"LAO refused the cover refresh: {started.content}")
+    try:
+        lao_job_id = ((json.loads(started.content).get("job") or {}).get("id")) or ""
+    except json.JSONDecodeError:
+        lao_job_id = ""
+    if lao_job_id:
+        job_recovery.attach(_connect, job["id"], lao_job_id)
+
+    poll_seconds = float(os.environ.get("ONE_LAO_POLL_SECONDS", "30"))
+    deadline = time.time() + float(os.environ.get("ONE_COVER_REFRESH_MAX_WAIT", "3600"))
+    terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
+    status = "Pending"
+    while time.time() < deadline:
+        time.sleep(poll_seconds)
+        job_recovery.heartbeat(_connect, job["id"])
+        probe = tool.execute(action="status", process_name=process_name,
+                             scope="production", job_id=lao_job_id)
+        if not probe.success:
+            continue
+        try:
+            status = str((json.loads(probe.content).get("job") or {}).get("status") or status)
+        except json.JSONDecodeError:
+            continue
+        stages.set_stage("scribe", stages.EXECUTING,
+                         f"Cover for “{label[:60]}” · LAO {status}", lao_job=lao_job_id)
+        if status in terminal:
+            break
+
+    produced = {
+        name: (visual / name).exists()
+        for name in ("cover_prompt.txt", "cover_raw.png", "cover.jpg", "cover_wrap_print.pdf")
+    }
+    stages.clear_stage("scribe")
+
+    if status != "Successful":
+        raise RuntimeError(f"LAO cover refresh ended as {status} (job {lao_job_id[:8]})")
+
+    memory.remember(
+        agent="SCRIBE", floor_id="5", floor_name="Book Publishing (KDP)",
+        kind="Cover Refresh",
+        body=(f"Regenerated the cover for “{label}”.\n\n"
+              f"- LAO job: `{lao_job_id}` — {status}\n"
+              f"- Run folder: `{run_dir}`\n"
+              f"- Prompts rotated out: {', '.join(moved) or 'none'}\n"
+              f"- Produced: {', '.join(k for k, v in produced.items() if v) or 'nothing'}\n\n"
+              "Front cover and paperback wrap are rebuilt; re-uploading them to "
+              "KDP is still a manual step."),
+        task=f"cover refresh / {label}",
+        tags=["kdp", "publishing", "cover"],
+    )
+
+    return {
+        "agent": "SCRIBE",
+        "mode": "cover_refresh",
+        "lao_job": lao_job_id,
+        "lao_status": status,
+        "run_dir": str(run_dir),
+        "title": label,
+        "rotated_out": moved,
+        "produced": produced,
+        "requires_human": "Re-upload the new cover to KDP; the listing is still in review.",
+    }
+
+
 def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 5 worker - runs LAO's KDP factory and waits for the book.
 
@@ -1325,6 +1441,15 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     kdp_mode = brief.get("kdp_mode") or "auto"
     region = brief.get("region") or "global"
     angle = str(brief.get("angle") or "").strip()
+
+    # Re-run only the cover for a book that already exists, rather than writing
+    # a new one. Added 2026-08-30: the cover pipeline gained a real composition
+    # layer, a paperback full-wrap, and new art-composition instructions, and a
+    # book already sitting in Amazon's review queue needed those applied to it.
+    # That is SCRIBE's job -- it owns this floor's production work -- not
+    # something to run by hand from a chat session.
+    if str(job.get("mode") or "").strip().lower() == "cover_refresh" or brief.get("cover_refresh"):
+        return _scribe_cover_refresh(job, brief)
 
     stages.worker_confirms_receipt(
         "scribe",
