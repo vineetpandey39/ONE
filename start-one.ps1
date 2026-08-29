@@ -120,21 +120,36 @@ $oneEngine = if ($env:ONE_ENGINE) { $env:ONE_ENGINE } else { "ollama" }
 $oneModel = if ($env:ONE_ROUTER_MODEL) { $env:ONE_ROUTER_MODEL } else { "qwen3.5:2b" }
 $oneAgent = if ($env:ONE_AGENT) { $env:ONE_AGENT } else { "react" }
 
-$cleanRepoSync = Join-Path $oneRoot "sync-one-github.ps1"
-if (Test-Path $cleanRepoSync) {
-    try {
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cleanRepoSync
-    } catch {
-        Write-Host "ONE clean repo sync skipped: $($_.Exception.Message)" -ForegroundColor DarkYellow
-    }
-}
-
-$privateSync = Join-Path $oneRoot "sync-one-private.ps1"
-if (Test-Path $privateSync) {
-    try {
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $privateSync
-    } catch {
-        Write-Host "ONE private runtime sync skipped: $($_.Exception.Message)" -ForegroundColor DarkYellow
+# Backing up to GitHub is housekeeping. ONE coming online is the product, and
+# it must never wait on a backup -- confirmed the hard way on 2026-08-29: these
+# two ran synchronously right here, before the server start below, and the
+# private one was mirroring plus git-adding 12 GB of runtime_home (13 GB of it
+# Ollama model blobs) on every single boot. start-one.ps1 looked hung; it was
+# actually still copying. Two PowerShell processes sat there for half an hour
+# without ONE ever listening on 8000.
+#
+# try/catch was never protection here either: it catches a terminating error,
+# not a call that simply takes forever. So these now run detached, with their
+# output kept, and startup carries on regardless. A sync that fails or drags is
+# now a stale backup -- visible in its own log -- instead of an offline ONE.
+# Set ONE_SYNC_ON_START=false to skip them entirely.
+if (($env:ONE_SYNC_ON_START -ne "false")) {
+    foreach ($syncPair in @(
+        @{ Script = "sync-one-github.ps1";  Log = "one-sync-github.log" },
+        @{ Script = "sync-one-private.ps1"; Log = "one-sync-private.log" }
+    )) {
+        $syncScript = Join-Path $oneRoot $syncPair.Script
+        if (-not (Test-Path $syncScript)) { continue }
+        try {
+            Start-Process -FilePath "powershell.exe" `
+                -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $syncScript) `
+                -WorkingDirectory $oneRoot `
+                -RedirectStandardOutput (Join-Path $oneRoot $syncPair.Log) `
+                -RedirectStandardError (Join-Path $oneRoot ($syncPair.Log -replace '\.log$', '-error.log')) `
+                -WindowStyle Hidden | Out-Null
+        } catch {
+            Write-Host "ONE $($syncPair.Script) could not be launched: $($_.Exception.Message)" -ForegroundColor DarkYellow
+        }
     }
 }
 

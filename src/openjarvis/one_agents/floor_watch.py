@@ -229,11 +229,19 @@ def _latest_job_per_agent(
     latest: dict[str, sqlite3.Row] = {}
     if not agent_ids:
         return latest
-    placeholders = ",".join("?" for _ in agent_ids)
     with closing(connect()) as db:
         for agent_id in agent_ids:
+            # mode='watch' is excluded because a watch is bookkeeping ABOUT the
+            # floor, not work ON it. Without this every head reported one false
+            # finding per run about itself: the head's own in-flight watch job
+            # is its most recent row, it is 'running', and watch jobs do not
+            # heartbeat, so D5 fired on the very job doing the looking. A head
+            # reconciling its own monitoring against itself is a loop, not a
+            # check. Found by running this across all thirteen heads instead of
+            # only the one being worked on.
             row = db.execute(
-                "SELECT * FROM jobs WHERE agent_id = ? ORDER BY created_at DESC LIMIT 1",
+                "SELECT * FROM jobs WHERE agent_id = ? AND mode != 'watch' "
+                "ORDER BY created_at DESC LIMIT 1",
                 (agent_id,),
             ).fetchone()
             if row is None:
@@ -436,8 +444,15 @@ def _stale_stage_findings(connect: Connect, agents: list[str]) -> list[Finding]:
             # action (the KDP upload). It is supposed to sit there.
             if record.get("stage") == stages.AWAITING_UPLOAD:
                 continue
+            # mode != 'watch' for the same reason _latest_job_per_agent excludes
+            # it, and it bit twice before being fixed in both places: the head's
+            # own in-flight watch job counts as a live job for the head, so a
+            # head could never see its OWN stale bubble -- the detector silently
+            # skipped exactly the agent most likely to have one. Proven by
+            # injecting a stale stage on TITAN and watching D3 not fire.
             live = db.execute(
-                "SELECT COUNT(*) FROM jobs WHERE agent_id = ? AND status IN ('queued', 'running')",
+                "SELECT COUNT(*) FROM jobs WHERE agent_id = ? AND mode != 'watch' "
+                "AND status IN ('queued', 'running')",
                 (agent_id,),
             ).fetchone()[0]
             if live:
