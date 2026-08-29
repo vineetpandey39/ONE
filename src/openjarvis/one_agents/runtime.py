@@ -125,7 +125,13 @@ def _enqueue_floor_watches() -> None:
     now_epoch = time.time()
     now = _now()
 
-    heads = [agent_id for agent_id, meta in AGENTS.items() if meta.get("seat") == "head"]
+    # "not a worker", not "seat == head". Only floors that actually have
+    # workers bother to mark their head's seat -- today just HERMES and IRIS.
+    # The other eleven floors are a single agent who IS the floor head and
+    # declares no seat at all, so matching on seat == "head" scheduled two
+    # watches and silently skipped eleven floors. Caught by testing every head
+    # rather than the one being worked on.
+    heads = [agent_id for agent_id, meta in AGENTS.items() if meta.get("seat") != "worker"]
     with _connect() as db:
         for head_id in heads:
             schedule_id = f"watch:{head_id}"

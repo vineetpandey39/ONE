@@ -67,6 +67,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from openjarvis.one_agents import floors_bridge
+
 Connect = Callable[[], sqlite3.Connection]
 
 # Six hours: long enough to cover an overnight book run that finished while
@@ -616,7 +618,23 @@ def watch_floor(
             _log({"head": head_id, "outcome": "healed", **asdict(finding), "action": action})
             continue
 
-        diagnosis_text = diagnose(finding) if allow_diagnosis else ""
+        # Spawning the Claude CLI is running a program, which is code:execute
+        # in this system's own vocabulary -- and every floor head currently
+        # denies that. Ask the head's own capabilities.yaml rather than
+        # assuming our machinery is exempt: a self-heal that quietly does what
+        # the agent declared it would not do is worse than one that skips a
+        # diagnosis. None means the registry cannot answer (a clone with no
+        # floors tree), which dispatch itself treats as allow.
+        may_execute = floors_bridge.may(head_id, "code:execute")
+        diagnosis_text = (
+            diagnose(finding) if (allow_diagnosis and may_execute is not False)
+            else (
+                "" if not allow_diagnosis else
+                f"(diagnosis skipped: {head_id} denies code:execute in its own "
+                "capabilities.yaml, and running the Claude CLI is code execution. "
+                "Grant it there if this head should be allowed to diagnose.)"
+            )
+        )
         _write_proposal(head_id, finding, diagnosis_text)
         _remember_healed(finding.job_id or f"{finding.agent_id}:{finding.code}",
                          finding.code, "proposed")
