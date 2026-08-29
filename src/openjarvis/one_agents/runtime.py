@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from openjarvis.one_agents import floors_bridge, job_recovery, memory, stages
+from openjarvis.one_agents import floor_watch, floors_bridge, job_recovery, memory, stages
 
 
 AGENTS: dict[str, dict[str, str]] = {
@@ -109,7 +109,67 @@ def _connect() -> sqlite3.Connection:
     return connection
 
 
+def _enqueue_floor_watches() -> None:
+    """Give each floor head a recurring look at its own floor.
+
+    Only heads whose floor actually did something recently get a watch job. A
+    floor with no jobs in the lookback window has nothing to reconcile, and
+    enqueuing fourteen no-op rows every interval would bury the real work in
+    the job list -- the watch is supposed to make problems easier to see, not
+    harder.
+    """
+    if os.environ.get("ONE_FLOOR_WATCH", "true").lower() not in {"1", "true", "yes", "on"}:
+        return
+    interval = max(300, int(os.environ.get("ONE_FLOOR_WATCH_INTERVAL_SECONDS", "1800")))
+    lookback = floor_watch.DEFAULT_LOOKBACK_SECONDS
+    now_epoch = time.time()
+    now = _now()
+
+    heads = [agent_id for agent_id, meta in AGENTS.items() if meta.get("seat") == "head"]
+    with _connect() as db:
+        for head_id in heads:
+            schedule_id = f"watch:{head_id}"
+            db.execute(
+                "INSERT OR IGNORE INTO agent_schedules (agent_id, interval_seconds, next_run_epoch) "
+                "VALUES (?, ?, 0)",
+                (schedule_id, interval),
+            )
+            schedule = db.execute(
+                "SELECT * FROM agent_schedules WHERE agent_id = ?", (schedule_id,)
+            ).fetchone()
+            if not schedule or not schedule["enabled"] or schedule["next_run_epoch"] > now_epoch:
+                continue
+
+            floor_ids = floor_watch.floor_agents(head_id)
+            placeholders = ",".join("?" for _ in floor_ids)
+            recent = db.execute(
+                f"SELECT COUNT(*) FROM jobs WHERE agent_id IN ({placeholders}) "
+                "AND created_at >= ?",
+                (*floor_ids, datetime.fromtimestamp(now_epoch - lookback, timezone.utc).isoformat()),
+            ).fetchone()[0]
+            # Always move the schedule forward, even when skipping: otherwise a
+            # quiet floor is re-evaluated on every single 30s tick forever.
+            db.execute(
+                "UPDATE agent_schedules SET interval_seconds = ?, next_run_epoch = ? WHERE agent_id = ?",
+                (interval, now_epoch + interval, schedule_id),
+            )
+            if not recent:
+                continue
+            db.execute(
+                "INSERT INTO jobs (id, agent_id, task, mode, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'watch', 'queued', ?, ?)",
+                (f"{head_id}-{uuid.uuid4().hex[:12]}", head_id,
+                 "[watch] Check this floor's recent jobs for anything stuck or unreconciled",
+                 now, now),
+            )
+
+
 def _enqueue_due_recurring_jobs() -> None:
+    try:
+        _enqueue_floor_watches()
+    except Exception as exc:  # noqa: BLE001 - the watch must never stop ordinary dispatch
+        print(f"[one-agents] floor watch scheduling skipped: {exc}", flush=True)
+
     now_epoch = time.time()
     now = _now()
     if os.environ.get("ALFA_AUTOSCOUT", "false").lower() in {"1", "true", "yes", "on"}:
@@ -2234,6 +2294,15 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
     refusal = _govern(job)
     if refusal is not None:
         return refusal
+
+    # A floor head watching its own floor is the same action whichever head is
+    # doing it, so it routes here rather than being copy-pasted into fourteen
+    # handlers -- most of which are still _local_plan stubs with nothing to
+    # copy it into. Deliberately placed AFTER _govern: a head that holds no
+    # capability cannot watch either, which is the honest answer rather than a
+    # quiet exemption for our own machinery.
+    if str(job.get("mode") or "").strip().lower() == "watch":
+        return floor_watch.watch_floor(_connect, job["agent_id"])
 
     handlers = {
         "zeus": _run_zeus,
