@@ -1311,17 +1311,21 @@ def _generate_kdp_packet(title: str, kdp_mode: str, region: str, angle: str, run
 def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[str, Any]:
     """Regenerate an existing book's cover with the current pipeline.
 
-    Works by making the run look incomplete again rather than by hand-running
-    the individual steps. LAO's KDP process already resumes the newest run that
-    is missing a required artifact, and its cover/banner prompt block is gated
-    on banner_prompt.txt -- so moving that gate file aside is enough to make the
-    resume rewrite the art prompts with the current instructions, generate fresh
-    art from them, and run the compose and full-wrap passes after it. Reusing
-    the proven process is the point: hand-assembling the same steps in a draft
-    would be a second, subtly different way to build a cover.
+    Runs an explicit, minimal step list against ONE named run_dir. It cannot
+    write a book: no step in it authors anything.
 
-    The old prompt files are renamed, never deleted, so a bad regeneration can
-    be compared against what shipped.
+    The first version of this tried to be clever and reuse the whole KDP
+    process, by clearing a gate file so LAO's resume would pick the book up.
+    That failed badly on 2026-08-30. _find_resumable_kdp_run skips any run
+    carrying lao_result.json -- i.e. any run that FINISHED -- so a completed
+    book can never be resumed no matter what is deleted from it. Resume found
+    nothing, and the process did the only other thing it knows how to do:
+    started a brand new book on a fresh topic. It was nine chapters deep before
+    it was stopped. A refresh whose failure mode is "writes an entire different
+    book" is not a refresh, so the process is not used at all here.
+
+    The old prompt and art files are renamed, never deleted, so a worse
+    regeneration can be compared against what shipped.
     """
     from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
 
@@ -1346,18 +1350,51 @@ def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[st
     visual = run_dir / "visual_assets"
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     moved: list[str] = []
-    for name in ("banner_prompt.txt", "banner_prompt.md", "cover_prompt.txt", "cover_prompt.md"):
+    # cover_raw.png goes too: the compositor reads it in preference to
+    # cover.png, so leaving the old raw art in place would quietly compose the
+    # new type over the OLD picture and look like the refresh had run.
+    for name in ("banner_prompt.txt", "banner_prompt.md", "cover_prompt.txt",
+                 "cover_prompt.md", "cover_raw.png"):
         src = visual / name
         if src.exists():
             src.rename(visual / f"{name}.{stamp}.bak")
             moved.append(name)
 
+    subtitle = ""
+    meta_file = run_dir / "kdp_metadata.json"
+    author = "Vineet Pandey"
+    if meta_file.exists():
+        try:
+            m = json.loads(meta_file.read_text(encoding="utf-8"))
+            subtitle = str(m.get("subtitle") or "")
+            author = str(m.get("author") or author)
+        except Exception:  # noqa: BLE001
+            pass
+
+    cover_png = str(visual / "cover.png")
+    steps = [
+        {"action": "get_credential_optional", "args": {"assetName": "nvidiaApiKey", "as": "nvidia_credential"}},
+        {"action": "refresh_kdp_cover_prompts",
+         "args": {"run_dir": str(run_dir), "nvidia_credential": "{{nvidia_credential}}", "as": "prompts"}},
+        {"action": "open_browser"},
+        {"action": "get_credential", "args": {"assetName": "chatgptLogin", "as": "chatgpt_credential"}},
+        {"action": "chatgpt_login_with_credential", "args": {"credential": "{{chatgpt_credential}}"}},
+        {"action": "read_local_file",
+         "args": {"path": str(visual / "cover_prompt.txt"), "as": "cover_prompt_text"}},
+        {"action": "generate_and_download_chatgpt_image",
+         "args": {"prompt": "Generate an image using this exact prompt. Do not ask "
+                            "follow-up questions. Prompt: {{cover_prompt_text}}",
+                  "filename": cover_png, "always_nudge_fresh_image": True}},
+        {"action": "overlay_cover_banner_text",
+         "args": {"run_dir": str(run_dir), "title": title or label,
+                  "subtitle": subtitle, "author": author}},
+    ]
+
     tool = LaoOrchestratorTool()
-    process_name = os.environ.get("LAO_KDP_PROCESS", KDP_PROCESS_NAME)
     stages.set_stage("scribe", stages.EXECUTING, f"LAO is regenerating the cover for “{label[:70]}”")
 
-    started = tool.execute(action="start", mode="dry_run", process_name=process_name,
-                           scope="production", input_args={})
+    started = tool.execute(action="run_draft", steps=steps, draft_name="scribe-cover-refresh",
+                           folder_id=_PEITHO_LAO_FOLDER_ID)
     if not started.success:
         stages.clear_stage("scribe")
         raise RuntimeError(f"LAO refused the cover refresh: {started.content}")
@@ -1367,6 +1404,7 @@ def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[st
         lao_job_id = ""
     if lao_job_id:
         job_recovery.attach(_connect, job["id"], lao_job_id)
+    process_name = ""
 
     poll_seconds = float(os.environ.get("ONE_LAO_POLL_SECONDS", "30"))
     deadline = time.time() + float(os.environ.get("ONE_COVER_REFRESH_MAX_WAIT", "3600"))
