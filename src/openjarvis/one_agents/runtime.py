@@ -1384,7 +1384,10 @@ def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[st
         {"action": "generate_and_download_chatgpt_image",
          "args": {"prompt": "Generate an image using this exact prompt. Do not ask "
                             "follow-up questions. Prompt: {{cover_prompt_text}}",
-                  "filename": cover_png, "always_nudge_fresh_image": True}},
+                  "filename": cover_png, "always_nudge_fresh_image": True,
+                  # Portrait + no-lettering. Without this the first refresh
+                  # produced a landscape image covered in legible text.
+                  "cover_constraints": True}},
         {"action": "overlay_cover_banner_text",
          "args": {"run_dir": str(run_dir), "title": title or label,
                   "subtitle": subtitle, "author": author}},
