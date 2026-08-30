@@ -1308,6 +1308,28 @@ def _generate_kdp_packet(title: str, kdp_mode: str, region: str, angle: str, run
     return {"generated": True, "content": packet, "path": str(packet_path)}
 
 
+def _docx_embeds(docx_path: Path, image_path: Path) -> bool:
+    """Is this exact image actually inside the .docx?
+
+    A cover refresh that reports success while the deliverable still carries
+    the previous cover is the failure worth catching here, and file timestamps
+    do not catch it -- the DOCX is rewritten on every run whether or not the
+    new art made it in. Comparing bytes is the only answer that means anything.
+    """
+    import hashlib
+    import zipfile
+
+    try:
+        wanted = hashlib.md5(image_path.read_bytes()).hexdigest()
+        with zipfile.ZipFile(docx_path) as bundle:
+            return any(
+                hashlib.md5(bundle.read(name)).hexdigest() == wanted
+                for name in bundle.namelist() if name.startswith("word/media/")
+            )
+    except Exception:  # noqa: BLE001 - unreadable means "cannot confirm", not "yes"
+        return False
+
+
 def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[str, Any]:
     """Regenerate an existing book's cover with the current pipeline.
 
@@ -1391,6 +1413,12 @@ def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[st
         {"action": "overlay_cover_banner_text",
          "args": {"run_dir": str(run_dir), "title": title or label,
                   "subtitle": subtitle, "author": author}},
+        # The book file embeds the cover, so regenerating the image alone
+        # leaves the DOCX still carrying the old one. The production workflow
+        # runs this immediately after the overlay step for exactly that
+        # reason; the first version of this draft stopped one step short and
+        # produced a new cover that existed nowhere in the actual deliverable.
+        {"action": "render_kdp_docx", "args": {"run_dir": str(run_dir), "as": "final_docx"}},
     ]
 
     tool = LaoOrchestratorTool()
@@ -1433,6 +1461,10 @@ def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[st
         name: (visual / name).exists()
         for name in ("cover_prompt.txt", "cover_raw.png", "cover.jpg", "cover_wrap_print.pdf")
     }
+    # Checked by content, not by existence: the DOCX is always there, and the
+    # question that matters is whether it carries the cover we just made.
+    produced["docx_has_new_cover"] = _docx_embeds(run_dir / "KDP_Book_Professional.docx",
+                                                  visual / "cover.jpg")
     stages.clear_stage("scribe")
 
     if status != "Successful":
