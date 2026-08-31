@@ -980,6 +980,51 @@ def _publishing_event(job: dict[str, Any], *, agent: str, event_type: str,
         pass
 
 
+def _reconcile_publishing_projection() -> None:
+    """Close ledger missions whose queue job is already terminal.
+
+    The queue is execution truth; the publishing ledger is a UI/audit
+    projection.  A worker crash between those two writes must not leave the
+    building claiming that HERMES is researching forever.
+    """
+    try:
+        ledger = floors_bridge.load("floor_05_publishing", "publishing_mission_ledger")
+        if ledger is None:
+            return
+        ledger_path = _home() / "publishing_missions.db"
+        with _connect() as db:
+            for mission in ledger.missions(ledger_path, limit=200):
+                if mission.get("status") != "running":
+                    continue
+                row = db.execute(
+                    "SELECT status,error FROM jobs WHERE id=?", (mission["mission_id"],)
+                ).fetchone()
+                if row is None or row["status"] in {"queued", "running"}:
+                    continue
+                queue_status = str(row["status"])
+                terminal = "completed" if queue_status == "completed" else "blocked"
+                last_type = (mission.get("events") or [{}])[-1].get("event_type", "")
+                # A completed queue row without a completed ledger event means
+                # the handler returned an old/fallback result, not governed
+                # research. Fail closed rather than laundering it as success.
+                if terminal == "completed" and last_type not in {
+                    "research_only_completed", "commissioned", "research_completed"
+                }:
+                    terminal = "blocked"
+                ledger.record(
+                    ledger_path, mission_id=mission["mission_id"],
+                    objective=mission.get("objective", ""), job_id=mission["mission_id"],
+                    agent_id=str(mission.get("current_agent") or "hermes"),
+                    event_type="state_reconciled", stage="queue_terminal",
+                    summary=f"Mission reconciled with terminal queue state: {queue_status}",
+                    details={"queue_status": queue_status, "last_event": last_type,
+                             "error": str(row["error"] or "")[:1000]},
+                    status=terminal,
+                )
+    except Exception as exc:
+        print(f"[one-agents] publishing reconciliation skipped: {exc}", flush=True)
+
+
 def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 5 head - commissions a title, then hands it to SCRIBE.
 
@@ -3139,6 +3184,12 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
     try:
         result = handler(job)
     except Exception as exc:  # noqa: BLE001 - recorded, then re-raised unchanged
+        if job.get("agent_id") == "hermes":
+            _publishing_event(
+                job, agent="HERMES", event_type="research_failed",
+                stage="execution_error", summary="Research stopped with an execution error",
+                details={"error": f"{type(exc).__name__}: {exc}"[:1200]}, status="blocked",
+            )
         floors_bridge.audit(agent_id=job.get("agent_id", ""),
                             floor_id=str(job.get("floor_id") or "1"),
                             job_id=job.get("id", ""), correlation_id=correlation_id,
@@ -3207,6 +3258,7 @@ def run_worker(poll_seconds: float = 2.0) -> None:
             print(f"[one-agents] restart recovery -- {line}", flush=True)
     except Exception as exc:  # noqa: BLE001 - recovery must never stop the worker
         print(f"[one-agents] restart recovery skipped: {exc}", flush=True)
+    _reconcile_publishing_projection()
 
     last_schedule_check = 0.0
     while True:
@@ -3251,6 +3303,12 @@ def run_worker(poll_seconds: float = 2.0) -> None:
                     "re-run the task if needed."
                 ),
             )
+            if job.get("agent_id") == "hermes":
+                _publishing_event(
+                    job, agent="HERMES", event_type="research_timeout",
+                    stage="watchdog", summary="Research stopped by the job watchdog",
+                    details={"timeout_seconds": _job_watchdog_seconds(job)}, status="blocked",
+                )
             continue
 
         if "error" in outcome:
