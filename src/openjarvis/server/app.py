@@ -230,14 +230,20 @@ def create_app(
     # it's a blocking loop, so it must run in its own daemon thread. Started
     # here (after inject_credentials()) so it inherits the same os.environ
     # the rest of the process uses, including OPENAI_API_KEY/FAL_KEY.
-    try:
-        import threading
+    # Production startup owns a dedicated one_agent_worker.py process. Running
+    # another consumer inside this long-lived API process creates a queue race:
+    # after runtime.py changes, the stale embedded copy can claim a fresh job
+    # first and execute yesterday's routing graph. Keep embedded consumption as
+    # an explicit development opt-in only.
+    if os.environ.get("ONE_EMBEDDED_AGENT_WORKER", "false").lower() == "true":
+        try:
+            import threading
 
-        from openjarvis.one_agents.runtime import run_worker
+            from openjarvis.one_agents.runtime import run_worker
 
-        threading.Thread(target=run_worker, daemon=True, name="one-agents-worker").start()
-    except Exception as exc:
-        logger.warning("one_agents job worker failed to start: %s", exc)
+            threading.Thread(target=run_worker, daemon=True, name="one-agents-worker").start()
+        except Exception as exc:
+            logger.warning("one_agents job worker failed to start: %s", exc)
 
     app = FastAPI(
         title="OpenJarvis API",
