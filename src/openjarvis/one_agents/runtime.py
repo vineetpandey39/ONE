@@ -856,6 +856,50 @@ def _claude_research(prompt: str, max_tokens: int = 1400, model: str = "",
         return "", f"Claude call failed ({model}): {exc}"
 
 
+def _local_research(prompt: str, max_tokens: int = 2200) -> tuple[str, str]:
+    """Interpret captured evidence with a local model; never spends API money.
+
+    Discovery is performed separately by allowlisted collectors.  Ollama gets
+    only that captured evidence, so it cannot claim that it browsed the web or
+    introduce uncited sources. Paid research is an explicit opt-in fallback.
+    """
+    base = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+    preferred = os.environ.get("ONE_LOCAL_RESEARCH_MODEL", "qwen3.5:9b").strip()
+    try:
+        tags = httpx.get(base + "/api/tags", timeout=10).json().get("models", [])
+        installed = [str(item.get("name") or item.get("model") or "") for item in tags]
+        model = preferred if preferred in installed else next(
+            (name for name in ("qwen3.5:9b", "qwen3:8b", "ibm/granite4.1:3b", "phi4-mini:latest")
+             if name in installed), ""
+        )
+        if not model:
+            return "", "No approved local research model is installed in Ollama"
+        response = httpx.post(
+            base + "/api/chat",
+            json={
+                "model": model, "stream": False, "think": False,
+                "messages": [{"role": "user", "content": prompt}],
+                "options": {"temperature": 0.1, "num_predict": max_tokens},
+            },
+            timeout=300,
+        )
+        response.raise_for_status()
+        text = str((response.json().get("message") or {}).get("content") or "").strip()
+        return (text, "") if text else ("", f"Local model {model} returned no text")
+    except Exception as exc:  # noqa: BLE001 - caller records an honest block
+        return "", f"Local research failed: {type(exc).__name__}: {exc}"
+
+
+def _research_synthesis(prompt: str, max_tokens: int = 2200) -> tuple[str, str]:
+    """Free/local first. Paid Claude is disabled unless the owner opts in."""
+    text, note = _local_research(prompt, max_tokens=max_tokens)
+    if text:
+        return text, ""
+    if os.environ.get("ONE_ALLOW_PAID_RESEARCH", "0").strip().lower() in {"1", "true", "yes"}:
+        return _claude_research(prompt, max_tokens=max_tokens, web_search=False)
+    return "", note + "; paid research fallback is disabled"
+
+
 def _marker(text: str, key: str, default: str = "") -> str:
     match = re.search(
         rf"^\s*\**{re.escape(key)}\**\s*:\s*\**(.+?)\**\s*$",
@@ -945,6 +989,7 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     # asking a model to interpret it. This prevents "web research" from being
     # only a persuasive paragraph with no reproducible input.
     radar_snapshot: dict[str, Any] = {"items": [], "errors": [{"error": "radar unavailable"}]}
+    radar = None
     try:
         radar = floors_bridge.load("floor_05_publishing", "publishing_demand_radar")
         if radar is not None:
@@ -961,7 +1006,24 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     radar_path = radar_dir / f"{mission_id}-trending-now.json"
     radar_path.write_text(json.dumps(radar_snapshot, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    brief, note = _claude_research(
+    # Add a credential-free book-supply/competition signal for the strongest
+    # discovered queries. These are public catalog results, not sales claims.
+    supply: list[dict[str, Any]] = []
+    if radar is not None:
+        for item in (radar_snapshot.get("items") or [])[:8]:
+            query = str(item.get("query") or "").strip()
+            if not query:
+                continue
+            try:
+                supply.append(radar.book_supply(query, timeout=10, limit=10))
+            except Exception as exc:
+                supply.append({"query": query, "error": f"{type(exc).__name__}: {exc}"[:300]})
+    research_evidence = json.dumps(
+        {"trending_now": radar_snapshot, "book_supply": supply},
+        ensure_ascii=False, separators=(",", ":"),
+    )
+
+    brief, note = _research_synthesis(
         "You are HERMES, head of Book Publishing at a digital holding company, "
         "commissioning the next Amazon KDP title.\n\n"
         f"Request: {task}\n\n"
@@ -969,10 +1031,11 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "KDP: real reader demand, a specific reachable audience, and a gap a new "
         "title can genuinely fill. Do not invent internal teams, tools, boards or "
         "databases — the only production system is an automated drafting pipeline.\n\n"
-        "Use web search and cite concrete demand/competition signals. A viral headline is not book demand: "
+        "Use ONLY the captured evidence below and cite its exact source_url values. "
+        "Do not claim you searched sources that are absent. A viral headline is not book demand: "
         "corroborate 24-hour acceleration with persistence and book-supply evidence.\n\n"
         f"Floor-owned operating method:\n{_publishing_skill_text()}\n\n"
-        f"Machine-captured official Trending Now snapshot (discovery only, not proof):\n{radar_text}\n\n"
+        f"Machine-captured official/public evidence (discovery and catalog supply; neither proves sales):\n{research_evidence}\n\n"
         "Reply in exactly this shape:\n"
         "MODE: fiction | nonfiction\n"
         "REGION: <primary market, e.g. global or india>\n"
@@ -986,7 +1049,6 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "one different, and the honest commercial risk>"
         + avoid,
         max_tokens=2200,
-        web_search=True,
     )
 
     if not brief:
@@ -1021,16 +1083,17 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "PERFORMANCE_SCORE", "EVIDENCE",
     )
     if any(not _marker(brief, marker) for marker in required_markers):
-        audit_text, audit_note = _claude_research(
+        audit_text, audit_note = _research_synthesis(
             "Act as an evidence auditor, not a commissioning writer. Audit the candidate below "
-            "against current reader-demand and book-competition evidence. Use web search. "
+            "against the captured reader-demand and book-competition evidence below. "
+            "Use only supplied source_url values; do not invent citations. "
             "Return ONLY these eight one-line markers. Scores must be 0-100 or UNKNOWN; "
             "EVIDENCE must contain direct URLs:\n"
             "DEMAND_SCORE:\nPACKAGING_SCORE:\nCONVERSION_SCORE:\n"
             "DIFFERENTIATION_SCORE:\nEXPANSION_SCORE:\nRIGHTS_SCORE:\n"
             "PERFORMANCE_SCORE:\nEVIDENCE:\n\n"
-            f"Candidate:\n{brief}\n\nDiscovery snapshot:\n{radar_text}",
-            max_tokens=1200, web_search=True,
+            f"Candidate:\n{brief}\n\nCaptured evidence:\n{research_evidence}",
+            max_tokens=1200,
         )
         if audit_text:
             brief = f"{brief}\n\nEVIDENCE AUDIT:\n{audit_text}"
