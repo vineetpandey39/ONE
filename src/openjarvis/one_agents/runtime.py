@@ -866,6 +866,14 @@ def _local_research(prompt: str, max_tokens: int = 2200) -> tuple[str, str]:
     base = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
     preferred = os.environ.get("ONE_LOCAL_RESEARCH_MODEL", "qwen3.5:9b").strip()
     try:
+        grounded = floors_bridge.load("floor_05_publishing", "hermes_grounded_research")
+        if grounded is not None:
+            result = grounded.synthesize(
+                prompt, base_url=base, preferred_model=preferred, max_tokens=max_tokens,
+            )
+            return str(result["text"]), ""
+        # Compatibility fallback only for installations whose floor tree is
+        # genuinely absent. Normal ONE production uses the Floor 5 component.
         tags = httpx.get(base + "/api/tags", timeout=10).json().get("models", [])
         installed = [str(item.get("name") or item.get("model") or "") for item in tags]
         model = preferred if preferred in installed else next(
@@ -1005,6 +1013,16 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     radar_dir.mkdir(parents=True, exist_ok=True)
     radar_path = radar_dir / f"{mission_id}-trending-now.json"
     radar_path.write_text(json.dumps(radar_snapshot, indent=2, ensure_ascii=False), encoding="utf-8")
+    freshness_counts = radar_snapshot.get("freshness_counts") or {}
+    _publishing_event(
+        job, agent="HERMES", event_type="freshness_gate_completed",
+        stage="24_48h_date_gate",
+        summary=(
+            f"Freshness gate: {len(radar_snapshot.get('items') or [])} eligible; "
+            f"{len(radar_snapshot.get('excluded_items') or [])} excluded"
+        ),
+        details={"buckets": freshness_counts, "snapshot": str(radar_path)},
+    )
 
     # Add a credential-free book-supply/competition signal for the strongest
     # discovered queries. These are public catalog results, not sales claims.
@@ -1033,7 +1051,9 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "databases — the only production system is an automated drafting pipeline.\n\n"
         "Use ONLY the captured evidence below and cite its exact source_url values. "
         "Do not claim you searched sources that are absent. A viral headline is not book demand: "
-        "corroborate 24-hour acceleration with persistence and book-supply evidence.\n\n"
+        "corroborate 24-hour acceleration with persistence and book-supply evidence. "
+        "Treat only 0-24h and 24-48h discovery buckets as demand evidence; never score or cite "
+        "signals in >48h or unknown buckets. Catalog supply is a separate current-index signal.\n\n"
         f"Floor-owned operating method:\n{_publishing_skill_text()}\n\n"
         f"Machine-captured official/public evidence (discovery and catalog supply; neither proves sales):\n{research_evidence}\n\n"
         "Reply in exactly this shape:\n"
