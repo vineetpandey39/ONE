@@ -856,7 +856,35 @@ def _claude_research(prompt: str, max_tokens: int = 1400, model: str = "",
         return "", f"Claude call failed ({model}): {exc}"
 
 
-def _local_research(prompt: str, max_tokens: int = 2200) -> tuple[str, str]:
+def _sanjeevani_research() -> Any | None:
+    """Load only Sanjeevani's reusable library, never its app or database."""
+    import importlib.util
+    import sys
+    path = Path(os.environ.get(
+        "SANJEEVANI_RESEARCH_LIBRARY",
+        r"C:\Users\pc\Documents\Codex\2026-08-28\ye\outputs\sanjeevani\research_library.py",
+    ))
+    if not path.is_file():
+        return None
+    key = "sanjeevani_reusable_research"
+    cached = sys.modules.get(key)
+    if cached is not None:
+        return cached
+    try:
+        spec = importlib.util.spec_from_file_location(key, path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[key] = module
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        sys.modules.pop(key, None)
+        return None
+
+
+def _local_research(prompt: str, max_tokens: int = 2200,
+                    evidence: dict[str, Any] | None = None) -> tuple[str, str]:
     """Interpret captured evidence with a local model; never spends API money.
 
     Discovery is performed separately by allowlisted collectors.  Ollama gets
@@ -866,14 +894,15 @@ def _local_research(prompt: str, max_tokens: int = 2200) -> tuple[str, str]:
     base = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
     preferred = os.environ.get("ONE_LOCAL_RESEARCH_MODEL", "qwen3.5:9b").strip()
     try:
-        grounded = floors_bridge.load("floor_05_publishing", "hermes_grounded_research")
-        if grounded is not None:
-            result = grounded.synthesize(
-                prompt, base_url=base, preferred_model=preferred, max_tokens=max_tokens,
+        reusable = _sanjeevani_research()
+        if reusable is not None:
+            result = reusable.ollama_synthesize(
+                prompt, evidence or {"eligible": [], "catalog_evidence": []},
+                base_url=base, preferred_model=preferred, max_tokens=max_tokens,
             )
             return str(result["text"]), ""
-        # Compatibility fallback only for installations whose floor tree is
-        # genuinely absent. Normal ONE production uses the Floor 5 component.
+        # Compatibility fallback only when the canonical Sanjeevani library is
+        # unavailable. It does not gain network authority.
         tags = httpx.get(base + "/api/tags", timeout=10).json().get("models", [])
         installed = [str(item.get("name") or item.get("model") or "") for item in tags]
         model = preferred if preferred in installed else next(
@@ -898,9 +927,10 @@ def _local_research(prompt: str, max_tokens: int = 2200) -> tuple[str, str]:
         return "", f"Local research failed: {type(exc).__name__}: {exc}"
 
 
-def _research_synthesis(prompt: str, max_tokens: int = 2200) -> tuple[str, str]:
+def _research_synthesis(prompt: str, max_tokens: int = 2200,
+                        evidence: dict[str, Any] | None = None) -> tuple[str, str]:
     """Free/local first. Paid Claude is disabled unless the owner opts in."""
-    text, note = _local_research(prompt, max_tokens=max_tokens)
+    text, note = _local_research(prompt, max_tokens=max_tokens, evidence=evidence)
     if text:
         return text, ""
     if os.environ.get("ONE_ALLOW_PAID_RESEARCH", "0").strip().lower() in {"1", "true", "yes"}:
@@ -999,13 +1029,27 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     radar_snapshot: dict[str, Any] = {"items": [], "errors": [{"error": "radar unavailable"}]}
     radar = None
     try:
-        radar = floors_bridge.load("floor_05_publishing", "publishing_demand_radar")
-        if radar is not None:
-            requested_region = str(portfolio_payload.get("region") or "").upper()
-            markets = [requested_region] if requested_region in {"IN", "US", "GB", "CA", "AU"} else ["IN", "US", "GB"]
+        requested_region = str(portfolio_payload.get("region") or "").upper()
+        markets = [requested_region] if requested_region in {"IN", "US", "GB", "CA", "AU"} else ["IN", "US", "GB"]
+        reusable = _sanjeevani_research()
+        if reusable is not None:
+            shared = reusable.collect(task, markets=markets)
+            radar_snapshot = {
+                "captured_at": shared.get("captured_at"), "markets": markets,
+                "items": shared.get("eligible", []), "excluded_items": shared.get("excluded", []),
+                "freshness_buckets": shared.get("buckets", {}), "freshness_counts": shared.get("counts", {}),
+                "freshness_policy": shared.get("policy", ""), "queries": shared.get("queries", []),
+                "catalog_evidence": shared.get("catalog_evidence", []),
+                "corroboration": shared.get("corroboration", {}), "errors": shared.get("errors", []),
+                "library": shared.get("library"), "library_version": shared.get("version"),
+            }
+            radar_text = json.dumps(radar_snapshot, ensure_ascii=False, separators=(",", ":"))
+        else:
+            radar = floors_bridge.load("floor_05_publishing", "publishing_demand_radar")
+        if reusable is None and radar is not None:
             radar_snapshot = radar.collect(markets)
             radar_text = radar.compact(radar_snapshot)
-        else:
+        elif reusable is None and radar is None:
             radar_text = "{}"
     except Exception as exc:
         radar_text = json.dumps({"error": f"{type(exc).__name__}: {exc}"})
@@ -1027,7 +1071,9 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     # Add a credential-free book-supply/competition signal for the strongest
     # discovered queries. These are public catalog results, not sales claims.
     supply: list[dict[str, Any]] = []
-    if radar is not None:
+    if radar_snapshot.get("catalog_evidence"):
+        supply = list(radar_snapshot.get("catalog_evidence") or [])
+    elif radar is not None:
         for item in (radar_snapshot.get("items") or [])[:8]:
             query = str(item.get("query") or "").strip()
             if not query:
@@ -1068,7 +1114,10 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "<8-14 lines: target reader, why now, competing titles, what makes this "
         "one different, and the honest commercial risk>"
         + avoid,
-        max_tokens=2200,
+        max_tokens=2200, evidence={"eligible": radar_snapshot.get("items", []),
+                                   "catalog_evidence": supply,
+                                   "counts": radar_snapshot.get("freshness_counts", {}),
+                                   "policy": radar_snapshot.get("freshness_policy", "")},
     )
 
     if not brief:
@@ -1113,7 +1162,10 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
             "DIFFERENTIATION_SCORE:\nEXPANSION_SCORE:\nRIGHTS_SCORE:\n"
             "PERFORMANCE_SCORE:\nEVIDENCE:\n\n"
             f"Candidate:\n{brief}\n\nCaptured evidence:\n{research_evidence}",
-            max_tokens=1200,
+            max_tokens=1200, evidence={"eligible": radar_snapshot.get("items", []),
+                                       "catalog_evidence": supply,
+                                       "counts": radar_snapshot.get("freshness_counts", {}),
+                                       "policy": radar_snapshot.get("freshness_policy", "")},
         )
         if audit_text:
             brief = f"{brief}\n\nEVIDENCE AUDIT:\n{audit_text}"

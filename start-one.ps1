@@ -118,6 +118,12 @@ if (Test-Path $envFile) {
         }
     }
 }
+if (-not $env:SANJEEVANI_RESEARCH_LIBRARY) {
+    $env:SANJEEVANI_RESEARCH_LIBRARY = "C:\Users\pc\Documents\Codex\2026-08-28\ye\outputs\sanjeevani\research_library.py"
+}
+if (-not $env:SANJEEVANI_SEARXNG_URL) {
+    $env:SANJEEVANI_SEARXNG_URL = "http://127.0.0.1:59011"
+}
 
 $oneEngine = if ($env:ONE_ENGINE) { $env:ONE_ENGINE } else { "ollama" }
 $oneModel = if ($env:ONE_ROUTER_MODEL) { $env:ONE_ROUTER_MODEL } else { "qwen3.5:2b" }
