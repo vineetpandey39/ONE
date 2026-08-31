@@ -225,8 +225,26 @@ if (-not $running) {
 $workerRunning = $false
 $foundWorkerPid = Test-ProcessAlreadyRunning -CommandLineMatch "*one_agent_worker.py*"
 if ($foundWorkerPid -gt 0) {
-    $workerRunning = $true
-    Set-Content -Path $workerPidFile -Value $foundWorkerPid
+    # The API server and queue worker import the same runtime.py into separate
+    # processes. A server restart used to expose the new roster while an old
+    # worker kept executing the previous routing graph (observed live:
+    # HERMES bypassed BIBLOS and went straight to SCRIBE). If routing source
+    # changed after the worker started, replace every matching wrapper/child
+    # process before accepting it as healthy.
+    $runtimeSource = Join-Path $sourceRoot "src\openjarvis\one_agents\runtime.py"
+    $workerProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$foundWorkerPid" -ErrorAction SilentlyContinue
+    $runtimeChanged = (Test-Path $runtimeSource) -and $workerProcess -and `
+        ((Get-Item $runtimeSource).LastWriteTime -gt $workerProcess.CreationDate)
+    if ($runtimeChanged) {
+        Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -and $_.CommandLine -like "*one_agent_worker.py*" } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        Start-Sleep -Milliseconds 400
+        $foundWorkerPid = 0
+    } else {
+        $workerRunning = $true
+        Set-Content -Path $workerPidFile -Value $foundWorkerPid
+    }
 } elseif (Test-Path $workerPidFile) {
     Remove-Item $workerPidFile -Force -ErrorAction SilentlyContinue
 }

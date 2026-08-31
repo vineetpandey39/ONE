@@ -28,6 +28,10 @@ AGENTS: dict[str, dict[str, str]] = {
     # First worker agent under a floor head — sits at an open desk on Floor 5
     # and is the one that actually drives LAO's KDP factory to completion.
     "scribe": {"name": "SCRIBE", "role": "KDP manuscript production worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
+    "biblos": {"name": "BIBLOS", "role": "Publishing demand validation and commercial scoring worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
+    "mercury": {"name": "MERCURY", "role": "Publishing rights and distribution-route worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
+    "leda": {"name": "LEDA", "role": "Consent-safe reader audience worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
+    "metron": {"name": "METRON", "role": "Publishing measurement and attribution worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
     # Floor 5's second worker, added 2026-08-26. Starts only after HERMES
     # reports a finished book (the report leg SCRIBE hands back), same
     # dual-worker-under-one-head shape as IRIS/MUSE/KAIROS on Floor 4.
@@ -431,6 +435,23 @@ def finish_job(job_id: str, result: dict[str, Any]) -> None:
             pass
 
 
+def mark_blocked(job_id: str, result: dict[str, Any]) -> None:
+    """Persist an honest terminal hold when a required capability is absent.
+
+    A blocked research run must never look completed, and it must not leave
+    the building projection stuck on ``running`` after the worker goes idle.
+    """
+    reason = str(result.get("blocked_reason") or "Required capability unavailable")[:2000]
+    with _connect() as db:
+        db.execute(
+            "UPDATE jobs SET status = 'blocked', progress = 0, result = ?, error = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(result, ensure_ascii=True), reason, _now(), job_id),
+        )
+    job = get_job(job_id)
+    if job:
+        stages.clear_stage(str(job.get("agent_id") or ""))
+
+
 def mark_awaiting_upload(job_id: str, result: dict[str, Any]) -> None:
     """SCRIBE's own execution is done, but the real-world action -- uploading
     to kdp.amazon.com by hand, since there's no KDP API and automating that
@@ -443,6 +464,16 @@ def mark_awaiting_upload(job_id: str, result: dict[str, Any]) -> None:
     with _connect() as db:
         db.execute(
             "UPDATE jobs SET status = 'awaiting_upload', progress = 95, result = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(result, ensure_ascii=True), _now(), job_id),
+        )
+
+
+def mark_awaiting_growth_review(job_id: str, result: dict[str, Any]) -> None:
+    """Hold a finished manuscript while MERCURY and ALFA review it."""
+    with _connect() as db:
+        db.execute(
+            "UPDATE jobs SET status = 'awaiting_growth_review', progress = 90, "
+            "result = ?, updated_at = ? WHERE id = ?",
             (json.dumps(result, ensure_ascii=True), _now(), job_id),
         )
 
@@ -484,6 +515,9 @@ def confirm_scribe_upload(job_id: str) -> dict[str, Any]:
         json.dumps({
             "run_dir": run_dir, "title": title, "lao_job": lao_job_id,
             "kdp_packet_path": kdp_packet_path,
+            "mission_id": result.get("mission_id"),
+            "origin_job": result.get("origin_job"),
+            "objective": result.get("objective"),
         }),
         mode="execute", tier="fast",
     )
@@ -502,16 +536,51 @@ def confirm_scribe_upload(job_id: str) -> dict[str, Any]:
         body=f"Chairman confirmed “{title}” is live on Amazon KDP. Handed off to PEITHO.",
         task=title, tags=["kdp", "publishing", "uploaded"],
     )
+    _publishing_event({**job, "task": json.dumps(result)}, agent="OLYMPUS",
+                      event_type="upload_confirmed", stage="human_gate",
+                      summary="Chairman confirmed the Amazon KDP upload",
+                      details={"title": title, "peitho_job_id": peitho_job["id"]})
 
     return {"scribe_job": get_job(job_id), "peitho_job": peitho_job}
 
 
+def reject_scribe_upload(job_id: str, rationale: str) -> dict[str, Any]:
+    """OLYMPUS rejects the submission packet; no publish or PEITHO handoff."""
+    job = get_job(job_id)
+    if not job or job.get("agent_id") != "scribe":
+        raise ValueError(f"Unknown SCRIBE job: {job_id}")
+    if job.get("status") != "awaiting_upload":
+        raise ValueError(f"Job {job_id} is {job.get('status')}, not awaiting upload review")
+    rationale = rationale.strip()
+    if len(rationale) < 10:
+        raise ValueError("a rejection rationale of 10+ characters is required")
+    with _connect() as db:
+        db.execute(
+            "UPDATE jobs SET status='failed', error=?, updated_at=? WHERE id=?",
+            (f"OLYMPUS rejected KDP submission: {rationale}"[:2000], _now(), job_id),
+        )
+    stages.clear_stage("scribe")
+    result = _json_task({"task": job.get("result") or "{}"})
+    _publishing_event({**job, "task": json.dumps(result)}, agent="OLYMPUS",
+                      event_type="upload_rejected", stage="human_gate",
+                      summary="OLYMPUS rejected the KDP submission packet",
+                      details={"rationale": rationale}, status="rejected")
+    return get_job(job_id) or {}
+
+
 def fail_job(job_id: str, error: Exception) -> None:
+    failed = get_job(job_id)
     with _connect() as db:
         db.execute(
             "UPDATE jobs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?",
             (str(error)[:2000], _now(), job_id),
         )
+    if failed:
+        agent_id = str(failed.get("agent_id") or "")
+        stages.clear_stage(agent_id)
+        reports_to = str((AGENTS.get(agent_id) or {}).get("reports_to") or "")
+        if reports_to:
+            stages.clear_stage(reports_to)
     if job_id.startswith("beta-"):
         try:
             from openjarvis.one_agents.revenue import mark_delivery_job
@@ -738,7 +807,8 @@ KDP_PROCESS_NAME = "KDP Book Factory - Full Manuscript Draft"
 IA_PROCESS_NAME = "ImagineIndia Reel - Twice Daily Production"
 
 
-def _claude_research(prompt: str, max_tokens: int = 1400, model: str = "") -> tuple[str, str]:
+def _claude_research(prompt: str, max_tokens: int = 1400, model: str = "",
+                     web_search: bool = False) -> tuple[str, str]:
     """Ask Claude directly. Returns (text, failure_note); never raises.
 
     Deliberately separate from the local Ollama planner: the 8B local model
@@ -767,11 +837,16 @@ def _claude_research(prompt: str, max_tokens: int = 1400, model: str = "") -> tu
             api_key=api_key,
             http_client=httpx.Client(verify=False, timeout=90.0),
         )
-        message = client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        request: dict[str, Any] = {
+            "model": model, "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if web_search:
+            # Server-side search produces current evidence without giving the
+            # runtime a general browser or arbitrary network surface.
+            request["tools"] = [{"type": "web_search_20250305",
+                                 "name": "web_search", "max_uses": 8}]
+        message = client.messages.create(**request)
         text = "".join(
             block.text for block in message.content
             if getattr(block, "type", None) == "text"
@@ -782,8 +857,45 @@ def _claude_research(prompt: str, max_tokens: int = 1400, model: str = "") -> tu
 
 
 def _marker(text: str, key: str, default: str = "") -> str:
-    match = re.search(rf"^{key}:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
+    match = re.search(
+        rf"^\s*\**{re.escape(key)}\**\s*:\s*\**(.+?)\**\s*$",
+        text, re.MULTILINE | re.IGNORECASE,
+    )
     return match.group(1).strip() if match else default
+
+
+def _publishing_skill_text() -> str:
+    """Load HERMES's floor-owned method; runtime code is not its policy owner."""
+    root = floors_bridge.floors_root()
+    if root is None:
+        return ""
+    base = root / "floor_05_publishing" / "head" / "hermes" / "skills" / "publishing-demand-radar"
+    parts: list[str] = []
+    for path in (base / "SKILL.md", base / "references" / "evidence-and-scoring.md",
+                 base / "references" / "signal-sources.md"):
+        if path.is_file():
+            parts.append(path.read_text(encoding="utf-8"))
+    return "\n\n".join(parts)[:16000]
+
+
+def _publishing_event(job: dict[str, Any], *, agent: str, event_type: str,
+                      stage: str, summary: str, details: dict[str, Any] | None = None,
+                      status: str = "running") -> None:
+    """Best-effort live projection. Execution never depends on dashboard storage."""
+    payload = _json_task(job)
+    mission_id = str(payload.get("mission_id") or payload.get("origin_job") or job.get("id") or "")
+    if not mission_id:
+        return
+    try:
+        ledger = floors_bridge.load("floor_05_publishing", "publishing_mission_ledger")
+        if ledger is not None:
+            ledger.record(_home() / "publishing_missions.db", mission_id=mission_id,
+                          objective=str(payload.get("objective") or payload.get("request") or job.get("task") or "")[:1000],
+                          job_id=str(job.get("id") or ""), agent_id=agent.lower(),
+                          event_type=event_type, stage=stage, summary=summary,
+                          details=details or {}, status=status)
+    except Exception:
+        pass
 
 
 def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
@@ -801,8 +913,19 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     task = str(job.get("task") or "")
     mode = str(job.get("mode") or "plan").strip().lower()
 
+    try:
+        portfolio_payload = json.loads(task)
+    except (json.JSONDecodeError, TypeError):
+        portfolio_payload = {}
+    if portfolio_payload.get("workflow") == "publishing_portfolio" and portfolio_payload.get("phase") == "commission":
+        return _hermes_commission(job, portfolio_payload)
+
     if mode == "report":
         return _hermes_report(job)
+
+    mission_id = str(portfolio_payload.get("mission_id") or job["id"])
+    _publishing_event(job, agent="HERMES", event_type="research_started",
+                      stage="24h_demand_radar", summary="Fresh market-signal research started")
 
     # The detail is what the building shows in the speech bubble beside HERMES'
     # face, so it carries the Chairman's actual words — not a generic label.
@@ -818,6 +941,26 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         if already else ""
     )
 
+    # Capture an immutable, machine-readable 24-hour discovery snapshot before
+    # asking a model to interpret it. This prevents "web research" from being
+    # only a persuasive paragraph with no reproducible input.
+    radar_snapshot: dict[str, Any] = {"items": [], "errors": [{"error": "radar unavailable"}]}
+    try:
+        radar = floors_bridge.load("floor_05_publishing", "publishing_demand_radar")
+        if radar is not None:
+            requested_region = str(portfolio_payload.get("region") or "").upper()
+            markets = [requested_region] if requested_region in {"IN", "US", "GB", "CA", "AU"} else ["IN", "US", "GB"]
+            radar_snapshot = radar.collect(markets)
+            radar_text = radar.compact(radar_snapshot)
+        else:
+            radar_text = "{}"
+    except Exception as exc:
+        radar_text = json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+    radar_dir = _home() / "agent_outputs" / "research"
+    radar_dir.mkdir(parents=True, exist_ok=True)
+    radar_path = radar_dir / f"{mission_id}-trending-now.json"
+    radar_path.write_text(json.dumps(radar_snapshot, indent=2, ensure_ascii=False), encoding="utf-8")
+
     brief, note = _claude_research(
         "You are HERMES, head of Book Publishing at a digital holding company, "
         "commissioning the next Amazon KDP title.\n\n"
@@ -826,23 +969,73 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "KDP: real reader demand, a specific reachable audience, and a gap a new "
         "title can genuinely fill. Do not invent internal teams, tools, boards or "
         "databases — the only production system is an automated drafting pipeline.\n\n"
+        "Use web search and cite concrete demand/competition signals. A viral headline is not book demand: "
+        "corroborate 24-hour acceleration with persistence and book-supply evidence.\n\n"
+        f"Floor-owned operating method:\n{_publishing_skill_text()}\n\n"
+        f"Machine-captured official Trending Now snapshot (discovery only, not proof):\n{radar_text}\n\n"
         "Reply in exactly this shape:\n"
         "MODE: fiction | nonfiction\n"
         "REGION: <primary market, e.g. global or india>\n"
         "ANGLE: <one line — the specific hook this book leads with>\n"
+        "DEMAND_SCORE: <0-100>\nPACKAGING_SCORE: <0-100>\n"
+        "CONVERSION_SCORE: <0-100>\nDIFFERENTIATION_SCORE: <0-100>\n"
+        "EXPANSION_SCORE: <0-100>\nRIGHTS_SCORE: <0-100>\nPERFORMANCE_SCORE: <0-100>\n"
+        "EVIDENCE: <URLs or named current sources supporting the scores>\n"
         "BRIEF:\n"
         "<8-14 lines: target reader, why now, competing titles, what makes this "
         "one different, and the honest commercial risk>"
-        + avoid
+        + avoid,
+        max_tokens=2200,
+        web_search=True,
     )
 
     if not brief:
-        # Never silently downgrade to the weaker model without saying so.
+        # Research evidence is a hard requirement. A local planning template
+        # is not a substitute and must never be presented as completed market
+        # research simply because the cloud provider is unavailable.
         stages.clear_stage("hermes")
-        fallback = _local_plan(job)
-        fallback["research_engine"] = "local planner"
-        fallback["claude_unavailable"] = note
-        return fallback
+        safe_note = str(note or "research provider unavailable")[:1200]
+        blocked = {
+            "agent": "HERMES",
+            "mode": "blocked",
+            "content": (
+                "Live market research did not run. HERMES stopped before "
+                "commissioning because no evidence-capable provider was available."
+            ),
+            "blocked_reason": safe_note,
+            "radar_snapshot": str(radar_path),
+            "_blocked": True,
+        }
+        _publishing_event(
+            job, agent="HERMES", event_type="research_blocked",
+            stage="provider_gate",
+            summary="Live market research blocked; no book was commissioned",
+            details={"reason": safe_note, "radar_snapshot": str(radar_path)},
+            status="blocked",
+        )
+        return blocked
+
+    required_markers = (
+        "DEMAND_SCORE", "PACKAGING_SCORE", "CONVERSION_SCORE",
+        "DIFFERENTIATION_SCORE", "EXPANSION_SCORE", "RIGHTS_SCORE",
+        "PERFORMANCE_SCORE", "EVIDENCE",
+    )
+    if any(not _marker(brief, marker) for marker in required_markers):
+        audit_text, audit_note = _claude_research(
+            "Act as an evidence auditor, not a commissioning writer. Audit the candidate below "
+            "against current reader-demand and book-competition evidence. Use web search. "
+            "Return ONLY these eight one-line markers. Scores must be 0-100 or UNKNOWN; "
+            "EVIDENCE must contain direct URLs:\n"
+            "DEMAND_SCORE:\nPACKAGING_SCORE:\nCONVERSION_SCORE:\n"
+            "DIFFERENTIATION_SCORE:\nEXPANSION_SCORE:\nRIGHTS_SCORE:\n"
+            "PERFORMANCE_SCORE:\nEVIDENCE:\n\n"
+            f"Candidate:\n{brief}\n\nDiscovery snapshot:\n{radar_text}",
+            max_tokens=1200, web_search=True,
+        )
+        if audit_text:
+            brief = f"{brief}\n\nEVIDENCE AUDIT:\n{audit_text}"
+        elif audit_note:
+            note = f"{note}; evidence audit unavailable: {audit_note}".strip("; ")
 
     kdp_mode = _marker(brief, "MODE", "auto").lower()
     if kdp_mode not in {"fiction", "nonfiction"}:
@@ -877,13 +1070,26 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "output": str(output_path),
         "vault_note": remembered.get("path"),
         "prior_titles_considered": len(already),
+        "mission_id": mission_id,
+        "radar_snapshot": str(radar_path),
+        "radar_signal_count": len(radar_snapshot.get("items") or []),
     }
+
+    _publishing_event(job, agent="HERMES", event_type="research_completed",
+                      stage="24h_demand_radar", summary=angle or "Research brief completed",
+                      details={"region": region, "mode": kdp_mode, "evidence": _marker(brief, "EVIDENCE")})
 
     # Commissioning the book is the DEFAULT. Telling a floor head to do its job
     # shouldn't require remembering which verb the router happens to map to
     # "execute" — any dispatch that reaches HERMES runs the whole pipeline.
     # Research-only is the explicit exception, asked for in plain words.
-    research_only = bool(re.search(r"\b(plan|draft|prepare|research)\b", task.lower()))
+    lowered_task = task.lower()
+    research_only = bool(re.search(
+        r"\b(research|analysis|planning|plan)\s+only\b|"
+        r"\b(do not|don't|dont|without)\s+(commission|build|produce|write)\b|"
+        r"\bno\s+(commission|production|book build)\b",
+        lowered_task,
+    ))
     if research_only:
         stages.clear_stage("hermes")
         result["handed_to"] = None
@@ -894,33 +1100,82 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         )
         return result
 
-    # --- the handoff ------------------------------------------------------
-    # HERMES leaves its desk and walks the brief across the floor. These two
-    # stages are short by nature; the building animates the walk between them.
-    # head_briefs_worker (stages.py) owns the CARRYING_TO_WORKER/BRIEFING/
-    # RECEIVING/AWAITING_WORKER choreography -- see its docstring for why
-    # this can't just be a bare set_stage/sleep/enqueue sequence per floor.
+    def score(name: str) -> float | None:
+        raw = _marker(brief, name)
+        try:
+            return max(0.0, min(100.0, float(raw)))
+        except (TypeError, ValueError):
+            return None
+
+    dimensions = {
+        "demand": score("DEMAND_SCORE"), "packaging": score("PACKAGING_SCORE"),
+        "conversion": score("CONVERSION_SCORE"),
+        "differentiation": score("DIFFERENTIATION_SCORE"),
+        "expansion": score("EXPANSION_SCORE"), "rights": score("RIGHTS_SCORE"),
+        "performance": score("PERFORMANCE_SCORE"),
+    }
+    evidence: list[dict[str, Any]] = []
+    if radar_snapshot.get("items"):
+        evidence.append(dict(radar_snapshot["items"][0]))
+    cited = _marker(brief, "EVIDENCE")
+    if cited:
+        evidence.append({"source": cited, "role": "demand_corroboration",
+                         "captured_at": _now(), "research_engine": result["research_engine"],
+                         "limitations": "Model-assisted web-search citations; BIBLOS must retain source URLs."})
+    try:
+        radar = floors_bridge.load("floor_05_publishing", "publishing_demand_radar")
+        if radar is not None and angle:
+            evidence.append(radar.book_supply(angle))
+    except Exception as exc:
+        evidence.append({"role": "competition_unavailable", "captured_at": _now(),
+                         "error": f"{type(exc).__name__}: {exc}"[:500]})
+
+    # New titles never go straight from an attractive brief into production.
+    # BIBLOS is the commercial gate; only an evidence-complete 80+ candidate
+    # comes back to HERMES for commissioning.
     worker = stages.head_briefs_worker(
-        "hermes", "scribe",
-        carrying_detail=f"Taking the brief to SCRIBE: {angle[:60]}",
-        briefing_detail=f"SCRIBE, build this one: {angle[:110]}",
-        awaiting_detail="Waiting on SCRIBE to produce the manuscript",
+        "hermes", "biblos",
+        carrying_detail=f"Taking the researched candidate to BIBLOS: {angle[:60]}",
+        briefing_detail=f"BIBLOS, validate demand before we commission: {angle[:90]}",
+        awaiting_detail="Waiting on BIBLOS commercial validation",
         enqueue=lambda: enqueue_job(
-            "scribe",
-            json.dumps({"brief_path": str(output_path), "kdp_mode": kdp_mode,
-                        "region": region, "angle": angle, "origin_job": job["id"]}),
+            "biblos", json.dumps({"workflow": "publishing_portfolio",
+                "phase": "audit", "title_id": job["id"],
+                "brief_path": str(output_path), "kdp_mode": kdp_mode,
+                "region": region, "angle": angle, "origin_job": job["id"],
+                "mission_id": mission_id, "objective": task,
+                "select_active": False,
+                "wide_requested": kdp_mode == "nonfiction",
+                "dimensions": dimensions, "evidence": evidence}),
             mode="execute",
             tier="fast",
         ),
     )
-
-    result["handed_to"] = {"agent": "SCRIBE", "job_id": worker["id"]}
+    result["handed_to"] = {"agent": "BIBLOS", "job_id": worker["id"]}
     result["note"] = (
-        "Brief handed to SCRIBE, who will run LAO's KDP Book Factory to "
-        "completion and hand the finished book back. Uploading to Amazon KDP "
-        "remains a manual human step."
+        "Candidate handed to BIBLOS. Production starts only if current evidence "
+        "is complete and the weighted commercial score is at least 80."
     )
     return result
+
+
+def _hermes_commission(job: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    """Commission a BIBLOS-approved title; this is the only path to SCRIBE."""
+    angle = str(payload.get("angle") or "")
+    worker = stages.head_briefs_worker(
+        "hermes", "scribe",
+        carrying_detail=f"Taking the validated brief to SCRIBE: {angle[:60]}",
+        briefing_detail=f"SCRIBE, build this 80+ candidate: {angle[:100]}",
+        awaiting_detail="Waiting on SCRIBE to produce the enriched manuscript",
+        enqueue=lambda: enqueue_job(
+            "scribe", json.dumps(payload), mode="execute", tier="heavy"),
+    )
+    _publishing_event(job, agent="HERMES", event_type="commissioned",
+                      stage="production_slot", summary="BIBLOS-approved title commissioned to SCRIBE",
+                      details={"score": (payload.get("audit") or {}).get("score"), "scribe_job_id": worker["id"]})
+    return {"agent": "HERMES", "mode": "commission", "commercial_audit": payload.get("audit"),
+            "handed_to": {"agent": "SCRIBE", "job_id": worker["id"]},
+            "content": "BIBLOS threshold passed; enriched book commissioned."}
 
 
 def _hermes_report(job: dict[str, Any]) -> dict[str, Any]:
@@ -965,6 +1220,119 @@ def _hermes_report(job: dict[str, Any]) -> dict[str, Any]:
         "vault_note": remembered.get("path"),
         "requires_human": "Amazon KDP upload",
     }
+
+
+def _publishing_growth_logic() -> Any:
+    logic = floors_bridge.load("floor_05_publishing", "portfolio_growth_runtime")
+    if logic is None:
+        raise RuntimeError("Floor 05 portfolio-growth logic is unavailable or unsafe to load")
+    return logic
+
+
+def _json_task(job: dict[str, Any]) -> dict[str, Any]:
+    try:
+        value = json.loads(str(job.get("task") or "{}"))
+        return value if isinstance(value, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _run_biblos(job: dict[str, Any]) -> dict[str, Any]:
+    payload = _json_task(job)
+    logic = _publishing_growth_logic()
+    stages.worker_confirms_receipt("biblos", "Auditing current demand evidence")
+    stages.set_stage("biblos", stages.EXECUTING, "Scoring demand, conversion and expansion potential")
+    audit = logic.commercial_audit(str(payload.get("title_id") or job["id"]),
+                                   payload.get("dimensions") or {},
+                                   payload.get("evidence") or [])
+    missing_labels = list(audit.get("missing") or []) + list(audit.get("missing_evidence") or [])
+    audit_summary = (
+        f"Commercial score {audit['score']}/100"
+        if audit.get("score") is not None
+        else "Rejected: missing " + ", ".join(missing_labels)
+    )
+    _publishing_event(job, agent="BIBLOS", event_type="commercial_score",
+                      stage="commercial_gate", summary=audit_summary,
+                      details={"score": audit["score"], "dimensions": audit.get("dimensions"),
+                               "eligible": audit["build_eligible"], "missing": audit.get("missing"),
+                               "missing_evidence": audit.get("missing_evidence")},
+                      status="running" if audit["build_eligible"] else "rejected")
+    if not audit["build_eligible"]:
+        stages.clear_stage("biblos"); stages.clear_stage("hermes")
+        return {"agent": "BIBLOS", "audit": audit, "handed_to": None,
+                "content": "Candidate rejected before production; score must be 80+ with complete evidence."}
+    commission = dict(payload)
+    commission.update({"phase": "commission", "audit": audit})
+    worker = stages.head_briefs_worker(
+        "biblos", "hermes",
+        carrying_detail=f"Taking {audit['score']}/100 validation back to HERMES",
+        briefing_detail="HERMES, this candidate cleared the commercial threshold",
+        awaiting_detail="Validation delivered",
+        enqueue=lambda: enqueue_job("hermes", json.dumps(commission), mode="execute", tier="heavy"),
+    )
+    stages.clear_stage("biblos")
+    return {"agent": "BIBLOS", "audit": audit,
+            "handed_to": {"agent": "HERMES", "job_id": worker["id"]},
+            "content": f"Commercial score {audit['score']}/100; eligible for one of the weekly production slots."}
+
+
+def _run_mercury(job: dict[str, Any]) -> dict[str, Any]:
+    payload = _json_task(job); logic = _publishing_growth_logic()
+    stages.worker_confirms_receipt("mercury", "Checking rights, exclusivity and store route")
+    route = logic.distribution_route(str(payload.get("title") or job["id"]),
+                                     str(payload.get("kdp_mode") or "nonfiction"),
+                                     payload.get("select_active"),
+                                     bool(payload.get("wide_requested")))
+    _publishing_event(job, agent="MERCURY", event_type="distribution_route",
+                      stage="rights_and_distribution", summary=f"Route: {route['route']}",
+                      details=route, status="blocked" if route["route"] == "HOLD" else "running")
+    if route["route"] == "HOLD":
+        stages.clear_stage("mercury")
+        scribe_id = str(payload.get("scribe_job_id") or "")
+        if scribe_id:
+            with _connect() as db:
+                db.execute("UPDATE jobs SET status='blocked', result=?, updated_at=? WHERE id=?",
+                           (json.dumps({**payload, "distribution": route}), _now(), scribe_id))
+        return {"agent": "MERCURY", "distribution": route, "content": route["reason"]}
+    economics = dict(payload); economics.update({"workflow": "publishing_portfolio",
+                                                  "phase": "economics", "distribution": route})
+    stages.set_stage("mercury", stages.CARRYING_TO_HEAD,
+                     f"Taking {route['route']} economics request to ALFA", worker="alfa")
+    alfa_job = enqueue_job("alfa", json.dumps(economics), mode="execute", tier="fast")
+    stages.clear_stage("mercury")
+    return {"agent": "MERCURY", "distribution": route,
+            "handed_to": {"agent": "ALFA", "job_id": alfa_job["id"]},
+            "content": "Rights-safe route proposed; no store was changed."}
+
+
+def _run_leda(job: dict[str, Any]) -> dict[str, Any]:
+    payload = _json_task(job); logic = _publishing_growth_logic()
+    title = str(payload.get("title") or "(untitled)")
+    stages.worker_confirms_receipt("leda", f"Preparing owned-audience plan for {title}")
+    plan = logic.audience_plan(title)
+    _publishing_event(job, agent="LEDA", event_type="audience_plan",
+                      stage="owned_audience", summary="Consent-safe audience draft prepared",
+                      details={"status": plan.get("status"), "segments": plan.get("segments")})
+    growth = dict(payload); growth.update({"workflow": "publishing_portfolio",
+                                          "phase": "organic_distribution", "audience": plan})
+    ares_job = enqueue_job("ares", json.dumps(growth), mode="execute", tier="fast")
+    stages.clear_stage("leda")
+    return {"agent": "LEDA", "audience": plan,
+            "handed_to": {"agent": "ARES", "job_id": ares_job["id"]},
+            "content": "Reader-magnet and consent-safe segments drafted; nothing sent."}
+
+
+def _run_metron(job: dict[str, Any]) -> dict[str, Any]:
+    payload = _json_task(job); logic = _publishing_growth_logic()
+    stages.worker_confirms_receipt("metron", "Establishing the seven-day performance baseline")
+    report = logic.measurement_baseline(str(payload.get("title") or "(untitled)"),
+                                        payload.get("metrics"))
+    _publishing_event(job, agent="METRON", event_type="measurement_baseline",
+                      stage="measurement", summary="Seven-day measurement loop opened",
+                      details=report, status="completed")
+    stages.clear_stage("metron")
+    return {"agent": "METRON", "measurement": report,
+            "content": "Measurement loop opened; missing storefront data remains unknown, never zero."}
 
 
 def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
@@ -1017,6 +1385,15 @@ def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
         tags=["kdp", "publishing", "marketing", "reel-scripts"],
     )
 
+    leda_job = enqueue_job(
+        "leda", json.dumps({**payload, "workflow": "publishing_portfolio",
+                            "phase": "owned_audience", "reel_scripts": reel_scripts}),
+        mode="execute", tier="fast",
+    )
+    _publishing_event(job, agent="PEITHO", event_type="creative_bundle",
+                      stage="launch_assets", summary=f"Generated {generated_count}/4 reel hook scripts",
+                      details={"generated": generated_count, "artifact_dir": reel_scripts.get("dir"),
+                               "leda_job_id": leda_job["id"]})
     stages.clear_stage("peitho")
 
     return {
@@ -1028,6 +1405,7 @@ def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
         "reel_scripts": reel_scripts,
         "content": f"Wrote {generated_count}/4 reel hook scripts for “{title}”.",
         "vault_note": remembered.get("path"),
+        "handed_to": {"agent": "LEDA", "job_id": leda_job["id"]},
         "note": "Phase 1 (text scripts) done. Video generation/posting is Phase 2/3, not built yet.",
     }
 
@@ -1735,7 +2113,7 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
         tags=["kdp", "publishing", "production", "awaiting-upload"],
     )
 
-    # --- hold here; do NOT hand off to PEITHO yet --------------------------
+    # --- growth review before the upload gate ------------------------------
     # Explicit call, 2026-08-26: "SCRIBE ke pas se message tab tak na hate
     # jab tak ye book upload na ho jaye" -- PEITHO's job is post-publish
     # marketing, so starting it before the book is actually live on Amazon
@@ -1750,10 +2128,19 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     # confusion this whole mechanism exists to avoid. Returning here lets
     # run_worker mark the row 'awaiting_upload' via the _await_human_upload
     # flag below and free the worker thread immediately.
-    stages.set_stage(
-        "scribe", stages.AWAITING_UPLOAD,
-        f"“{title}” is ready — KDP packet done. Upload it, then mark it uploaded.",
-    )
+    stages.set_stage("scribe", stages.AWAITING_WORKER,
+                     f"“{title}” is ready — waiting on MERCURY and ALFA review")
+    mercury_job = enqueue_job(
+        "mercury", json.dumps({
+            "workflow": "publishing_portfolio", "phase": "distribution_review",
+            "scribe_job_id": job["id"], "run_dir": run_dir, "title": title,
+            "lao_job": lao_job_id, "kdp_mode": kdp_mode, "region": region,
+            "kdp_packet": kdp_packet,
+            "mission_id": brief.get("mission_id") or brief.get("origin_job"),
+            "origin_job": brief.get("origin_job"), "objective": brief.get("objective"),
+            "select_active": brief.get("select_active"),
+            "wide_requested": bool(brief.get("wide_requested", kdp_mode == "nonfiction")),
+        }), mode="execute", tier="fast")
     # HERMES's own job (_run_hermes) set itself to AWAITING_WORKER when it
     # briefed SCRIBE and has been blocked ever since -- that wait was only
     # ever for the manuscript, which is done now. Nothing else clears it:
@@ -1773,9 +2160,12 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
         "title": title,
         "kdp_mode": kdp_mode,
         "region": region,
+        "mission_id": brief.get("mission_id") or brief.get("origin_job"),
+        "origin_job": brief.get("origin_job"), "objective": brief.get("objective"),
         "kdp_packet": kdp_packet,
-        "requires_human": "Amazon KDP upload -- mark it uploaded from the dashboard to hand off to PEITHO",
-        "_await_human_upload": True,
+        "growth_review": {"agent": "MERCURY", "job_id": mercury_job["id"]},
+        "requires_human": "After MERCURY/ALFA clear the title: Amazon KDP upload",
+        "_await_growth_review": True,
     }
 
 
@@ -1819,12 +2209,57 @@ def _latest_kdp_output() -> tuple[str, str]:
 
 
 def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
-    """Floor 3 - Growth & Distribution. Pending LAO integration."""
+    """Floor 3 - organic publishing distribution or the existing local plan."""
+    payload = _json_task(job)
+    if payload.get("workflow") == "publishing_portfolio":
+        title = str(payload.get("title") or "(untitled)")
+        plan = {
+            "title": title, "status": "DRAFT", "real_spend": False,
+            "channels": ["short-form hooks", "author/brand social", "reader email",
+                         "store metadata iteration"],
+            "paid_ads": "not started; only proven titles qualify for a bounded test",
+        }
+        metron_job = enqueue_job(
+            "metron", json.dumps({**payload, "phase": "measurement", "growth_plan": plan}),
+            mode="execute", tier="fast")
+        _publishing_event(job, agent="ARES", event_type="organic_plan",
+                          stage="organic_distribution", summary="No-spend launch plan drafted",
+                          details={"channels": plan["channels"], "paid_ads": plan["paid_ads"]})
+        return {"agent": "ARES", "organic_distribution": plan,
+                "handed_to": {"agent": "METRON", "job_id": metron_job["id"]},
+                "content": "Organic distribution plan drafted; no ad spend or external post executed."}
     return _local_plan(job)
 
 
 def _run_alfa(job: dict[str, Any]) -> dict[str, Any]:
-    """Floor 2 - Commerce & Monetization. Pending LAO integration."""
+    """Floor 2 - publishing economics or the existing local plan."""
+    payload = _json_task(job)
+    if payload.get("workflow") == "publishing_portfolio":
+        title = str(payload.get("title") or "(untitled)")
+        economics = {
+            "title": title, "currency": "USD", "price": None,
+            "status": "PROPOSAL", "price_change_executed": False,
+            "required_metrics": ["royalty", "ad_spend", "read_through", "refunds"],
+            "note": "Price remains unset until title format, page count and royalty band are known.",
+        }
+        scribe_id = str(payload.get("scribe_job_id") or "")
+        if not scribe_id:
+            raise RuntimeError("Publishing economics has no SCRIBE job to release to upload review")
+        current = get_job(scribe_id)
+        if not current or current.get("status") != "awaiting_growth_review":
+            raise RuntimeError(f"SCRIBE job {scribe_id} is not awaiting growth review")
+        result = _json_task({"task": current.get("result") or "{}"})
+        result.update({"distribution": payload.get("distribution"), "economics": economics,
+                       "requires_human": "Amazon KDP upload -- growth and rights review passed"})
+        mark_awaiting_upload(scribe_id, result)
+        stages.set_stage("scribe", stages.AWAITING_UPLOAD,
+                         f"“{title}” cleared growth review — awaiting manual KDP upload")
+        _publishing_event(job, agent="ALFA", event_type="economics_proposal",
+                          stage="economics_gate", summary="Economics reviewed; manual upload gate opened",
+                          details=economics, status="awaiting_approval")
+        return {"agent": "ALFA", "economics": economics,
+                "released_job": scribe_id,
+                "content": "Economics proposal attached; SCRIBE moved to the OLYMPUS upload gate."}
     return _local_plan(job)
 
 
@@ -2532,6 +2967,9 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
     if str(job.get("mode") or "").strip().lower() == "watch":
         return floor_watch.watch_floor(_connect, job["agent_id"])
 
+    publishing_payload = _json_task(job)
+    correlation_id = str(publishing_payload.get("mission_id") or
+                         publishing_payload.get("origin_job") or job.get("id", ""))
     handlers = {
         "zeus": _run_zeus,
         "athena": _run_athena,
@@ -2540,8 +2978,12 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         "beta": _run_beta,
         "apollo": _run_apollo,
         "hermes": _run_hermes,
+        "biblos": _run_biblos,
         "scribe": _run_scribe,
+        "mercury": _run_mercury,
         "peitho": _run_peitho,
+        "leda": _run_leda,
+        "metron": _run_metron,
         "ia": _run_iris,
         "muse": _run_muse,
         "kairos": _run_kairos,
@@ -2557,14 +2999,14 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - recorded, then re-raised unchanged
         floors_bridge.audit(agent_id=job.get("agent_id", ""),
                             floor_id=str(job.get("floor_id") or "1"),
-                            job_id=job.get("id", ""), correlation_id=job.get("id", ""),
+                            job_id=job.get("id", ""), correlation_id=correlation_id,
                             action=job.get("mode") or "execute",
                             approval_level="A0", status="failed",
                             result=type(exc).__name__)
         raise
     floors_bridge.audit(agent_id=job.get("agent_id", ""),
                         floor_id=str(job.get("floor_id") or "1"),
-                        job_id=job.get("id", ""), correlation_id=job.get("id", ""),
+                        job_id=job.get("id", ""), correlation_id=correlation_id,
                         action=job.get("mode") or "execute",
                         approval_level="A0", status="succeeded",
                         cost=result.get("cost_usd") if isinstance(result, dict) else None)
@@ -2641,6 +3083,8 @@ def run_worker(poll_seconds: float = 2.0) -> None:
                 outcome["result"] = execute_job(job)
             except Exception as exc:  # noqa: BLE001 - surfaced via outcome
                 outcome["error"] = exc
+                import traceback
+                outcome["traceback"] = traceback.format_exc()
 
         worker_thread = threading.Thread(
             target=_target, name=f"job-{job['id']}", daemon=True
@@ -2668,7 +3112,10 @@ def run_worker(poll_seconds: float = 2.0) -> None:
             continue
 
         if "error" in outcome:
-            fail_job(job["id"], outcome["error"])
+            trace = str(outcome.get("traceback") or "").strip()
+            fail_job(job["id"], RuntimeError(
+                f"{outcome['error']}\n\n{trace}" if trace else str(outcome["error"])
+            ))
         else:
             result = outcome.get("result", {})
             # The gate is asked for, not asserted.
@@ -2684,7 +3131,11 @@ def run_worker(poll_seconds: float = 2.0) -> None:
             #
             # None means the registry could not answer - tree absent, index
             # stale - and None is not permission. Hold, and let a person look.
-            if result.pop("_await_human_upload", False):
+            if result.pop("_blocked", False):
+                mark_blocked(job["id"], result)
+            elif result.pop("_await_growth_review", False):
+                mark_awaiting_growth_review(job["id"], result)
+            elif result.pop("_await_human_upload", False):
                 gated = floors_bridge.needs_approval(
                     job.get("agent_id", ""), "publish_to_store")
                 if gated is False:

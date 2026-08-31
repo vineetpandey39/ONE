@@ -1,9 +1,15 @@
 from openjarvis.core.credentials import inject_credentials
 from openjarvis.one_agents.runtime import run_worker
+from openjarvis.one_agents import runtime as runtime_module
 from openjarvis.one_agents.wake import start_wake_listener
 
 
 if __name__ == "__main__":
+    print(
+        f"[one-agents] runtime source={runtime_module.__file__} "
+        f"agents={len(runtime_module.AGENTS)} marker_v=markdown-v2",
+        flush=True,
+    )
     # The worker is a separate OS process from the API server and does not
     # inherit credentials.toml-derived env vars from it. Without this, the
     # worker only sees whatever happens to already be in the parent shell's

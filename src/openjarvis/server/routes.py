@@ -324,6 +324,17 @@ async def one_confirm_upload(job_id: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/v1/one/jobs/{job_id}/reject-upload")
+async def one_reject_upload(job_id: str, request: Request):
+    from openjarvis.one_agents.runtime import reject_scribe_upload
+
+    payload = await request.json()
+    try:
+        return reject_scribe_upload(job_id, str(payload.get("rationale") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/v1/jobhunt/board")
 async def jobhunt_board(limit: int = 50):
     from openjarvis.one_agents.jobhunt import jobhunt_board as build_jobhunt_board
