@@ -1217,6 +1217,44 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         elif audit_note:
             note = f"{note}; evidence audit unavailable: {audit_note}".strip("; ")
 
+    # A provider returning fluent prose is not the same thing as completing
+    # the research contract.  Fail closed unless the post-audit brief has the
+    # full scorecard and at least one direct evidence URL.  This prevents the
+    # monitor from labelling a generic trend summary as completed research.
+    missing_markers = [marker for marker in required_markers if not _marker(brief, marker)]
+    evidence_value = _marker(brief, "EVIDENCE")
+    direct_urls = re.findall(r"https?://[^\s,)]+", evidence_value)
+    if missing_markers or not direct_urls:
+        stages.clear_stage("hermes")
+        output_dir = _home() / "agent_outputs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        rejected_path = output_dir / f"{job['id']}-rejected-research.md"
+        rejected_path.write_text(
+            "# HERMES — Rejected Research Output\n\n"
+            f"Missing score fields: {', '.join(missing_markers) or 'none'}\n\n"
+            f"Direct evidence URLs: {len(direct_urls)}\n\n{brief}\n",
+            encoding="utf-8",
+        )
+        blocked = {
+            "agent": "HERMES", "mode": "blocked", "_blocked": True,
+            "content": "Research output failed the idea-scorecard quality gate.",
+            "blocked_reason": (
+                f"missing score fields: {', '.join(missing_markers) or 'none'}; "
+                f"direct evidence URLs: {len(direct_urls)}"
+            ),
+            "radar_snapshot": str(radar_path), "output": str(rejected_path),
+        }
+        _publishing_event(
+            job, agent="HERMES", event_type="research_blocked",
+            stage="output_quality_gate",
+            summary="Rejected: provider did not return a scored, evidence-linked idea brief",
+            details={"missing_markers": missing_markers,
+                     "direct_evidence_urls": len(direct_urls),
+                     "result": str(rejected_path)},
+            status="blocked",
+        )
+        return blocked
+
     kdp_mode = _marker(brief, "MODE", "auto").lower()
     if kdp_mode not in {"fiction", "nonfiction"}:
         kdp_mode = "auto"
