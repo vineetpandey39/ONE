@@ -1233,6 +1233,13 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
             "to plan/draft/research. Say it without those words (e.g. 'HERMES, "
             "get the next book done') to commission it for real."
         )
+        _publishing_event(
+            job, agent="HERMES", event_type="research_only_completed",
+            stage="24_48h_date_gate",
+            summary="Governed research completed; no book was commissioned",
+            details={"radar_snapshot": str(radar_path), "result": str(output_path)},
+            status="completed",
+        )
         return result
 
     def score(name: str) -> float | None:

@@ -7,7 +7,7 @@ from openjarvis.one_agents.wake import start_wake_listener
 if __name__ == "__main__":
     print(
         f"[one-agents] runtime source={runtime_module.__file__} "
-        f"agents={len(runtime_module.AGENTS)} marker_v=markdown-v2",
+        f"agents={len(runtime_module.AGENTS)} marker_v=publishing-research-v3",
         flush=True,
     )
     # The worker is a separate OS process from the API server and does not
