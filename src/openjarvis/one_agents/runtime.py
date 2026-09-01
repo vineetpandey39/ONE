@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import re
 import sqlite3
@@ -310,7 +311,10 @@ def enqueue_job(agent_id: str, task: str, mode: str = "plan", tier: str = "fast"
         db.execute(
             "INSERT INTO jobs (id, agent_id, task, mode, tier, status, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)",
-            (job_id, agent_id, task[:4000], mode, tier, now, now),
+            # Publishing handoffs carry governed evidence and scorecards. TEXT
+            # has no 4K database limit; truncating here corrupts the JSON and
+            # makes the receiving agent misclassify the handoff as a new task.
+            (job_id, agent_id, task[:100000], mode, tier, now, now),
         )
     return get_job(job_id) or {}
 
@@ -478,7 +482,22 @@ def mark_awaiting_growth_review(job_id: str, result: dict[str, Any]) -> None:
         )
 
 
-def confirm_scribe_upload(job_id: str) -> dict[str, Any]:
+def _publishing_lifecycle_module():
+    """Load Floor 5's implementation without moving ownership into runtime."""
+    path = (Path(__file__).resolve().parents[4] / "one-company" / "floors" /
+            "floor_05_publishing" / "lib" / "post_upload_lifecycle.py")
+    if not path.exists():
+        return None
+    spec = importlib.util.spec_from_file_location("floor05_post_upload_lifecycle", path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def confirm_scribe_upload(job_id: str,
+                          upload_evidence: dict[str, Any] | None = None) -> dict[str, Any]:
     """Dashboard 'mark uploaded' action -- the Chairman confirms they actually
     submitted the book on kdp.amazon.com by hand. Explicit call, 2026-08-26:
     "jab book upload ho jayegi to SCRIBE ko message bhi dena hai ki wo book
@@ -504,7 +523,21 @@ def confirm_scribe_upload(job_id: str) -> dict[str, Any]:
     lao_job_id = str(result.get("lao_job") or "")
     kdp_packet_path = str((result.get("kdp_packet") or {}).get("path") or "")
 
-    celebration = f"“{title}” is live! 🎉" if title else "It's live! 🎉"
+    lifecycle = _publishing_lifecycle_module()
+    if lifecycle is not None:
+        launch = lifecycle.launch_plan(
+            title_id=str((upload_evidence or {}).get("asin") or job_id),
+            title=title, evidence=upload_evidence,
+        )
+    else:
+        launch = {
+            "listing_evidence": {"verification_status": "verification_pending",
+                                 "remote_checked": False,
+                                 "errors": ["Floor 5 lifecycle module unavailable"]},
+            "phases": [], "owner_setup": {"items": []},
+        }
+
+    celebration = f"“{title}” upload attested! 🎉" if title else "Upload attested! 🎉"
     stages.set_stage("scribe", stages.CELEBRATING, celebration)
     stages.set_stage("peitho", stages.CELEBRATING, celebration)
     time.sleep(float(os.environ.get("ONE_CELEBRATE_SECONDS", "9")))
@@ -518,11 +551,15 @@ def confirm_scribe_upload(job_id: str) -> dict[str, Any]:
             "mission_id": result.get("mission_id"),
             "origin_job": result.get("origin_job"),
             "objective": result.get("objective"),
+            "post_upload_lifecycle": launch,
+            "upload_evidence": launch.get("listing_evidence"),
         }),
         mode="execute", tier="fast",
     )
 
     result["uploaded_confirmed_at"] = _now()
+    result["upload_evidence"] = launch.get("listing_evidence")
+    result["post_upload_lifecycle"] = launch
     result["handed_to"] = {"agent": "PEITHO", "job_id": peitho_job["id"]}
     with _connect() as db:
         db.execute(
@@ -533,13 +570,17 @@ def confirm_scribe_upload(job_id: str) -> dict[str, Any]:
     memory.remember(
         agent="SCRIBE", floor_id="5", floor_name="Book Publishing (KDP)",
         kind="Upload Confirmed",
-        body=f"Chairman confirmed “{title}” is live on Amazon KDP. Handed off to PEITHO.",
+        body=(f"Chairman attested the KDP upload for “{title}”. "
+              f"Listing state: {launch['listing_evidence']['verification_status']}. "
+              "Handed off to PEITHO for draft-only launch preparation."),
         task=title, tags=["kdp", "publishing", "uploaded"],
     )
     _publishing_event({**job, "task": json.dumps(result)}, agent="OLYMPUS",
                       event_type="upload_confirmed", stage="human_gate",
                       summary="Chairman confirmed the Amazon KDP upload",
-                      details={"title": title, "peitho_job_id": peitho_job["id"]})
+                      details={"title": title, "peitho_job_id": peitho_job["id"],
+                               "listing_evidence": launch.get("listing_evidence"),
+                               "owner_setup": launch.get("owner_setup")})
 
     return {"scribe_job": get_job(job_id), "peitho_job": peitho_job}
 
@@ -1280,7 +1321,11 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {
         "agent": "HERMES",
         "mode": mode,
-        "research_engine": os.environ.get("ONE_RESEARCH_MODEL", "claude-haiku-4-5"),
+        "research_engine": (
+            os.environ.get("ONE_RESEARCH_MODEL", "claude-haiku-4-5")
+            if os.environ.get("ONE_ALLOW_PAID_RESEARCH", "0").strip().lower() in {"1", "true", "yes"}
+            else "free-local (Sanjeevani/Ollama)"
+        ),
         "kdp_mode": kdp_mode,
         "region": region,
         "angle": angle,
@@ -1346,7 +1391,7 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     if cited:
         evidence.append({"source": cited, "role": "demand_corroboration",
                          "captured_at": _now(), "research_engine": result["research_engine"],
-                         "limitations": "Model-assisted web-search citations; BIBLOS must retain source URLs."})
+                         "limitations": "Local synthesis over captured public evidence; BIBLOS must retain source URLs."})
     try:
         radar = floors_bridge.load("floor_05_publishing", "publishing_demand_radar")
         if radar is not None and angle:
@@ -1588,6 +1633,15 @@ def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
     stages.set_stage("peitho", stages.EXECUTING, f"Writing reel hook scripts for “{title}”")
 
     reel_scripts = _generate_peitho_reel_scripts(run_dir, title) if run_dir else {"generated": False, "note": "no run_dir", "angles": []}
+    lifecycle_plan = payload.get("post_upload_lifecycle") or {}
+    lifecycle = _publishing_lifecycle_module()
+    launch_workspace = (
+        lifecycle.materialize_launch_workspace(
+            run_dir, str((payload.get("upload_evidence") or {}).get("asin") or job["id"]),
+            title, lifecycle_plan, reel_scripts)
+        if lifecycle is not None and run_dir else
+        {"root": "", "files": {}, "external_actions_executed": 0}
+    )
 
     generated_count = sum(1 for a in reel_scripts.get("angles", []) if a.get("generated"))
     hooks_summary = "\n".join(
@@ -1602,9 +1656,9 @@ def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
             f"KDP submission packet: {kdp_packet_path or '(not generated)'}\n\n"
             f"Wrote {generated_count}/4 reel hook scripts to "
             f"{reel_scripts.get('dir') or '(not generated)'}:\n{hooks_summary}\n\n"
-            "Phase 1 only (text scripts). Actual video generation + Instagram "
-            "auto-post (Phase 2) and YouTube Shorts upload (Phase 3) are "
-            "separate builds, not implemented yet -- see the PEITHO plan doc."
+            f"Governed post-upload workspace: {launch_workspace.get('root') or '(not generated)'}\n"
+            "Creative, audience, distribution and measurement artifacts are "
+            "drafted there. External posting, sending and spend remain disabled."
         ),
         task=f"book delivered: {title}",
         tags=["kdp", "publishing", "marketing", "reel-scripts"],
@@ -1612,7 +1666,8 @@ def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
 
     leda_job = enqueue_job(
         "leda", json.dumps({**payload, "workflow": "publishing_portfolio",
-                            "phase": "owned_audience", "reel_scripts": reel_scripts}),
+                            "phase": "owned_audience", "reel_scripts": reel_scripts,
+                            "launch_workspace": launch_workspace}),
         mode="execute", tier="fast",
     )
     _publishing_event(job, agent="PEITHO", event_type="creative_bundle",
@@ -1628,10 +1683,11 @@ def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
         "run_dir": run_dir,
         "kdp_packet_path": kdp_packet_path,
         "reel_scripts": reel_scripts,
+        "launch_workspace": launch_workspace,
         "content": f"Wrote {generated_count}/4 reel hook scripts for “{title}”.",
         "vault_note": remembered.get("path"),
         "handed_to": {"agent": "LEDA", "job_id": leda_job["id"]},
-        "note": "Phase 1 (text scripts) done. Video generation/posting is Phase 2/3, not built yet.",
+        "note": "Review workspace prepared. External generation/posting needs configured adapters and explicit approval.",
     }
 
 
@@ -1871,7 +1927,10 @@ def _generate_kdp_packet(title: str, kdp_mode: str, region: str, angle: str, run
     as automation goes: SCRIBE prepares every field a human would otherwise
     have to write from scratch, and a human still does the clicking.
     """
-    packet, note = _claude_research(
+    # Metadata drafting is synthesis over an already-finished, local book. It
+    # does not justify a paid provider call; use the same local-first policy as
+    # HERMES research and fail closed if no approved local model is available.
+    packet, note = _research_synthesis(
         "You are SCRIBE, producing the exact fields a human will paste into "
         "Amazon KDP's Kindle eBook setup wizard for a finished manuscript. "
         "There is no KDP API -- this packet is what gets typed in by hand.\n\n"
@@ -1889,7 +1948,9 @@ def _generate_kdp_packet(title: str, kdp_mode: str, region: str, angle: str, run
         "PRICE_USD: <a single list price, matching the current 70%-royalty "
         "band $2.99-$12.99 on Amazon.com, calibrated to what comparable "
         "titles in this genre/region actually sell at>\n"
-        "ROYALTY_PLAN: 70 | 35\n"
+        "ROYALTY_PLAN: 70 | 35\n",
+        evidence={"eligible": [], "catalog_evidence": [], "counts": {},
+                  "policy": "Do not invent live sales or competitor-price claims."},
     )
     if not packet:
         return {"generated": False, "note": note, "path": ""}
@@ -2323,6 +2384,18 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     # docstring for why. This is SCRIBE's actual deliverable for that step:
     # every field a human needs, pre-written, ready to paste.
     kdp_packet = _generate_kdp_packet(title, kdp_mode, region, angle, run_dir)
+    if not kdp_packet.get("generated") or not kdp_packet.get("path"):
+        # A finished manuscript is not upload-ready without its submission
+        # packet. Do not expose the OLYMPUS upload action or continue to
+        # distribution/economics with an incomplete SCRIBE delivery.
+        stages.clear_stage("scribe")
+        stages.clear_stage("hermes")
+        return {
+            "agent": "SCRIBE", "mode": "blocked", "_blocked": True,
+            "content": "The manuscript is preserved, but the KDP submission packet is missing.",
+            "blocked_reason": str(kdp_packet.get("note") or "KDP packet generation failed"),
+            "run_dir": run_dir, "title": title, "kdp_packet": kdp_packet,
+        }
 
     memory.remember(
         agent="SCRIBE", floor_id="5", floor_name="Book Publishing (KDP)",

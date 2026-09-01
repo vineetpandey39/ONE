@@ -310,7 +310,7 @@ async def one_cancel_job(job_id: str):
 
 
 @router.post("/v1/one/jobs/{job_id}/confirm-upload")
-async def one_confirm_upload(job_id: str):
+async def one_confirm_upload(job_id: str, request: Request):
     """Dashboard 'mark uploaded' action -- SCRIBE holds a finished book at
     'awaiting_upload' (KDP has no upload API, so the Chairman does the real
     submit by hand) instead of finishing its job outright. This is the only
@@ -319,7 +319,12 @@ async def one_confirm_upload(job_id: str):
     from openjarvis.one_agents.runtime import confirm_scribe_upload
 
     try:
-        return confirm_scribe_upload(job_id)
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        evidence = payload.get("upload_evidence") if isinstance(payload, dict) else None
+        return confirm_scribe_upload(job_id, evidence if isinstance(evidence, dict) else None)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
