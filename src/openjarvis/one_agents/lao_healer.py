@@ -43,6 +43,8 @@ from typing import Any
 
 import httpx
 
+from openjarvis.core.paths import get_data_dir
+
 LAO_BASE_URL = os.environ.get("LAO_BASE_URL", "http://127.0.0.1:18000/api/v1")
 LAO_EMAIL = os.environ.get("LAO_EMAIL", "admin@example.com")
 LAO_PASSWORD = os.environ.get("LAO_PASSWORD", "ChangeMe123!")
@@ -59,7 +61,14 @@ ROBOT_WORKER_DIR = os.environ.get(
     r"\local_374e1c90-a56c-4744-840b-8f0118a3547a\outputs\lao-platform\robot-worker",
 )
 
-_LOG_PATH = Path(os.environ.get("ONE_HOME", str(Path.home() / ".openjarvis"))) / "lao_healer_log.jsonl"
+# Was os.environ.get("ONE_HOME", ...) - "ONE_HOME" is set nowhere in this
+# suite (the real variable is OPENJARVIS_HOME, set by start-one.ps1), so this
+# always fell through to the hardcoded ~/.openjarvis fallback regardless of
+# how the process was launched. get_data_dir() is the shared resolver every
+# other module in this tree uses (OPENJARVIS_HOME > XDG_DATA_HOME > the same
+# ~/.openjarvis default, but only when neither is set) - this file just never
+# got migrated to it.
+_LOG_PATH = get_data_dir() / "lao_healer_log.jsonl"
 
 
 def _log_event(event: dict[str, Any]) -> None:
