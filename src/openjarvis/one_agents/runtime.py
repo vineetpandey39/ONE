@@ -1066,6 +1066,88 @@ def _reconcile_publishing_projection() -> None:
         print(f"[one-agents] publishing reconciliation skipped: {exc}", flush=True)
 
 
+# The drafting pipeline has no research capability. SCRIBE writes from an
+# outline; nothing in the chain can look a fact up, read a document, interview
+# anyone or check a name. That is fine for advice, framework and how-to
+# nonfiction, where the value is a method rather than a claim about the world.
+# It is not fine for reportage -- a book telling the reader what is happening
+# inside a real, named institution -- because every specific in it is invented.
+#
+# This is not theoretical. "Code of the Past" reached OLYMPUS as AI-written
+# reportage about the National Archives of India and a named government
+# digitisation mission, complete with a fabricated surprise audit, hacking
+# attempts and a funding freeze. It was refused. The cheapest place to stop the
+# next one is here, before a 65,000-word draft exists.
+_REPORTAGE_ENTITY = re.compile(
+    r"\b(ministr(y|ies)|department|government|parliament|archives?|bureau|"
+    r"agenc(y|ies)|commission|authority|corporation|council|federation|"
+    r"institute|university|administration|programme|program|mission|"
+    r"initiative|scheme|task force)\b",
+    re.IGNORECASE,
+)
+_REPORTAGE_FRAMING = re.compile(
+    r"\b(inside|investigation|investigative|expos[eé]|untold|true story|"
+    r"real story|what really happened|behind the scenes|leaked|whistleblower|"
+    r"scandal|the rise (and fall )?of|how .{0,40} is "
+    r"(saving|rebuilding|transforming|fixing|rescuing))\b",
+    re.IGNORECASE,
+)
+
+
+def _sourcing_gate(brief: str, kdp_mode: str) -> tuple[bool, str]:
+    """Would writing this book honestly need facts the pipeline cannot get?
+
+    Returns (blocked, reason). Fiction is never blocked -- invented specifics
+    are the point there. Nonfiction goes to a focused model audit, with the
+    keyword heuristic as the fallback when no provider answers, so a provider
+    outage cannot quietly switch the guard off.
+    """
+    if kdp_mode == "fiction":
+        return False, ""
+
+    candidate = "\n".join(part for part in (
+        _marker(brief, "ANGLE"), _marker(brief, "BRIEF") or brief[:2000],
+    ) if part)
+
+    verdict, _note = _research_synthesis(
+        "You are a sourcing auditor for a book pipeline that CANNOT research: it "
+        "has no way to look a fact up, read a document, interview anyone, or "
+        "check a name. Judge exactly one thing about the candidate below.\n\n"
+        "Answer HIGH if writing this book honestly would require specific factual "
+        "claims about real named organisations, government programmes, current "
+        "events, or living (or recently living) people — claims a reader could "
+        "check and find invented.\n"
+        "Answer LOW if the book delivers a method, framework, skill or invented "
+        "story, and its value does not rest on such claims. Ordinary advice "
+        "nonfiction is LOW even when it mentions real professions, places or "
+        "well-known ideas.\n\n"
+        "Reply with exactly two lines:\n"
+        "SOURCING_RISK: HIGH | LOW\n"
+        "WHY: <one line>\n\n"
+        f"Candidate:\n{candidate}",
+        max_tokens=200,
+    )
+    level = _marker(verdict, "SOURCING_RISK").upper() if verdict else ""
+    if level.startswith("HIGH"):
+        why = _marker(verdict, "WHY") or "requires factual claims the pipeline cannot verify"
+        return True, f"sourcing auditor: {why}"
+    if level.startswith("LOW"):
+        return False, ""
+
+    # No usable verdict. Judge the shape of the text rather than waving the
+    # candidate through: a named institution plus reportage framing is the
+    # exact combination that produced the refused title.
+    entity = _REPORTAGE_ENTITY.search(candidate)
+    framing = _REPORTAGE_FRAMING.search(candidate)
+    if entity and framing:
+        return True, (
+            "sourcing auditor unavailable and the candidate reads as reportage "
+            f"about a real institution (matched '{entity.group(0)}' with "
+            f"'{framing.group(0).strip()}')"
+        )
+    return False, ""
+
+
 def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 5 head - commissions a title, then hands it to SCRIBE.
 
@@ -1181,6 +1263,13 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "KDP: real reader demand, a specific reachable audience, and a gap a new "
         "title can genuinely fill. Do not invent internal teams, tools, boards or "
         "databases — the only production system is an automated drafting pipeline.\n\n"
+        "That pipeline cannot research. It cannot look a fact up, read a document, "
+        "interview anyone or verify a name, so do not commission a book whose honest "
+        "execution needs specific factual claims about real named organisations, "
+        "government programmes, current events, or living people — every specific in "
+        "it would be invented and the book would be unpublishable. Nonfiction is "
+        "welcome when it delivers a method, framework or skill the reader applies to "
+        "their own life.\n\n"
         "Use ONLY the captured evidence below and cite its exact source_url values. "
         "Do not claim you searched sources that are absent. A viral headline is not book demand: "
         "corroborate 24-hour acceleration with persistence and book-supply evidence. "
@@ -1301,6 +1390,41 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         kdp_mode = "auto"
     region = _marker(brief, "REGION", "global").lower()
     angle = _marker(brief, "ANGLE")
+
+    unsourceable, sourcing_reason = _sourcing_gate(brief, kdp_mode)
+    if unsourceable:
+        stages.clear_stage("hermes")
+        output_dir = _home() / "agent_outputs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        rejected_path = output_dir / f"{job['id']}-rejected-sourcing.md"
+        rejected_path.write_text(
+            "# HERMES — Rejected at the Sourcing Gate\n\n"
+            f"Reason: {sourcing_reason}\n\n"
+            "This candidate would need facts the drafting pipeline cannot obtain, "
+            "so nothing was commissioned.\n\n"
+            f"{brief}\n",
+            encoding="utf-8",
+        )
+        blocked = {
+            "agent": "HERMES", "mode": "blocked", "_blocked": True,
+            "content": (
+                "Candidate refused at the sourcing gate: it would need facts about the "
+                "real world that this pipeline cannot research, so the book could only "
+                "be written by inventing them."
+            ),
+            "blocked_reason": sourcing_reason,
+            "angle": angle, "kdp_mode": kdp_mode,
+            "radar_snapshot": str(radar_path), "output": str(rejected_path),
+        }
+        _publishing_event(
+            job, agent="HERMES", event_type="research_blocked",
+            stage="sourcing_gate",
+            summary="Refused: candidate requires unverifiable real-world claims",
+            details={"reason": sourcing_reason, "angle": angle,
+                     "result": str(rejected_path)},
+            status="blocked",
+        )
+        return blocked
 
     output_dir = _home() / "agent_outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
