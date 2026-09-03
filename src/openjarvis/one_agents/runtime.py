@@ -497,7 +497,8 @@ def _publishing_lifecycle_module():
 
 
 def confirm_scribe_upload(job_id: str,
-                          upload_evidence: dict[str, Any] | None = None) -> dict[str, Any]:
+                          upload_evidence: dict[str, Any] | None = None,
+                          rationale: str = "") -> dict[str, Any]:
     """Dashboard 'mark uploaded' action -- the Chairman confirms they actually
     submitted the book on kdp.amazon.com by hand. Explicit call, 2026-08-26:
     "jab book upload ho jayegi to SCRIBE ko message bhi dena hai ki wo book
@@ -505,6 +506,12 @@ def confirm_scribe_upload(job_id: str,
     only this action enqueues PEITHO's job and finishes SCRIBE's; nothing
     else does. Starting PEITHO before this (post-publish marketing) would
     have nothing real to work from, since the book isn't actually live yet.
+
+    ``rationale`` is recorded, not required. The building enforces the same
+    10-character floor the rejection path uses before it ever calls this;
+    OneCockpit's confirm button is a single click with an empty body, and
+    breaking that to enforce the floor twice would remove a working gate to
+    tighten one that is already covered.
     """
     job = get_job(job_id)
     if not job:
@@ -558,6 +565,8 @@ def confirm_scribe_upload(job_id: str,
     )
 
     result["uploaded_confirmed_at"] = _now()
+    if rationale.strip():
+        result["upload_confirmed_rationale"] = rationale.strip()[:2000]
     result["upload_evidence"] = launch.get("listing_evidence")
     result["post_upload_lifecycle"] = launch
     result["handed_to"] = {"agent": "PEITHO", "job_id": peitho_job["id"]}
@@ -579,6 +588,7 @@ def confirm_scribe_upload(job_id: str,
                       event_type="upload_confirmed", stage="human_gate",
                       summary="Chairman confirmed the Amazon KDP upload",
                       details={"title": title, "peitho_job_id": peitho_job["id"],
+                               "rationale": rationale.strip(),
                                "listing_evidence": launch.get("listing_evidence"),
                                "owner_setup": launch.get("owner_setup")})
 

@@ -324,7 +324,11 @@ async def one_confirm_upload(job_id: str, request: Request):
         except Exception:
             payload = {}
         evidence = payload.get("upload_evidence") if isinstance(payload, dict) else None
-        return confirm_scribe_upload(job_id, evidence if isinstance(evidence, dict) else None)
+        # The building has always sent a rationale in this body; until now it
+        # was read and discarded, so an approved publish carried no reason.
+        rationale = payload.get("rationale") if isinstance(payload, dict) else ""
+        return confirm_scribe_upload(job_id, evidence if isinstance(evidence, dict) else None,
+                                     rationale=str(rationale or ""))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
