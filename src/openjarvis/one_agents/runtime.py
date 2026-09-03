@@ -544,6 +544,23 @@ def confirm_scribe_upload(job_id: str,
             "phases": [], "owner_setup": {"items": []},
         }
 
+    # Floor 5's own policy already makes this a hard requirement -- it is
+    # OWNER_REQUIREMENTS['kdp_listing_evidence'], required=True, and it is what
+    # "unblocks" PEITHO. Until now that verdict was computed and discarded, so
+    # a confirmation carrying nothing still completed the job, recorded a
+    # published title and started launch work. Raising here leaves the job at
+    # awaiting_upload: the gate stays open instead of closing on nothing.
+    #
+    # The lifecycle module being unavailable also lands here, deliberately. If
+    # the evidence cannot be validated it cannot be attested either, and a book
+    # wrongly recorded as on sale is worse than a gate that waits.
+    evidence_errors = [str(e) for e in (launch.get("listing_evidence") or {}).get("errors") or []]
+    if evidence_errors:
+        raise ValueError(
+            "KDP listing evidence is required before a book counts as uploaded: "
+            + "; ".join(evidence_errors)
+        )
+
     celebration = f"“{title}” upload attested! 🎉" if title else "Upload attested! 🎉"
     stages.set_stage("scribe", stages.CELEBRATING, celebration)
     stages.set_stage("peitho", stages.CELEBRATING, celebration)

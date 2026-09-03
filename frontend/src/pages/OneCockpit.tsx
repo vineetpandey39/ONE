@@ -258,6 +258,12 @@ export function OneCockpit() {
   // jobs only) -- see confirmUpload below for why this doesn't need the
   // two-click pattern pendingKillJobId uses.
   const [confirmingUploadJobId, setConfirmingUploadJobId] = useState<string | null>(null);
+  // The listing evidence ONE now requires before a book counts as uploaded.
+  // Held here rather than per-card so both "Mark Uploaded" buttons share one
+  // dialog instead of duplicating a form in two places.
+  const [uploadJobId, setUploadJobId] = useState<string | null>(null);
+  const [uploadForm, setUploadForm] = useState({ marketplace: '', asin: '', listing_url: '' });
+  const [uploadError, setUploadError] = useState('');
   const [command, setCommand] = useState('');
   const [lines, setLines] = useState<Line[]>([
     { role: 'one', text: 'ONE command core ready. Speak or type a command.' },
@@ -528,23 +534,47 @@ export function OneCockpit() {
   // The backend holds it a few seconds for the SCRIBE/PEITHO celebration
   // choreography, so this tracks in-flight to disable the button meanwhile
   // rather than letting a second click race the first.
-  const confirmUpload = useCallback(async (jobId: string) => {
+  const openUploadDialog = useCallback((jobId: string) => {
+    setUploadError('');
+    setUploadForm({ marketplace: '', asin: '', listing_url: '' });
+    setUploadJobId(jobId);
+  }, []);
+
+  // This used to fire a bare POST with no body, which is exactly how a book
+  // got recorded as published with upload_evidence: null. ONE refuses that
+  // now, so the evidence is collected first and the server's reason is shown
+  // rather than logged to a console nobody has open.
+  const confirmUpload = useCallback(async () => {
+    const jobId = uploadJobId;
+    if (!jobId) return;
     setConfirmingUploadJobId(jobId);
+    setUploadError('');
     try {
-      const response = await coreFetch(`/v1/one/jobs/${jobId}/confirm-upload`, { method: 'POST' });
+      const response = await coreFetch(`/v1/one/jobs/${jobId}/confirm-upload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          upload_evidence: {
+            marketplace: uploadForm.marketplace.trim(),
+            asin: uploadForm.asin.trim(),
+            listing_url: uploadForm.listing_url.trim(),
+          },
+        }),
+      });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
-        console.error('Could not confirm the upload:', body.detail || response.statusText);
+        setUploadError(String(body.detail || response.statusText));
         return;
       }
     } catch (err) {
-      console.error('Could not reach ONE to confirm the upload:', err);
+      setUploadError('Could not reach ONE to confirm the upload.');
       return;
     } finally {
       setConfirmingUploadJobId(null);
     }
+    setUploadJobId(null);
     refreshStatus();
-  }, [refreshStatus]);
+  }, [uploadJobId, uploadForm, refreshStatus]);
 
   const refreshMemoryGraph = useCallback(async () => {
     try {
@@ -1844,7 +1874,7 @@ export function OneCockpit() {
                     className="one-job-upload"
                     title="Confirm you uploaded this book to kdp.amazon.com by hand, and hand it to PEITHO"
                     disabled={confirmingUploadJobId === job.id}
-                    onClick={() => confirmUpload(job.id)}
+                    onClick={() => openUploadDialog(job.id)}
                   >
                     {confirmingUploadJobId === job.id ? 'Confirming…' : 'Mark Uploaded'}
                   </button>
@@ -1889,7 +1919,7 @@ export function OneCockpit() {
                         className="one-job-upload"
                         title="Confirm you uploaded this book to kdp.amazon.com by hand, and hand it to PEITHO"
                         disabled={confirmingUploadJobId === job.id}
-                        onClick={() => confirmUpload(job.id)}
+                        onClick={() => openUploadDialog(job.id)}
                       >
                         {confirmingUploadJobId === job.id ? 'Confirming…' : 'Mark Uploaded'}
                       </button>
@@ -1961,6 +1991,45 @@ export function OneCockpit() {
             {memoryMessage && <small>{memoryMessage}</small>}
             {status.obsidian.connected && <small>{status.obsidian.notes} notes active</small>}
             <a href="obsidian://open" target="_blank" rel="noreferrer">Open Obsidian <ExternalLink size={14} /></a>
+          </section>
+        </div>
+      )}
+      {uploadJobId && (
+        <div className="one-modal-backdrop" onMouseDown={() => setUploadJobId(null)}>
+          <section className="one-memory-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="one-modal-close" title="Close" onClick={() => setUploadJobId(null)}><X size={20} /></button>
+            <div className="one-panel-label">KDP LISTING EVIDENCE</div>
+            <h2>Confirm the upload</h2>
+            <p>
+              Marketplace, plus the ASIN or the Amazon listing URL. This is what marks the
+              book live and hands it to PEITHO, so it is recorded rather than assumed.
+            </p>
+            <label>Marketplace</label>
+            <input
+              value={uploadForm.marketplace}
+              onChange={(event) => setUploadForm((f) => ({ ...f, marketplace: event.target.value }))}
+              placeholder="IN"
+            />
+            <label>ASIN</label>
+            <input
+              value={uploadForm.asin}
+              onChange={(event) => setUploadForm((f) => ({ ...f, asin: event.target.value }))}
+              placeholder="10 letters/digits"
+            />
+            <label>Amazon listing URL</label>
+            <input
+              value={uploadForm.listing_url}
+              onChange={(event) => setUploadForm((f) => ({ ...f, listing_url: event.target.value }))}
+              placeholder="https://www.amazon.in/dp/..."
+            />
+            <button
+              className="one-primary"
+              disabled={confirmingUploadJobId === uploadJobId}
+              onClick={() => void confirmUpload()}
+            >
+              {confirmingUploadJobId === uploadJobId ? 'Confirming…' : 'Mark uploaded'}
+            </button>
+            {uploadError && <small style={{ color: '#ff8795' }}>{uploadError}</small>}
           </section>
         </div>
       )}
