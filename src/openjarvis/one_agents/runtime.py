@@ -889,6 +889,23 @@ def _money_board() -> dict[str, Any]:
 _COLLECTORS: dict[str, tuple[str, str]] = {}
 
 
+def _experiment_board() -> dict[str, Any]:
+    """Running revenue experiments, or an honest statement that they cannot be read."""
+    import sys  # module-local: runtime.py has no top-level sys import
+
+    service = _COMPANY_SERVICES / "experiments"
+    if not service.is_dir():
+        return {"unavailable": "floors/_services/experiments is not present"}
+    for path in (service, _COMPANY_SERVICES / "revenue"):
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+    try:
+        import experiment  # type: ignore
+        return experiment.board(_COMPANY_SERVICES.parents[1] / "data" / "company.db")
+    except Exception as exc:  # noqa: BLE001
+        return {"unavailable": f"{type(exc).__name__}: {exc}"[:300]}
+
+
 def _run_zeus(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 11 - the company scorecard, and what to do about what it shows.
 
@@ -907,6 +924,7 @@ def _run_zeus(job: dict[str, Any]) -> dict[str, Any]:
                 "content": ("The company scorecard could not be read, so nothing is "
                             "reported. An unreadable board is not a board of zeros.")}
 
+    experiments = _experiment_board()
     businesses = money.get("businesses", [])
     unmeasured = [b for b in businesses if b["status"] == "no_source_connected"]
 
@@ -963,6 +981,21 @@ def _run_zeus(job: dict[str, Any]) -> dict[str, Any]:
                      f"({business['status']})")
         for blocked in business.get("blocked_sources") or []:
             lines.append(f"    blocked: {blocked['blocked_on']}")
+    if not experiments.get("unavailable"):
+        awaiting = experiments.get("awaiting_decision") or []
+        lines += ["", "## Experiments", "",
+                  f"- Running: {len(experiments.get('running') or [])}",
+                  f"- Awaiting a verdict now: {len(awaiting)}",
+                  f"- Concluded: SCALE {experiments.get('profitable', 0)}, "
+                  f"KILL {experiments.get('killed', 0)}, "
+                  f"INCONCLUSIVE {experiments.get('inconclusive', 0)}"]
+        for item in awaiting:
+            lines.append(f"    {item['experiment_id']} {item['label']}: "
+                         f"{item['verdict']} - {item['verdict_reason']}")
+        if not (experiments.get("running") or experiments.get("concluded")):
+            lines.append("    No experiment has ever been run. Every revenue number "
+                         "above is therefore unexplained rather than disappointing.")
+
     if routed:
         lines += ["", "## Collection routed", ""]
         lines += [f"- {r['business']} -> {r['agent']} ({r['job_id']})" for r in routed]
@@ -987,6 +1020,8 @@ def _run_zeus(job: dict[str, Any]) -> dict[str, Any]:
         "money": {k: v for k, v in money.items() if k != "businesses"},
         "businesses": businesses,
         "production_completed": produced,
+        "experiments": {k: v for k, v in experiments.items() if k != "running"},
+        "experiments_awaiting_decision": experiments.get("awaiting_decision") or [],
         "collection_routed": routed,
         "for_olympus": escalate,
         "output": str(output_path),
