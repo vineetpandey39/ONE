@@ -849,9 +849,149 @@ def _local_plan(job: dict[str, Any]) -> dict[str, Any]:
 # worth reusing when real integration comes back.
 
 
+# Where the company's books live. ZEUS reads them; floors/_services/revenue
+# owns them. Kept as a path rather than an import of the service module so a
+# missing or moved company layer degrades to "scorecard unavailable" instead of
+# breaking every dispatch to floor 11.
+_COMPANY_SERVICES = Path(__file__).resolve().parents[4] / "one-company" / "floors" / "_services"
+
+
+def _money_board() -> dict[str, Any]:
+    """The company's money, or an honest statement that it could not be read."""
+    import sys  # module-local: runtime.py has no top-level sys import
+
+    service = _COMPANY_SERVICES / "revenue"
+    if not service.is_dir():
+        return {"unavailable": "floors/_services/revenue is not present"}
+    if str(service) not in sys.path:
+        sys.path.insert(0, str(service))
+    try:
+        import money  # type: ignore
+        return money.money_board(_COMPANY_SERVICES.parents[1] / "data" / "company.db")
+    except Exception as exc:  # noqa: BLE001
+        return {"unavailable": f"{type(exc).__name__}: {exc}"[:300]}
+
+
+# Who to send a measurement gap to. A business that cannot report a sale is a
+# job for the floor that owns the source, not a question for the Chairman --
+# that is the whole point of ZEUS holding the scorecard rather than printing it.
+# A floor missing from here has no collector to route to yet and is escalated
+# instead, which is the honest outcome rather than a job sent nowhere.
+# Empty today, and that is the accurate state rather than an oversight. Neither
+# collector exists yet: nothing anywhere fetches a KDP royalty report, and
+# instagram_insights.py can read reach but nothing writes what it reads to the
+# ledger. Routing to IRIS or METRON now would send them work they cannot do and
+# get a plausible-looking non-answer back, which is worse than an honest gap.
+#
+# The mechanism below is live and tested. Adding an entry here is all it takes
+# to start routing the moment a collector is real - that is a one-line change,
+# not a rewrite, which is the point of registering them rather than hardcoding.
+_COLLECTORS: dict[str, tuple[str, str]] = {}
+
+
 def _run_zeus(job: dict[str, Any]) -> dict[str, Any]:
-    """Floor 11 - ONE-JARVIS Executive Command. Pending LAO integration."""
-    return _local_plan(job)
+    """Floor 11 - the company scorecard, and what to do about what it shows.
+
+    Money first, production second, deliberately. Books published and reels
+    produced are the numbers ONE has always been able to show; they are also
+    the numbers that stayed high while revenue stayed at zero, which is exactly
+    how a production company mistakes itself for a business.
+    """
+    stages.set_stage("zeus", stages.WORKING, "Reading the company scorecard")
+    money = _money_board()
+
+    if money.get("unavailable"):
+        stages.clear_stage("zeus")
+        return {"agent": "ZEUS", "mode": "scorecard", "_blocked": True,
+                "blocked_reason": money["unavailable"],
+                "content": ("The company scorecard could not be read, so nothing is "
+                            "reported. An unreadable board is not a board of zeros.")}
+
+    businesses = money.get("businesses", [])
+    unmeasured = [b for b in businesses if b["status"] == "no_source_connected"]
+
+    # Production, for contrast only. This is the half ONE has always counted.
+    recent = list_jobs(limit=200)
+    produced = len([j for j in recent if j.get("status") == "completed"
+                    and j.get("mode") not in ("watch", "plan")])
+
+    routed: list[dict[str, Any]] = []
+    escalate: list[dict[str, Any]] = []
+    for business in unmeasured:
+        floor_id = business["floor_id"]
+        blocked = business.get("blocked_sources") or []
+        collector = _COLLECTORS.get(floor_id)
+        if collector is None:
+            escalate.append({
+                "floor_id": floor_id, "business": business["name"],
+                "why": "no floor agent can collect this yet",
+                "needs": [b["blocked_on"] for b in blocked] or
+                         ["a revenue source has never been declared for this business"],
+            })
+            continue
+        agent_id, instruction = collector
+        # Routing, not doing. ZEUS says what is needed and to whom; the floor
+        # decides how, which is its own charter's boundary.
+        worker = enqueue_job(agent_id, json.dumps({
+            "workflow": "revenue_collection", "floor_id": floor_id,
+            "business": business["name"], "objective": instruction,
+            "blocked_on": [b["blocked_on"] for b in blocked],
+            "requested_by": "zeus",
+        }), mode="execute", tier="fast")
+        routed.append({"floor_id": floor_id, "business": business["name"],
+                       "agent": agent_id.upper(), "job_id": worker["id"]})
+
+    lines = [
+        "# ZEUS - Company Scorecard", "",
+        f"Generated {money['generated_at']}", "",
+        "## Money", "",
+        f"- Earned revenue: {money['currency']} {money['earned_revenue']}",
+        f"- This month: {money['currency']} {money['revenue_mtd']}",
+        f"- Unverified (recorded, no payment reference): {money['currency']} {money['unverified_revenue']}",
+        f"- Businesses able to report a sale: {money['businesses_measuring']} of {money['businesses_total']}",
+        "",
+        "## Production, for contrast", "",
+        f"- Jobs completed in the last {len(recent)} records: {produced}",
+        "",
+        "A high production number beside a zero revenue number is not a mixed",
+        "result. It is one result: the company can make things and cannot yet",
+        "tell whether anyone wants them.",
+        "", "## Business lines", "",
+    ]
+    for business in businesses:
+        lines.append(f"- {business['name']}: {money['currency']} {business['earned']} "
+                     f"({business['status']})")
+        for blocked in business.get("blocked_sources") or []:
+            lines.append(f"    blocked: {blocked['blocked_on']}")
+    if routed:
+        lines += ["", "## Collection routed", ""]
+        lines += [f"- {r['business']} -> {r['agent']} ({r['job_id']})" for r in routed]
+    if escalate:
+        lines += ["", "## For OLYMPUS", "",
+                  "These cannot be fixed by routing work. Each needs an account or a",
+                  "decision that only the Chairman can make.", ""]
+        for item in escalate:
+            lines.append(f"- {item['business']}: {item['why']}")
+            lines += [f"    needs: {need}" for need in item["needs"]]
+
+    output_dir = _home() / "agent_outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{job['id']}-scorecard.md"
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    stages.clear_stage("zeus")
+    headline = (f"{money['businesses_measuring']} of {money['businesses_total']} businesses "
+                f"can report a sale; earned {money['currency']} {money['earned_revenue']}")
+    return {
+        "agent": "ZEUS", "mode": "scorecard",
+        "money": {k: v for k, v in money.items() if k != "businesses"},
+        "businesses": businesses,
+        "production_completed": produced,
+        "collection_routed": routed,
+        "for_olympus": escalate,
+        "output": str(output_path),
+        "content": headline,
+    }
 
 
 def _run_athena(job: dict[str, Any]) -> dict[str, Any]:
