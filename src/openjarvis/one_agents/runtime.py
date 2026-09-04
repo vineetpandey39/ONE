@@ -3250,6 +3250,20 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     # mode="dry_run" only avoids the tool's publish gate (mode="publish"
     # demands confirm_publish=true). What actually gets published is the
     # package's own publishMode default, which is manual_review.
+    #
+    # Caption and hashtags, for BOTH the reel and the before/after post, are
+    # NEVER MUSE's to supply -- per explicit user direction (2026-09-04):
+    # "jab MUSE inko create karke post karega, to caption and hashtags jo
+    # bhi relevant ho wo leke tab post karega" (whatever caption/hashtags
+    # are relevant get taken at post time). This is exactly why input_args
+    # stays {} below -- each LAO run's own ChatGPT call generates a fresh
+    # minimal_caption/seo_hashtags (or instagram_caption/instagram_hashtags
+    # for the reel) specific to THAT run's location and format, and
+    # meta_publish_image/meta_publish_reel use exactly that value when
+    # publishMode is auto_publish. MUSE must never pass a fixed/stale
+    # caption or hashtag override here -- doing so would post yesterday's
+    # or a hardcoded caption on today's images.
+    #
     # A restart while this was polling leaves the LAO id on the job row. When
     # it is there, re-attach to that run instead of starting a second one --
     # the poll loop below is the same either way.

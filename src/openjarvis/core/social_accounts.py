@@ -49,6 +49,7 @@ PLATFORMS: dict[str, dict[str, Any]] = {
         "id_key": "INSTAGRAM_BUSINESS_ACCOUNT_ID",
         "expected_key": "INSTAGRAM_EXPECTED_USERNAME",
         "identity_field": "username",  # Graph API field on the account node
+        "graph_base": "https://graph.instagram.com/v21.0",
         "label": "Instagram",
     },
     "facebook": {
@@ -56,12 +57,12 @@ PLATFORMS: dict[str, dict[str, Any]] = {
         "id_key": "FACEBOOK_PAGE_ID",
         "expected_key": "FACEBOOK_EXPECTED_PAGE_NAME",
         "identity_field": "name",
+        "graph_base": "https://graph.facebook.com/v21.0",
         "label": "Facebook Page",
     },
 }
 
 _CHANNELS_SECTION = "social_channels"  # slug -> display name registry
-_GRAPH = "https://graph.facebook.com/v21.0"
 _TIMEOUT = 15
 
 
@@ -211,21 +212,22 @@ def list_accounts(*, path=None) -> dict[str, dict[str, dict[str, bool]]]:
 # ---------------------------------------------------------------------------
 # The cross-post guard
 # ---------------------------------------------------------------------------
-def _graph_identity(account_id: str, token: str, field: str) -> tuple[str | None, str]:
+def _graph_identity(graph_base: str, account_id: str, token: str, field: str) -> tuple[str | None, str]:
     """Ask the Graph API for an account node's identity field (username / name).
-    Returns (value, error). requests(verify=False): same Avast SSL-interception
-    workaround already standard for web_search/Deepgram/instagram_insights on
-    this machine."""
+    Returns (value, error). The graph host is platform-specific: tokens issued
+    through Instagram Login are validated by graph.instagram.com, while Page
+    tokens are validated by graph.facebook.com."""
     try:
+        import truststore
+        truststore.inject_into_ssl()
         import requests  # local import keeps module import cheap/offline-safe
     except Exception as exc:  # pragma: no cover
         return None, f"requests unavailable: {exc}"
     try:
         resp = requests.get(
-            f"{_GRAPH}/{account_id}",
+            f"{graph_base}/{account_id}",
             params={"fields": field, "access_token": token},
             timeout=_TIMEOUT,
-            verify=False,
         )
     except Exception as exc:
         return None, f"Graph API request failed: {exc}"
@@ -245,7 +247,9 @@ def verify_account(channel: str, platform: str, *, path=None) -> tuple[bool, str
     spec = PLATFORMS[platform]
     if acct is None:
         return False, f"{spec['label']} for '{channel}' is not fully configured (missing token or account id)."
-    live, err = _graph_identity(acct.account_id, acct.token, spec["identity_field"])
+    live, err = _graph_identity(
+        spec["graph_base"], acct.account_id, acct.token, spec["identity_field"]
+    )
     if live is None:
         return False, f"Could not verify {spec['label']} for '{acct.channel_name}': {err}"
     if acct.expected_identity and live.strip().lower() != acct.expected_identity.strip().lower():
