@@ -897,7 +897,7 @@ def _run_zeus(job: dict[str, Any]) -> dict[str, Any]:
     the numbers that stayed high while revenue stayed at zero, which is exactly
     how a production company mistakes itself for a business.
     """
-    stages.set_stage("zeus", stages.WORKING, "Reading the company scorecard")
+    stages.set_stage("zeus", stages.RESEARCHING, "Reading the company scorecard")
     money = _money_board()
 
     if money.get("unavailable"):
