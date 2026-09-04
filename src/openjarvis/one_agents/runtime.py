@@ -1048,6 +1048,13 @@ KDP_PROCESS_NAME = "KDP Book Factory - Full Manuscript Draft"
 # Confirmed live against LAO's own /processes list (2026-08-14), not guessed --
 # LAO matches on the exact display name, so a near-miss silently fails to start.
 IA_PROCESS_NAME = "ImagineIndia Reel - Twice Daily Production"
+# Added 2026-09-04, per explicit user direction ("Wire MUSE to it too" / "So
+# that MUSE hi kewal imagineindia ko drive kare, rest agent rest channel ko"):
+# MUSE stays the SOLE ImagineIndia-brand worker on Floor 4, now driving TWO
+# LAO processes instead of one -- the existing video reel, and this new
+# static before/after square-image post. Every other Floor 4 worker
+# (FABULA/LUMIO/PRAXIS/TESSERA) is untouched; their brands are unaffected.
+IA_BEFORE_AFTER_PROCESS_NAME = "ImagineIndia Before/After Post"
 
 
 def _claude_research(prompt: str, max_tokens: int = 1400, model: str = "",
@@ -3185,11 +3192,16 @@ def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str, 
 
 
 def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
-    """Floor 4 worker - runs LAO's ImagineIndia pipeline and waits for the reel.
+    """Floor 4 worker - runs LAO's ImagineIndia pipeline(s) and waits for the
+    result. MUSE is the sole ImagineIndia-brand worker on Floor 4: it drives
+    BOTH the video reel and the static before/after post (added 2026-09-04),
+    selected by `content_type` in the brief ("reel", the default -- kept for
+    every existing caller that never set this field -- or "before_after").
+    Every other Floor 4 worker's brand is untouched by this addition.
 
     Same shape as _run_scribe on Floor 5: this blocks on a long external LAO
     job and polls it, so the floor genuinely shows the worker busy for as long
-    as the reel actually takes.
+    as the run actually takes.
     """
     from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
 
@@ -3201,6 +3213,9 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     region = brief.get("region") or "india"
     angle = str(brief.get("angle") or "").strip()
     headline = angle or priority
+    content_type = str(brief.get("content_type") or "reel").strip().lower()
+    is_before_after = content_type in ("before_after", "before-after", "beforeafter")
+    kind_label = "before/after post" if is_before_after else "reel"
 
     stages.worker_confirms_receipt(
         "muse",
@@ -3208,11 +3223,15 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     )
 
     tool = LaoOrchestratorTool()
-    process_name = os.environ.get("LAO_IA_PROCESS", IA_PROCESS_NAME)
+    process_name = (
+        os.environ.get("LAO_IA_BEFORE_AFTER_PROCESS", IA_BEFORE_AFTER_PROCESS_NAME)
+        if is_before_after
+        else os.environ.get("LAO_IA_PROCESS", IA_PROCESS_NAME)
+    )
 
     stages.set_stage("muse", stages.EXECUTING,
-                     f"Starting the reel: {headline[:110]}" if headline
-                     else "Starting LAO ImagineIndia pipeline")
+                     f"Starting the {kind_label}: {headline[:110]}" if headline
+                     else f"Starting LAO ImagineIndia {kind_label} pipeline")
 
     # Deliberately EMPTY -- confirmed against LAO's own process detail
     # (2026-08-14): this process carries input_defaults for everything it
@@ -3239,7 +3258,7 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         lao_job_id = resume_id
         stages.set_stage(
             "muse", stages.EXECUTING,
-            f"Picking the reel back up — LAO job {resume_id[:8]} after a restart",
+            f"Picking the {kind_label} back up — LAO job {resume_id[:8]} after a restart",
             lao_job=resume_id)
     else:
         started = tool.execute(
@@ -3309,9 +3328,10 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
             last = {"raw": probe.content}
         status = str((last.get("job") or {}).get("status") or status)
         elapsed = int((time.time() - (deadline - max_wait)) // 60)
+        verb = "Composing" if is_before_after else "Shooting"
         stages.set_stage(
             "muse", stages.EXECUTING,
-            (f"Shooting “{headline[:70]}” · LAO {status} · {elapsed}m" if headline
+            (f"{verb} “{headline[:70]}” · LAO {status} · {elapsed}m" if headline
              else f"LAO job {status} · {elapsed}m"),
             lao_job=lao_job_id, lao_process=process_name)
         if status in terminal:
@@ -3333,15 +3353,26 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     # SCRIBE: this process runs under a sandboxed runtime_home, so
     # re-discovering the output folder locally would look in the wrong place.
     out = ((last.get("job") or {}).get("output_result") or {})
-    reel = out.get("reel") or out.get("meta_publish") or {}
-    run_dir = str(reel.get("run_dir") or reel.get("output_dir") or "")
-    title = str(reel.get("title") or reel.get("location") or headline or "")
-    published = bool(reel.get("published") or reel.get("permalink"))
+    if is_before_after:
+        # Verified live (2026-09-04) against a real run's actual
+        # output_result shape -- this package has no "reel"/"meta_publish"
+        # nesting, its fields are top-level.
+        location = out.get("chosen_location") or {}
+        location_name = str(location.get("name") or "")
+        style = str((out.get("before_after_format_result") or {}).get("before_after_style") or "")
+        title = f"{location_name} before/after ({style})" if (location_name and style) else (location_name or headline or "")
+        run_dir = str((out.get("composite_image_path") or {}).get("path") or "")
+        published = str((out.get("meta_publish_result") or {}).get("status") or "") == "published"
+    else:
+        reel = out.get("reel") or out.get("meta_publish") or {}
+        run_dir = str(reel.get("run_dir") or reel.get("output_dir") or "")
+        title = str(reel.get("title") or reel.get("location") or headline or "")
+        published = bool(reel.get("published") or reel.get("permalink"))
 
     if not title:
         # LAO said Successful but told us nothing identifiable -- report the
-        # job id rather than walking a phantom reel across the floor.
-        title = f"ImagineIndia reel (LAO job {lao_job_id[:8]})"
+        # job id rather than walking a phantom result across the floor.
+        title = f"ImagineIndia {kind_label} (LAO job {lao_job_id[:8]})"
 
     # --- walk the finished reel back to the floor head --------------------
     stages.set_stage("muse", stages.CARRYING_TO_HEAD, f"Delivering: {title}")
@@ -3358,19 +3389,20 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     memory.remember(
         agent="MUSE", floor_id="4", floor_name="Media & Content (ImagineIndia)",
         kind="Production Run",
-        body=(f"Ran LAO's ImagineIndia reel pipeline to completion.\n\n"
+        body=(f"Ran LAO's ImagineIndia {kind_label} pipeline to completion.\n\n"
               f"- LAO job: `{lao_job_id}` — {status}\n"
-              f"- Output folder: `{run_dir or '(not reported)'}`\n"
-              f"- Reel: {title}\n\n"
-              "Handed the finished reel to IRIS."),
+              f"- Output: `{run_dir or '(not reported)'}`\n"
+              f"- {'Post' if is_before_after else 'Reel'}: {title}\n\n"
+              f"Handed the finished {kind_label} to IRIS."),
         task=f"{priority or 'rotation pick'} / {region}",
-        tags=["imagineindia", "media", "reel", "production"],
+        tags=["imagineindia", "media", "production"] + (["before_after"] if is_before_after else ["reel"]),
     )
 
     enqueue_job(
         "ia",
         json.dumps({"run_dir": run_dir, "title": title,
-                    "published": published, "lao_job": lao_job_id}),
+                    "published": published, "lao_job": lao_job_id,
+                    "content_type": content_type}),
         mode="report", tier="fast",
     )
     stages.clear_stage("muse")
@@ -3378,12 +3410,13 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     return {
         "agent": "MUSE",
         "mode": job.get("mode"),
+        "content_type": content_type,
         "lao_job": lao_job_id,
         "status": status,
         "run_dir": run_dir,
         "title": title,
         "published": published,
-        "content": f"Reel finished: {title}",
+        "content": f"{kind_label.capitalize()} finished: {title}",
         "handed_to": {"agent": "IRIS"},
     }
 
