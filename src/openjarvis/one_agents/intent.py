@@ -6,14 +6,14 @@ fell through to the paid cloud path because `execute` wasn't on the list, and
 "Dispatch Hermes agent." researched-and-stopped because `dispatch` mapped to
 plan mode. That is a vocabulary quiz, not comprehension.
 
-This asks Claude instead, showing it the live agent roster and asking which
-agent — if any — should act, and whether the ask is to do the work or only to
-look into it. Any phrasing, any language, works.
+This asks Sanjeevani's credential-free local router, showing it the live agent
+roster and asking which agent — if any — should act, and whether the ask is to
+do the work or only to look into it. Any phrasing, any language, works.
 
 Design rules:
   * Deterministic first. The caller keeps its cheap regex fast-path; this is
     only consulted when that path is unsure. No new latency on clear commands.
-  * Fails safe. If Claude is unreachable or answers oddly, return None and let
+  * Fails safe. If local routing is unavailable or answers oddly, return None and let
     the caller fall back to its existing behaviour — never guess an agent.
   * Never dispatches by itself. It returns a decision; the caller acts on it.
 """
@@ -21,33 +21,39 @@ Design rules:
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import re
+import sys
+from pathlib import Path
 from typing import Any
-
-import httpx
 
 # A question about an agent is not an instruction to that agent.
 _ACTIONS = {"work", "research", "none"}
 
 
-def _client():
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not api_key:
-        return None, "ANTHROPIC_API_KEY is not in ONE's credential vault"
+def _sanjeevani():
+    """Load the shared Sanjeevani router without loading its app or state."""
+    path = Path(os.environ.get(
+        "SANJEEVANI_RESEARCH_LIBRARY",
+        r"C:\Users\pc\Documents\Codex\2026-08-28\ye\outputs\sanjeevani\research_library.py",
+    ))
+    if not path.is_file():
+        return None
+    key = "sanjeevani_reusable_research"
+    if key in sys.modules:
+        return sys.modules[key]
     try:
-        import anthropic
-    except ImportError as exc:
-        return None, f"anthropic package unavailable: {exc}"
-    try:
-        # verify=False: the same Avast SSL-interception workaround already used
-        # for Deepgram, web_search and instagram_insights on this machine.
-        return anthropic.Anthropic(
-            api_key=api_key,
-            http_client=httpx.Client(verify=False, timeout=30.0),
-        ), ""
-    except Exception as exc:  # noqa: BLE001
-        return None, f"client init failed: {exc}"
+        spec = importlib.util.spec_from_file_location(key, path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[key] = module
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        sys.modules.pop(key, None)
+        return None
 
 
 def _roster_lines(agents: dict[str, dict[str, str]]) -> str:
@@ -73,11 +79,10 @@ def classify(message: str, agents: dict[str, dict[str, str]]) -> dict[str, Any] 
     if not text:
         return None
 
-    client, note = _client()
-    if client is None:
+    sanjeevani = _sanjeevani()
+    if sanjeevani is None:
         return None
 
-    model = os.environ.get("ONE_INTENT_MODEL", "claude-haiku-4-5")
     prompt = (
         "You route instructions to agents in an autonomous company. Decide which "
         "agent, if any, should act on the message below.\n\n"
@@ -104,15 +109,13 @@ def classify(message: str, agents: dict[str, dict[str, str]]) -> dict[str, Any] 
     )
 
     try:
-        message_obj = client.messages.create(
-            model=model,
+        result = sanjeevani.local_route(
+            prompt,
+            base_url=os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434"),
+            preferred_model=os.environ.get("ONE_LOCAL_RESEARCH_MODEL", "qwen3.5:9b"),
             max_tokens=300,
-            messages=[{"role": "user", "content": prompt}],
         )
-        reply = "".join(
-            block.text for block in message_obj.content
-            if getattr(block, "type", None) == "text"
-        ).strip()
+        reply = str(result.get("text") or "").strip()
     except Exception:  # noqa: BLE001 - caller falls back to its own routing
         return None
 

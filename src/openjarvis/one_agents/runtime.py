@@ -771,6 +771,12 @@ def _local_plan(job: dict[str, Any]) -> dict[str, Any]:
     )
     tier = (job.get("tier") or "fast").strip().lower()
     model, engine = _resolve_planner_model(tier)
+    # Every non-worker is a floor head in ONE's company roster. Floor-head
+    # planning is a Sanjeevani/local boundary and may not spend cloud credits,
+    # even when a caller accidentally requests the heavy/NVIDIA tier.
+    if agent.get("seat") != "worker":
+        model = os.environ.get("ONE_LOCAL_RESEARCH_MODEL", "qwen3.5:9b")
+        engine = "ollama"
     fallback_reason = ""
     if engine == "nvidia":
         api_key = os.environ.get("NVIDIA_API_KEY", "").strip()
@@ -821,7 +827,7 @@ def _local_plan(job: dict[str, Any]) -> dict[str, Any]:
             "## Next Actions\n"
             "- Confirm the intended mode: plan, execute, or publish.\n"
             "- Check required credentials in the ONE credential vault before running external tools.\n"
-            "- Use deterministic/local steps first, then cloud providers only where configured.\n"
+            "- Use deterministic/Sanjeevani local steps; cloud-model fallback is forbidden for floor heads.\n"
             "- Save outputs and audit trail under the ONE runtime data folder.\n"
             "- Do not publish, send, or apply without explicit approval.\n\n"
             "## Current Runtime Note\n"
@@ -1057,53 +1063,65 @@ IA_PROCESS_NAME = "ImagineIndia Reel - Twice Daily Production"
 IA_BEFORE_AFTER_PROCESS_NAME = "ImagineIndia Before/After Post"
 
 
-def _claude_research(prompt: str, max_tokens: int = 1400, model: str = "",
-                     web_search: bool = False) -> tuple[str, str]:
-    """Ask Claude directly. Returns (text, failure_note); never raises.
+def _muse_publish_facebook(image_path: str, caption: str) -> dict[str, Any]:
+    """Publish one local image through Meta Graph using LAO's encrypted vault.
 
-    Deliberately separate from the local Ollama planner: the 8B local model
-    invents plausible-sounding infrastructure that doesn't exist, which is
-    exactly the wrong failure mode for research that feeds a real book run.
-
-    `model` overrides ONE_RESEARCH_MODEL/the Haiku default for this one call
-    -- added for PEITHO's reel-hook writing (confirmed live 2026-08-28: the
-    Chairman flagged Haiku's output as flat book-blurb prose, not punchy
-    short-form-video copy; every other caller is unaffected since the
-    default behavior is unchanged when this is left empty).
+    The secret is resolved robot-to-vault in memory and is never copied into
+    ONE. Exact-caption reconciliation makes a retry safe against duplicates.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not api_key:
-        return "", "ANTHROPIC_API_KEY is not in ONE's credential vault"
-    try:
-        import anthropic
-    except ImportError as exc:  # optional dep — surface it, never swallow
-        return "", f"anthropic package unavailable: {exc}"
-    model = model or os.environ.get("ONE_RESEARCH_MODEL", "claude-haiku-4-5")
-    try:
-        # verify=False: the same Avast SSL-interception workaround already used
-        # for Deepgram, web_search and instagram_insights on this machine — a
-        # bare client fails here with a generic "Connection error".
-        client = anthropic.Anthropic(
-            api_key=api_key,
-            http_client=httpx.Client(verify=False, timeout=90.0),
-        )
-        request: dict[str, Any] = {
-            "model": model, "max_tokens": max_tokens,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        if web_search:
-            # Server-side search produces current evidence without giving the
-            # runtime a general browser or arbitrary network surface.
-            request["tools"] = [{"type": "web_search_20250305",
-                                 "name": "web_search", "max_uses": 8}]
-        message = client.messages.create(**request)
-        text = "".join(
-            block.text for block in message.content
-            if getattr(block, "type", None) == "text"
-        ).strip()
-        return (text, "") if text else ("", f"{model} returned no text")
-    except Exception as exc:  # noqa: BLE001 - reported, not hidden
-        return "", f"Claude call failed ({model}): {exc}"
+    import glob
+    import urllib.parse
+    import urllib.request
+
+    config_path = os.environ.get("LAO_ROBOT_CONFIG", "").strip()
+    if not config_path:
+        pattern = str(Path.home() / "AppData/Local/Packages/Claude_*" /
+                      "LocalCache/Roaming/Claude/local-agent-mode-sessions/**/lao-platform/robot-worker/config.local.json")
+        matches = glob.glob(pattern, recursive=True)
+        config_path = matches[-1] if matches else ""
+    if not config_path or not Path(config_path).is_file():
+        raise RuntimeError("LAO production robot config was not found")
+    config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    folder_id = os.environ.get("LAO_ASSET_FOLDER_ID", "446427d7-5722-4d59-a487-8de321325cbc")
+    asset_name = os.environ.get("LAO_FACEBOOK_PUBLISH_ASSET", "imagineIndiaFacebookPublishingToken")
+    resolve_url = (str(config["orchestrator_url"]).rstrip("/") + "/assets/resolve/" +
+                   urllib.parse.quote(asset_name) + "?folder_id=" + urllib.parse.quote(folder_id))
+    request = urllib.request.Request(resolve_url, headers={"Authorization": "Bearer " + config["robot_token"]})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        credential = json.loads(response.read())["value"]
+    token = credential if isinstance(credential, str) else str(credential.get("password") or "")
+    page_id = os.environ.get("IMAGINEINDIA_FACEBOOK_PAGE_ID", "1208655322324462")
+    if not token or not page_id:
+        raise RuntimeError("ImagineIndia Facebook publishing credential is incomplete")
+
+    # Reconcile before create: exact same caption on the Page means this
+    # logical delivery already landed and must not be posted twice.
+    graph = "https://graph.facebook.com/v20.0"
+    recent = httpx.get(f"{graph}/{page_id}/photos", params={
+        "type": "uploaded", "fields": "id,name,created_time,link", "limit": 25,
+        "access_token": token,
+    }, timeout=60)
+    recent.raise_for_status()
+    for row in recent.json().get("data", []):
+        if str(row.get("name") or "").strip() == caption.strip():
+            return {"status": "already_published", "post_id": row.get("id"),
+                    "permalink": row.get("link") or "", "verified": True}
+
+    with Path(image_path).open("rb") as image:
+        published = httpx.post(f"{graph}/{page_id}/photos",
+            data={"caption": caption, "published": "true", "access_token": token},
+            files={"source": (Path(image_path).name, image, "image/jpeg")}, timeout=180)
+    published.raise_for_status()
+    post_id = str(published.json().get("post_id") or published.json().get("id") or "")
+    if not post_id:
+        raise RuntimeError("Facebook accepted no verifiable post id")
+    verified = httpx.get(f"{graph}/{post_id}", params={
+        "fields": "id,permalink_url,created_time", "access_token": token,
+    }, timeout=60)
+    verified.raise_for_status()
+    proof = verified.json()
+    return {"status": "published", "post_id": post_id,
+            "permalink": proof.get("permalink_url") or "", "verified": proof.get("id") == post_id}
 
 
 def _sanjeevani_research() -> Any | None:
@@ -1179,13 +1197,17 @@ def _local_research(prompt: str, max_tokens: int = 2200,
 
 def _research_synthesis(prompt: str, max_tokens: int = 2200,
                         evidence: dict[str, Any] | None = None) -> tuple[str, str]:
-    """Free/local first. Paid Claude is disabled unless the owner opts in."""
+    """Sanjeevani/local-only research for every company floor head.
+
+    This is a hard product boundary, not a preference flag: autonomous floor
+    research must never spend Anthropic/OpenAI/Gemini (or another cloud-model)
+    credits. A failed local run stops honestly instead of silently buying a
+    fallback response.
+    """
     text, note = _local_research(prompt, max_tokens=max_tokens, evidence=evidence)
     if text:
         return text, ""
-    if os.environ.get("ONE_ALLOW_PAID_RESEARCH", "0").strip().lower() in {"1", "true", "yes"}:
-        return _claude_research(prompt, max_tokens=max_tokens, web_search=False)
-    return "", note + "; paid research fallback is disabled"
+    return "", note + "; cloud-model fallback is forbidden for floor heads"
 
 
 def _marker(text: str, key: str, default: str = "") -> str:
@@ -1640,7 +1662,8 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     output_path = output_dir / f"{job['id']}.md"
     output_path.write_text(
         f"# HERMES — KDP Commissioning Brief\n\n"
-        f"Request: {task}\n\nResearched by: {os.environ.get('ONE_RESEARCH_MODEL', 'claude-haiku-4-5')}\n\n"
+        f"Request: {task}\n\nResearched by: Sanjeevani + "
+        f"{os.environ.get('ONE_LOCAL_RESEARCH_MODEL', 'qwen3.5:9b')}\n\n"
         f"{brief}\n",
         encoding="utf-8",
     )
@@ -1654,11 +1677,7 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {
         "agent": "HERMES",
         "mode": mode,
-        "research_engine": (
-            os.environ.get("ONE_RESEARCH_MODEL", "claude-haiku-4-5")
-            if os.environ.get("ONE_ALLOW_PAID_RESEARCH", "0").strip().lower() in {"1", "true", "yes"}
-            else "free-local (Sanjeevani/Ollama)"
-        ),
+        "research_engine": "free-local (Sanjeevani/Ollama)",
         "kdp_mode": kdp_mode,
         "region": region,
         "angle": angle,
@@ -2981,7 +3000,22 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         if already else ""
     )
 
-    brief, note = _claude_research(
+    # Media research follows the same Sanjeevani contract as Publishing:
+    # capture current public evidence first, then let an approved local Ollama
+    # model interpret only that snapshot.  Paid providers are never consulted
+    # Cloud-model fallback is forbidden for autonomous floor work.
+    media_evidence: dict[str, Any] = {"eligible": [], "catalog_evidence": []}
+    reusable = _sanjeevani_research()
+    if reusable is not None:
+        try:
+            media_evidence = reusable.collect(task or "ImagineIndia India heritage visual trends", markets=["IN"])
+        except Exception as exc:  # evidence failure is surfaced by synthesis
+            media_evidence = {
+                "eligible": [], "catalog_evidence": [],
+                "errors": [{"source": "sanjeevani", "error": f"{type(exc).__name__}: {exc}"[:400]}],
+            }
+
+    brief, note = _research_synthesis(
         "You are IRIS, head of Media & Content at a digital holding company, "
         "signing off the next ImagineIndia Instagram reel run.\n\n"
         f"Request: {task}\n\n"
@@ -3000,15 +3034,20 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "BRIEF:\n"
         "<6-12 lines: who the audience is, why run now, what would make this "
         "one perform, and the honest risk that it underperforms>"
-        + avoid
+        + "\n\nUse only this Sanjeevani-captured evidence for current-market claims:\n"
+        + json.dumps(media_evidence, ensure_ascii=False, separators=(",", ":"))[:50000]
+        + avoid,
+        evidence=media_evidence,
     )
 
     if not brief:
         stages.clear_stage("ia")
-        fallback = _local_plan(job)
-        fallback["research_engine"] = "local planner"
-        fallback["claude_unavailable"] = note
-        return fallback
+        return {
+            "agent": "IRIS", "mode": "blocked", "_blocked": True,
+            "content": "Sanjeevani local research could not produce a grounded editorial brief.",
+            "blocked_reason": note,
+            "handed_to": None,
+        }
 
     # "location" here is IRIS's editorial priority, NOT the place to shoot --
     # the manifest rotation owns that. Named `priority` so nothing downstream
@@ -3016,13 +3055,22 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     priority = _marker(brief, "PRIORITY")
     region = _marker(brief, "REGION", "rotation").lower()
     angle = _marker(brief, "ANGLE")
+    lowered_task = task.lower()
+    publish_target = "facebook" if "facebook" in lowered_task else (
+        "instagram" if "instagram" in lowered_task else "")
+    publish_authorized = bool(
+        publish_target and re.search(r"\b(publish|post|upload|live)\b", lowered_task)
+        and not re.search(r"\b(do not|don't|dont|without)\s+(publish|post|upload)\b", lowered_task)
+    )
+    content_type = "before_after" if re.search(r"\b(before.?after|static|image|photo|post)\b", lowered_task) else "reel"
 
     output_dir = _home() / "agent_outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{job['id']}.md"
     output_path.write_text(
         f"# IRIS — ImagineIndia Reel Brief\n\n"
-        f"Request: {task}\n\nResearched by: {os.environ.get('ONE_RESEARCH_MODEL', 'claude-haiku-4-5')}\n\n"
+        f"Request: {task}\n\nResearched by: Sanjeevani + "
+        f"{os.environ.get('ONE_LOCAL_RESEARCH_MODEL', 'qwen3.5:9b')}\n\n"
         f"{brief}\n",
         encoding="utf-8",
     )
@@ -3036,7 +3084,7 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {
         "agent": "IRIS",
         "mode": mode,
-        "research_engine": os.environ.get("ONE_RESEARCH_MODEL", "claude-haiku-4-5"),
+        "research_engine": "Sanjeevani local-first",
         "priority": priority,
         "region": region,
         "angle": angle,
@@ -3071,7 +3119,10 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         enqueue=lambda: enqueue_job(
             "muse",
             json.dumps({"brief_path": str(output_path), "priority": priority,
-                        "region": region, "angle": angle, "origin_job": job["id"]}),
+                        "region": region, "angle": angle, "origin_job": job["id"],
+                        "content_type": content_type,
+                        "publish_target": publish_target,
+                        "publish_authorized": publish_authorized}),
             mode="execute",
             tier="fast",
         ),
@@ -3096,12 +3147,15 @@ def _iris_report(job: dict[str, Any]) -> dict[str, Any]:
     run_dir = payload.get("run_dir") or "(not reported by LAO)"
     title = payload.get("title") or "(details in the run folder)"
     published = bool(payload.get("published"))
+    publish_receipt = payload.get("publish_receipt") or {}
+    permalink = str(publish_receipt.get("permalink") or "")
+    platform = "Facebook" if "facebook.com" in permalink.lower() else "Instagram"
 
     message = (
         f"Sir, the reel is finished. MUSE has handed it over.\n\n"
         f"Reel: {title}\n"
         f"Location: {run_dir}\n\n"
-        + ("It has been published to Instagram by the pipeline."
+        + (f"It has been published to {platform} by the pipeline."
            if published else
            "It is produced and ready — publishing is whatever the LAO package "
            "is configured to do; I have not touched it by hand.")
@@ -3383,6 +3437,23 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         title = str(reel.get("title") or reel.get("location") or headline or "")
         published = bool(reel.get("published") or reel.get("permalink"))
 
+    publish_receipt: dict[str, Any] = {}
+    publish_target = str(brief.get("publish_target") or "").strip().lower()
+    if (is_before_after and bool(brief.get("publish_authorized"))
+            and publish_target == "facebook" and not published):
+        manifest_path = Path(run_dir).with_name("before_after_publish_manifest.json")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        stages.set_stage("muse", stages.EXECUTING, "Publishing to ImagineIndia Facebook via Graph API")
+        publish_receipt = _muse_publish_facebook(run_dir, str(manifest.get("caption") or ""))
+        published = bool(publish_receipt.get("verified"))
+        if not published:
+            raise RuntimeError("Facebook delivery did not return verified publication evidence")
+    if bool(brief.get("publish_authorized")) and not published:
+        raise RuntimeError(
+            f"MUSE cannot complete: requested {publish_target or 'social'} publication "
+            "has no verified provider receipt"
+        )
+
     if not title:
         # LAO said Successful but told us nothing identifiable -- report the
         # job id rather than walking a phantom result across the floor.
@@ -3416,7 +3487,8 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         "ia",
         json.dumps({"run_dir": run_dir, "title": title,
                     "published": published, "lao_job": lao_job_id,
-                    "content_type": content_type}),
+                    "content_type": content_type,
+                    "publish_receipt": publish_receipt}),
         mode="report", tier="fast",
     )
     stages.clear_stage("muse")
@@ -3430,6 +3502,7 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         "run_dir": run_dir,
         "title": title,
         "published": published,
+        "publish_receipt": publish_receipt,
         "content": f"{kind_label.capitalize()} finished: {title}",
         "handed_to": {"agent": "IRIS"},
     }
@@ -3526,7 +3599,7 @@ def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
     return kairos.run(
         job,
         kairos.Ports(
-            research=_claude_research,
+            research=_research_synthesis,
             remember=memory.remember,
             set_stage=stages.set_stage,
             clear_stage=stages.clear_stage,
