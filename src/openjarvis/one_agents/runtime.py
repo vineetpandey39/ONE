@@ -1063,25 +1063,44 @@ IA_PROCESS_NAME = "ImagineIndia Reel - Twice Daily Production"
 IA_BEFORE_AFTER_PROCESS_NAME = "ImagineIndia Before/After Post"
 
 
+def _find_lao_robot_config() -> Path:
+    """Find the active LAO robot config across desktop-session layouts.
+
+    Service restarts do not always inherit the same HOME used by the desktop
+    host.  Prefer an explicit path, then LOCALAPPDATA/USERPROFILE and finally
+    Path.home.  Only an existing file is returned.
+    """
+    import glob
+
+    explicit = os.environ.get("LAO_ROBOT_CONFIG", "").strip()
+    candidates: list[str] = [explicit] if explicit else []
+    roots = {
+        os.environ.get("LOCALAPPDATA", "").strip(),
+        str(Path(os.environ.get("USERPROFILE", "")) / "AppData/Local") if os.environ.get("USERPROFILE") else "",
+        str(Path.home() / "AppData/Local"),
+    }
+    suffix = ("Packages/Claude_*/LocalCache/Roaming/Claude/"
+              "local-agent-mode-sessions/**/lao-platform/robot-worker/config.local.json")
+    for root in filter(None, roots):
+        candidates.extend(glob.glob(str(Path(root) / suffix), recursive=True))
+    existing = [Path(item) for item in candidates if item and Path(item).is_file()]
+    if not existing:
+        raise RuntimeError("LAO production robot config was not found")
+    # Newest session wins; stale Claude session directories can remain for weeks.
+    return max(existing, key=lambda item: item.stat().st_mtime)
+
+
 def _muse_publish_facebook(image_path: str, caption: str) -> dict[str, Any]:
     """Publish one local image through Meta Graph using LAO's encrypted vault.
 
     The secret is resolved robot-to-vault in memory and is never copied into
     ONE. Exact-caption reconciliation makes a retry safe against duplicates.
     """
-    import glob
     import urllib.parse
     import urllib.request
 
-    config_path = os.environ.get("LAO_ROBOT_CONFIG", "").strip()
-    if not config_path:
-        pattern = str(Path.home() / "AppData/Local/Packages/Claude_*" /
-                      "LocalCache/Roaming/Claude/local-agent-mode-sessions/**/lao-platform/robot-worker/config.local.json")
-        matches = glob.glob(pattern, recursive=True)
-        config_path = matches[-1] if matches else ""
-    if not config_path or not Path(config_path).is_file():
-        raise RuntimeError("LAO production robot config was not found")
-    config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    config_path = _find_lao_robot_config()
+    config = json.loads(config_path.read_text(encoding="utf-8"))
     folder_id = os.environ.get("LAO_ASSET_FOLDER_ID", "446427d7-5722-4d59-a487-8de321325cbc")
     asset_name = os.environ.get("LAO_FACEBOOK_PUBLISH_ASSET", "imagineIndiaFacebookPublishingToken")
     resolve_url = (str(config["orchestrator_url"]).rstrip("/") + "/assets/resolve/" +
@@ -1097,10 +1116,10 @@ def _muse_publish_facebook(image_path: str, caption: str) -> dict[str, Any]:
     # Reconcile before create: exact same caption on the Page means this
     # logical delivery already landed and must not be posted twice.
     graph = "https://graph.facebook.com/v20.0"
+    auth_headers = {"Authorization": f"Bearer {token}"}
     recent = httpx.get(f"{graph}/{page_id}/photos", params={
         "type": "uploaded", "fields": "id,name,created_time,link", "limit": 25,
-        "access_token": token,
-    }, timeout=60)
+    }, headers=auth_headers, timeout=60)
     recent.raise_for_status()
     for row in recent.json().get("data", []):
         if str(row.get("name") or "").strip() == caption.strip():
@@ -1109,15 +1128,15 @@ def _muse_publish_facebook(image_path: str, caption: str) -> dict[str, Any]:
 
     with Path(image_path).open("rb") as image:
         published = httpx.post(f"{graph}/{page_id}/photos",
-            data={"caption": caption, "published": "true", "access_token": token},
+            data={"caption": caption, "published": "true"}, headers=auth_headers,
             files={"source": (Path(image_path).name, image, "image/jpeg")}, timeout=180)
     published.raise_for_status()
     post_id = str(published.json().get("post_id") or published.json().get("id") or "")
     if not post_id:
         raise RuntimeError("Facebook accepted no verifiable post id")
     verified = httpx.get(f"{graph}/{post_id}", params={
-        "fields": "id,permalink_url,created_time", "access_token": token,
-    }, timeout=60)
+        "fields": "id,permalink_url,created_time",
+    }, headers=auth_headers, timeout=60)
     verified.raise_for_status()
     proof = verified.json()
     return {"status": "published", "post_id": post_id,
@@ -3056,19 +3075,41 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     region = _marker(brief, "REGION", "rotation").lower()
     angle = _marker(brief, "ANGLE")
     lowered_task = task.lower()
-    publish_target = "facebook" if "facebook" in lowered_task else (
-        "instagram" if "instagram" in lowered_task else "")
+    facebook_positive = bool(
+        "facebook" in lowered_task
+        and not re.search(r"\b(do not|don't|dont|without)\s+(?:publish|post|upload)(?:\s+\w+){0,3}\s+(?:to\s+)?facebook\b", lowered_task)
+    )
+    instagram_positive = bool(
+        "instagram" in lowered_task
+        and not re.search(r"\b(do not|don't|dont|without)\s+(?:publish|post|upload)(?:\s+\w+){0,3}\s+(?:to\s+)?instagram\b", lowered_task)
+    )
+    publish_target = "facebook" if facebook_positive else ("instagram" if instagram_positive else "")
     publish_authorized = bool(
         publish_target and re.search(r"\b(publish|post|upload|live)\b", lowered_task)
-        and not re.search(r"\b(do not|don't|dont|without)\s+(publish|post|upload)\b", lowered_task)
     )
-    content_type = "before_after" if re.search(r"\b(before.?after|static|image|photo|post)\b", lowered_task) else "reel"
+    # Specific formats must win before the generic word "post". Previously a
+    # request such as "post this carousel" silently became a before/after.
+    content_type = (
+        "carousel" if re.search(r"\b(carousel|slides?|swipe)\b", lowered_task)
+        else "before_after" if re.search(r"\b(before.?after|static|image|photo|post)\b", lowered_task)
+        else "reel"
+    )
+    # A governed ImagineIndia carousel is one distribution mission, not two
+    # unrelated posts. Facebook must land first, then Instagram; completion is
+    # withheld until both provider receipts verify.
+    if content_type == "carousel" and publish_authorized:
+        publish_target = "facebook_then_instagram"
+    content_label = {
+        "carousel": "carousel",
+        "before_after": "before/after post",
+        "reel": "reel",
+    }.get(content_type, "post")
 
     output_dir = _home() / "agent_outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{job['id']}.md"
     output_path.write_text(
-        f"# IRIS — ImagineIndia Reel Brief\n\n"
+        f"# IRIS — ImagineIndia {content_label.title()} Brief\n\n"
         f"Request: {task}\n\nResearched by: Sanjeevani + "
         f"{os.environ.get('ONE_LOCAL_RESEARCH_MODEL', 'qwen3.5:9b')}\n\n"
         f"{brief}\n",
@@ -3077,8 +3118,8 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
 
     remembered = memory.remember(
         agent="IRIS", floor_id="4", floor_name="Media & Content (ImagineIndia)",
-        kind="Reel Brief", body=brief, task=task,
-        tags=["imagineindia", "media", "reel"],
+        kind=f"{content_label.title()} Brief", body=brief, task=task,
+        tags=["imagineindia", "media", content_type],
     )
 
     result: dict[str, Any] = {
@@ -3113,14 +3154,14 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     # this can't just be a bare set_stage/sleep/enqueue sequence per floor.
     worker = stages.head_briefs_worker(
         "ia", "muse",
-        carrying_detail=f"Taking the brief to MUSE: {(priority or angle)[:60]}",
-        briefing_detail=f"MUSE, run the next reel: {(priority or angle)[:110]}",
-        awaiting_detail="Waiting on MUSE to produce the reel",
+        carrying_detail=f"Taking the {content_label} brief to MUSE: {(priority or angle)[:60]}",
+        briefing_detail=f"MUSE, create the {content_label}: {(priority or angle)[:110]}",
+        awaiting_detail=f"Waiting on MUSE to produce the {content_label}",
         enqueue=lambda: enqueue_job(
             "muse",
             json.dumps({"brief_path": str(output_path), "priority": priority,
                         "region": region, "angle": angle, "origin_job": job["id"],
-                        "content_type": content_type,
+                        "content_type": content_type, "topic": task,
                         "publish_target": publish_target,
                         "publish_authorized": publish_authorized}),
             mode="execute",
@@ -3130,30 +3171,41 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
 
     result["handed_to"] = {"agent": "MUSE", "job_id": worker["id"]}
     result["note"] = (
-        "Brief handed to MUSE, who will run LAO's ImagineIndia reel pipeline "
-        "to completion and hand the finished reel back."
+        f"Brief handed to MUSE, who will produce the ImagineIndia {content_label} "
+        f"to completion and hand the finished {content_label} back."
     )
     return result
 
 
 def _iris_report(job: dict[str, Any]) -> dict[str, Any]:
     """Third leg: MUSE has delivered, IRIS reports the result upward."""
-    stages.set_stage("ia", stages.REPORTING, "Reporting the finished reel")
     try:
         payload = json.loads(str(job.get("task") or "{}"))
     except json.JSONDecodeError:
         payload = {}
 
+    content_type = str(payload.get("content_type") or "reel").strip().lower()
+    content_label = {
+        "carousel": "carousel",
+        "before_after": "before/after post",
+        "before-after": "before/after post",
+        "reel": "reel",
+    }.get(content_type, "post")
+    stages.set_stage("ia", stages.REPORTING, f"Reviewing MUSE's finished {content_label}")
     run_dir = payload.get("run_dir") or "(not reported by LAO)"
     title = payload.get("title") or "(details in the run folder)"
     published = bool(payload.get("published"))
     publish_receipt = payload.get("publish_receipt") or {}
+    platforms = publish_receipt.get("platforms") or {}
     permalink = str(publish_receipt.get("permalink") or "")
-    platform = "Facebook" if "facebook.com" in permalink.lower() else "Instagram"
+    if platforms:
+        platform = "Facebook and Instagram"
+    else:
+        platform = "Facebook" if "facebook.com" in permalink.lower() else "Instagram"
 
     message = (
-        f"Sir, the reel is finished. MUSE has handed it over.\n\n"
-        f"Reel: {title}\n"
+        f"Sir, the {content_label} is finished. MUSE has handed it over.\n\n"
+        f"{content_label.title()}: {title}\n"
         f"Location: {run_dir}\n\n"
         + (f"It has been published to {platform} by the pipeline."
            if published else
@@ -3168,9 +3220,9 @@ def _iris_report(job: dict[str, Any]) -> dict[str, Any]:
 
     remembered = memory.remember(
         agent="IRIS", floor_id="4", floor_name="Media & Content (ImagineIndia)",
-        kind="Delivery Report",
+        kind=f"{content_label.title()} Delivery Report",
         body=f"{message}\n\nANGLE: {title}\n",
-        tags=["imagineindia", "media", "reel", "delivered"],
+        tags=["imagineindia", "media", content_type, "delivered"],
     )
 
     time.sleep(2.0)
@@ -3245,6 +3297,126 @@ def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str, 
     }
 
 
+def _floor4_carousel_module() -> Any:
+    """Load Floor 4's owned adapter without making one-company a package."""
+    path = (Path(__file__).resolve().parents[4] / "one-company" / "floors" /
+            "floor_04_media" / "lib" / "imagineindia_carousel.py")
+    spec = importlib.util.spec_from_file_location("one_floor4_imagineindia_carousel", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot load Floor 4 carousel adapter: {path}")
+    module = importlib.util.module_from_spec(spec)
+    # dataclasses resolves the defining module through sys.modules.
+    import sys
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _resolve_lao_secret(asset_name: str) -> str:
+    """Resolve one LAO-vault value in memory; never persist or log it."""
+    import urllib.parse
+    import urllib.request
+
+    config_path = _find_lao_robot_config()
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    folder_id = os.environ.get("LAO_ASSET_FOLDER_ID", _PEITHO_LAO_FOLDER_ID)
+    url = (str(config["orchestrator_url"]).rstrip("/") + "/assets/resolve/" +
+           urllib.parse.quote(asset_name) + "?folder_id=" + urllib.parse.quote(folder_id))
+    request = urllib.request.Request(url, headers={"Authorization": "Bearer " + config["robot_token"]})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        value = json.loads(response.read())["value"]
+    secret = value if isinstance(value, str) else str(value.get("password") or "")
+    if not secret:
+        raise RuntimeError(f"LAO vault asset {asset_name!r} is empty")
+    return secret
+
+
+def _run_muse_carousel(job: dict[str, Any], brief: dict[str, Any]) -> dict[str, Any]:
+    """Create two candidates, select transparently, render, and optionally post."""
+    module = _floor4_carousel_module()
+    topic = str(brief.get("topic") or brief.get("angle") or brief.get("priority") or "").strip()
+    if not topic:
+        raise RuntimeError("Carousel brief has no topic")
+    stages.set_stage("muse", stages.EXECUTING, "Collecting grounded carousel evidence with Sanjeevani")
+    reusable = _sanjeevani_research()
+    evidence: dict[str, Any] = {"eligible": [], "catalog_evidence": []}
+    if reusable is not None:
+        evidence = reusable.collect(topic, markets=["IN"])
+    prompt = module.carousel_prompt(topic, evidence)
+
+    stages.set_stage("muse", stages.EXECUTING, "Creating ChatGPT and Sanjeevani carousel candidates")
+    chatgpt_output, chatgpt_error = _run_peitho_lao_draft([prompt])
+    chatgpt_raw = str(chatgpt_output.get("angle_1") or "")
+    if not chatgpt_raw:
+        raise RuntimeError(f"ChatGPT carousel candidate failed: {chatgpt_error}")
+    sanjeevani_raw, local_error = _research_synthesis(prompt, evidence=evidence)
+    if not sanjeevani_raw:
+        raise RuntimeError(f"Sanjeevani carousel candidate failed: {local_error}")
+
+    selection = module.select_candidate(chatgpt_raw, sanjeevani_raw)
+    winner = selection["winner"]
+    output_dir = _home() / "agent_outputs" / "carousels" / f"{job['id']}-{module.content_hash(selection)}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "selection.json").write_text(
+        json.dumps(selection, ensure_ascii=False, indent=2), encoding="utf-8")
+    slides = module.render(winner, output_dir)
+    caption = "\n\n".join(filter(None, [winner.get("caption", ""), " ".join(winner.get("hashtags") or [])]))
+    receipt: dict[str, Any] = {"required_order": ["facebook", "instagram"], "platforms": {}}
+    published = False
+    if bool(brief.get("publish_authorized")):
+        target = str(brief.get("publish_target") or "").lower()
+        if target not in {"facebook_then_instagram", "instagram", "facebook"}:
+            raise RuntimeError("Carousel publication target is not governed")
+        # Current product contract is intentionally stricter than a caller's
+        # one-platform wording: Facebook first, then Instagram, both required.
+        stages.set_stage("muse", stages.EXECUTING, "1/2 Publishing carousel to ImagineIndia Facebook")
+        facebook_token = _resolve_lao_secret(os.environ.get(
+            "LAO_FACEBOOK_PUBLISH_ASSET", "imagineIndiaFacebookPublishingToken"))
+        page_id = os.environ.get("IMAGINEINDIA_FACEBOOK_PAGE_ID", "1208655322324462")
+        facebook_receipt = module.publish_facebook(
+            page_id=page_id, token=facebook_token, slides=slides, caption=caption)
+        receipt["platforms"]["facebook"] = facebook_receipt
+        if not facebook_receipt.get("verified"):
+            raise RuntimeError("Facebook did not return a verified carousel receipt; Instagram was not attempted")
+
+        stages.set_stage("muse", stages.EXECUTING, "2/2 Publishing carousel to ImagineIndia Instagram")
+        instagram_token = _resolve_lao_secret(os.environ.get(
+            "LAO_INSTAGRAM_PUBLISH_ASSET", "imagineIndiaInstagramPublishingToken"))
+        account_id = os.environ.get("IMAGINEINDIA_INSTAGRAM_ACCOUNT_ID", "28638709669130556")
+        cloudflared = Path(os.environ.get("CLOUDFLARED_EXE", str(Path.home() / "AppData/Local/Programs/cloudflared/cloudflared.exe")))
+        if not cloudflared.is_file():
+            raise RuntimeError("cloudflared is required to give Meta temporary HTTPS access to slides")
+        instagram_receipt = module.publish_instagram(
+            account_id=account_id, token=instagram_token, slides=slides,
+            caption=caption, cloudflared=cloudflared)
+        receipt["platforms"]["instagram"] = instagram_receipt
+        published = all(
+            bool(receipt["platforms"].get(platform, {}).get("verified"))
+            for platform in receipt["required_order"]
+        )
+        if not published:
+            raise RuntimeError("MUSE cannot complete until Facebook and Instagram both verify")
+
+    title = str(winner.get("title") or topic)
+    memory.remember(
+        agent="MUSE", floor_id="4", floor_name="Media & Content (ImagineIndia)",
+        kind="Carousel Production Run",
+        body=(f"Two candidates evaluated; {selection['decision']}.\n\n"
+              f"Output: `{output_dir}`\nPublished: {published}"),
+        task=topic, tags=["imagineindia", "media", "carousel", winner["source"]],
+    )
+    enqueue_job("ia", json.dumps({"run_dir": str(output_dir), "title": title,
+                "published": published, "content_type": "carousel",
+                "publish_receipt": receipt}), mode="report", tier="fast")
+    stages.clear_stage("muse")
+    return {"agent": "MUSE", "mode": job.get("mode"), "content_type": "carousel",
+            "status": "Successful", "run_dir": str(output_dir), "title": title,
+            "winner": winner["source"], "score": winner["score"],
+            "published": published, "publish_receipt": receipt,
+            "content": f"Carousel finished: {title}. {selection['decision']}",
+            "handed_to": {"agent": "IRIS"}}
+
+
 def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 4 worker - runs LAO's ImagineIndia pipeline(s) and waits for the
     result. MUSE is the sole ImagineIndia-brand worker on Floor 4: it drives
@@ -3268,6 +3440,10 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     angle = str(brief.get("angle") or "").strip()
     headline = angle or priority
     content_type = str(brief.get("content_type") or "reel").strip().lower()
+    if content_type == "carousel":
+        stages.worker_confirms_receipt(
+            "muse", f"Got it — {(str(brief.get('angle') or brief.get('topic') or 'carousel'))[:110]}")
+        return _run_muse_carousel(job, brief)
     is_before_after = content_type in ("before_after", "before-after", "beforeafter")
     kind_label = "before/after post" if is_before_after else "reel"
 
