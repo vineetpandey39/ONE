@@ -895,6 +895,30 @@ def _money_board() -> dict[str, Any]:
 _COLLECTORS: dict[str, tuple[str, str]] = {}
 
 
+def _drain_inbox() -> dict[str, Any]:
+    """Collect sales that arrived while ONE was not running.
+
+    Runs before the scorecard is read, not after. A board that reports money
+    it has not collected yet is a board that is wrong for as long as it takes
+    somebody to notice - and the whole point of the inbox is that nobody has
+    to notice.
+    """
+    import sys  # module-local: runtime.py has no top-level sys import
+
+    service = _COMPANY_SERVICES / "revenue"
+    if not service.is_dir():
+        return {"skipped": "revenue service not present"}
+    if str(service) not in sys.path:
+        sys.path.insert(0, str(service))
+    try:
+        import inbox  # type: ignore
+        return inbox.drain(db_path=_COMPANY_SERVICES.parents[1] / "data" / "company.db")
+    except Exception as exc:  # noqa: BLE001 - an unreachable inbox must not stop the report
+        # Reported, not raised. The scorecard is still worth reading when the
+        # inbox is unreachable; it just has to say so.
+        return {"unavailable": f"{type(exc).__name__}: {exc}"[:200]}
+
+
 def _experiment_board() -> dict[str, Any]:
     """Running revenue experiments, or an honest statement that they cannot be read."""
     import sys  # module-local: runtime.py has no top-level sys import
@@ -920,7 +944,8 @@ def _run_zeus(job: dict[str, Any]) -> dict[str, Any]:
     the numbers that stayed high while revenue stayed at zero, which is exactly
     how a production company mistakes itself for a business.
     """
-    stages.set_stage("zeus", stages.RESEARCHING, "Reading the company scorecard")
+    stages.set_stage("zeus", stages.RESEARCHING, "Collecting sales, then reading the scorecard")
+    collected = _drain_inbox()
     money = _money_board()
 
     if money.get("unavailable"):
@@ -1026,6 +1051,7 @@ def _run_zeus(job: dict[str, Any]) -> dict[str, Any]:
         "money": {k: v for k, v in money.items() if k != "businesses"},
         "businesses": businesses,
         "production_completed": produced,
+        "inbox": collected,
         "experiments": {k: v for k, v in experiments.items() if k != "running"},
         "experiments_awaiting_decision": experiments.get("awaiting_decision") or [],
         "collection_routed": routed,
