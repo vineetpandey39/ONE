@@ -3027,9 +3027,16 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     # answer -- falls straight through to the original path below, unchanged.
     brand, question = floors_bridge.route_media(task, job)
     if question:
-        return {"agent": "IRIS", "mode": mode, "content": question,
-                "handed_to": None,
-                "note": "Nothing dispatched - the brand was unclear."}
+        stages.clear_stage("ia")
+        return {
+            "agent": "IRIS",
+            "mode": "blocked",
+            "_blocked": True,
+            "content": question,
+            "blocked_reason": question,
+            "handed_to": None,
+            "note": "Nothing dispatched - the brand was unclear.",
+        }
     if brand and brand.get("slug") != "imagineindia":
         return _iris_dispatch_brand(job, brand)
 
