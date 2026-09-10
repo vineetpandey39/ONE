@@ -1530,7 +1530,7 @@ explicitly wants kept as a standing fact, not routine conversation.
 
 AGENTS -- agent_network is how you reach Sir's team of floor agents (ZEUS, \
 ATHENA, DAEDALUS, TITAN, BETA, APOLLO, HERMES, SCRIBE, IRIS, ARES, ALFA, \
-POSEIDON, HEPHAISTOS, ARGUS). Use action=stats (NOT dispatch) for "how are \
+POSEIDON, HEPHAISTOS, WARDEN). Use action=stats (NOT dispatch) for "how are \
 the agents doing" / status-review questions -- it is free and local. Use \
 action=dispatch only when Sir explicitly wants NEW work started with a named \
 agent ("ZEUS, look into X", "get HERMES to draft a book on Y") -- confirm \
@@ -1595,7 +1595,7 @@ def _cloud_escalation_tools():
     (PowerShell here-string quoting broke on multi-line content, sometimes
     silently) and screen_control+Notepad (lost window focus mid-task), plus
     wastefully dispatching the same simple task to three different floor
-    agents (ARGUS, HEPHAISTOS, APOLLO) as a fallback. 13 minutes, no working
+    agents (WARDEN, HEPHAISTOS, APOLLO) as a fallback. 13 minutes, no working
     file, and Sir experiencing it as "voice breaking and getting lost."
     file_write is a direct, reliable, purpose-built tool for exactly this --
     no shell quoting, no GUI focus to lose.

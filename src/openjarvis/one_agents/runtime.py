@@ -57,7 +57,7 @@ AGENTS: dict[str, dict[str, str]] = {
     "alfa": {"name": "ALFA", "role": "Pricing, funnels, and revenue-attribution operator", "floor_id": "2", "floor_name": "Commerce & Monetization", "division": "commerce"},
     "poseidon": {"name": "POSEIDON", "role": "Finance, HR, Admin, and Legal/Compliance operator", "floor_id": "1", "floor_name": "Corporate Services", "division": "corporate"},
     "hephaistos": {"name": "HEPHAISTOS", "role": "ONE runtime, workflow-engine, and LAO-bridge operator", "floor_id": "B1", "floor_name": "Platform Engineering", "division": "platform"},
-    "argus": {"name": "ARGUS", "role": "Health, audit, kill-switch, and rate-limit operator", "floor_id": "B2", "floor_name": "Security & SRE", "division": "security"},
+    "argus": {"name": "WARDEN", "role": "Health, audit, kill-switch, and rate-limit operator", "floor_id": "B2", "floor_name": "Security & SRE", "division": "security"},
 }
 
 
@@ -226,26 +226,8 @@ def _enqueue_due_recurring_jobs() -> None:
                     (interval, now_epoch + interval),
                 )
 
-    if os.environ.get("JOBHUNT_AUTOSCOUT", "true").lower() not in {"1", "true", "yes", "on"}:
-        return
-    jobhunt_interval = max(3600, int(os.environ.get("JOBHUNT_SCAN_INTERVAL_SECONDS", "86400")))
-    with _connect() as db:
-        db.execute(
-            "INSERT OR IGNORE INTO agent_schedules (agent_id, interval_seconds, next_run_epoch) VALUES ('jobhunt', ?, 0)",
-            (jobhunt_interval,),
-        )
-        schedule = db.execute("SELECT * FROM agent_schedules WHERE agent_id = 'jobhunt'").fetchone()
-        if not schedule or not schedule["enabled"] or schedule["next_run_epoch"] > now_epoch:
-            return
-        job_id = f"jobhunt-{uuid.uuid4().hex[:12]}"
-        db.execute(
-            "INSERT INTO jobs (id, agent_id, task, mode, status, created_at, updated_at) VALUES (?, 'jobhunt', ?, 'execute', 'queued', ?, ?)",
-            (job_id, "[scheduled] Prepare QA/Product job-search opportunities from local alert inbox", now, now),
-        )
-        db.execute(
-            "UPDATE agent_schedules SET interval_seconds = ?, next_run_epoch = ? WHERE agent_id = 'jobhunt'",
-            (jobhunt_interval, now_epoch + jobhunt_interval),
-        )
+    # Job hunting belongs to POSEIDON on Floor 1's Prompt 0-28 company plane.
+    # The legacy Floor-9 autoscout was removed rather than left behind a flag.
 
 
 def _now() -> str:
@@ -1067,7 +1049,7 @@ def _run_athena(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_daedalus(job: dict[str, Any]) -> dict[str, Any]:
-    """Floor 9 - Micro-SaaS & AI Product Factory. Pending LAO integration."""
+    """Floor 9 - Micro-SaaS & AI Product Factory only."""
     return _local_plan(job)
 
 
@@ -3846,7 +3828,7 @@ KNOWN_CAPABILITIES = (
 NOT_APPLICABLE: dict[str, str] = {
     "release_gate": (
         "certifies a product for release after a security and privacy review. "
-        "A KDP manuscript is not reviewed by ARGUS or AEGIS and never enters "
+        "A KDP manuscript is not reviewed by WARDEN or AEGIS and never enters "
         "the app lifecycle, so there is nothing here for the gate to certify."
     ),
     "event_taxonomy": (
