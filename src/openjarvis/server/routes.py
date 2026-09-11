@@ -618,6 +618,39 @@ def _one_agent_command(text: str) -> str | None:
         lines = [f"{item['title']}: {item['snippet'][:140]}" for item in findings]
         return "Obsidian memory found:\n" + "\n".join(lines)
 
+    # A Sonia/corporate job-hunt instruction belongs to the governed company
+    # plane.  This must precede the generic ``job`` queue branch below: that
+    # branch reports runtime state and previously swallowed every job-search
+    # request before Floor 1 could receive it.
+    corporate_job_hunt = bool(
+        re.search(r"\b(sonia|job\s*(hunt|search|opening)|manual\s*(qa|testing)|automation\s*(qa|testing)|database\s*testing|product\s*owner)\b", lowered)
+        and re.search(r"\b(research|find|hunt|search|rank|opening|role|send|tell|start|execute)\w*\b", lowered)
+    )
+    if corporate_job_hunt:
+        from openjarvis.one_agents.floors_bridge import dispatch_company_job
+
+        objective = (
+            "Research-only Sonia job hunt in India for Manual Testing, Automation Testing, "
+            "Database Testing, and Product Owner roles. Use Sanjeevani; separate verified "
+            "openings into 1, 7, 14, and 30 day freshness windows; deduplicate and rank by "
+            "priority, profile match, age, and honest interview-success probability. Do not "
+            "email, apply, or perform any external side effect."
+        )
+        dispatched = dispatch_company_job(
+            agent_id="poseidon", floor_id="1", objective=objective,
+            capability="network:fetch", action="internal_analysis",
+        )
+        if not dispatched:
+            return "Corporate Floor bridge is unavailable, so I did not pretend the mission was sent."
+        if not dispatched.get("ok"):
+            return f"Corporate Floor refused the mission: {dispatched.get('error', 'unknown reason')}"
+        job_part = f" Company job ID: {dispatched['job_id']}." if dispatched.get("job_id") else ""
+        return (
+            "POSEIDON received the research-only mission on Corporate Floor 1 and the company "
+            "worker has been awakened. POSEIDON will hand governed discovery to TRITON through "
+            f"the Prompt 0-28 company plane.{job_part} No email or application is authorised."
+        )
+
     # Confirmed live (2026-07-20): bare "status" here used to hijack anything
     # containing that extremely common word, including totally unrelated
     # Ghost Agent requests like "open instagram and get the status of my

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,51 @@ _DEFAULT_ROOT = Path(__file__).resolve().parents[4] / "one-company" / "floors"
 def floors_root() -> Path:
     override = os.environ.get("ONE_FLOORS_ROOT", "").strip()
     return Path(override) if override else _DEFAULT_ROOT
+
+
+def dispatch_company_job(*, agent_id: str, floor_id: str, objective: str,
+                         capability: str = "internal:read",
+                         action: str = "internal_analysis") -> dict[str, Any] | None:
+    """Dispatch work into the governed company plane and wake its worker.
+
+    The company plane deliberately owns its own imports and SQLite store.  Run
+    its public CLI instead of importing those flat modules into the API server,
+    where names such as ``jobs`` and ``dispatch`` could collide with the
+    runtime plane.  The worker is detached so a research run never holds the
+    chat request open.
+    """
+    work_dir = floors_root() / "_work"
+    cli = work_dir / "cli.py"
+    worker = work_dir / "worker.py"
+    if not cli.is_file() or not worker.is_file():
+        return None
+    command = [
+        sys.executable, str(cli), "dispatch", "--to", agent_id,
+        "--floor", str(floor_id), "--objective", objective,
+        "--by", "olympus", "--capability", capability,
+        "--action", action,
+    ]
+    try:
+        result = subprocess.run(
+            command, cwd=str(work_dir), capture_output=True, text=True,
+            timeout=15, check=False,
+        )
+        output = (result.stdout or "").strip()
+        if result.returncode != 0:
+            return {"ok": False, "error": output or (result.stderr or "dispatch refused").strip()}
+        # Company IDs are agent-prefixed (for example
+        # ``poseidon-ba75d185938b``), not runtime ``job_...`` IDs.
+        match = re.search(r"\b([a-z][a-z0-9_]*-[a-f0-9]{12})\b", output, re.IGNORECASE)
+        job_id = match.group(1) if match else None
+        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        subprocess.Popen(
+            [sys.executable, str(worker), "run"], cwd=str(work_dir),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, creationflags=creation_flags,
+        )
+        return {"ok": True, "job_id": job_id, "detail": output}
+    except Exception as exc:  # noqa: BLE001 - bridge callers need a safe refusal
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 def registry() -> Any | None:
