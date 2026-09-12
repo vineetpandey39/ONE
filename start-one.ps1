@@ -11,6 +11,7 @@ $pidFile = Join-Path $oneRoot "one-server.pid"
 $workerPidFile = Join-Path $oneRoot "one-worker.pid"
 $companyPidFile = Join-Path $oneRoot "one-company.pid"
 $floorsWorkerPidFile = Join-Path $oneRoot "one-floors-worker.pid"
+$sanjeevaniPidFile = Join-Path $oneRoot "sanjeevani-server.pid"
 
 function Test-ProcessAlreadyRunning {
     <#
@@ -90,6 +91,8 @@ $workerLogFile = Join-Path $oneRoot "one-worker.log"
 $workerErrorLogFile = Join-Path $oneRoot "one-worker-error.log"
 $floorsWorkerLogFile = Join-Path $oneRoot "one-floors-worker.log"
 $floorsWorkerErrorLogFile = Join-Path $oneRoot "one-floors-worker-error.log"
+$sanjeevaniLogFile = Join-Path $oneRoot "sanjeevani-server.log"
+$sanjeevaniErrorLogFile = Join-Path $oneRoot "sanjeevani-server-error.log"
 
 $env:OPENJARVIS_HOME = $dataRoot
 $sourcePythonPath = Join-Path $sourceRoot "src"
@@ -123,6 +126,48 @@ if (-not $env:SANJEEVANI_RESEARCH_LIBRARY) {
 }
 if (-not $env:SANJEEVANI_SEARXNG_URL) {
     $env:SANJEEVANI_SEARXNG_URL = "http://127.0.0.1:59011"
+}
+
+# Sanjeevani is ONE's local research/continuity service, not an operator-opened
+# desktop window. Start its secured search stack and localhost API with ONE,
+# idempotently, so every floor gets the same live research plane after login.
+$sanjeevaniRoot = Split-Path -Parent $env:SANJEEVANI_RESEARCH_LIBRARY
+$sanjeevaniServer = Join-Path $sanjeevaniRoot "server.py"
+$sanjeevaniCompose = Join-Path $sanjeevaniRoot "research_stack\compose.yaml"
+if (Test-Path $sanjeevaniCompose) {
+    try {
+        $searxListener = Get-NetTCPConnection -LocalPort 59011 -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if (-not $searxListener -and (Get-Command docker -ErrorAction SilentlyContinue)) {
+            & docker compose -f $sanjeevaniCompose up -d | Out-Null
+        }
+    } catch {
+        Write-Host "Sanjeevani search stack degraded: $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+}
+if (Test-Path $sanjeevaniServer) {
+    try {
+        $sanjeevaniRunning = $false
+        $foundSanjeevaniPid = Test-ProcessAlreadyRunning -CommandLineMatch "*sanjeevani*server.py*" -ListenPort 59010
+        if ($foundSanjeevaniPid -gt 0) {
+            $sanjeevaniRunning = $true
+            Set-Content -Path $sanjeevaniPidFile -Value $foundSanjeevaniPid
+        } elseif (Test-Path $sanjeevaniPidFile) {
+            Remove-Item $sanjeevaniPidFile -Force -ErrorAction SilentlyContinue
+        }
+        if (-not $sanjeevaniRunning) {
+            $sanjeevaniProcess = Start-Process -FilePath $pythonExe `
+                -ArgumentList @($sanjeevaniServer, "--host", "127.0.0.1", "--port", "59010", "--no-browser") `
+                -WorkingDirectory $sanjeevaniRoot `
+                -RedirectStandardOutput $sanjeevaniLogFile `
+                -RedirectStandardError $sanjeevaniErrorLogFile `
+                -WindowStyle Hidden `
+                -PassThru
+            Set-Content -Path $sanjeevaniPidFile -Value $sanjeevaniProcess.Id
+        }
+    } catch {
+        Write-Host "Sanjeevani API startup degraded: $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
 }
 
 $oneEngine = if ($env:ONE_ENGINE) { $env:ONE_ENGINE } else { "ollama" }
@@ -341,6 +386,12 @@ for ($attempt = 0; $attempt -lt 30; $attempt++) {
             Write-Host "ONE speech warmup will complete on first use." -ForegroundColor DarkYellow
         }
         Write-Host "ONE is online at http://127.0.0.1:8000" -ForegroundColor Cyan
+        try {
+            Invoke-RestMethod -Uri "http://127.0.0.1:59010/api/health" -TimeoutSec 2 | Out-Null
+            Write-Host "Sanjeevani is online at http://127.0.0.1:59010" -ForegroundColor Green
+        } catch {
+            Write-Host "Sanjeevani API is degraded; ONE remains available." -ForegroundColor DarkYellow
+        }
         if (Test-Path $companyServer) {
             Write-Host "Company building at http://127.0.0.1:8200" -ForegroundColor Cyan
         }

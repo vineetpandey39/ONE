@@ -4,6 +4,18 @@ $workerPidFile = Join-Path $oneRoot "one-worker.pid"
 $fluxPidFile = Join-Path $oneRoot "one-flux.pid"
 $companyPidFile = Join-Path $oneRoot "one-company.pid"
 $floorsWorkerPidFile = Join-Path $oneRoot "one-floors-worker.pid"
+$sanjeevaniPidFile = Join-Path $oneRoot "sanjeevani-server.pid"
+
+# Sanjeevani's API shares ONE's lifecycle. Its Docker research stack keeps its
+# own restart policy and is intentionally left warm for fast subsequent boots.
+if (Test-Path $sanjeevaniPidFile) {
+    $savedSanjeevaniPid = [int](Get-Content $sanjeevaniPidFile -Raw)
+    $sanjeevani = Get-Process -Id $savedSanjeevaniPid -ErrorAction SilentlyContinue
+    if ($sanjeevani) { Stop-Process -Id $savedSanjeevaniPid -Force -ErrorAction SilentlyContinue }
+    Remove-Item $sanjeevaniPidFile -Force
+}
+Get-NetTCPConnection -LocalPort 59010 -State Listen -ErrorAction SilentlyContinue |
+    ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 
 # Stop the company building first, and by port as well as by pid: Windows
 # lets a second process bind an already-listening port, so a stale server
