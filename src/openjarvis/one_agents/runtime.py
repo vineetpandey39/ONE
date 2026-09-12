@@ -4113,6 +4113,33 @@ def run_worker(poll_seconds: float = 2.0) -> None:
                     stage="watchdog", summary="Research stopped by the job watchdog",
                     details={"timeout_seconds": _job_watchdog_seconds(job)}, status="blocked",
                 )
+
+            # Observability alone (the log line above) does not stop the
+            # leak - it only lets a human notice it. The one thing that
+            # DOES reclaim the memory an abandoned thread holds is ending
+            # the process: every thread here is daemon=True, so the
+            # interpreter does not wait for them on exit - they, and
+            # whatever they were holding, are gone the moment this process
+            # is. So past a small threshold, exit deliberately rather than
+            # let the count climb toward another 3.27 GB. This is safe only
+            # because something outside this process restarts it when it's
+            # gone - see start-one.ps1's dedup guard, and the scheduled task
+            # that calls it periodically (ONE-AutoRestart) so a bounce here
+            # is a few minutes of no new jobs claimed, not a dead worker.
+            max_abandoned = int(os.environ.get("ONE_WORKER_MAX_ABANDONED_THREADS", "3"))
+            if len(still_abandoned) >= max_abandoned:
+                print(
+                    f"[one-agents] {len(still_abandoned)} abandoned job thread(s) reached "
+                    f"the limit ({max_abandoned}) - exiting deliberately so the memory "
+                    f"they hold is actually reclaimed, and a fresh worker can be started. "
+                    f"This process depends on something else (start-one.ps1 / the "
+                    f"ONE-AutoRestart scheduled task) noticing it is gone and restarting "
+                    f"it; if that is not in place, the worker stays down until someone "
+                    f"runs start-one.ps1 by hand.",
+                    flush=True,
+                )
+                import sys
+                sys.exit(1)
             continue
 
         if "error" in outcome:
