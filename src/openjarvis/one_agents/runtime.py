@@ -1290,6 +1290,37 @@ _MEDIA_TREND_CATEGORIES: tuple[tuple[str, str], ...] = (
 )
 
 
+def _compact_media_evidence(evidence: dict[str, Any], *, max_items: int = 20) -> dict[str, Any]:
+    """Strips each eligible item to the fields a synthesis prompt actually
+    needs before it goes into the model's context.
+
+    Added 2026-09-12 after a live failure: the first category-query version
+    of _run_iris injected the FULL merged evidence dict (raw_signal,
+    captured_at, evidence_score, score_reasons and all) for up to ~100 items
+    across four categories, on top of the full three-file skill text. The
+    local model's response abandoned the required output shape entirely
+    (PRIORITY/ANGLE came back empty) and invented an unrelated, ungrounded
+    "digital heritage" narrative with fabricated individuals -- exactly the
+    failure this skill's evidence discipline exists to prevent. Shrinking
+    what actually reaches the model's context is the direct fix; the
+    shape-check below is the safety net for whenever it still slips."""
+    trimmed = []
+    for item in (evidence.get("eligible") or [])[:max_items]:
+        trimmed.append({
+            "evidence_id": item.get("evidence_id"),
+            "category": item.get("category"),
+            "title": item.get("title"),
+            "source_url": item.get("source_url"),
+            "published_at": item.get("published_at"),
+            "freshness_bucket": item.get("freshness_bucket"),
+        })
+    return {
+        "eligible": trimmed,
+        "categories": evidence.get("categories", {}),
+        "errors": evidence.get("errors", []),
+    }
+
+
 def _media_trend_evidence(reusable: Any) -> dict[str, Any]:
     """Runs each imagineindia-trend-radar category query separately and
     merges them, tagging every item with which category found it. Replaces
@@ -3204,11 +3235,24 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "<6-12 lines: who the audience is, why run now, what would make this "
         "one perform, and the honest risk that it underperforms>"
         + "\n\nUse only this Sanjeevani-captured evidence for current-market claims. "
-        "Each item is tagged with the category query that found it:\n"
-        + json.dumps(media_evidence, ensure_ascii=False, separators=(",", ":"))[:50000]
+        "Each item is tagged with the category query that found it. Cite an "
+        "evidence_id in brackets for every specific factual claim; do not "
+        "invent people, quotes, figures, or scenarios not present here:\n"
+        + json.dumps(_compact_media_evidence(media_evidence), ensure_ascii=False, separators=(",", ":"))
         + avoid,
         evidence=media_evidence,
     )
+
+    # Shape safeguard (added 2026-09-12 after a live failure): a local model
+    # given too much context abandoned the required PRIORITY/ANGLE shape
+    # entirely and returned an ungrounded free-form narrative instead. A
+    # brief without even a PRIORITY marker did not follow the contract and
+    # must not be handed downstream as if it were a valid editorial call --
+    # fail the same honest way as an empty brief rather than accept prose
+    # that skipped the format this skill exists to enforce.
+    if brief and not _marker(brief, "PRIORITY"):
+        note = "local model returned an off-format response (no PRIORITY marker) -- rejected, not used"
+        brief = ""
 
     if not brief:
         stages.clear_stage("ia")
