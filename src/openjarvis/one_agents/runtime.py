@@ -1259,6 +1259,66 @@ def _publishing_skill_text() -> str:
     return "\n\n".join(parts)[:16000]
 
 
+def _media_skill_text() -> str:
+    """Load IRIS's floor-owned trend-research method; same pattern as
+    _publishing_skill_text -- runtime code is not its policy owner. Added
+    2026-09-12 after a live comparison showed a single blended Sanjeevani
+    query surfaces almost nothing eligible (see the skill's own docstring
+    for the category-query discipline this replaces it with)."""
+    root = floors_bridge.floors_root()
+    if root is None:
+        return ""
+    base = root / "floor_04_media" / "head" / "ia" / "skills" / "imagineindia-trend-radar"
+    parts: list[str] = []
+    for path in (base / "SKILL.md", base / "references" / "evidence-and-scoring.md",
+                 base / "references" / "signal-sources.md"):
+        if path.is_file():
+            parts.append(path.read_text(encoding="utf-8"))
+    return "\n\n".join(parts)[:16000]
+
+
+# The four category queries from imagineindia-trend-radar's
+# references/signal-sources.md. Kept here (not re-derived from the skill
+# text) so a change to the skill's prose can't silently change what actually
+# gets queried without a matching code review -- the skill document is the
+# explanation of why these four and this shape; this tuple is what runs.
+_MEDIA_TREND_CATEGORIES: tuple[tuple[str, str], ...] = (
+    ("heritage_monument", "India heritage monument temple restoration controversy news"),
+    ("civic_infra", "India road construction traffic infrastructure protest news"),
+    ("festival", "India festival pilgrimage crowd temple news"),
+    ("viral_format", "India viral AI photo trend social media"),
+)
+
+
+def _media_trend_evidence(reusable: Any) -> dict[str, Any]:
+    """Runs each imagineindia-trend-radar category query separately and
+    merges them, tagging every item with which category found it. Replaces
+    a single blended collect() call, which returned almost nothing eligible
+    in the live 2026-09-12 comparison that led to this skill."""
+    merged: dict[str, Any] = {"eligible": [], "catalog_evidence": [], "categories": {}, "errors": []}
+    for category, query in _MEDIA_TREND_CATEGORIES:
+        try:
+            snapshot = reusable.collect(query, markets=["IN"])
+            items = list(snapshot.get("eligible") or [])
+            for item in items:
+                item["category"] = category
+            merged["eligible"].extend(items)
+            merged["categories"][category] = {
+                "query": query,
+                "eligible_count": len(items),
+                "commissioning_eligible": bool(
+                    (snapshot.get("corroboration") or {}).get("commissioning_eligible")
+                ),
+            }
+        except Exception as exc:  # one category failing must not sink the others
+            merged["errors"].append({"category": category, "query": query,
+                                     "error": f"{type(exc).__name__}: {exc}"[:400]})
+            merged["categories"][category] = {"query": query, "eligible_count": 0,
+                                              "commissioning_eligible": False,
+                                              "error": f"{type(exc).__name__}: {exc}"[:400]}
+    return merged
+
+
 def _publishing_event(job: dict[str, Any], *, agent: str, event_type: str,
                       stage: str, summary: str, details: dict[str, Any] | None = None,
                       status: str = "running") -> None:
@@ -3101,14 +3161,21 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     # capture current public evidence first, then let an approved local Ollama
     # model interpret only that snapshot.  Paid providers are never consulted
     # Cloud-model fallback is forbidden for autonomous floor work.
-    media_evidence: dict[str, Any] = {"eligible": [], "catalog_evidence": []}
+    #
+    # Category-query discipline (added 2026-09-12): a single collect() call
+    # built from the whole task sentence returned almost nothing eligible in
+    # a live comparison, because query_plan() requires lexical overlap with
+    # real headlines. imagineindia-trend-radar (this floor's own skill, see
+    # _media_skill_text below) runs four short targeted category queries
+    # instead and merges them -- see that skill's SKILL.md for why.
+    media_evidence: dict[str, Any] = {"eligible": [], "catalog_evidence": [], "categories": {}}
     reusable = _sanjeevani_research()
     if reusable is not None:
         try:
-            media_evidence = reusable.collect(task or "ImagineIndia India heritage visual trends", markets=["IN"])
+            media_evidence = _media_trend_evidence(reusable)
         except Exception as exc:  # evidence failure is surfaced by synthesis
             media_evidence = {
-                "eligible": [], "catalog_evidence": [],
+                "eligible": [], "catalog_evidence": [], "categories": {},
                 "errors": [{"source": "sanjeevani", "error": f"{type(exc).__name__}: {exc}"[:400]}],
             }
 
@@ -3124,14 +3191,20 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "Decide: is now the right time to produce another reel, and what should "
         "this run prioritise editorially? Do not invent internal teams or tools "
         "— production is an automated pipeline.\n\n"
+        f"Floor-owned operating method:\n{_media_skill_text()}\n\n"
         "Reply in exactly this shape:\n"
         "PRIORITY: <one line — what this run should optimise for>\n"
         "REGION: <the zone you'd prefer if it were free, or 'rotation'>\n"
         "ANGLE: <one line — the editorial through-line to aim for>\n"
+        "VIRAL_SCORE: <0-100 estimate against the Bible's Recognition/Emotion/"
+        "Visible-Problem/Transformation/Comment-Potential/Human-Experience rubric>\n"
+        "SACRED_SITE: <none, or which protocol element applies and how the "
+        "angle already respects it>\n"
         "BRIEF:\n"
         "<6-12 lines: who the audience is, why run now, what would make this "
         "one perform, and the honest risk that it underperforms>"
-        + "\n\nUse only this Sanjeevani-captured evidence for current-market claims:\n"
+        + "\n\nUse only this Sanjeevani-captured evidence for current-market claims. "
+        "Each item is tagged with the category query that found it:\n"
         + json.dumps(media_evidence, ensure_ascii=False, separators=(",", ":"))[:50000]
         + avoid,
         evidence=media_evidence,
