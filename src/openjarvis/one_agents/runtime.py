@@ -9,7 +9,7 @@ import re
 import sqlite3
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1069,6 +1069,11 @@ IA_PROCESS_NAME = "ImagineIndia Reel - Twice Daily Production"
 # static before/after square-image post. Every other Floor 4 worker
 # (FABULA/LUMIO/PRAXIS/TESSERA) is untouched; their brands are unaffected.
 IA_BEFORE_AFTER_PROCESS_NAME = "ImagineIndia Before/After Post"
+# Matches the imagineindia-instagram-reel package's own input_schema default
+# for locationManifestPath (package.json). Duplicated here (not read from the
+# package) only so _peek_next_ia_location below can predict a location
+# without asking LAO to run anything -- see that function's docstring.
+IA_LOCATIONS_MANIFEST_PATH = r"C:\Users\pc\Documents\LAO\imagineindia\IA_Locations.json"
 
 
 def _find_lao_robot_config() -> Path:
@@ -1275,6 +1280,156 @@ def _media_skill_text() -> str:
         if path.is_file():
             parts.append(path.read_text(encoding="utf-8"))
     return "\n\n".join(parts)[:16000]
+
+
+_IA_PEEK_LANDMARK_TYPES = frozenset({"landmark"})
+_IA_PEEK_LOCAL_ICON_TYPES = frozenset(
+    {"market", "station", "road", "urban_plaza", "transit_hub", "heritage_plaza"}
+)
+_IA_PEEK_WATER_TYPES = frozenset({"river", "lake", "waterfront"})
+_IA_PEEK_IST = timezone(timedelta(hours=5, minutes=30), name="IST")
+
+
+def _ia_peek_days_since(used_date: str | None, today) -> int:
+    if not used_date:
+        return 10**9
+    try:
+        d = datetime.strptime(used_date, "%Y-%m-%d").date()
+    except Exception:  # noqa: BLE001
+        return 10**9
+    return (today - d).days
+
+
+def _ia_peek_water_blocked_this_month(manifest: dict, today) -> bool:
+    this_month = today.strftime("%Y-%m")
+    for zone_entries in manifest.get("zones", {}).values():
+        for entry in zone_entries:
+            if entry.get("type") in _IA_PEEK_WATER_TYPES and str(entry.get("used_date") or "").startswith(this_month):
+                return True
+    return False
+
+
+def _ia_peek_pick_from_zone(zone_name: str, manifest: dict, today, cooldown_days: int, water_blocked: bool):
+    entries = manifest.get("zones", {}).get(zone_name, [])
+    state_last_used: dict[str, str] = {}
+    for entry in entries:
+        used_date = entry.get("used_date")
+        state = entry.get("state")
+        if used_date and state:
+            if state not in state_last_used or used_date > state_last_used[state]:
+                state_last_used[state] = used_date
+    for tier_types in (_IA_PEEK_LANDMARK_TYPES, _IA_PEEK_LOCAL_ICON_TYPES, _IA_PEEK_WATER_TYPES):
+        if tier_types is _IA_PEEK_WATER_TYPES and water_blocked:
+            continue
+        tier_entries = [e for e in entries if e.get("type") in tier_types]
+        if not tier_entries:
+            continue
+        eligible = [e for e in tier_entries if _ia_peek_days_since(e.get("used_date"), today) >= cooldown_days]
+        if not eligible:
+            continue
+        eligible.sort(key=lambda e: _ia_peek_days_since(state_last_used.get(e.get("state")), today), reverse=True)
+        return eligible[0]
+    return None
+
+
+def _peek_next_ia_location(manifest_path: str, *, cooldown_days: int = 7) -> dict[str, Any] | None:
+    """Read-only prediction of which real place LAO's own select_next_ia_location
+    action (workflow_engine.py, the LAO robot -- a different process IRIS has
+    no direct handle to) will actually pick next. Ported line-for-line from
+    that function's algorithm (day-of-week zone -> landmark/local-icon/water
+    tier -> 7-day cooldown -> state fairness -> once-a-month water cap) so the
+    prediction matches production, not an approximation.
+
+    Added 2026-09-13 after live verification of the editorialPriority/Angle
+    wiring showed it structurally couldn't work: the IA Bible requires Frame
+    1's conflict to be a real, LOCAL problem at whatever location the
+    deterministic rotation lands on (Golden Temple, Red Fort, ...) -- an
+    abstract macro-trend theme researched independently of any specific place
+    almost never has an honest connection to a random pick, so ChatGPT was
+    correctly declining it nearly every run. Predicting the actual next
+    location lets IRIS's research target that real place's own current
+    situation instead, giving the connection a genuine chance of being true.
+
+    NEVER writes to the manifest -- this is the same non-destructive peek the
+    LAO engine itself already supports via mark_used=False (used by its own
+    chatgpt-dryrun package), just re-implemented here in-process since IRIS
+    cannot invoke a single LAO workflow step directly, only start/poll a full
+    job. Must be kept in sync with workflow_engine.py's
+    _select_next_ia_location / _ia_pick_from_zone / _ia_water_blocked_this_month
+    if that algorithm ever changes -- this is a deliberate, documented
+    duplication, not the source of truth, and a real LAO run between this
+    peek and MUSE's actual dispatch (another manual trigger, a dry-run) can
+    still make the prediction stale; downstream still treats it as a
+    prediction to check, never a fact to assume.
+
+    Returns None on any read/parse problem (missing file, malformed JSON,
+    empty manifest) rather than raising, so a manifest issue degrades IRIS
+    back to theme-only research instead of failing the whole run.
+    """
+    try:
+        path = Path(manifest_path)
+        if not path.is_file():
+            return None
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        zone_order = manifest.get("zone_order") or list(manifest.get("zones", {}).keys())
+        if not zone_order:
+            return None
+        now_ist = datetime.now(_IA_PEEK_IST)
+        today = now_ist.date()
+        weekday = now_ist.weekday()
+        day_zone_map = {i: zone_order[i] for i in range(min(6, len(zone_order)))}
+        water_blocked = _ia_peek_water_blocked_this_month(manifest, today)
+
+        chosen = None
+        chosen_zone = None
+        if weekday in day_zone_map:
+            chosen_zone = day_zone_map[weekday]
+            chosen = _ia_peek_pick_from_zone(chosen_zone, manifest, today, cooldown_days, water_blocked)
+        else:
+            best_zone, best_count = None, -1
+            for zone_name in zone_order:
+                entries = manifest.get("zones", {}).get(zone_name, [])
+                count = sum(
+                    1 for e in entries
+                    if e.get("type") in (_IA_PEEK_LANDMARK_TYPES | _IA_PEEK_LOCAL_ICON_TYPES)
+                    and _ia_peek_days_since(e.get("used_date"), today) >= cooldown_days
+                )
+                if count > best_count:
+                    best_zone, best_count = zone_name, count
+            if best_zone:
+                chosen_zone = best_zone
+                chosen = _ia_peek_pick_from_zone(best_zone, manifest, today, cooldown_days, water_blocked)
+
+        if chosen is None:
+            for zone_name in zone_order:
+                if zone_name == chosen_zone:
+                    continue
+                candidate = _ia_peek_pick_from_zone(zone_name, manifest, today, cooldown_days, water_blocked)
+                if candidate is not None:
+                    chosen, chosen_zone = candidate, zone_name
+                    break
+
+        if chosen is None:
+            all_entries = [
+                (zone_name, entry)
+                for zone_name in zone_order
+                for entry in manifest.get("zones", {}).get(zone_name, [])
+            ]
+            if not all_entries:
+                return None
+            all_entries.sort(key=lambda ze: _ia_peek_days_since(ze[1].get("used_date"), today), reverse=True)
+            chosen_zone, chosen = all_entries[0]
+
+        if chosen is None:
+            return None
+        return {
+            "name": chosen.get("name"),
+            "state": chosen.get("state"),
+            "type": chosen.get("type"),
+            "zone": chosen_zone,
+        }
+    except Exception:  # noqa: BLE001
+        return None
 
 
 # The four category queries from imagineindia-trend-radar's
@@ -3241,6 +3396,39 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
                 "errors": [{"source": "sanjeevani", "error": f"{type(exc).__name__}: {exc}"[:400]}],
             }
 
+    # Location-aware research (added 2026-09-13, see _peek_next_ia_location's
+    # docstring): the 4 category queries above find macro trends untethered
+    # to any specific place, which the Bible's Frame-1 rule ("a real local
+    # problem at whatever location the rotation lands on") almost never lets
+    # ChatGPT honestly connect to. Predicting the real next location and
+    # researching THAT place by name gives evidence with an actual chance of
+    # a genuine connection, instead of hoping a floating theme happens to fit.
+    predicted_location = _peek_next_ia_location(IA_LOCATIONS_MANIFEST_PATH)
+    if predicted_location and predicted_location.get("name") and reusable is not None:
+        try:
+            loc_query = (
+                f"{predicted_location['name']} {predicted_location.get('state', '')} "
+                "India news conservation restoration heritage controversy"
+            ).strip()
+            snapshot = reusable.collect(loc_query, markets=["IN"])
+            loc_items = list(snapshot.get("eligible") or [])
+            for item in loc_items:
+                item["category"] = "predicted_location"
+            media_evidence.setdefault("eligible", []).extend(loc_items)
+            media_evidence.setdefault("categories", {})["predicted_location"] = {
+                "query": loc_query,
+                "eligible_count": len(loc_items),
+                "commissioning_eligible": bool(
+                    (snapshot.get("corroboration") or {}).get("commissioning_eligible")
+                ),
+            }
+        except Exception as exc:  # noqa: BLE001
+            media_evidence.setdefault("categories", {})["predicted_location"] = {
+                "query": f"{predicted_location.get('name')}", "eligible_count": 0,
+                "commissioning_eligible": False,
+                "error": f"{type(exc).__name__}: {exc}"[:400],
+            }
+
     # Ordering matters (fixed 2026-09-12 after a live failure): the prompt
     # used to put "Reply in exactly this shape" BEFORE the evidence dump, so
     # the evidence was the last thing the model read before generating -- it
@@ -3264,7 +3452,24 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "this run prioritise editorially? Do not invent internal teams or tools "
         "— production is an automated pipeline.\n\n"
         f"Floor-owned operating method:\n{_media_skill_text()}\n\n"
-        "Use only this Sanjeevani-captured evidence for current-market claims. "
+        + (
+            f"PREDICTED NEXT LOCATION: {predicted_location['name']}, "
+            f"{predicted_location.get('state', '')} (a live, read-only prediction of the "
+            "deterministic rotation's next pick -- not a guarantee, it can shift if "
+            "another run consumes a manifest slot first). Evidence tagged "
+            "category='predicted_location' below is research specifically about this "
+            "real place, not a floating theme -- the IA Bible requires Frame 1's "
+            "conflict to be a genuine LOCAL problem at whichever place actually gets "
+            "used, so an angle grounded in this place has a real chance of an honest "
+            "connection where a generic macro-trend almost never does. Strongly prefer "
+            "building PRIORITY/ANGLE from this evidence when it has anything usable; "
+            "fall back to the general category evidence only when it does not, and say "
+            "so honestly in BRIEF rather than forcing a connection.\n\n"
+            if predicted_location and predicted_location.get("name")
+            else "PREDICTED NEXT LOCATION: unavailable this run (manifest unreadable) -- "
+            "fall back to general trend evidence only.\n\n"
+        )
+        + "Use only this Sanjeevani-captured evidence for current-market claims. "
         "Each item is tagged with the category query that found it. Cite an "
         "evidence_id in brackets for every specific factual claim; do not "
         "invent people, quotes, figures, or scenarios not present here:\n"
@@ -3276,7 +3481,8 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "before or after them:\n"
         "PRIORITY: <one line — what this run should optimise for>\n"
         "REGION: <the zone you'd prefer if it were free, or 'rotation'>\n"
-        "ANGLE: <one line — the editorial through-line to aim for>\n"
+        "ANGLE: <one line — the editorial through-line to aim for; grounded in the "
+        "predicted location's own evidence when available>\n"
         "VIRAL_SCORE: <0-100 estimate against the Bible's Recognition/Emotion/"
         "Visible-Problem/Transformation/Comment-Potential/Human-Experience rubric>\n"
         "SACRED_SITE: <none, or which protocol element applies and how the "
