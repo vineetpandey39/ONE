@@ -293,11 +293,33 @@ if ($foundWorkerPid -gt 0) {
     $runtimeChanged = (Test-Path $runtimeSource) -and $workerProcess -and `
         ((Get-Item $runtimeSource).LastWriteTime -gt $workerProcess.CreationDate)
     if ($runtimeChanged) {
-        Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -and $_.CommandLine -like "*one_agent_worker.py*" } |
-            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-        Start-Sleep -Milliseconds 400
-        $foundWorkerPid = 0
+        # This used to Stop-Process -Force unconditionally the moment
+        # runtime.py looked newer than the running worker - fine when a human
+        # ran this by hand right after a deploy, but this script is now also
+        # fired every 5 minutes by the ONE-AutoRestart scheduled task, so an
+        # unconditional kill here would hard-abort whatever job happens to be
+        # mid-run at that moment (confirmed live 2026-09-13: a 3-4 minute-old
+        # IRIS job was left orphaned by exactly this). Check the queue first -
+        # if a job is actively running, leave the stale code in place for one
+        # more cycle rather than cut it off; the next tick five minutes later
+        # picks up the swap once the job has cleared.
+        $agentQueueDb = Join-Path $dataRoot "agent_queue.db"
+        $jobRunningChecker = Join-Path $sourceRoot "scripts\check_worker_jobs_running.py"
+        $jobRunning = $false
+        if ((Test-Path $agentQueueDb) -and (Test-Path $jobRunningChecker)) {
+            & $pythonExe $jobRunningChecker $agentQueueDb
+            $jobRunning = ($LASTEXITCODE -eq 1)
+        }
+        if ($jobRunning) {
+            $workerRunning = $true
+            Set-Content -Path $workerPidFile -Value $foundWorkerPid
+        } else {
+            Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
+                Where-Object { $_.CommandLine -and $_.CommandLine -like "*one_agent_worker.py*" } |
+                ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            Start-Sleep -Milliseconds 400
+            $foundWorkerPid = 0
+        }
     } else {
         $workerRunning = $true
         Set-Content -Path $workerPidFile -Value $foundWorkerPid
