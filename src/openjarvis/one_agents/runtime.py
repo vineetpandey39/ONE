@@ -3987,6 +3987,23 @@ def _job_watchdog_seconds(job: dict[str, Any] | None = None) -> float:
     return default
 
 
+def abandoned_job_threads() -> list["threading.Thread"]:
+    """Every job-execution thread still alive past its own watchdog timeout.
+
+    Reads threading.enumerate() directly rather than maintaining a separate
+    list, keyed on the "job-<id>" name run_worker() already gives each
+    thread - so this can never drift out of sync with which threads are
+    actually still running the way a hand-updated counter could. Python has
+    no supported way to forcibly terminate a thread from the outside, so
+    this only makes the leak visible; it cannot reclaim the memory those
+    threads are holding. See run_worker()'s watchdog branch for where this
+    is logged.
+    """
+    import threading
+    return [t for t in threading.enumerate()
+            if t.name.startswith("job-") and t.is_alive()]
+
+
 def run_worker(poll_seconds: float = 2.0) -> None:
     import threading
 
@@ -4009,10 +4026,23 @@ def run_worker(poll_seconds: float = 2.0) -> None:
     _reconcile_publishing_projection()
 
     last_schedule_check = 0.0
+    last_leak_check = 0.0
     while True:
         if time.time() - last_schedule_check >= 30:
             _enqueue_due_recurring_jobs()
             last_schedule_check = time.time()
+        if time.time() - last_leak_check >= 300:
+            # Periodic, not just on the moment a new thread gets abandoned -
+            # the count only ever goes up between restarts (nothing removes
+            # a finished-late thread from threading.enumerate() until
+            # Python's own bookkeeping does), so this is the signal that
+            # would have shown the 3.27 GB growth building well before Task
+            # Manager did. Quiet when there is nothing to report.
+            stuck = abandoned_job_threads()
+            if stuck:
+                print(f"[one-agents] {len(stuck)} abandoned job thread(s) still alive: "
+                      f"{', '.join(t.name for t in stuck)}", flush=True)
+            last_leak_check = time.time()
         job = claim_job()
         if not job:
             time.sleep(poll_seconds)
@@ -4042,6 +4072,32 @@ def run_worker(poll_seconds: float = 2.0) -> None:
             # immediately so the dashboard stops showing a permanently
             # frozen RUNNING card and the worker loop can keep picking up
             # other queued jobs.
+            #
+            # What was invisible until now: that abandoned thread does not
+            # free the memory it was holding (API response bytes, image/
+            # video buffers, whatever the stuck step had in scope) - it just
+            # sits there, alive, forever, because nothing ever joins it.
+            # Confirmed live 2026-09-12: this worker process's RSS grew to
+            # 3.27 GB over ~2 hours with no other explanation found in this
+            # file's module-level state. This does not free that memory -
+            # a thread genuinely cannot be force-killed from the outside in
+            # Python - but it makes every abandonment loud in the log with a
+            # running total, so the leak is a number someone can watch
+            # instead of a silent multi-GB surprise discovered in Task
+            # Manager. abandoned_job_threads() reads threading.enumerate()
+            # directly rather than keeping a separate list, so the count can
+            # never drift from reality the way a hand-maintained counter
+            # could.
+            still_abandoned = abandoned_job_threads()
+            print(
+                f"[one-agents] job {job['id']} ({job.get('agent_id')}) exceeded its "
+                f"watchdog and was abandoned running in the background - "
+                f"{len(still_abandoned)} such thread(s) now alive. Each one holds "
+                f"memory that will not be freed until it finishes on its own; a "
+                f"climbing count here is the leading indicator of the RSS growth "
+                f"that used to go unnoticed until it reached multiple GB.",
+                flush=True,
+            )
             fail_job(
                 job["id"],
                 TimeoutError(
