@@ -1467,6 +1467,7 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
                 "freshness_policy": shared.get("policy", ""), "queries": shared.get("queries", []),
                 "catalog_evidence": shared.get("catalog_evidence", []),
                 "corroboration": shared.get("corroboration", {}), "errors": shared.get("errors", []),
+                "source_health": shared.get("source_health", {}),
                 "library": shared.get("library"), "library_version": shared.get("version"),
             }
             radar_text = json.dumps(radar_snapshot, ensure_ascii=False, separators=(",", ":"))
@@ -1493,6 +1494,45 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         ),
         details={"buckets": freshness_counts, "snapshot": str(radar_path)},
     )
+
+    # Freshness is a commissioning gate, not an informational event. Models
+    # may interpret evidence only after deterministic acquisition meets this
+    # quorum; prose and catalog homepages can never substitute for dated demand.
+    eligible_items = list(radar_snapshot.get("items") or [])
+    eligible_sources = {str(row.get("source_type") or "") for row in eligible_items
+                        if row.get("source_type")}
+    quorum = radar_snapshot.get("corroboration") or {}
+    minimum_items = int(quorum.get("minimum_items") or 3)
+    minimum_sources = int(quorum.get("minimum_source_types") or 2)
+    if len(eligible_items) < minimum_items or len(eligible_sources) < minimum_sources:
+        stages.clear_stage("hermes")
+        output_dir = _home() / "agent_outputs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        rejected_path = output_dir / f"{job['id']}-rejected-freshness.md"
+        rejected_path.write_text(
+            "# HERMES — Blocked at Freshness Evidence Gate\n\n"
+            f"Eligible dated signals: {len(eligible_items)} (minimum {minimum_items})\n\n"
+            f"Independent source types: {len(eligible_sources)} (minimum {minimum_sources})\n\n"
+            f"Source health: {json.dumps(radar_snapshot.get('source_health') or {}, ensure_ascii=False)}\n\n"
+            "No demand score or publishing commission was produced.\n",
+            encoding="utf-8",
+        )
+        blocked_reason = (
+            f"fresh evidence quorum not met: {len(eligible_items)}/{minimum_items} items, "
+            f"{len(eligible_sources)}/{minimum_sources} independent source types"
+        )
+        _publishing_event(
+            job, agent="HERMES", event_type="research_blocked",
+            stage="24_48h_date_gate",
+            summary="Freshness evidence quorum failed; no book was commissioned",
+            details={"reason": blocked_reason, "snapshot": str(radar_path),
+                     "source_health": radar_snapshot.get("source_health") or {}},
+            status="blocked",
+        )
+        return {"agent": "HERMES", "mode": "blocked", "_blocked": True,
+                "content": "Current market evidence is insufficient; HERMES did not commission a book.",
+                "blocked_reason": blocked_reason, "radar_snapshot": str(radar_path),
+                "output": str(rejected_path)}
 
     # Add a credential-free book-supply/competition signal for the strongest
     # discovered queries. These are public catalog results, not sales claims.
@@ -1689,7 +1729,9 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     output_path = output_dir / f"{job['id']}.md"
     output_path.write_text(
         f"# HERMES — KDP Commissioning Brief\n\n"
-        f"Request: {task}\n\nResearched by: Sanjeevani + "
+        f"Request: {task}\n\nResearch engine: "
+        f"{radar_snapshot.get('library') or 'floor-local-fallback'} "
+        f"v{radar_snapshot.get('library_version') or 'unknown'}; synthesis: "
         f"{os.environ.get('ONE_LOCAL_RESEARCH_MODEL', 'qwen3.5:9b')}\n\n"
         f"{brief}\n",
         encoding="utf-8",
