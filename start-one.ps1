@@ -127,6 +127,9 @@ if (Test-Path $envFile) {
 if (-not $env:SANJEEVANI_RESEARCH_LIBRARY) {
     $env:SANJEEVANI_RESEARCH_LIBRARY = Join-Path $oneRoot "sanjeevani\research_library.py"
 }
+if (-not $env:SANJEEVANI_DATA_DIR) {
+    $env:SANJEEVANI_DATA_DIR = Join-Path $oneRoot "data\sanjeevani"
+}
 if (-not $env:SANJEEVANI_SEARXNG_URL) {
     $env:SANJEEVANI_SEARXNG_URL = "http://127.0.0.1:59011"
 }
