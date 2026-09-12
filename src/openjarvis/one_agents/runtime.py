@@ -1157,7 +1157,7 @@ def _sanjeevani_research() -> Any | None:
     import sys
     path = Path(os.environ.get(
         "SANJEEVANI_RESEARCH_LIBRARY",
-        r"C:\Users\pc\Documents\Codex\2026-08-28\ye\outputs\sanjeevani\research_library.py",
+        r"E:\ONE-SUITE\sanjeevani\research_library.py",
     ))
     if not path.is_file():
         return None
