@@ -3210,6 +3210,16 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
                 "errors": [{"source": "sanjeevani", "error": f"{type(exc).__name__}: {exc}"[:400]}],
             }
 
+    # Ordering matters (fixed 2026-09-12 after a live failure): the prompt
+    # used to put "Reply in exactly this shape" BEFORE the evidence dump, so
+    # the evidence was the last thing the model read before generating -- it
+    # produced an accurate, well-cited, entirely free-form summary instead of
+    # the required PRIORITY/REGION/ANGLE shape every time. This is the exact
+    # failure mode ollama_synthesize's own docstring already warns about for
+    # every Sanjeevani caller: "keeping the required output shape last
+    # prevents a large evidence bundle from silently deleting the agent's
+    # contract." Evidence now comes first; the reply-shape spec is the last
+    # thing in the prompt.
     brief, note = _research_synthesis(
         "You are IRIS, head of Media & Content at a digital holding company, "
         "signing off the next ImagineIndia Instagram reel run.\n\n"
@@ -3223,7 +3233,16 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "this run prioritise editorially? Do not invent internal teams or tools "
         "— production is an automated pipeline.\n\n"
         f"Floor-owned operating method:\n{_media_skill_text()}\n\n"
-        "Reply in exactly this shape:\n"
+        "Use only this Sanjeevani-captured evidence for current-market claims. "
+        "Each item is tagged with the category query that found it. Cite an "
+        "evidence_id in brackets for every specific factual claim; do not "
+        "invent people, quotes, figures, or scenarios not present here:\n"
+        + json.dumps(_compact_media_evidence(media_evidence), ensure_ascii=False, separators=(",", ":"))
+        + avoid
+        + "\n\nYou already have everything above -- the location catalogue, the "
+        "evidence, and the operating method. Do not write a free-form summary "
+        "of the evidence. Reply with ONLY the following six lines, nothing "
+        "before or after them:\n"
         "PRIORITY: <one line — what this run should optimise for>\n"
         "REGION: <the zone you'd prefer if it were free, or 'rotation'>\n"
         "ANGLE: <one line — the editorial through-line to aim for>\n"
@@ -3231,15 +3250,8 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "Visible-Problem/Transformation/Comment-Potential/Human-Experience rubric>\n"
         "SACRED_SITE: <none, or which protocol element applies and how the "
         "angle already respects it>\n"
-        "BRIEF:\n"
-        "<6-12 lines: who the audience is, why run now, what would make this "
-        "one perform, and the honest risk that it underperforms>"
-        + "\n\nUse only this Sanjeevani-captured evidence for current-market claims. "
-        "Each item is tagged with the category query that found it. Cite an "
-        "evidence_id in brackets for every specific factual claim; do not "
-        "invent people, quotes, figures, or scenarios not present here:\n"
-        + json.dumps(_compact_media_evidence(media_evidence), ensure_ascii=False, separators=(",", ":"))
-        + avoid,
+        "BRIEF: <6-12 lines: who the audience is, why run now, what would make "
+        "this one perform, and the honest risk that it underperforms>",
         evidence=media_evidence,
     )
 
