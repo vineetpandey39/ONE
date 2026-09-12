@@ -629,12 +629,13 @@ def _one_agent_command(text: str) -> str | None:
     if corporate_job_hunt:
         from openjarvis.one_agents.floors_bridge import dispatch_company_job
 
+        # Preserve the named candidate and requested roles. Floor 1 resolves
+        # these against its local registry; replacing the command with a
+        # Sonia-specific template made every future person's run look like
+        # Sonia's and defeated identity isolation.
         objective = (
-            "Research-only Sonia job hunt in India for Manual Testing, Automation Testing, "
-            "Database Testing, and Product Owner roles. Use Sanjeevani; separate verified "
-            "openings into 1, 7, 14, and 30 day freshness windows; deduplicate and rank by "
-            "priority, profile match, age, and honest interview-success probability. Do not "
-            "email, apply, or perform any external side effect."
+            clean + " Research only: use Sanjeevani, apply 1/7/14/30-day freshness gates, "
+            "deduplicate and rank transparently. Do not email, apply, or perform any external side effect."
         )
         dispatched = dispatch_company_job(
             agent_id="poseidon", floor_id="1", objective=objective,
