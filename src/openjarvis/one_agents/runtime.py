@@ -1279,6 +1279,25 @@ def _publishing_event(job: dict[str, Any], *, agent: str, event_type: str,
         pass
 
 
+def _fresh_research_quorum(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Return a deterministic commissioning decision before any model runs."""
+    eligible = list(snapshot.get("items") or [])
+    sources = {str(row.get("source_type") or "") for row in eligible
+               if row.get("source_type")}
+    demand_items = [row for row in eligible if row.get("role") == "demand_discovery"]
+    catalog_items = list(snapshot.get("catalog_evidence") or [])
+    contract = snapshot.get("corroboration") or {}
+    minimum_items = int(contract.get("minimum_items") or 3)
+    minimum_sources = int(contract.get("minimum_source_types") or 2)
+    return {
+        "passed": (len(eligible) >= minimum_items and len(sources) >= minimum_sources
+                   and bool(demand_items) and bool(catalog_items)),
+        "eligible_items": len(eligible), "eligible_sources": len(sources),
+        "demand_items": len(demand_items), "catalog_items": len(catalog_items),
+        "minimum_items": minimum_items, "minimum_sources": minimum_sources,
+    }
+
+
 def _reconcile_publishing_projection() -> None:
     """Close ledger missions whose queue job is already terminal.
 
@@ -1498,28 +1517,30 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     # Freshness is a commissioning gate, not an informational event. Models
     # may interpret evidence only after deterministic acquisition meets this
     # quorum; prose and catalog homepages can never substitute for dated demand.
-    eligible_items = list(radar_snapshot.get("items") or [])
-    eligible_sources = {str(row.get("source_type") or "") for row in eligible_items
-                        if row.get("source_type")}
-    quorum = radar_snapshot.get("corroboration") or {}
-    minimum_items = int(quorum.get("minimum_items") or 3)
-    minimum_sources = int(quorum.get("minimum_source_types") or 2)
-    if len(eligible_items) < minimum_items or len(eligible_sources) < minimum_sources:
+    evidence_gate = _fresh_research_quorum(radar_snapshot)
+    if not evidence_gate["passed"]:
         stages.clear_stage("hermes")
         output_dir = _home() / "agent_outputs"
         output_dir.mkdir(parents=True, exist_ok=True)
         rejected_path = output_dir / f"{job['id']}-rejected-freshness.md"
         rejected_path.write_text(
             "# HERMES — Blocked at Freshness Evidence Gate\n\n"
-            f"Eligible dated signals: {len(eligible_items)} (minimum {minimum_items})\n\n"
-            f"Independent source types: {len(eligible_sources)} (minimum {minimum_sources})\n\n"
+            f"Eligible dated signals: {evidence_gate['eligible_items']} "
+            f"(minimum {evidence_gate['minimum_items']})\n\n"
+            f"Independent source types: {evidence_gate['eligible_sources']} "
+            f"(minimum {evidence_gate['minimum_sources']})\n\n"
+            f"Fresh demand-discovery signals: {evidence_gate['demand_items']} (minimum 1)\n\n"
+            f"Current catalog comparisons: {evidence_gate['catalog_items']} (minimum 1)\n\n"
             f"Source health: {json.dumps(radar_snapshot.get('source_health') or {}, ensure_ascii=False)}\n\n"
             "No demand score or publishing commission was produced.\n",
             encoding="utf-8",
         )
         blocked_reason = (
-            f"fresh evidence quorum not met: {len(eligible_items)}/{minimum_items} items, "
-            f"{len(eligible_sources)}/{minimum_sources} independent source types"
+            f"fresh evidence quorum not met: {evidence_gate['eligible_items']}/"
+            f"{evidence_gate['minimum_items']} items, {evidence_gate['eligible_sources']}/"
+            f"{evidence_gate['minimum_sources']} independent source types, "
+            f"{evidence_gate['demand_items']} demand signals, "
+            f"{evidence_gate['catalog_items']} catalog comparisons"
         )
         _publishing_event(
             job, agent="HERMES", event_type="research_blocked",
