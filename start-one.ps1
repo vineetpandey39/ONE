@@ -108,6 +108,9 @@ $runtimeDrive = Split-Path -Qualifier $runtimeHome
 $runtimePath = $runtimeHome.Substring($runtimeDrive.Length)
 $env:HOMEDRIVE = $runtimeDrive
 $env:HOMEPATH = $runtimePath
+# Keep one canonical Ollama inventory. Without this, Windows' desktop Ollama
+# and ONE can resolve different HOME directories and show different fleets.
+$env:OLLAMA_MODELS = Join-Path $runtimeHome ".ollama\models"
 if (-not $env:PADDLE_PDX_CACHE_HOME) { $env:PADDLE_PDX_CACHE_HOME = Join-Path $modelCacheRoot "paddlex" }
 if (-not $env:HF_HOME) { $env:HF_HOME = Join-Path $modelCacheRoot "huggingface" }
 if (-not $env:TORCH_HOME) { $env:TORCH_HOME = Join-Path $modelCacheRoot "torch" }
