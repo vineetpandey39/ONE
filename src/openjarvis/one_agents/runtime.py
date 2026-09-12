@@ -1380,12 +1380,19 @@ def _fresh_research_quorum(snapshot: dict[str, Any]) -> dict[str, Any]:
     contract = snapshot.get("corroboration") or {}
     minimum_items = int(contract.get("minimum_items") or 3)
     minimum_sources = int(contract.get("minimum_source_types") or 2)
+    floor_owned = snapshot.get("contract") == "one.floor05.book-demand/v1"
+    passed = bool(snapshot.get("commissioning_eligible")) if floor_owned else (
+        len(eligible) >= minimum_items and len(sources) >= minimum_sources
+        and bool(demand_items) and bool(catalog_items)
+    )
     return {
-        "passed": (len(eligible) >= minimum_items and len(sources) >= minimum_sources
-                   and bool(demand_items) and bool(catalog_items)),
+        "passed": passed,
         "eligible_items": len(eligible), "eligible_sources": len(sources),
         "demand_items": len(demand_items), "catalog_items": len(catalog_items),
         "minimum_items": minimum_items, "minimum_sources": minimum_sources,
+        "candidate_count": len(snapshot.get("candidates") or []),
+        "winner_score": (snapshot.get("winner") or {}).get("score"),
+        "floor_owned": floor_owned,
     }
 
 
@@ -1569,17 +1576,14 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         markets = [requested_region] if requested_region in {"IN", "US", "GB", "CA", "AU"} else ["IN", "US", "GB"]
         reusable = _sanjeevani_research()
         if reusable is not None:
-            shared = reusable.collect(task, markets=markets)
-            radar_snapshot = {
-                "captured_at": shared.get("captured_at"), "markets": markets,
-                "items": shared.get("eligible", []), "excluded_items": shared.get("excluded", []),
-                "freshness_buckets": shared.get("buckets", {}), "freshness_counts": shared.get("counts", {}),
-                "freshness_policy": shared.get("policy", ""), "queries": shared.get("queries", []),
-                "catalog_evidence": shared.get("catalog_evidence", []),
-                "corroboration": shared.get("corroboration", {}), "errors": shared.get("errors", []),
-                "source_health": shared.get("source_health", {}),
-                "library": shared.get("library"), "library_version": shared.get("version"),
-            }
+            engine = floors_bridge.load("floor_05_publishing", "book_demand_engine")
+            radar = floors_bridge.load("floor_05_publishing", "publishing_demand_radar")
+            if engine is None:
+                raise RuntimeError("Floor 05 book-demand engine is unavailable")
+            supply_collector = radar.book_supply if radar is not None else None
+            radar_snapshot = engine.collect(
+                task, reusable, markets=markets, supply_collector=supply_collector
+            )
             radar_text = json.dumps(radar_snapshot, ensure_ascii=False, separators=(",", ":"))
         else:
             radar = floors_bridge.load("floor_05_publishing", "publishing_demand_radar")
@@ -1602,7 +1606,10 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
             f"Freshness gate: {len(radar_snapshot.get('items') or [])} eligible; "
             f"{len(radar_snapshot.get('excluded_items') or [])} excluded"
         ),
-        details={"buckets": freshness_counts, "snapshot": str(radar_path)},
+        details={"buckets": freshness_counts, "snapshot": str(radar_path),
+                 "candidate_count": len(radar_snapshot.get("candidates") or []),
+                 "winner": (radar_snapshot.get("winner") or {}).get("topic"),
+                 "winner_score": (radar_snapshot.get("winner") or {}).get("score")},
     )
 
     # Freshness is a commissioning gate, not an informational event. Models
@@ -1633,6 +1640,11 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
             f"{evidence_gate['demand_items']} demand signals, "
             f"{evidence_gate['catalog_items']} catalog comparisons"
         )
+        if evidence_gate.get("floor_owned"):
+            blocked_reason = (
+                f"Floor 05 found {evidence_gate['candidate_count']} candidate(s), "
+                "but none passed the deterministic 80/100 book-demand gate"
+            )
         _publishing_event(
             job, agent="HERMES", event_type="research_blocked",
             stage="24_48h_date_gate",
@@ -1664,6 +1676,18 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         {"trending_now": radar_snapshot, "book_supply": supply},
         ensure_ascii=False, separators=(",", ":"),
     )
+    winner = radar_snapshot.get("winner") or {}
+    _publishing_event(
+        job, agent="HERMES", event_type="book_demand_shortlist_completed",
+        stage="reader_intent_competition_score",
+        summary=(f"Selected {winner.get('topic')} at {winner.get('score')}/100"
+                 if winner else "No candidate passed the book-demand gate"),
+        details={"candidates": [{"topic": row.get("topic"), "score": row.get("score"),
+                                  "eligible": row.get("build_eligible"),
+                                  "blockers": row.get("blockers", [])}
+                                 for row in radar_snapshot.get("candidates") or []],
+                 "winner": winner.get("topic"), "winner_score": winner.get("score")},
+    )
 
     brief, note = _research_synthesis(
         "You are HERMES, head of Book Publishing at a digital holding company, "
@@ -1681,12 +1705,15 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "welcome when it delivers a method, framework or skill the reader applies to "
         "their own life.\n\n"
         "Use ONLY the captured evidence below and cite its exact source_url values. "
+        "The Floor 05 engine has already selected the winner deterministically. Use only "
+        "that winner; do not replace it, alter its scores, or invent a different candidate. "
         "Do not claim you searched sources that are absent. A viral headline is not book demand: "
         "corroborate 24-hour acceleration with persistence and book-supply evidence. "
         "Treat only 0-24h and 24-48h discovery buckets as demand evidence; never score or cite "
         "signals in >48h or unknown buckets. Catalog supply is a separate current-index signal.\n\n"
         f"Floor-owned operating method:\n{_publishing_skill_text()}\n\n"
         f"Machine-captured official/public evidence (discovery and catalog supply; neither proves sales):\n{research_evidence}\n\n"
+        f"Deterministic winner: {json.dumps(winner, ensure_ascii=False)}\n\n"
         "Reply in exactly this shape:\n"
         "MODE: fiction | nonfiction\n"
         "REGION: <primary market, e.g. global or india>\n"
@@ -1910,15 +1937,19 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError):
             return None
 
-    dimensions = {
-        "demand": score("DEMAND_SCORE"), "packaging": score("PACKAGING_SCORE"),
-        "conversion": score("CONVERSION_SCORE"),
-        "differentiation": score("DIFFERENTIATION_SCORE"),
-        "expansion": score("EXPANSION_SCORE"), "rights": score("RIGHTS_SCORE"),
-        "performance": score("PERFORMANCE_SCORE"),
-    }
+    dimensions = dict(winner.get("biblos_dimensions") or {})
+    if not dimensions:
+        dimensions = {
+            "demand": score("DEMAND_SCORE"), "packaging": score("PACKAGING_SCORE"),
+            "conversion": score("CONVERSION_SCORE"),
+            "differentiation": score("DIFFERENTIATION_SCORE"),
+            "expansion": score("EXPANSION_SCORE"), "rights": score("RIGHTS_SCORE"),
+            "performance": score("PERFORMANCE_SCORE"),
+        }
     evidence: list[dict[str, Any]] = []
-    if radar_snapshot.get("items"):
+    if winner.get("evidence"):
+        evidence.extend(dict(row) for row in winner["evidence"].values() if isinstance(row, dict))
+    elif radar_snapshot.get("items"):
         evidence.append(dict(radar_snapshot["items"][0]))
     cited = _marker(brief, "EVIDENCE")
     if cited:
