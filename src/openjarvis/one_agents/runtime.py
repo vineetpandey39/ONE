@@ -3712,10 +3712,25 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
             f"Picking the {kind_label} back up — LAO job {resume_id[:8]} after a restart",
             lao_job=resume_id)
     else:
+        # LAO integration wiring (2026-09-13, governance approval
+        # 61c59bc2-15ae-4deb-bc2f-c65a984bcbb8, decided_by=olympus): IRIS's
+        # Sanjeevani-grounded priority/angle now reaches the real LAO trigger
+        # as an OPTIONAL editorial hint, not a location override -- the
+        # deterministic no-repeat rotation above is completely unaffected,
+        # nothing here can steer which location comes next. What changes is
+        # that whichever location the rotation picks, ChatGPT is told about
+        # today's real, evidence-grounded viral/trend angle and instructed
+        # to weave it into the reel substantively IF a genuine connection
+        # exists to that specific location -- never a forced or fabricated
+        # tie-in. before_after keeps input_args={} for now; only the reel
+        # path is wired, matching what was actually requested and tested.
+        lao_input_args: dict[str, Any] = {}
+        if not is_before_after and (priority or angle):
+            lao_input_args = {"editorialPriority": priority, "editorialAngle": angle}
         started = tool.execute(
             action="start", mode="dry_run", process_name=process_name,
             scope="production",
-            input_args={},
+            input_args=lao_input_args,
         )
         if not started.success:
             stages.clear_stage("muse")
