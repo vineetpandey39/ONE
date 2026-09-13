@@ -4243,6 +4243,28 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# LinkedIn Authority runs off a fixed weekly content calendar, not a freely
+# chosen topic -- see C:\Users\pc\Documents\LAO\LinkedIn-Content-Bible.md.
+# Only Saturday's own rule says a topic must be "grounded in a LIVE Google
+# News fetch, not invented"; every other day already has ChatGPT pick a
+# topic within that day's pillar, which worked long before any Sanjeevani
+# step existed here. A single blended query ("AI leadership workplace
+# automation India LinkedIn authority current trends") also ignored the
+# Bible's own scope guard -- Tuesday/Wednesday/Friday must NOT be framed
+# through an AI lens, which that always-AI-flavoured query was pushing into
+# every day regardless. Keyed on Python's Monday=0 weekday(), matching the
+# Bible's own day list order.
+_LINKEDIN_PILLAR_BY_WEEKDAY = {
+    0: ("AI", "agentic AI enterprise adoption trends"),
+    1: ("Cloud", "cloud infrastructure cost optimization"),
+    2: ("Infrastructure", "data center infrastructure engineering"),
+    3: ("RPA + Automation / Agentic AI", "robotic process automation agentic workflows"),
+    4: ("Networking", "professional networking career growth"),
+    5: ("Viral Tech Stack", "trending technology news today"),
+    6: ("For Freshers", "entry level tech career advice"),
+}
+
+
 def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str, Any]:
     """Hand a non-ImagineIndia Floor 4 brand to that brand's own worker.
 
@@ -4286,48 +4308,65 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
     evidence_path = ""
     evidence_count = 0
     if brand.get("slug") == "linkedin_authority":
+        from zoneinfo import ZoneInfo
+        weekday = datetime.now(ZoneInfo("Asia/Kolkata")).weekday()
+        pillar, pillar_query = _LINKEDIN_PILLAR_BY_WEEKDAY[weekday]
+        requires_grounding = weekday == 5  # Saturday: the Bible's own "not invented" day
+
         reusable = _sanjeevani_research()
+        grounded_brief = ""
+        ground_error = ""
         if reusable is None:
-            stages.clear_stage("ia")
-            return {"agent":"IRIS", "mode":"blocked", "_blocked":True,
-                    "content":"LinkedIn Authority stopped: Sanjeevani is unavailable.",
-                    "blocked_reason":"Sanjeevani research library unavailable", "handed_to":None}
-        try:
-            snapshot = reusable.collect(
-                "AI leadership workplace automation India LinkedIn authority current trends",
-                markets=["IN"],
-            )
-            eligible = list(snapshot.get("eligible") or [])
-            evidence_count = len(eligible)
-            if not eligible:
-                stages.clear_stage("ia")
-                return {"agent":"IRIS", "mode":"blocked", "_blocked":True,
-                        "content":"LinkedIn Authority stopped: no fresh, date-verifiable Sanjeevani evidence.",
-                        "blocked_reason":"zero eligible current evidence", "handed_to":None}
-            brief, note = _research_synthesis(
-                "You are IRIS. Create one concise LinkedIn authority-post brief from ONLY the supplied "
-                "evidence. Do not invent facts. Return TITLE:, ANGLE:, PROOF:, CTA: and cite evidence_id. "
-                f"Avoid these prior titles: {json.dumps(prior[:15], ensure_ascii=False)}",
-                evidence=snapshot,
-            )
-            if not brief:
-                raise RuntimeError(note or "local synthesis returned no brief")
-            grounded_angle = brief
+            ground_error = "Sanjeevani research library unavailable"
+        else:
+            try:
+                snapshot = reusable.collect(pillar_query, markets=["IN", "US", "GB"])
+                eligible = list(snapshot.get("eligible") or [])
+                evidence_count = len(eligible)
+                if not eligible:
+                    ground_error = "zero eligible current evidence"
+                else:
+                    brief, note = _research_synthesis(
+                        f"You are IRIS. Today's fixed LinkedIn Authority pillar is '{pillar}'. Create "
+                        "one concise LinkedIn authority-post brief from ONLY the supplied evidence, "
+                        "staying inside that pillar. Do not invent facts. Return TITLE:, ANGLE:, "
+                        "PROOF:, CTA: and cite evidence_id. "
+                        f"Avoid these prior titles: {json.dumps(prior[:15], ensure_ascii=False)}",
+                        evidence=snapshot,
+                    )
+                    if not brief:
+                        ground_error = note or "local synthesis returned no brief"
+                    else:
+                        grounded_brief = brief
+            except Exception as exc:
+                ground_error = f"{type(exc).__name__}: {exc}"
+
+        if grounded_brief:
+            grounded_angle = grounded_brief
             output_dir = _home() / "agent_outputs"
             output_dir.mkdir(parents=True, exist_ok=True)
             evidence_file = output_dir / f"{job['id']}-linkedin-brief.md"
             evidence_file.write_text(
-                f"# IRIS — LinkedIn Authority Brief\n\nRequest: {task}\n\n"
-                f"Researched by: Sanjeevani\n\n{brief}\n", encoding="utf-8")
+                f"# IRIS — LinkedIn Authority Brief\n\nPillar: {pillar}\nRequest: {task}\n\n"
+                f"Researched by: Sanjeevani\n\n{grounded_brief}\n", encoding="utf-8")
             evidence_path = str(evidence_file)
             memory.remember(agent="IRIS", floor_id="4", floor_name=brand["vault_floor_name"],
-                            kind="LinkedIn Authority Brief", body=brief, task=task,
-                            tags=["linkedin", "authority", "sanjeevani"])
-        except Exception as exc:
+                            kind="LinkedIn Authority Brief", body=grounded_brief, task=task,
+                            tags=["linkedin", "authority", "sanjeevani", pillar.lower()])
+        elif requires_grounding:
+            # Saturday alone must actually stop rather than let ChatGPT
+            # invent a "trending" story the Bible says has to be real.
             stages.clear_stage("ia")
             return {"agent":"IRIS", "mode":"blocked", "_blocked":True,
-                    "content":"LinkedIn Authority stopped before production: grounded brief failed.",
-                    "blocked_reason":f"{type(exc).__name__}: {exc}", "handed_to":None}
+                    "content":f"LinkedIn Authority stopped: {ground_error}.",
+                    "blocked_reason":ground_error, "handed_to":None}
+        else:
+            # Every other day of the Bible already lets ChatGPT pick a topic
+            # within that day's own pillar without needing Sanjeevani
+            # grounding -- that mechanism worked long before this step
+            # existed. A research miss enriches nothing today, but must not
+            # stop a day the calendar never asked it to gate.
+            grounded_angle = f"{task.strip()} Today's fixed pillar is '{pillar}' — stay within it."
 
     # ``worker`` names who this handover is actually for. Without it the
     # building can only guess, and a head briefing its second worker walks to
