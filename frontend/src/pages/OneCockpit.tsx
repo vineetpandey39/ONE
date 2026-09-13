@@ -3,6 +3,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import {
   BarChart3,
   BrainCircuit,
+  CalendarClock,
   ChevronUp,
   Code2,
   Contact,
@@ -164,6 +165,26 @@ type ConnectionPreset = {
   section: string;
   keys: string[];
   note: string;
+};
+type CompanyTrigger = {
+  id: string;
+  name: string;
+  agent_id: string;
+  mode: string;
+  cron_expression: string | null;
+  timezone: string;
+  enabled: number;
+  next_fire_epoch: number;
+  last_fire_epoch: number | null;
+  last_job_id: string | null;
+};
+type TriggerFire = {
+  id: number;
+  trigger_id: string;
+  fired_at: string;
+  outcome: string;
+  job_id: string | null;
+  detail: string;
 };
 
 const coreUrl = (path: string) => `${getBase()}${path}`;
@@ -371,6 +392,10 @@ export function OneCockpit() {
     applied_counts: {},
     applications: [],
   });
+  const [companyTriggers, setCompanyTriggers] = useState<CompanyTrigger[]>([]);
+  const [triggerFires, setTriggerFires] = useState<TriggerFire[]>([]);
+  const [triggerAction, setTriggerAction] = useState<string | null>(null);
+  const [triggerMessage, setTriggerMessage] = useState('');
   // issueTitles kept alongside the count so the HUD can point a status dot at
   // the specific agent a self-diagnosis issue names (e.g. "IA is failing
   // often") instead of only showing an aggregate issue count.
@@ -404,6 +429,40 @@ export function OneCockpit() {
     const timer = window.setInterval(refreshJobhuntBoard, 8000);
     return () => window.clearInterval(timer);
   }, [refreshJobhuntBoard]);
+
+  const refreshCompanyTriggers = useCallback(async () => {
+    try {
+      const response = await coreFetch('/v1/one/triggers', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Trigger service unavailable');
+      const data = await response.json();
+      setCompanyTriggers(data.triggers || []);
+      setTriggerFires(data.recent_fires || []);
+    } catch {
+      setTriggerMessage('ONE trigger service is offline.');
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshCompanyTriggers();
+    const timer = window.setInterval(refreshCompanyTriggers, 10000);
+    return () => window.clearInterval(timer);
+  }, [refreshCompanyTriggers]);
+
+  async function updateCompanyTrigger(trigger: CompanyTrigger, action: 'enable' | 'disable' | 'fire') {
+    setTriggerAction(`${trigger.id}:${action}`);
+    setTriggerMessage('');
+    try {
+      const response = await coreFetch(`/v1/one/triggers/${encodeURIComponent(trigger.id)}/${action}`, { method: 'POST' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || `Could not ${action} trigger`);
+      setTriggerMessage(action === 'fire' ? `${trigger.name} queued for the ONE scheduler.` : `${trigger.name} ${action}d.`);
+      await refreshCompanyTriggers();
+    } catch (error) {
+      setTriggerMessage(error instanceof Error ? error.message : 'Trigger action failed.');
+    } finally {
+      setTriggerAction(null);
+    }
+  }
 
   const refreshCredentialVault = useCallback(async () => {
     try {
@@ -1932,6 +1991,56 @@ export function OneCockpit() {
               ))}
             </article>
           ))}
+        </div>
+      </section>
+
+      <section className="one-operations one-trigger-board">
+        <div className="one-operations-head">
+          <div>
+            <div className="one-panel-label">AUTONOMOUS OPERATIONS</div>
+            <strong>SCHEDULED TRIGGERS</strong>
+          </div>
+          <span className="one-trigger-owner"><CalendarClock size={15} /> ONE-company owns the clock</span>
+        </div>
+        <div className="one-trigger-summary">
+          <div><span>Configured</span><strong>{companyTriggers.length}</strong></div>
+          <div><span>Active</span><strong>{companyTriggers.filter((trigger) => Boolean(trigger.enabled)).length}</strong></div>
+          <div><span>LAO role</span><strong>Executor only</strong></div>
+          <div><span>Recent fires</span><strong>{triggerFires.length}</strong></div>
+        </div>
+        {triggerMessage && <p className="one-trigger-message" role="status">{triggerMessage}</p>}
+        <div className="one-trigger-list">
+          {!companyTriggers.length && <p>No ONE-company triggers configured.</p>}
+          {companyTriggers.map((trigger) => {
+            const busyAction = triggerAction?.startsWith(`${trigger.id}:`);
+            const lastFire = triggerFires.find((fire) => fire.trigger_id === trigger.id);
+            return (
+              <article key={trigger.id} className={trigger.enabled ? 'active' : 'disabled'}>
+                <div className="one-trigger-main">
+                  <i aria-hidden="true" />
+                  <div>
+                    <strong>{trigger.name}</strong>
+                    <span>{trigger.agent_id.toUpperCase()} · {trigger.cron_expression || 'interval'} · {trigger.timezone}</span>
+                  </div>
+                  <b>{trigger.enabled ? 'ACTIVE' : 'DISABLED'}</b>
+                </div>
+                <div className="one-trigger-timing">
+                  <span>Next run</span>
+                  <strong>{new Date(trigger.next_fire_epoch * 1000).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</strong>
+                  <span>Last</span>
+                  <strong>{lastFire ? `${lastFire.outcome}${lastFire.job_id ? ` · ${lastFire.job_id.slice(0, 12)}` : ''}` : 'Not fired by ONE yet'}</strong>
+                </div>
+                <div className="one-trigger-actions">
+                  <button type="button" disabled={busyAction} onClick={() => void updateCompanyTrigger(trigger, trigger.enabled ? 'disable' : 'enable')}>
+                    {trigger.enabled ? 'Disable' : 'Enable'}
+                  </button>
+                  <button type="button" className="primary" disabled={busyAction || !trigger.enabled} onClick={() => void updateCompanyTrigger(trigger, 'fire')}>
+                    Run now
+                  </button>
+                </div>
+              </article>
+            );
+          })}
         </div>
       </section>
 
