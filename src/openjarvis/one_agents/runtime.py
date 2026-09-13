@@ -224,26 +224,12 @@ def _enqueue_due_recurring_jobs() -> None:
                 ).fetchone()[0])
 
         def dispatch(agent_id: str, task: str, mode: str, priority: str) -> dict[str, Any]:
-            if mode != "lao_process":
-                return enqueue_job(agent_id, task, mode, priority)
-            # Compatibility cutover for workflows that still execute in LAO:
-            # ONE owns the clock; LAO receives a single named execution request.
-            from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
-            process_name = re.sub(r"^\[ONE trigger: [^]]+\]\s*", "", task).strip()
-            tool = LaoOrchestratorTool()
-            current = tool.execute(action="status", process_name=process_name, scope="production")
-            current_job = (current.metadata or {}).get("job") or {}
-            if str(current_job.get("status") or "") in {"Pending", "Assigned", "Running"}:
-                return {"id": str(current_job["id"])}
-            result = tool.execute(
-                action="start", mode="publish", process_name=process_name,
-                scope="production", confirm_publish=True,
-            )
-            payload = result.metadata or {}
-            if not result.success:
-                raise RuntimeError(str(payload.get("error") or payload.get("reason") or result.content))
-            lao_job = payload.get("job") or {}
-            return {"id": str(lao_job.get("id") or payload.get("job_id") or f"lao-{uuid.uuid4().hex[:12]}")}
+            agent = AGENTS.get(agent_id)
+            if not agent or agent.get("seat") == "worker" or agent.get("reports_to"):
+                raise RuntimeError(f"Scheduled trigger refused non-head target: {agent_id}")
+            if mode != "execute":
+                raise RuntimeError(f"Scheduled trigger refused direct/legacy mode: {mode}")
+            return enqueue_job(agent_id, task, "execute", priority)
 
         for outcome in trigger_module.fire_due(dispatch, active_count):
             print(f"[one-agents] company trigger {outcome['trigger_id']}: "
@@ -4250,9 +4236,9 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
     Deliberately a separate path from the ImagineIndia flow in _run_iris: that
     flow is live and produces real reels, so it is left exactly as it was.
 
-    IRIS coordinates here rather than producing. It does not run its own
-    research call for this brand -- the worker does that once, which is the
-    whole point of having a worker -- so a post costs one model call, not two.
+    IRIS coordinates here rather than producing. For the scheduled LinkedIn
+    Authority lane, the head first creates a grounded Sanjeevani evidence brief;
+    HERALD then executes that brief and never decides its own channel or topic.
     """
     task = str(job.get("task") or "")
     mode = str(job.get("mode") or "plan").strip().lower()
@@ -4283,6 +4269,53 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
     # would make IRIS refuse an angle this channel has never published.
     prior = memory.prior_titles("4", brand["vault_floor_name"])
 
+    grounded_angle = task.strip()
+    evidence_path = ""
+    evidence_count = 0
+    if brand.get("slug") == "linkedin_authority":
+        reusable = _sanjeevani_research()
+        if reusable is None:
+            stages.clear_stage("ia")
+            return {"agent":"IRIS", "mode":"blocked", "_blocked":True,
+                    "content":"LinkedIn Authority stopped: Sanjeevani is unavailable.",
+                    "blocked_reason":"Sanjeevani research library unavailable", "handed_to":None}
+        try:
+            snapshot = reusable.collect(
+                "AI leadership workplace automation India LinkedIn authority current trends",
+                markets=["IN"],
+            )
+            eligible = list(snapshot.get("eligible") or [])
+            evidence_count = len(eligible)
+            if not eligible:
+                stages.clear_stage("ia")
+                return {"agent":"IRIS", "mode":"blocked", "_blocked":True,
+                        "content":"LinkedIn Authority stopped: no fresh, date-verifiable Sanjeevani evidence.",
+                        "blocked_reason":"zero eligible current evidence", "handed_to":None}
+            brief, note = _research_synthesis(
+                "You are IRIS. Create one concise LinkedIn authority-post brief from ONLY the supplied "
+                "evidence. Do not invent facts. Return TITLE:, ANGLE:, PROOF:, CTA: and cite evidence_id. "
+                f"Avoid these prior titles: {json.dumps(prior[:15], ensure_ascii=False)}",
+                evidence=snapshot,
+            )
+            if not brief:
+                raise RuntimeError(note or "local synthesis returned no brief")
+            grounded_angle = brief
+            output_dir = _home() / "agent_outputs"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            evidence_file = output_dir / f"{job['id']}-linkedin-brief.md"
+            evidence_file.write_text(
+                f"# IRIS — LinkedIn Authority Brief\n\nRequest: {task}\n\n"
+                f"Researched by: Sanjeevani\n\n{brief}\n", encoding="utf-8")
+            evidence_path = str(evidence_file)
+            memory.remember(agent="IRIS", floor_id="4", floor_name=brand["vault_floor_name"],
+                            kind="LinkedIn Authority Brief", body=brief, task=task,
+                            tags=["linkedin", "authority", "sanjeevani"])
+        except Exception as exc:
+            stages.clear_stage("ia")
+            return {"agent":"IRIS", "mode":"blocked", "_blocked":True,
+                    "content":"LinkedIn Authority stopped before production: grounded brief failed.",
+                    "blocked_reason":f"{type(exc).__name__}: {exc}", "handed_to":None}
+
     # ``worker`` names who this handover is actually for. Without it the
     # building can only guess, and a head briefing its second worker walks to
     # the first worker's desk instead. Carried on the walking and briefing
@@ -4300,9 +4333,10 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
         awaiting_detail=f"Waiting on {worker_id.upper()} to produce the {display} post",
         enqueue=lambda: enqueue_job(
             worker_id,
-            json.dumps({"brand": brand["slug"], "angle": task.strip(),
+            json.dumps({"brand": brand["slug"], "angle": grounded_angle,
                         "priority": "", "prior_angles": prior[:15],
-                        "origin_job": job["id"]}),
+                        "origin_job": job["id"], "evidence_path": evidence_path,
+                        "evidence_count": evidence_count}),
             mode="execute",
             tier="fast",
         ),
@@ -4314,11 +4348,11 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
         "brand": brand["slug"],
         "content": f"Briefed {worker_id.upper()} on the next {display} post.",
         "prior_posts_considered": len(prior),
+        "sanjeevani_evidence_count": evidence_count,
+        "evidence_path": evidence_path,
         "handed_to": {"agent": worker_id.upper(), "job_id": worker["id"]},
         "note": (
-            f"{worker_id.upper()} will produce the plan and hand it back. "
-            "Nothing is published: that needs the channel registered in the "
-            "vault and OLYMPUS sign-off."
+            f"{worker_id.upper()} will execute the head-approved brief and hand back its receipt."
         ),
     }
 
