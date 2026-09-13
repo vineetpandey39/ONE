@@ -229,7 +229,12 @@ def _enqueue_due_recurring_jobs() -> None:
             # ONE owns the clock; LAO receives a single named execution request.
             from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
             process_name = re.sub(r"^\[ONE trigger: [^]]+\]\s*", "", task).strip()
-            result = LaoOrchestratorTool().execute(
+            tool = LaoOrchestratorTool()
+            current = tool.execute(action="status", process_name=process_name, scope="production")
+            current_job = (current.metadata or {}).get("job") or {}
+            if str(current_job.get("status") or "") in {"Pending", "Assigned", "Running"}:
+                return {"id": str(current_job["id"])}
+            result = tool.execute(
                 action="start", mode="publish", process_name=process_name,
                 scope="production", confirm_publish=True,
             )

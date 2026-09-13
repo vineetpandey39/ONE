@@ -344,6 +344,8 @@ async def one_fire_trigger(trigger_id: str):
         row = _company_triggers().make_due(trigger_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Unknown ONE trigger") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"accepted": True, "trigger": row, "note": "queued for the ONE scheduler loop"}
 
 
