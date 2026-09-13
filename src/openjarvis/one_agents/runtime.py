@@ -3949,25 +3949,23 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
             f"Picking the {kind_label} back up — LAO job {resume_id[:8]} after a restart",
             lao_job=resume_id)
     else:
-        # LAO integration wiring (2026-09-13, governance approval
-        # 61c59bc2-15ae-4deb-bc2f-c65a984bcbb8, decided_by=olympus): IRIS's
-        # Sanjeevani-grounded priority/angle now reaches the real LAO trigger
-        # as an OPTIONAL editorial hint, not a location override -- the
-        # deterministic no-repeat rotation above is completely unaffected,
-        # nothing here can steer which location comes next. What changes is
-        # that whichever location the rotation picks, ChatGPT is told about
-        # today's real, evidence-grounded viral/trend angle and instructed
-        # to weave it into the reel substantively IF a genuine connection
-        # exists to that specific location -- never a forced or fabricated
-        # tie-in. before_after keeps input_args={} for now; only the reel
-        # path is wired, matching what was actually requested and tested.
-        lao_input_args: dict[str, Any] = {}
-        if not is_before_after and (priority or angle):
-            lao_input_args = {"editorialPriority": priority, "editorialAngle": angle}
+        # LAO integration wiring (governance approval
+        # 61c59bc2-15ae-4deb-bc2f-c65a984bcbb8, decided_by=olympus) was tried
+        # 2026-09-13 and REVERTED the same day: live verification showed it
+        # structurally couldn't work against this package's own Bible (Frame
+        # 1's conflict must be a real LOCAL problem at whatever location the
+        # deterministic rotation lands on, so an abstract researched theme
+        # almost never has an honest connection to a random pick). Reverted
+        # to plain input_args={} -- there is NO location override to pass,
+        # and no editorial hint either now. IRIS's Sanjeevani research
+        # instead drives a separate, new lightweight Leonardo-based content
+        # format; this reel path is back to its original, untouched
+        # behaviour. IRIS's brief remains editorial intent and a durable
+        # record; it does not and must not steer which location comes next.
         started = tool.execute(
             action="start", mode="dry_run", process_name=process_name,
             scope="production",
-            input_args=lao_input_args,
+            input_args={},
         )
         if not started.success:
             stages.clear_stage("muse")
