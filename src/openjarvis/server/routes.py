@@ -557,9 +557,19 @@ def _one_agent_command(text: str) -> str | None:
             + "; then before that, ".join(parts)
         )
 
-    if status_agent and re.search(
-        r"\b(status|update|progress|found|find|result|results|lead|leads|opportunit|achiev|revenue)\w*\b", lowered
-    ):
+    # Do not let nouns such as "opportunity", "lead" or "find" hijack an
+    # imperative dispatch (for example "HERMES, start a KDP opportunity
+    # scan").  Those words describe the work as often as they ask for its
+    # status.  Status routing therefore needs an explicit status word, or an
+    # interrogative immediately asking what/how much the named agent found.
+    explicit_status = bool(re.search(
+        r"\b(status|update|progress|result|results|achiev|revenue)\w*\b", lowered
+    ))
+    interrogative_status = bool(re.search(
+        r"\b(what|how\s+many|kya)\b.{0,60}\b(found|find|lead|leads|opportunit)\w*\b",
+        lowered,
+    ))
+    if status_agent and (explicit_status or interrogative_status):
         return _friendly_agent_status(status_agent, AGENTS[status_agent]["name"])
 
     # Confirmed live (2026-07-19, traces.db traces 1f38a44b0264456c and
@@ -744,9 +754,10 @@ def _one_agent_command(text: str) -> str | None:
 
     mode = "plan"
     publish_is_negated = bool(
-        re.search(r"\b(do not|don't|dont|without)\s+(publish|post|publishing|posting)\b", lowered)
+        re.search(r"\b(do not|don't|dont|without)\b.{0,50}\b(publish|post|publishing|posting)\b", lowered)
     )
-    if re.search(r"\b(publish|post)\b", lowered) and not publish_is_negated:
+    research_only = bool(re.search(r"\bresearch\s+only\b", lowered))
+    if re.search(r"\b(publish|post)\b", lowered) and not publish_is_negated and not research_only:
         mode = "publish"
     else:
         # A bare mention of "plan"/"draft"/"prepare" only means "stay in plan
