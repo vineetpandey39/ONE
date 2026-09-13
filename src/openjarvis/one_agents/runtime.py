@@ -1770,8 +1770,12 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     radar_snapshot: dict[str, Any] = {"items": [], "errors": [{"error": "radar unavailable"}]}
     radar = None
     try:
+        # Global-first by explicit instruction 2026-09-13 ("apne search ko
+        # global rakhna as hume maximum profit bahar se hi ho payega") --
+        # KDP's real volume is the US/UK market, not India; the first entry
+        # picks the Google News edition discussion_persistence() etc. search.
         requested_region = str(portfolio_payload.get("region") or "").upper()
-        markets = [requested_region] if requested_region in {"IN", "US", "GB", "CA", "AU"} else ["IN", "US", "GB"]
+        markets = [requested_region] if requested_region in {"IN", "US", "GB", "CA", "AU"} else ["US", "GB", "CA", "AU", "IN"]
         reusable = _sanjeevani_research()
         if reusable is not None:
             engine = floors_bridge.load("floor_05_publishing", "book_demand_engine")
