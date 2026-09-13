@@ -200,6 +200,33 @@ def _enqueue_floor_watches() -> None:
 
 
 def _enqueue_due_recurring_jobs() -> None:
+    # ONE-company owns business triggers. LAO remains only an execution
+    # adapter called by the receiving agent; it is no longer the clock.
+    try:
+        import importlib.util
+        trigger_path = floors_bridge.floors_root() / "_work" / "triggers.py"
+        spec = importlib.util.spec_from_file_location("one_company_triggers", trigger_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("ONE trigger module loader unavailable")
+        trigger_module = sys.modules.get("one_company_triggers")
+        if trigger_module is None:
+            trigger_module = importlib.util.module_from_spec(spec)
+            sys.modules["one_company_triggers"] = trigger_module
+            spec.loader.exec_module(trigger_module)
+
+        def active_count(agent_id: str) -> int:
+            with _connect() as db:
+                return int(db.execute(
+                    "SELECT COUNT(*) FROM jobs WHERE agent_id=? AND status IN ('queued','running')",
+                    (agent_id,),
+                ).fetchone()[0])
+
+        for outcome in trigger_module.fire_due(enqueue_job, active_count):
+            print(f"[one-agents] company trigger {outcome['trigger_id']}: "
+                  f"{outcome['outcome']} {outcome.get('job_id') or ''}", flush=True)
+    except Exception as exc:  # scheduling failure must not stop manual work
+        print(f"[one-agents] company trigger scheduling skipped: {exc}", flush=True)
+
     try:
         _enqueue_floor_watches()
     except Exception as exc:  # noqa: BLE001 - the watch must never stop ordinary dispatch
