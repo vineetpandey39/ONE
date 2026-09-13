@@ -9,6 +9,9 @@ import os
 import re
 import time
 import uuid
+import importlib.util
+import sys
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -31,6 +34,23 @@ from openjarvis.server.models import (
 )
 
 router = APIRouter()
+
+
+def _company_triggers():
+    """Load the ONE-company-owned clock registry without moving policy into src."""
+    from openjarvis.one_agents import floors_bridge
+    path = floors_bridge.floors_root() / "_work" / "triggers.py"
+    name = "one_company_triggers"
+    module = sys.modules.get(name)
+    if module is not None:
+        return module
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot load company triggers from {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _one_model_status(model: str | None = None) -> dict[str, Any]:
@@ -292,6 +312,39 @@ async def one_jobs():
     from openjarvis.one_agents.runtime import list_jobs
 
     return {"jobs": list_jobs(30)}
+
+
+@router.get("/v1/one/triggers")
+async def one_triggers():
+    registry = _company_triggers()
+    return {"owner": "ONE-company", "executor": "LAO adapter where declared",
+            "triggers": registry.list_triggers(), "recent_fires": registry.fires(50)}
+
+
+@router.post("/v1/one/triggers/{trigger_id}/enable")
+async def one_enable_trigger(trigger_id: str):
+    try:
+        return _company_triggers().set_enabled(trigger_id, True)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown ONE trigger") from exc
+
+
+@router.post("/v1/one/triggers/{trigger_id}/disable")
+async def one_disable_trigger(trigger_id: str):
+    try:
+        return _company_triggers().set_enabled(trigger_id, False)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown ONE trigger") from exc
+
+
+@router.post("/v1/one/triggers/{trigger_id}/fire")
+async def one_fire_trigger(trigger_id: str):
+    """Make a trigger due; the worker claims it through the normal audited path."""
+    try:
+        row = _company_triggers().make_due(trigger_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown ONE trigger") from exc
+    return {"accepted": True, "trigger": row, "note": "queued for the ONE scheduler loop"}
 
 
 @router.post("/v1/one/jobs/{job_id}/cancel")
