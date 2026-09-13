@@ -3336,9 +3336,101 @@ def _run_alfa(job: dict[str, Any]) -> dict[str, Any]:
     return _local_plan(job)
 
 
+# The exact objective text a human already ran three times by hand through
+# the company-plane CLI (poseidon-ba75d185938b, -eb7f3fcadc52, -9677d9b83977
+# -- all completed) before this trigger existed. Reused verbatim rather than
+# reworded, since TRITON's own keyword-based job-hunt detection in
+# floors/_work/handlers/executive.py matches on this exact proven phrasing.
+_SONIA_JOB_HUNT_OBJECTIVE = (
+    "Run the corrected end-to-end governed Sonia Chauhan job hunt using her "
+    "verified canonical resume and structured verified profile. Research "
+    "fresh Manual Testing, Automation Testing, Database Testing, and "
+    "Product Owner roles in India through Sanjeevani, apply freshness "
+    "gates, deduplicate and rank, then hand qualifying dated openings to "
+    "CLIO for truthful local resume evidence packets. Do not email or "
+    "submit applications without OLYMPUS approval."
+)
+
+
 def _run_poseidon(job: dict[str, Any]) -> dict[str, Any]:
-    """Floor 1 - Corporate Services. Pending LAO integration."""
+    """Floor 1 - Corporate Services.
+
+    Bridges a scheduled Sonia Chauhan job-hunt trigger into the governed
+    company plane via floors_bridge.dispatch_company_job() -- the exact CLI
+    path a human already ran by hand three times before this trigger
+    existed, now on a schedule. Everything else POSEIDON might be asked is
+    still "Pending LAO integration", same as before.
+
+    The company plane is a completely separate dispatch system from this
+    runtime-plane queue: its own company_jobs.db, its own fail-closed
+    evaluate()/dispatch() gate (floors/_work/dispatch.py), its own standing
+    floors/_work/worker.py poller. This function's only real job is
+    deciding whether to start a new cycle at all -- checked against
+    company_jobs.db directly first, since a cycle can sit genuinely open
+    for days at CLIO's own A2 resume-review gate, and firing a second one
+    on top would research the same roles twice and leave two cycles for a
+    human to untangle instead of one to approve.
+    """
+    task = str(job.get("task") or "")
+    if "sonia" in task.lower() and "job hunt" in task.lower():
+        return _poseidon_sonia_job_hunt(job)
     return _local_plan(job)
+
+
+def _poseidon_sonia_job_hunt(job: dict[str, Any]) -> dict[str, Any]:
+    stages.worker_confirms_receipt(
+        "poseidon", "Checking for an already-open Sonia Chauhan job-hunt cycle")
+    company_db = _home() / "company_jobs.db"
+    open_cycle = None
+    if company_db.is_file():
+        try:
+            con = sqlite3.connect(str(company_db))
+            try:
+                open_cycle = con.execute(
+                    "SELECT job_id, status FROM jobs WHERE assigned_to='poseidon' "
+                    "AND floor_id='1' AND status NOT IN ('completed','cancelled') "
+                    "AND objective LIKE '%Sonia%job hunt%' LIMIT 1"
+                ).fetchone()
+            finally:
+                con.close()
+        except Exception as exc:
+            stages.clear_stage("poseidon")
+            return {
+                "agent": "POSEIDON", "mode": "blocked", "_blocked": True,
+                "content": "Could not check the company plane for an open Sonia job-hunt cycle.",
+                "blocked_reason": f"{type(exc).__name__}: {exc}",
+            }
+    if open_cycle:
+        stages.clear_stage("poseidon")
+        return {
+            "agent": "POSEIDON", "mode": "skipped",
+            "content": (f"A Sonia Chauhan job-hunt cycle is already open "
+                        f"({open_cycle[0]}, {open_cycle[1]}) -- not starting a second "
+                        "one on top of it."),
+            "existing_job_id": open_cycle[0], "existing_status": open_cycle[1],
+        }
+
+    stages.set_stage("poseidon", stages.CARRYING_TO_WORKER,
+                     "Starting a governed Sonia Chauhan job-hunt cycle", worker="triton")
+    result = floors_bridge.dispatch_company_job(
+        agent_id="poseidon", floor_id="1", objective=_SONIA_JOB_HUNT_OBJECTIVE,
+        capability="network:fetch", action="internal_analysis",
+    )
+    stages.clear_stage("poseidon")
+    if not result or not result.get("ok"):
+        error = (result or {}).get("error") or "company-plane dispatch bridge unavailable"
+        return {
+            "agent": "POSEIDON", "mode": "blocked", "_blocked": True,
+            "content": "Could not start the Sonia Chauhan job-hunt cycle.",
+            "blocked_reason": error,
+        }
+    return {
+        "agent": "POSEIDON", "mode": "execute",
+        "content": f"Started a governed Sonia Chauhan job-hunt cycle: {result.get('job_id') or '(id not parsed)'}.",
+        "company_job_id": result.get("job_id"),
+        "note": ("POSEIDON → TRITON → CLIO on the company plane; CLIO stops for an "
+                 "owner resume review before anything leaves ONE."),
+    }
 
 
 def _run_argus(job: dict[str, Any]) -> dict[str, Any]:
