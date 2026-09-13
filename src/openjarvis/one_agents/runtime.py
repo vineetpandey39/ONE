@@ -54,6 +54,7 @@ AGENTS: dict[str, dict[str, str]] = {
     # router in one-company/floors/floor_04_media, never by preference order --
     # guessing wrong here means posting to the wrong account.
     "kairos": {"name": "KAIROS", "role": "aibyvineet channel content production worker", "floor_id": "4", "floor_name": "Media & Content", "division": "media", "seat": "worker", "reports_to": "ia"},
+    "herald": {"name": "HERALD", "role": "LinkedIn authority-post production and publishing worker", "floor_id": "4", "floor_name": "Media & Content", "division": "media", "seat": "worker", "reports_to": "ia"},
     "ares": {"name": "ARES", "role": "SEO, social, and cross-floor distribution operator", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth"},
     "alfa": {"name": "ALFA", "role": "Pricing, funnels, and revenue-attribution operator", "floor_id": "2", "floor_name": "Commerce & Monetization", "division": "commerce"},
     "poseidon": {"name": "POSEIDON", "role": "Finance, HR, Admin, and Legal/Compliance operator", "floor_id": "1", "floor_name": "Corporate Services", "division": "corporate"},
@@ -4344,6 +4345,56 @@ def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _run_herald(job: dict[str, Any]) -> dict[str, Any]:
+    """Dedicated LinkedIn worker: LAO executes; HERALD tracks and reports to IRIS."""
+    payload = _json_task(job)
+    if str(payload.get("brand") or "") != "linkedin_authority":
+        raise RuntimeError("HERALD refuses work outside linkedin_authority")
+    stages.worker_confirms_receipt("herald", "Received the LinkedIn Authority brief from IRIS")
+    tool = LaoOrchestratorTool()
+    process_name = "Daily LinkedIn Authority Post"
+    resume_id = job_recovery.resume_target(job)
+    if resume_id:
+        lao_job_id = resume_id
+    else:
+        started = tool.execute(action="start", mode="publish", process_name=process_name,
+                               scope="production", confirm_publish=True)
+        if not started.success:
+            raise RuntimeError(f"LAO refused LinkedIn production: {started.content}")
+        started_payload = started.metadata or {}
+        lao_job_id = str((started_payload.get("job") or {}).get("id") or "")
+        if not lao_job_id:
+            raise RuntimeError("LAO started LinkedIn production without returning a job id")
+        job_recovery.attach(_connect, job["id"], lao_job_id)
+    terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
+    deadline = time.time() + float(os.environ.get("ONE_LINKEDIN_MAX_WAIT_SECONDS", "3600"))
+    status = "Pending"
+    last: dict[str, Any] = {}
+    while time.time() < deadline:
+        stages.set_stage("herald", stages.EXECUTING, f"Publishing LinkedIn authority post · LAO {status}",
+                         lao_job=lao_job_id, lao_process=process_name)
+        time.sleep(float(os.environ.get("ONE_LAO_POLL_SECONDS", "30")))
+        job_recovery.heartbeat(_connect, job["id"])
+        probe = tool.execute(action="status", process_name=process_name, scope="production", job_id=lao_job_id)
+        if not probe.success:
+            continue
+        last = probe.metadata or {}
+        status = str((last.get("job") or {}).get("status") or status)
+        if status in terminal:
+            break
+    if status != "Successful":
+        stages.clear_stage("herald"); stages.clear_stage("ia")
+        raise RuntimeError(f"LinkedIn Authority workflow ended as {status}")
+    stages.set_stage("herald", stages.CARRYING_TO_HEAD, "Taking the verified LinkedIn receipt back to IRIS")
+    report = enqueue_job("ia", json.dumps({"brand":"linkedin_authority", "worker":"herald",
+        "title":"Daily LinkedIn Authority Post", "format":"LinkedIn post", "published":True,
+        "output":f"LAO job {lao_job_id}", "origin_job":payload.get("origin_job")}), mode="report", tier="fast")
+    stages.set_stage("herald", stages.DELIVERING, "Delivered the LinkedIn publish receipt to IRIS")
+    time.sleep(1); stages.clear_stage("herald")
+    return {"agent":"HERALD", "mode":"publish", "published":True, "lao_job":lao_job_id,
+            "handed_to":{"agent":"IRIS", "job_id":report["id"]}}
+
+
 # The capability check asks whether an agent holds *any* capability, not
 # whether it holds one particular one.
 #
@@ -4466,6 +4517,7 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         "ia": _run_iris,
         "muse": _run_muse,
         "kairos": _run_kairos,
+        "herald": _run_herald,
         "ares": _run_ares,
         "alfa": _run_alfa,
         "poseidon": _run_poseidon,
