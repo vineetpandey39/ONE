@@ -1069,6 +1069,12 @@ IA_PROCESS_NAME = "ImagineIndia Reel - Twice Daily Production"
 # static before/after square-image post. Every other Floor 4 worker
 # (FABULA/LUMIO/PRAXIS/TESSERA) is untouched; their brands are unaffected.
 IA_BEFORE_AFTER_PROCESS_NAME = "ImagineIndia Before/After Post"
+# Added 2026-09-13, same day as the editorialPriority/Angle reel wiring was
+# reverted (see _run_muse's reel branch below) -- a separate, much lighter
+# LAO process: imagineindia-trend-spotlight, single Leonardo-animated image
+# instead of the main reel's 5-frame Bible structure, so IRIS's research
+# has somewhere it can genuinely drive the visual content.
+IA_TREND_SPOTLIGHT_PROCESS_NAME = "ImagineIndia Trend Spotlight"
 # Matches the imagineindia-instagram-reel package's own input_schema default
 # for locationManifestPath (package.json). Duplicated here (not read from the
 # package) only so _peek_next_ia_location below can predict a location
@@ -3533,8 +3539,14 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     )
     # Specific formats must win before the generic word "post". Previously a
     # request such as "post this carousel" silently became a before/after.
+    # "spotlight"/"trend spotlight" was added 2026-09-13, replacing the same-
+    # day-reverted editorialPriority/Angle wiring into the main reel -- see
+    # imagineindia-trend-spotlight's package.json release_notes. Checked
+    # before before_after's "photo" match so a "trend spotlight" request
+    # never gets misread as a static before/after post.
     content_type = (
         "carousel" if re.search(r"\b(carousel|slides?|swipe)\b", lowered_task)
+        else "trend_spotlight" if re.search(r"\bspotlight\b", lowered_task)
         else "before_after" if re.search(r"\b(before.?after|static|image|photo|post)\b", lowered_task)
         else "reel"
     )
@@ -3546,6 +3558,7 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     content_label = {
         "carousel": "carousel",
         "before_after": "before/after post",
+        "trend_spotlight": "trend spotlight",
         "reel": "reel",
     }.get(content_type, "post")
 
@@ -3592,6 +3605,32 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         )
         return result
 
+    # Trend Spotlight is deliberately ad hoc, per explicit user direction
+    # (2026-09-13): unlike the reel/before_after/carousel formats, it has no
+    # location catalogue or Bible structure to fall back on if the research
+    # is weak -- the whole video IS today's researched story, so a weak day
+    # must not ship a forced/thin spotlight. Gate on Sanjeevani's own
+    # commissioning_eligible flag (>=3 eligible items, >=2 source types) on
+    # ANY category researched above, including predicted_location. A caller
+    # (or a future trigger this session was told NOT to build -- "Mn abhi
+    # trigger ke liye ONE mn alag se kuch banaunga... abhi wait karo") can
+    # dispatch this daily and IRIS will simply no-op on weak days.
+    if content_type == "trend_spotlight":
+        strong = any(
+            bool(cat.get("commissioning_eligible"))
+            for cat in media_evidence.get("categories", {}).values()
+        )
+        if not strong:
+            stages.clear_stage("ia")
+            result["handed_to"] = None
+            result["note"] = (
+                "No genuinely strong trend today (nothing hit Sanjeevani's "
+                "commissioning_eligible bar across any researched category) -- "
+                "not forcing a Trend Spotlight on thin evidence. Try again "
+                "later, or ask for the regular reel instead."
+            )
+            return result
+
     # --- the handoff ------------------------------------------------------
     # head_briefs_worker (stages.py) owns the CARRYING_TO_WORKER/BRIEFING/
     # RECEIVING/AWAITING_WORKER choreography -- see its docstring for why
@@ -3633,6 +3672,8 @@ def _iris_report(job: dict[str, Any]) -> dict[str, Any]:
         "carousel": "carousel",
         "before_after": "before/after post",
         "before-after": "before/after post",
+        "trend_spotlight": "trend spotlight",
+        "trend-spotlight": "trend spotlight",
         "reel": "reel",
     }.get(content_type, "post")
     stages.set_stage("ia", stages.REPORTING, f"Reviewing MUSE's finished {content_label}")
@@ -3889,7 +3930,8 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
             "muse", f"Got it — {(str(brief.get('angle') or brief.get('topic') or 'carousel'))[:110]}")
         return _run_muse_carousel(job, brief)
     is_before_after = content_type in ("before_after", "before-after", "beforeafter")
-    kind_label = "before/after post" if is_before_after else "reel"
+    is_trend_spotlight = content_type in ("trend_spotlight", "trend-spotlight", "spotlight")
+    kind_label = "before/after post" if is_before_after else "trend spotlight" if is_trend_spotlight else "reel"
 
     stages.worker_confirms_receipt(
         "muse",
@@ -3898,8 +3940,8 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
 
     tool = LaoOrchestratorTool()
     process_name = (
-        os.environ.get("LAO_IA_BEFORE_AFTER_PROCESS", IA_BEFORE_AFTER_PROCESS_NAME)
-        if is_before_after
+        os.environ.get("LAO_IA_BEFORE_AFTER_PROCESS", IA_BEFORE_AFTER_PROCESS_NAME) if is_before_after
+        else os.environ.get("LAO_IA_TREND_SPOTLIGHT_PROCESS", IA_TREND_SPOTLIGHT_PROCESS_NAME) if is_trend_spotlight
         else os.environ.get("LAO_IA_PROCESS", IA_PROCESS_NAME)
     )
 
@@ -3952,20 +3994,24 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         # LAO integration wiring (governance approval
         # 61c59bc2-15ae-4deb-bc2f-c65a984bcbb8, decided_by=olympus) was tried
         # 2026-09-13 and REVERTED the same day: live verification showed it
-        # structurally couldn't work against this package's own Bible (Frame
-        # 1's conflict must be a real LOCAL problem at whatever location the
+        # structurally couldn't work against the reel's own Bible (Frame 1's
+        # conflict must be a real LOCAL problem at whatever location the
         # deterministic rotation lands on, so an abstract researched theme
-        # almost never has an honest connection to a random pick). Reverted
-        # to plain input_args={} -- there is NO location override to pass,
-        # and no editorial hint either now. IRIS's Sanjeevani research
-        # instead drives a separate, new lightweight Leonardo-based content
-        # format; this reel path is back to its original, untouched
-        # behaviour. IRIS's brief remains editorial intent and a durable
-        # record; it does not and must not steer which location comes next.
+        # almost never has an honest connection to a random pick). The reel
+        # and before_after paths pass input_args={} -- there is NO location
+        # override to pass, and no editorial hint either now. IRIS's
+        # Sanjeevani research instead drives the separate trend_spotlight
+        # path below, added the same day: that package has no location
+        # catalogue or Bible structure to fall back on, so priority/angle
+        # ARE its required content, not an optional hint.
+        lao_input_args: dict[str, Any] = (
+            {"editorialPriority": priority, "editorialAngle": angle}
+            if is_trend_spotlight else {}
+        )
         started = tool.execute(
             action="start", mode="dry_run", process_name=process_name,
             scope="production",
-            input_args={},
+            input_args=lao_input_args,
         )
         if not started.success:
             stages.clear_stage("muse")
@@ -4029,7 +4075,7 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
             last = {"raw": probe.content}
         status = str((last.get("job") or {}).get("status") or status)
         elapsed = int((time.time() - (deadline - max_wait)) // 60)
-        verb = "Composing" if is_before_after else "Shooting"
+        verb = "Composing" if is_before_after else "Spotlighting" if is_trend_spotlight else "Shooting"
         stages.set_stage(
             "muse", stages.EXECUTING,
             (f"{verb} “{headline[:70]}” · LAO {status} · {elapsed}m" if headline
@@ -4063,6 +4109,12 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         style = str((out.get("before_after_format_result") or {}).get("before_after_style") or "")
         title = f"{location_name} before/after ({style})" if (location_name and style) else (location_name or headline or "")
         run_dir = str((out.get("composite_image_path") or {}).get("path") or "")
+        published = str((out.get("meta_publish_result") or {}).get("status") or "") == "published"
+    elif is_trend_spotlight:
+        # imagineindia-trend-spotlight has no location catalogue -- title is
+        # always the researched headline, never a place name.
+        run_dir = str((out.get("final_video") or {}).get("path") or "")
+        title = headline or f"Trend Spotlight (LAO job {lao_job_id[:8]})"
         published = str((out.get("meta_publish_result") or {}).get("status") or "") == "published"
     else:
         reel = out.get("reel") or out.get("meta_publish") or {}
@@ -4110,10 +4162,10 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         body=(f"Ran LAO's ImagineIndia {kind_label} pipeline to completion.\n\n"
               f"- LAO job: `{lao_job_id}` — {status}\n"
               f"- Output: `{run_dir or '(not reported)'}`\n"
-              f"- {'Post' if is_before_after else 'Reel'}: {title}\n\n"
+              f"- {kind_label.title()}: {title}\n\n"
               f"Handed the finished {kind_label} to IRIS."),
         task=f"{priority or 'rotation pick'} / {region}",
-        tags=["imagineindia", "media", "production"] + (["before_after"] if is_before_after else ["reel"]),
+        tags=["imagineindia", "media", "production", content_type],
     )
 
     enqueue_job(
