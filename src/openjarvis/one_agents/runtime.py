@@ -4433,6 +4433,7 @@ def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
 
 def _run_herald(job: dict[str, Any]) -> dict[str, Any]:
     """Dedicated LinkedIn worker: LAO executes; HERALD tracks and reports to IRIS."""
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
     payload = _json_task(job)
     if str(payload.get("brand") or "") != "linkedin_authority":
         raise RuntimeError("HERALD refuses work outside linkedin_authority")
