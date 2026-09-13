@@ -7,6 +7,7 @@ import importlib.util
 import os
 import re
 import sqlite3
+import sys
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -221,7 +222,24 @@ def _enqueue_due_recurring_jobs() -> None:
                     (agent_id,),
                 ).fetchone()[0])
 
-        for outcome in trigger_module.fire_due(enqueue_job, active_count):
+        def dispatch(agent_id: str, task: str, mode: str, priority: str) -> dict[str, Any]:
+            if mode != "lao_process":
+                return enqueue_job(agent_id, task, mode, priority)
+            # Compatibility cutover for workflows that still execute in LAO:
+            # ONE owns the clock; LAO receives a single named execution request.
+            from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+            process_name = re.sub(r"^\[ONE trigger: [^]]+\]\s*", "", task).strip()
+            result = LaoOrchestratorTool().execute(
+                action="start", mode="publish", process_name=process_name,
+                scope="production", confirm_publish=True,
+            )
+            payload = result.metadata or {}
+            if not result.success:
+                raise RuntimeError(str(payload.get("error") or payload.get("reason") or result.content))
+            lao_job = payload.get("job") or {}
+            return {"id": str(lao_job.get("id") or payload.get("job_id") or f"lao-{uuid.uuid4().hex[:12]}")}
+
+        for outcome in trigger_module.fire_due(dispatch, active_count):
             print(f"[one-agents] company trigger {outcome['trigger_id']}: "
                   f"{outcome['outcome']} {outcome.get('job_id') or ''}", flush=True)
     except Exception as exc:  # scheduling failure must not stop manual work
