@@ -1779,8 +1779,17 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
             if engine is None:
                 raise RuntimeError("Floor 05 book-demand engine is unavailable")
             supply_collector = radar.book_supply if radar is not None else None
+            # A trigger-fired job's task carries a "[ONE trigger: ...]"
+            # schedule label the Chairman needs to see (kept in `task` for
+            # the stage detail above), but engine.collect() uses this same
+            # string as a literal search query. Stripped here so a query
+            # never gets built from "ONE trigger KDP Book Factory Weekly
+            # Monday IST" -- confirmed live 2026-09-13 via query_plan() that
+            # the unstripped prefix dominates the extracted query terms and
+            # returns nothing a real headline would ever match.
+            research_query = re.sub(r"^\[ONE trigger: [^\]]+\]\s*", "", task).strip() or task
             radar_snapshot = engine.collect(
-                task, reusable, markets=markets, supply_collector=supply_collector
+                research_query, reusable, markets=markets, supply_collector=supply_collector
             )
             radar_text = json.dumps(radar_snapshot, ensure_ascii=False, separators=(",", ":"))
         else:
