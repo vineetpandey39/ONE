@@ -2535,7 +2535,8 @@ def _peitho_angle_prompt(title: str, genre: str, tropes: str, premise: str, outl
     )
 
 
-def _run_peitho_lao_draft(angle_prompts: list[str]) -> tuple[dict[str, str], str]:
+def _run_peitho_lao_draft(angle_prompts: list[str], *, expected_markers: list[str] | None = None,
+                          timeout_ms: int = 120000) -> tuple[dict[str, str], str]:
     """Run all 4 angle prompts through LAO's own, already-logged-in ChatGPT
     session -- reuses the exact `chatgptLogin` credential and production-
     hardened `ask_chatgpt` action ImagineIndia and KDP Book Factory already
@@ -2562,7 +2563,12 @@ def _run_peitho_lao_draft(angle_prompts: list[str]) -> tuple[dict[str, str], str
             # A fresh chat per angle -- otherwise angle 2-4 would be written
             # with angle 1's beats still in the same conversation's context.
             steps.append({"action": "navigate", "args": {"url": "https://chatgpt.com/"}})
-        steps.append({"action": "ask_chatgpt", "args": {"prompt": prompt, "timeout_ms": 120000, "as": f"angle_{i}"}})
+        ask_args: dict[str, Any] = {"prompt": prompt, "timeout_ms": timeout_ms, "as": f"angle_{i}"}
+        if expected_markers:
+            # Without markers ask_chatgpt returns the first assistant text it
+            # sees, which for a long reply is the reply mid-stream.
+            ask_args["expected_markers"] = list(expected_markers)
+        steps.append({"action": "ask_chatgpt", "args": ask_args})
 
     tool = LaoOrchestratorTool()
     started = tool.execute(
@@ -3874,8 +3880,6 @@ def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str, 
     the wording. Keeping this separate leaves the ImagineIndia report exactly
     as it was rather than making one function serve two voices badly.
     """
-    stages.set_stage("ia", stages.REPORTING,
-                     f"Reporting the finished {brand.get('display_name', brand['slug'])} post")
     try:
         payload = json.loads(str(job.get("task") or "{}"))
     except json.JSONDecodeError:
@@ -3883,6 +3887,32 @@ def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str, 
 
     display = brand.get("display_name", brand["slug"])
     worker = str(payload.get("worker") or brand["worker_agent_id"]).upper()
+
+    if str(payload.get("status") or "") == "stopped":
+        # The worker ended without anything to deliver. Reported as that, not
+        # as "ready", and kept out of the brand's ANGLE history: a post that
+        # was never made must not stop tomorrow's run from making it.
+        stages.set_stage("ia", stages.REPORTING, f"Reporting why today's {display} post was not made")
+        fmt = payload.get("format") or "post"
+        reason = str(payload.get("note") or payload.get("error") or "no reason was given")
+        message = (f"Sir, today's {display} {fmt} was not produced. {worker} stopped before making it.\n\n"
+                   f"Reason: {reason}")
+        output_dir = _home() / "agent_outputs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{job['id']}.md"
+        output_path.write_text(f"# IRIS - Stopped ({display})\n\n{message}\n", encoding="utf-8")
+        remembered = memory.remember(
+            agent="IRIS", floor_id="4", floor_name=brand["vault_floor_name"],
+            kind="Stopped Report", body=message,
+            tags=[brand["slug"], "media", str(fmt).lower(), "stopped"],
+        )
+        time.sleep(2.0)
+        stages.clear_stage("ia")
+        return {"agent": "IRIS", "mode": "report", "brand": brand["slug"], "content": message,
+                "status": "stopped", "error": payload.get("error"), "published": False,
+                "output": str(output_path), "vault_note": remembered.get("path")}
+
+    stages.set_stage("ia", stages.REPORTING, f"Reporting the finished {display} post")
     title = payload.get("title") or "(details in the plan)"
     fmt = payload.get("format") or "post"
     output = payload.get("output") or "(not reported)"
@@ -4515,7 +4545,9 @@ def _kairos_chatgpt(prompt: str) -> tuple[str, str]:
     The draft path PEITHO and MUSE already use: the session the LAO robot keeps
     open on the existing subscription, not a metered API.
     """
-    output, error = _run_peitho_lao_draft([prompt])
+    carousel = floors_bridge.load("floor_04_media", "aibyvineet_carousel")
+    markers = list(getattr(carousel, "COPY_MARKERS", ()) or ())
+    output, error = _run_peitho_lao_draft([prompt], expected_markers=markers or None, timeout_ms=240000)
     return str(output.get("angle_1") or ""), error
 
 
