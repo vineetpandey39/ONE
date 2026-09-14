@@ -102,6 +102,9 @@ $modelCacheRoot = Join-Path $dataRoot "model_cache"
 $runtimeHome = Join-Path $dataRoot "runtime_home"
 New-Item -ItemType Directory -Force -Path $modelCacheRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $runtimeHome | Out-Null
+# Preserve the real Windows owner profile for discovering separately installed
+# CLIs. HOME/USERPROFILE below intentionally isolate ONE runtime data on E:.
+$env:ONE_OWNER_PROFILE = $env:USERPROFILE
 $env:HOME = $runtimeHome
 $env:USERPROFILE = $runtimeHome
 $runtimeDrive = Split-Path -Qualifier $runtimeHome
