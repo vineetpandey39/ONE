@@ -4520,9 +4520,11 @@ def _kairos_chatgpt(prompt: str) -> tuple[str, str]:
 
 
 def _kairos_lao_images(prompts: list[str], target_dir: Path, job_id: str = "") -> dict[int, str]:
-    """Text-free slide visuals through LAO's reusable ChatGPT image component.
+    """PostForge-style slides through LAO's reusable ChatGPT image component.
 
-    One draft, one logged-in browser, a fresh chat per image. Each file lands
+    One draft, one logged-in browser, one chat for every slide - the first
+    version opened a new chat per image and filled ChatGPT's history with five
+    unrelated conversations for one carousel. Each file lands
     at an absolute host path: the handler joins its artifacts directory with
     the filename, and joining with an absolute path yields that path - the same
     way SCRIBE's cover refresh already gets its art back. A failed step ends
@@ -4554,12 +4556,17 @@ def _kairos_lao_images(prompts: list[str], target_dir: Path, job_id: str = "") -
             {"action": "get_credential", "args": {"assetName": "chatgptLogin", "as": "chatgpt_credential"}},
             {"action": "chatgpt_login_with_credential", "args": {"credential": "{{chatgpt_credential}}"}},
         ]
-        for index in missing:
-            steps.append({"action": "navigate", "args": {"url": "https://chatgpt.com/"}})
+        # One fresh chat for the whole carousel, then every slide in it. Fresh-
+        # chat recovery is switched off so a stall is nudged in place instead of
+        # silently opening another conversation.
+        steps.append({"action": "navigate", "args": {"url": "https://chatgpt.com/"}})
+        for position, index in enumerate(missing):
             steps.append({"action": "generate_and_download_chatgpt_image", "args": {
                 "prompt": prompts[index], "filename": str(wanted[index]),
                 "stall_timeout_ms": 180000, "max_attempts": 4, "poll_ms": 3000,
-                "always_nudge_fresh_image": True, "as": f"visual_{index + 1:02d}"}})
+                "always_nudge_fresh_image": position == 0,
+                "allow_fresh_chat_recovery": False,
+                "as": f"visual_{index + 1:02d}"}})
         started = tool.execute(action="run_draft", steps=steps,
                                draft_name="kairos-carousel-visuals", folder_id=_PEITHO_LAO_FOLDER_ID)
         if not started.success:
