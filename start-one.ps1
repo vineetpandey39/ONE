@@ -124,6 +124,10 @@ if (Test-Path $envFile) {
         }
     }
 }
+# This is infrastructure policy, not a user-overridable provider setting.
+# Re-assert it after one.env so stale configuration cannot redirect ONE or
+# Sanjeevani to the Windows profile's default C: inventory.
+$env:OLLAMA_MODELS = Join-Path $runtimeHome ".ollama\models"
 if (-not $env:SANJEEVANI_RESEARCH_LIBRARY) {
     $env:SANJEEVANI_RESEARCH_LIBRARY = Join-Path $oneRoot "sanjeevani\research_library.py"
 }
@@ -216,6 +220,17 @@ if (($env:ONE_SYNC_ON_START -ne "false")) {
 if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
     Start-Process -FilePath $ollama -ArgumentList "serve" -WindowStyle Hidden
     Start-Sleep -Seconds 2
+}
+
+# Guard the canonical E: model inventory on every ONE boot. A missing model is
+# reported durably; startup never switches to a hidden C: inventory and never
+# launches an unapproved multi-gigabyte repair download.
+$modelInventoryGuard = Join-Path $oneRoot "sanjeevani\verify_model_inventory.py"
+if (Test-Path $modelInventoryGuard) {
+    & $pythonExe $modelInventoryGuard
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Sanjeevani model inventory needs attention; see data\sanjeevani\model-inventory-status.json" -ForegroundColor DarkYellow
+    }
 }
 
 if (($env:ONE_FLUX_AUTOSTART -eq "true") -or ($env:ONE_IMAGE_PROVIDER -eq "flux")) {
