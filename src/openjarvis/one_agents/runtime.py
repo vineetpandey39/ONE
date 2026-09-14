@@ -4501,15 +4501,125 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
     }
 
 
-def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
-    """Floor 4 worker for aibyvineet. Its logic lives in one-company/floors.
+def _kairos_collect(query: str) -> dict[str, Any]:
+    """KAIROS's evidence port: Sanjeevani, the only researcher a floor may use."""
+    reusable = _sanjeevani_research()
+    if reusable is None:
+        raise RuntimeError("Sanjeevani research library is unavailable")
+    return reusable.collect(query, markets=["IN", "US"])
 
-    If that tree is unavailable this degrades to the local planner rather than
-    failing the job, so this repository still runs on its own.
+
+def _kairos_chatgpt(prompt: str) -> tuple[str, str]:
+    """One carousel copy candidate through LAO's logged-in ChatGPT session.
+
+    The draft path PEITHO and MUSE already use: the session the LAO robot keeps
+    open on the existing subscription, not a metered API.
+    """
+    output, error = _run_peitho_lao_draft([prompt])
+    return str(output.get("angle_1") or ""), error
+
+
+def _kairos_lao_images(prompts: list[str], target_dir: Path, job_id: str = "") -> dict[int, str]:
+    """Text-free slide visuals through LAO's reusable ChatGPT image component.
+
+    One draft, one logged-in browser, a fresh chat per image. Each file lands
+    at an absolute host path: the handler joins its artifacts directory with
+    the filename, and joining with an absolute path yields that path - the same
+    way SCRIBE's cover refresh already gets its art back. A failed step ends
+    the whole draft, so a second pass asks only for what is still missing.
+
+    Heartbeats, deliberately never attaches. job_recovery re-queues an attached
+    job after a restart, and KAIROS does not resume: it would write fresh copy
+    and draw a second set of images. An honest failure after a restart is
+    better than spending the subscription's image allowance twice.
+    """
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    wanted = {index: target_dir / f"visual-{index + 1:02d}.png" for index in range(len(prompts))}
+
+    def ready() -> dict[int, str]:
+        return {i: str(p) for i, p in wanted.items() if p.is_file() and p.stat().st_size > 0}
+
+    tool = LaoOrchestratorTool()
+    poll_seconds = float(os.environ.get("ONE_LAO_POLL_SECONDS", "30"))
+    max_wait = float(os.environ.get("ONE_KAIROS_IMAGES_MAX_WAIT", "5400"))
+    terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
+    for attempt in (1, 2):
+        missing = [index for index in wanted if index not in ready()]
+        if not missing:
+            break
+        steps: list[dict[str, Any]] = [
+            {"action": "open_browser"},
+            {"action": "get_credential", "args": {"assetName": "chatgptLogin", "as": "chatgpt_credential"}},
+            {"action": "chatgpt_login_with_credential", "args": {"credential": "{{chatgpt_credential}}"}},
+        ]
+        for index in missing:
+            steps.append({"action": "navigate", "args": {"url": "https://chatgpt.com/"}})
+            steps.append({"action": "generate_and_download_chatgpt_image", "args": {
+                "prompt": prompts[index], "filename": str(wanted[index]),
+                "stall_timeout_ms": 180000, "max_attempts": 4, "poll_ms": 3000,
+                "always_nudge_fresh_image": True, "as": f"visual_{index + 1:02d}"}})
+        started = tool.execute(action="run_draft", steps=steps,
+                               draft_name="kairos-carousel-visuals", folder_id=_PEITHO_LAO_FOLDER_ID)
+        if not started.success:
+            if attempt == 1:
+                raise RuntimeError(f"LAO refused the visuals draft: {str(started.content)[:300]}")
+            break
+        try:
+            lao_job_id = ((json.loads(started.content).get("job") or {}).get("id")) or ""
+        except json.JSONDecodeError:
+            lao_job_id = ""
+        if not lao_job_id:
+            break
+        status = "Pending"
+        deadline = time.time() + max_wait
+        while time.time() < deadline:
+            time.sleep(poll_seconds)
+            if job_id:
+                job_recovery.heartbeat(_connect, job_id)
+            probe = tool.execute(action="status", process_name="", scope="production", job_id=lao_job_id)
+            if probe.success:
+                try:
+                    status = str((json.loads(probe.content).get("job") or {}).get("status") or status)
+                except json.JSONDecodeError:
+                    pass
+            stages.set_stage("kairos", stages.EXECUTING,
+                             f"LAO is drawing slide visuals · {len(ready())}/{len(prompts)} ready · {status}",
+                             lao_job=lao_job_id)
+            if status in terminal:
+                break
+    return ready()
+
+
+def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 4 worker for aibyvineet: PostForge's carousel job, rebuilt on ONE.
+
+    Its logic lives in one-company/floors. This wrapper only injects the ports:
+    Sanjeevani for evidence and local copy, LAO for ChatGPT copy and visuals,
+    and the one-media host for public URLs. The Instagram publisher goes
+    through social_accounts' cross-post guard, and KAIROS itself refuses to
+    call it while the brand is not marked postable. If the floors tree is
+    unavailable this degrades to the local planner rather than failing the job.
     """
     kairos = floors_bridge.load("floor_04_media", "kairos_agent")
     if kairos is None:
         return _local_plan(job)
+    media = floors_bridge.load("floor_04_media", "aibyvineet_publish")
+    host = media.MediaHost.from_env() if media is not None else None
+    job_id = str(job.get("id") or "")
+
+    def upload(path: Path, pathname: str) -> str:
+        return media.upload_slide(host, path, pathname)
+
+    def publish(image_urls: list[str], caption: str) -> dict[str, Any]:
+        from openjarvis.core import social_accounts
+
+        account = social_accounts.resolve_for_post("aibyvineet", "instagram")
+        return media.publish_carousel(
+            account_id=account.account_id, token=account.token, image_urls=image_urls,
+            caption=caption, graph_base=social_accounts.PLATFORMS["instagram"]["graph_base"])
+
     return kairos.run(
         job,
         kairos.Ports(
@@ -4519,6 +4629,12 @@ def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
             clear_stage=stages.clear_stage,
             enqueue=enqueue_job,
             output_dir=_home() / "agent_outputs",
+            collect=_kairos_collect if _sanjeevani_research() is not None else None,
+            chatgpt=_kairos_chatgpt,
+            generate_images=lambda prompts, target: _kairos_lao_images(prompts, target, job_id=job_id),
+            upload=upload if host is not None else None,
+            publish=publish if media is not None else None,
+            confirm_receipt=stages.worker_confirms_receipt,
         ),
     )
 
