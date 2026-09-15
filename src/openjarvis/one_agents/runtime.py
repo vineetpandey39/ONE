@@ -201,6 +201,37 @@ def _enqueue_floor_watches() -> None:
             )
 
 
+def _job_fired_by_trigger(trigger_id: str, job_id: str) -> bool:
+    """The scheduler's own receipt: was this job enqueued by that trigger's fire?
+
+    A standing publish authority must not rest on task text alone - anyone can
+    type "[ONE trigger: ...]". fire_due writes the job id it enqueued into
+    trigger_fires right after enqueue returns, so a short retry covers a head
+    that picked the job up in that gap. No receipt means no authority.
+    """
+    if not trigger_id or not job_id:
+        return False
+    try:
+        import importlib.util
+        module = sys.modules.get("one_company_triggers")
+        if module is None or not hasattr(module, "fired_job"):
+            trigger_path = floors_bridge.floors_root() / "_work" / "triggers.py"
+            spec = importlib.util.spec_from_file_location("one_company_triggers", trigger_path)
+            if spec is None or spec.loader is None:
+                return False
+            module = importlib.util.module_from_spec(spec)
+            sys.modules["one_company_triggers"] = module
+            spec.loader.exec_module(module)
+        for attempt in range(3):
+            if module.fired_job(trigger_id, job_id):
+                return True
+            if attempt < 2:
+                time.sleep(1.0)
+    except Exception as exc:  # noqa: BLE001 - fail closed
+        print(f"[one-agents] trigger receipt check failed for {job_id}: {exc}", flush=True)
+    return False
+
+
 def _enqueue_due_recurring_jobs() -> None:
     # ONE-company owns business triggers. LAO remains only an execution
     # adapter called by the receiving agent; it is no longer the clock.
@@ -4404,6 +4435,8 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
     # Standing authority is intentionally narrower than "brand is KAIROS".
     # Only ONE's canonical scheduled carousel fire may publish without a new
     # OLYMPUS click. Manual/ad-hoc aibyvineet jobs still arrive unapproved.
+    # The envelope check here is text; the scheduler's receipt is checked just
+    # before the worker is briefed.
     router = floors_bridge.load("floor_04_media", "brand_router")
     routine_publish_authorized = bool(
         router is not None
@@ -4508,6 +4541,12 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
     # through the walking/briefing stages so the building knows which desk
     # to walk to -- see its docstring for why this can't just be a bare
     # set_stage/sleep/enqueue sequence per floor.
+    if routine_publish_authorized:
+        routine_publish_authorized = _job_fired_by_trigger(
+            str(brand.get("routine_trigger_id") or ""), str(job.get("id") or ""))
+        if not routine_publish_authorized:
+            print(f"[one-agents] {job.get('id')} names the {display} schedule but has no fire receipt; "
+                  "the worker is briefed without publish authority", flush=True)
     worker = stages.head_briefs_worker(
         "ia", worker_id,
         carrying_detail=f"Taking the {display} brief to {worker_id.upper()}",
