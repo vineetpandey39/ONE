@@ -41,7 +41,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
 
 
 def _cmd_set(args: argparse.Namespace) -> int:
-    count = 0
+    fields: dict[str, str] = {}
     for line in sys.stdin.read().splitlines():
         if not line.strip():
             continue
@@ -50,10 +50,12 @@ def _cmd_set(args: argparse.Namespace) -> int:
             continue
         key, value = line.split("\t", 1)
         if value.strip():
-            sa.set_account_field(args.channel, args.platform, key.strip(), value)
-            count += 1
-    print(f"Stored {count} field(s) for {args.platform} on channel: {args.channel}")
-    return 0
+            fields[key.strip()] = value
+    ok, detail = sa.configure_account(
+        args.channel, args.platform, fields, verify=not args.skip_verify
+    )
+    print(("OK  " if ok else "FAIL ") + detail)
+    return 0 if ok else 2
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:
@@ -73,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     p_set = sub.add_parser("set", help="store fields (read from stdin as KEY<TAB>VALUE)")
     p_set.add_argument("--channel", required=True)
     p_set.add_argument("--platform", required=True, choices=list(sa.PLATFORMS))
+    p_set.add_argument("--skip-verify", action="store_true", help="store without a live identity check")
     p_set.set_defaults(func=_cmd_set)
 
     p_ver = sub.add_parser("verify", help="live-verify one channel's account identity")

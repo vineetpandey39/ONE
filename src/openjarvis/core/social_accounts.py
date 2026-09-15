@@ -153,6 +153,68 @@ def set_account_field(channel: str, platform: str, key: str, value: str, *, path
     _vault.save_section_credential(_section(slug, platform), key, value, allowed=allowed, path=path)
 
 
+def configure_account(
+    channel: str,
+    platform: str,
+    fields: dict[str, str],
+    *,
+    verify: bool = True,
+    path=None,
+) -> tuple[bool, str]:
+    """Validate a complete account bundle before writing it to the vault.
+
+    The old CLI persisted the token and only then called ``verify_account``.
+    A mistyped id or wrong-account token therefore left unusable credentials
+    behind.  This operation checks the candidate values against Graph first;
+    only a verified bundle is committed.  ``verify=False`` exists solely for
+    deliberate offline setup and retains the duplicate-account guard.
+    """
+    slug = slugify(channel)
+    spec = PLATFORMS.get(platform)
+    if not spec:
+        raise ValueError(f"Unknown platform '{platform}'")
+    allowed = (spec["token_key"], spec["id_key"], spec["expected_key"])
+    clean = {key: str(value).strip() for key, value in fields.items() if str(value).strip()}
+    unknown = sorted(set(clean) - set(allowed))
+    if unknown:
+        raise ValueError(f"Invalid field(s) for {platform}: {', '.join(unknown)}")
+    token, account_id = clean.get(spec["token_key"]), clean.get(spec["id_key"])
+    if not token or not account_id:
+        return False, f"{spec['label']} needs both an access token and account id. Nothing was saved."
+
+    for other in list_channel_slugs(path=path):
+        if other == slug:
+            continue
+        other_id = _vault.get_section_credential(_section(other, platform), spec["id_key"], path=path)
+        if other_id and other_id.strip() == account_id:
+            raise SocialAccountError(
+                f"{spec['label']} account id {account_id!r} is already registered to "
+                f"channel '{channel_name(other, path=path)}'. Refusing duplicate ownership."
+            )
+
+    expected = clean.get(spec["expected_key"])
+    if verify:
+        live, err = _graph_identity(spec["graph_base"], account_id, token, spec["identity_field"])
+        if live is None:
+            return False, f"Could not verify {spec['label']} for '{channel}': {err}. Nothing was saved."
+        if expected and live.strip().lower() != expected.lower():
+            return False, (
+                f"IDENTITY MISMATCH: token controls '{live}', expected '{expected}'. "
+                "Nothing was saved."
+            )
+        detail = f"Verified {spec['label']} identity '{live}' before saving."
+    else:
+        detail = f"Stored {spec['label']} without live verification by explicit request."
+
+    register_channel(channel, path=path)
+    section = _section(slug, platform)
+    for key in allowed:
+        value = clean.get(key)
+        if value:
+            _vault.save_section_credential(section, key, value, allowed=list(allowed), path=path)
+    return True, detail
+
+
 def clear_account(channel: str, platform: str, *, path=None) -> None:
     """Remove all stored fields for a channel's platform account."""
     slug = slugify(channel)
