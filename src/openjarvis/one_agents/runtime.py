@@ -4401,6 +4401,14 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
     mode = str(job.get("mode") or "plan").strip().lower()
     worker_id = brand["worker_agent_id"]
     display = brand.get("display_name", brand["slug"])
+    # Standing authority is intentionally narrower than "brand is KAIROS".
+    # Only ONE's canonical scheduled carousel fire may publish without a new
+    # OLYMPUS click. Manual/ad-hoc aibyvineet jobs still arrive unapproved.
+    router = floors_bridge.load("floor_04_media", "brand_router")
+    routine_publish_authorized = bool(
+        router is not None
+        and router.routine_publish_allowed(brand.get("slug", ""), task)
+    )
 
     # stages.set_stage() keeps one record per agent_id, so a second concurrent
     # flow would overwrite this head's own worker_job pointer and make the
@@ -4510,7 +4518,12 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
             json.dumps({"brand": brand["slug"], "angle": grounded_angle,
                         "priority": "", "prior_angles": prior[:15],
                         "origin_job": job["id"], "evidence_path": evidence_path,
-                        "evidence_count": evidence_count}),
+                        "evidence_count": evidence_count,
+                        "publish_authorized": routine_publish_authorized,
+                        "publish_authority": (
+                            "standing_owner_policy:daily-aibyvineet-carousel"
+                            if routine_publish_authorized else "none"
+                        )}),
             mode="execute",
             tier="fast",
         ),
