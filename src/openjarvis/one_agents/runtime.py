@@ -1383,7 +1383,19 @@ def _ia_peek_water_blocked_this_month(manifest: dict, today) -> bool:
     return False
 
 
-def _ia_peek_pick_from_zone(zone_name: str, manifest: dict, today, cooldown_days: int, water_blocked: bool):
+def _ia_peek_candidate_weight(entry: dict, weights: dict | None) -> float:
+    """Same as the LAO engine's _ia_candidate_weight and imagineindia_learning.candidate_weight."""
+    if not weights:
+        return 1.0
+    weight = float((weights.get("types") or {}).get(str(entry.get("type") or ""), 1.0))
+    if entry.get("sacred"):
+        weight *= float(weights.get("sacred") or 1.0)
+    weight *= float((weights.get("locations") or {}).get(str(entry.get("id") or ""), 1.0))
+    return round(weight, 4)
+
+
+def _ia_peek_pick_from_zone(zone_name: str, manifest: dict, today, cooldown_days: int, water_blocked: bool,
+                            weights: dict | None = None):
     entries = manifest.get("zones", {}).get(zone_name, [])
     state_last_used: dict[str, str] = {}
     for entry in entries:
@@ -1401,9 +1413,51 @@ def _ia_peek_pick_from_zone(zone_name: str, manifest: dict, today, cooldown_days
         eligible = [e for e in tier_entries if _ia_peek_days_since(e.get("used_date"), today) >= cooldown_days]
         if not eligible:
             continue
-        eligible.sort(key=lambda e: _ia_peek_days_since(state_last_used.get(e.get("state")), today), reverse=True)
+        eligible.sort(key=lambda e: (round(_ia_peek_candidate_weight(e, weights) * 10) / 10,
+                                     _ia_peek_days_since(state_last_used.get(e.get("state")), today)),
+                      reverse=True)
         return eligible[0]
     return None
+
+
+def _refresh_imagineindia_learning() -> str:
+    """Once a day, before IRIS predicts ImagineIndia's next location: read every reel's
+    Instagram insights, relearn, and rewrite IA_Performance_Weights.json - the file
+    LAO's location picker orders eligible places by. Also refreshes ImagineIndia's
+    Sanjeevani hook library and reel-format scout. Read-only toward Instagram;
+    best-effort, so a failure here never stops IRIS. Returns a one-line summary."""
+    learning = floors_bridge.load("floor_04_media", "imagineindia_learning")
+    trends = floors_bridge.load("floor_04_media", "imagineindia_trends")
+    media = floors_bridge.load("floor_04_media", "aibyvineet_publish")
+    if learning is None or media is None:
+        return "ImagineIndia learning modules are not available"
+    brand_dir = _home() / "agent_outputs" / "imagineindia"
+    now = datetime.now(timezone.utc)
+    notes: list[str] = []
+    if learning.stale(brand_dir, now):
+        from openjarvis.core import social_accounts
+
+        account = social_accounts.get_account("imagineindia", "instagram")
+        if account is None:
+            return "ImagineIndia's Instagram account is not in ONE's vault"
+        stages.set_stage("ia", stages.EXECUTING, "Reading how ImagineIndia's reels did on Instagram")
+        get = media.graph_reader(token=account.token,
+                                 graph_base=social_accounts.PLATFORMS["instagram"]["graph_base"])
+        result = learning.refresh(brand_dir, get, IA_LOCATIONS_MANIFEST_PATH, now)
+        learned = result["learning"]
+        notes.append(f"{learned['scored_reels']} reels measured, median {learned['median_views']:,} views, "
+                     f"{learned['over_1m']} over 1M; location weights rewritten")
+    if trends is not None:
+        cycle = trends.trends.run_cycle(
+            brand_dir, now=now, profile=trends.PROFILE,
+            video_search=_kairos_video_search if _sanjeevani_reel() is not None else None,
+            web_search=_kairos_web_search if _sanjeevani_research() is not None else None,
+            read_page=_kairos_read_page if _sanjeevani_research() is not None else None,
+            stage=lambda detail: stages.set_stage("ia", stages.EXECUTING, detail))
+        proposals = [p["name"] for p in (cycle.get("layout_scout") or {}).get("proposals") or []]
+        if cycle.get("scout_refreshed") and proposals:
+            notes.append("new reel formats for the Chairman: " + ", ".join(proposals))
+    return "; ".join(notes)
 
 
 def _peek_next_ia_location(manifest_path: str, *, cooldown_days: int = 7) -> dict[str, Any] | None:
@@ -1453,12 +1507,16 @@ def _peek_next_ia_location(manifest_path: str, *, cooldown_days: int = 7) -> dic
         weekday = now_ist.weekday()
         day_zone_map = {i: zone_order[i] for i in range(min(6, len(zone_order)))}
         water_blocked = _ia_peek_water_blocked_this_month(manifest, today)
+        try:
+            weights = json.loads(path.with_name("IA_Performance_Weights.json").read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - no weights file: plain state-fairness order, as LAO does
+            weights = None
 
         chosen = None
         chosen_zone = None
         if weekday in day_zone_map:
             chosen_zone = day_zone_map[weekday]
-            chosen = _ia_peek_pick_from_zone(chosen_zone, manifest, today, cooldown_days, water_blocked)
+            chosen = _ia_peek_pick_from_zone(chosen_zone, manifest, today, cooldown_days, water_blocked, weights)
         else:
             best_zone, best_count = None, -1
             for zone_name in zone_order:
@@ -1472,13 +1530,13 @@ def _peek_next_ia_location(manifest_path: str, *, cooldown_days: int = 7) -> dic
                     best_zone, best_count = zone_name, count
             if best_zone:
                 chosen_zone = best_zone
-                chosen = _ia_peek_pick_from_zone(best_zone, manifest, today, cooldown_days, water_blocked)
+                chosen = _ia_peek_pick_from_zone(best_zone, manifest, today, cooldown_days, water_blocked, weights)
 
         if chosen is None:
             for zone_name in zone_order:
                 if zone_name == chosen_zone:
                     continue
-                candidate = _ia_peek_pick_from_zone(zone_name, manifest, today, cooldown_days, water_blocked)
+                candidate = _ia_peek_pick_from_zone(zone_name, manifest, today, cooldown_days, water_blocked, weights)
                 if candidate is not None:
                     chosen, chosen_zone = candidate, zone_name
                     break
@@ -3588,6 +3646,14 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     # ChatGPT honestly connect to. Predicting the real next location and
     # researching THAT place by name gives evidence with an actual chance of
     # a genuine connection, instead of hoping a floating theme happens to fit.
+    # Learn from ImagineIndia's own reels first (once a day), so the prediction
+    # below and LAO's real pick both use today's performance weights.
+    try:
+        learning_note = _refresh_imagineindia_learning()
+        if learning_note:
+            print(f"[one-agents] IRIS ImagineIndia learning: {learning_note}", flush=True)
+    except Exception as exc:  # noqa: BLE001 - learning must never stop IRIS
+        print(f"[one-agents] IRIS ImagineIndia learning skipped: {type(exc).__name__}: {exc}"[:400], flush=True)
     predicted_location = _peek_next_ia_location(IA_LOCATIONS_MANIFEST_PATH)
     if predicted_location and predicted_location.get("name") and reusable is not None:
         try:
