@@ -53,7 +53,7 @@ AGENTS: dict[str, dict[str, str]] = {
     # own @aibyvineet channel. Which one gets a job is decided by the brand
     # router in one-company/floors/floor_04_media, never by preference order --
     # guessing wrong here means posting to the wrong account.
-    "kairos": {"name": "KAIROS", "role": "aibyvineet channel content production worker", "floor_id": "4", "floor_name": "Media & Content", "division": "media", "seat": "worker", "reports_to": "ia"},
+    "kairos": {"name": "KAIROS", "role": "aibyvineet carousel worker and Floor 4 revenue agent: turns @imagineindia.ai and @aibyvineet reach into income - money-funnel reviews, brand deals, media kits, affiliate and product plans (drafts only, sends nothing without the Chairman)", "floor_id": "4", "floor_name": "Media & Content", "division": "media", "seat": "worker", "reports_to": "ia"},
     "herald": {"name": "HERALD", "role": "LinkedIn authority-post production and publishing worker", "floor_id": "4", "floor_name": "Media & Content", "division": "media", "seat": "worker", "reports_to": "ia"},
     "ares": {"name": "ARES", "role": "SEO, social, and cross-floor distribution operator", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth"},
     "alfa": {"name": "ALFA", "role": "Pricing, funnels, and revenue-attribution operator", "floor_id": "2", "floor_name": "Commerce & Monetization", "division": "commerce"},
@@ -3577,6 +3577,14 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     mode = str(job.get("mode") or "plan").strip().lower()
 
     if mode == "report":
+        # A revenue review is not a post: it gets its own report, whichever
+        # brand it is about.
+        try:
+            report_payload = json.loads(str(job.get("task") or "{}"))
+        except json.JSONDecodeError:
+            report_payload = {}
+        if isinstance(report_payload, dict) and report_payload.get("format") == "revenue_review":
+            return _iris_report_revenue(job, report_payload)
         # The hand-back leg has to be routed too. _iris_report below is written
         # for ImagineIndia specifically -- its wording, tags and vault folder
         # are all that brand -- so a report from another brand's worker filed
@@ -3590,6 +3598,13 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     # Floor 4 serves two brands with two workers. This routing is deliberately
     # additive: an ImagineIndia request -- or anything the floors tree cannot
     # answer -- falls straight through to the original path below, unchanged.
+    # Money work never enters a production pipeline: "make ImagineIndia money"
+    # must not start an ImagineIndia reel. It goes to the brand's revenue agent.
+    revenue_router = floors_bridge.load("floor_04_media", "brand_router")
+    if (revenue_router is not None and hasattr(revenue_router, "revenue_intent")
+            and revenue_router.revenue_intent(task)):
+        return _iris_dispatch_revenue(job, revenue_router.revenue_brand(task))
+
     brand, question = floors_bridge.route_media(task, job)
     if question:
         stages.clear_stage("ia")
@@ -4813,6 +4828,100 @@ def _kairos_lao_images(prompts: list[str], target_dir: Path, job_id: str = "") -
     return ready()
 
 
+def _iris_dispatch_revenue(job: dict[str, Any], slug: str) -> dict[str, Any]:
+    """IRIS briefs KAIROS, the Floor 4 revenue agent, on one brand's money work.
+
+    Added 2026-09-16: the Chairman made KAIROS responsible for turning the
+    brands' reach into income. KAIROS reads, prices and drafts; sending,
+    signing and spending stay with the Chairman.
+    """
+    task = str(job.get("task") or "")
+    display = "ImagineIndia" if slug == "imagineindia" else "AI by Vineet" if slug == "aibyvineet" else slug
+    busy = floors_bridge.media_head_busy("ia")
+    if busy:
+        detail = str(busy.get("detail") or "").strip()
+        return {"agent": "IRIS", "mode": "execute", "handed_to": None,
+                "content": (f"I'm mid-flow on another Floor 4 job ({busy.get('stage')}"
+                            + (f" - {detail}" if detail else "")
+                            + f"). Ask me again for {display}'s revenue review once it lands."),
+                "note": "Declined to start a second Floor 4 flow."}
+    worker = stages.head_briefs_worker(
+        "ia", "kairos",
+        carrying_detail=f"Taking the {display} revenue brief to KAIROS",
+        briefing_detail=f"KAIROS, where is {display}'s reach leaking money?",
+        awaiting_detail=f"Waiting on KAIROS's {display} revenue review",
+        enqueue=lambda: enqueue_job(
+            "kairos",
+            json.dumps({"mode": "revenue", "brand": slug, "task": task, "origin_job": job["id"]}),
+            mode="execute", tier="fast",
+        ),
+    )
+    return {"agent": "IRIS", "mode": "execute", "brand": slug,
+            "content": f"Briefed KAIROS on {display}'s revenue review.",
+            "handed_to": {"agent": "KAIROS", "job_id": (worker or {}).get("id") if isinstance(worker, dict) else None}}
+
+
+def _iris_report_revenue(job: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    """IRIS reports KAIROS's revenue review upward: the leaks, the drafts, and what only the Chairman can do."""
+    slug = str(payload.get("brand") or "imagineindia")
+    display = "ImagineIndia" if slug == "imagineindia" else "AI by Vineet" if slug == "aibyvineet" else slug
+    stages.set_stage("ia", stages.REPORTING, f"Reporting {display}'s revenue review")
+    if str(payload.get("status") or "") == "stopped":
+        message = (f"Sir, KAIROS could not finish {display}'s revenue review.\n\n"
+                   f"Reason: {payload.get('note') or payload.get('error') or 'no reason was given'}")
+    else:
+        leaks = "\n".join(f"- {leak}" for leak in payload.get("leaks") or []) or "- none found"
+        actions = "\n".join(f"- {ask}" for ask in payload.get("chairman_actions") or [])
+        rate = payload.get("profile_visit_rate_pct")
+        message = (
+            f"Sir, KAIROS has finished {display}'s revenue review.\n\n"
+            f"Reach in the last 28 days: {int(payload.get('reach_28d') or 0):,}"
+            + (f"; only {rate}% of those accounts opened the profile." if rate is not None else ".")
+            + f"\n\nWhere the money leaks:\n{leaks}\n\n"
+            f"{int(payload.get('pitches_drafted') or 0)} brand pitches are drafted and waiting for your approval - "
+            "nothing has been sent.\n\n"
+            + (f"Only you can do these:\n{actions}\n\n" if actions else "")
+            + f"Full review: {payload.get('output') or '(not reported)'}"
+        )
+    output_dir = _home() / "agent_outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{job['id']}.md"
+    output_path.write_text(f"# IRIS - Revenue Report ({display})\n\n{message}\n", encoding="utf-8")
+    router = floors_bridge.load("floor_04_media", "brand_router")
+    brand = router.route("", explicit=slug) if router is not None else None
+    remembered = memory.remember(
+        agent="IRIS", floor_id="4",
+        floor_name=(brand or {}).get("vault_floor_name") or "Media & Content",
+        kind="Revenue Report", body=message, tags=[slug, "media", "revenue"],
+    )
+    time.sleep(2.0)
+    stages.clear_stage("ia")
+    return {"agent": "IRIS", "mode": "report", "brand": slug, "content": message, "format": "revenue_review",
+            "output": str(output_path), "vault_note": (remembered or {}).get("path")}
+
+
+def _company_revenue_ledger() -> Any | None:
+    """one-company's revenue ledger (floors/_services/revenue/money.py), loaded by path."""
+    import importlib.util
+    key = "one_company_revenue_money"
+    if key in sys.modules:
+        return sys.modules[key]
+    path = floors_bridge.floors_root() / "_services" / "revenue" / "money.py"
+    if not path.is_file():
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location(key, path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[key] = module
+        spec.loader.exec_module(module)
+        return module
+    except Exception:  # noqa: BLE001
+        sys.modules.pop(key, None)
+        return None
+
+
 def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 4 worker for aibyvineet: PostForge's carousel job, rebuilt on ONE.
 
@@ -4853,6 +4962,23 @@ def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
                                     graph_base=social_accounts.PLATFORMS["instagram"]["graph_base"])
         return reader(path, params)
 
+    def graph_for(slug: str):
+        # Revenue mode reads any Floor 4 account KAIROS earns for, each from its
+        # own vault channel - read-only, token in a header.
+        from openjarvis.core import social_accounts
+
+        account = social_accounts.get_account(slug, "instagram")
+        if account is None:
+            raise RuntimeError(f"{slug}'s Instagram account is not in ONE's vault")
+        return media.graph_reader(token=account.token,
+                                  graph_base=social_accounts.PLATFORMS["instagram"]["graph_base"])
+
+    def declare_revenue_source(floor_id: str, name: str, *, connected: bool, blocked_on: str = "") -> Any:
+        ledger = _company_revenue_ledger()
+        if ledger is None:
+            raise RuntimeError("the company revenue ledger is unavailable")
+        return ledger.declare_source(floor_id, name, connected=connected, blocked_on=blocked_on)
+
     return kairos.run(
         job,
         kairos.Ports(
@@ -4872,6 +4998,8 @@ def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
             video_search=_kairos_video_search if _sanjeevani_reel() is not None else None,
             web_search=_kairos_web_search if _sanjeevani_research() is not None else None,
             read_page=_kairos_read_page if _sanjeevani_research() is not None else None,
+            graph_for=graph_for if media is not None and hasattr(media, "graph_reader") else None,
+            declare_revenue_source=declare_revenue_source,
         ),
     )
 
