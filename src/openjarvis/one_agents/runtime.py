@@ -3950,12 +3950,17 @@ def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str, 
     published = bool(payload.get("published"))
     blocked = payload.get("publish_blocked_reason") or ""
 
+    learned = str(payload.get("learning_summary") or "").strip()
+    proposals = [str(name) for name in payload.get("layout_proposals") or [] if str(name).strip()]
     message = (
         f"Sir, the {display} {fmt} is ready. {worker} has handed it over.\n\n"
         f"Angle: {title}\n"
         f"Plan: {output}\n\n"
         + ("It has been published." if published else
            f"It is not published. {blocked}".strip())
+        + (f"\n\nWhat {worker} has learned so far: {learned}" if learned else "")
+        + (f"\nNew carousel formats creators are using, waiting for your pick: {', '.join(proposals)}"
+           if proposals else "")
     )
 
     output_dir = _home() / "agent_outputs"
@@ -4583,6 +4588,46 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
     }
 
 
+def _sanjeevani_reel() -> Any | None:
+    """Sanjeevani's reel collector, for its metadata-only yt-dlp YouTube discovery."""
+    import importlib.util
+    path = Path(os.environ.get("SANJEEVANI_REEL_LIBRARY", r"E:\ONE-SUITE\sanjeevani\reel_research.py"))
+    if not path.is_file():
+        return None
+    key = "sanjeevani_reel_research"
+    cached = sys.modules.get(key)
+    if cached is not None:
+        return cached
+    try:
+        spec = importlib.util.spec_from_file_location(key, path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[key] = module
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        sys.modules.pop(key, None)
+        return None
+
+
+def _kairos_video_search(query: str) -> list[dict[str, Any]]:
+    """KAIROS's hook-library port: public YouTube metadata from the last 48 hours, via Sanjeevani."""
+    reel = _sanjeevani_reel()
+    if reel is None:
+        raise RuntimeError("Sanjeevani reel collector is unavailable")
+    return list(reel.discover_youtube(query, maximum=15).get("observations") or [])
+
+
+def _kairos_web_search(queries: list[str], time_range: str) -> list[dict[str, Any]]:
+    """KAIROS's layout-scout port: Sanjeevani's self-hosted SearXNG."""
+    reusable = _sanjeevani_research()
+    if reusable is None:
+        raise RuntimeError("Sanjeevani research library is unavailable")
+    rows, _mode = reusable.searxng(list(queries), time_range=time_range)
+    return rows
+
+
 def _kairos_collect(query: str) -> dict[str, Any]:
     """KAIROS's evidence port: Sanjeevani, the only researcher a floor may use."""
     reusable = _sanjeevani_research()
@@ -4711,6 +4756,18 @@ def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
             account_id=account.account_id, token=account.token, image_urls=image_urls,
             caption=caption, graph_base=social_accounts.PLATFORMS["instagram"]["graph_base"])
 
+    def insights(path: str, params: dict[str, Any]) -> dict[str, Any]:
+        # Read-only: how earlier carousels did. The account comes from the vault
+        # by channel, never from a shared environment variable.
+        from openjarvis.core import social_accounts
+
+        account = social_accounts.get_account("aibyvineet", "instagram")
+        if account is None:
+            raise RuntimeError("aibyvineet's Instagram account is not in ONE's vault")
+        reader = media.graph_reader(token=account.token,
+                                    graph_base=social_accounts.PLATFORMS["instagram"]["graph_base"])
+        return reader(path, params)
+
     return kairos.run(
         job,
         kairos.Ports(
@@ -4726,6 +4783,9 @@ def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
             upload=upload if host is not None else None,
             publish=publish if media is not None else None,
             confirm_receipt=stages.worker_confirms_receipt,
+            insights=insights if media is not None and hasattr(media, "graph_reader") else None,
+            video_search=_kairos_video_search if _sanjeevani_reel() is not None else None,
+            web_search=_kairos_web_search if _sanjeevani_research() is not None else None,
         ),
     )
 
