@@ -4628,6 +4628,25 @@ def _kairos_web_search(queries: list[str], time_range: str) -> list[dict[str, An
     return rows
 
 
+def _kairos_read_page(url: str) -> str:
+    """KAIROS's layout-scout reader: one public article's visible text.
+
+    Through Sanjeevani's own bounded, TLS-verified fetcher, which refuses private
+    and loopback addresses. The text is only matched against format names; it is
+    never treated as an instruction.
+    """
+    import html as _html
+
+    reusable = _sanjeevani_research()
+    if reusable is None:
+        raise RuntimeError("Sanjeevani research library is unavailable")
+    raw = reusable._get(reusable._safe_public_url(url), timeout=12, limit=1_500_000, attempts=1)
+    text = raw.decode("utf-8", "replace")
+    text = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", text)
+    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", _html.unescape(text))[:200_000]
+
+
 def _kairos_collect(query: str) -> dict[str, Any]:
     """KAIROS's evidence port: Sanjeevani, the only researcher a floor may use."""
     reusable = _sanjeevani_research()
@@ -4786,6 +4805,7 @@ def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
             insights=insights if media is not None and hasattr(media, "graph_reader") else None,
             video_search=_kairos_video_search if _sanjeevani_reel() is not None else None,
             web_search=_kairos_web_search if _sanjeevani_research() is not None else None,
+            read_page=_kairos_read_page if _sanjeevani_research() is not None else None,
         ),
     )
 
