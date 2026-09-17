@@ -3583,7 +3583,7 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
             report_payload = json.loads(str(job.get("task") or "{}"))
         except json.JSONDecodeError:
             report_payload = {}
-        if isinstance(report_payload, dict) and report_payload.get("format") == "revenue_review":
+        if isinstance(report_payload, dict) and report_payload.get("format") in ("revenue_review", "revenue_pulse"):
             return _iris_report_revenue(job, report_payload)
         # The hand-back leg has to be routed too. _iris_report below is written
         # for ImagineIndia specifically -- its wording, tags and vault folder
@@ -4865,10 +4865,28 @@ def _iris_report_revenue(job: dict[str, Any], payload: dict[str, Any]) -> dict[s
     """IRIS reports KAIROS's revenue review upward: the leaks, the drafts, and what only the Chairman can do."""
     slug = str(payload.get("brand") or "imagineindia")
     display = "ImagineIndia" if slug == "imagineindia" else "AI by Vineet" if slug == "aibyvineet" else slug
-    stages.set_stage("ia", stages.REPORTING, f"Reporting {display}'s revenue review")
+    pulse = payload.get("format") == "revenue_pulse"
+    what = "daily pulse" if pulse else "revenue review"
+    stages.set_stage("ia", stages.REPORTING, f"Reporting {display}'s {what}")
     if str(payload.get("status") or "") == "stopped":
-        message = (f"Sir, KAIROS could not finish {display}'s revenue review.\n\n"
+        message = (f"Sir, KAIROS could not finish {display}'s {what}.\n\n"
                    f"Reason: {payload.get('note') or payload.get('error') or 'no reason was given'}")
+    elif pulse:
+        def count(value: Any) -> str:
+            return f"{int(value):,}" if isinstance(value, (int, float)) else "n/a"
+
+        change = payload.get("follower_change")
+        alerts = "\n".join(f"- {alert}" for alert in payload.get("alerts") or []) or "- none, all good"
+        message = (
+            f"Sir, {display}'s daily pulse.\n\n"
+            f"Followers: {count(payload.get('followers'))}"
+            + (f" ({'+' if change >= 0 else ''}{change} since yesterday)" if isinstance(change, int) else "")
+            + f"\nLast 24h: reach {count(payload.get('reach_1d'))}, profile visits "
+            f"{count(payload.get('profile_views_1d'))}, link taps {count(payload.get('link_taps_1d'))}\n"
+            f"Bio: collab email {'present' if payload.get('has_contact') else 'MISSING'}, "
+            f"link {'present' if payload.get('has_link') else 'MISSING'}\n\n"
+            f"Alerts:\n{alerts}\n\nFull pulse: {payload.get('output') or '(not reported)'}"
+        )
     else:
         leaks = "\n".join(f"- {leak}" for leak in payload.get("leaks") or []) or "- none found"
         actions = "\n".join(f"- {ask}" for ask in payload.get("chairman_actions") or [])
