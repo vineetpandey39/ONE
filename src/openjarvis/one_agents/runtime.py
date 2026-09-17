@@ -4904,17 +4904,19 @@ def _iris_report_revenue(job: dict[str, Any], payload: dict[str, Any]) -> dict[s
     output_dir = _home() / "agent_outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{job['id']}.md"
-    output_path.write_text(f"# IRIS - Revenue Report ({display})\n\n{message}\n", encoding="utf-8")
+    heading = "Daily Pulse" if pulse else "Revenue Report"
+    output_path.write_text(f"# IRIS - {heading} ({display})\n\n{message}\n", encoding="utf-8")
     router = floors_bridge.load("floor_04_media", "brand_router")
     brand = router.route("", explicit=slug) if router is not None else None
     remembered = memory.remember(
         agent="IRIS", floor_id="4",
         floor_name=(brand or {}).get("vault_floor_name") or "Media & Content",
-        kind="Revenue Report", body=message, tags=[slug, "media", "revenue"],
+        kind=heading, body=message, tags=[slug, "media", "revenue"] + (["pulse"] if pulse else []),
     )
     time.sleep(2.0)
     stages.clear_stage("ia")
-    return {"agent": "IRIS", "mode": "report", "brand": slug, "content": message, "format": "revenue_review",
+    return {"agent": "IRIS", "mode": "report", "brand": slug, "content": message,
+            "format": "revenue_pulse" if pulse else "revenue_review",
             "output": str(output_path), "vault_note": (remembered or {}).get("path")}
 
 
