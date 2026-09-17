@@ -3583,7 +3583,8 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
             report_payload = json.loads(str(job.get("task") or "{}"))
         except json.JSONDecodeError:
             report_payload = {}
-        if isinstance(report_payload, dict) and report_payload.get("format") in ("revenue_review", "revenue_pulse"):
+        if isinstance(report_payload, dict) and report_payload.get("format") in (
+                "revenue_review", "revenue_pulse", "product_pack"):
             return _iris_report_revenue(job, report_payload)
         # The hand-back leg has to be routed too. _iris_report below is written
         # for ImagineIndia specifically -- its wording, tags and vault folder
@@ -4866,11 +4867,23 @@ def _iris_report_revenue(job: dict[str, Any], payload: dict[str, Any]) -> dict[s
     slug = str(payload.get("brand") or "imagineindia")
     display = "ImagineIndia" if slug == "imagineindia" else "AI by Vineet" if slug == "aibyvineet" else slug
     pulse = payload.get("format") == "revenue_pulse"
-    what = "daily pulse" if pulse else "revenue review"
+    product = payload.get("format") == "product_pack"
+    what = "daily pulse" if pulse else "product pack" if product else "revenue review"
     stages.set_stage("ia", stages.REPORTING, f"Reporting {display}'s {what}")
     if str(payload.get("status") or "") == "stopped":
         message = (f"Sir, KAIROS could not finish {display}'s {what}.\n\n"
                    f"Reason: {payload.get('note') or payload.get('error') or 'no reason was given'}")
+    elif product:
+        missing = payload.get("missing") or []
+        message = (
+            f"Sir, KAIROS has built {display}'s first sellable product.\n\n"
+            f"{payload.get('title') or 'Product pack'}: {payload.get('made')} of "
+            f"{payload.get('requested')} images are ready"
+            + (f"; {', '.join(missing)} did not come back." if missing else ".")
+            + "\n\nNothing is priced and nothing is listed - the store, the price and the payout "
+            "are yours.\n\n"
+            f"Images and listing copy: {payload.get('run_dir') or payload.get('output') or '(not reported)'}"
+        )
     elif pulse:
         def count(value: Any) -> str:
             return f"{int(value):,}" if isinstance(value, (int, float)) else "n/a"
@@ -4904,7 +4917,7 @@ def _iris_report_revenue(job: dict[str, Any], payload: dict[str, Any]) -> dict[s
     output_dir = _home() / "agent_outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{job['id']}.md"
-    heading = "Daily Pulse" if pulse else "Revenue Report"
+    heading = "Daily Pulse" if pulse else "Product Pack" if product else "Revenue Report"
     output_path.write_text(f"# IRIS - {heading} ({display})\n\n{message}\n", encoding="utf-8")
     router = floors_bridge.load("floor_04_media", "brand_router")
     brand = router.route("", explicit=slug) if router is not None else None
@@ -4916,7 +4929,7 @@ def _iris_report_revenue(job: dict[str, Any], payload: dict[str, Any]) -> dict[s
     time.sleep(2.0)
     stages.clear_stage("ia")
     return {"agent": "IRIS", "mode": "report", "brand": slug, "content": message,
-            "format": "revenue_pulse" if pulse else "revenue_review",
+            "format": payload.get("format") or "revenue_review",
             "output": str(output_path), "vault_note": (remembered or {}).get("path")}
 
 
