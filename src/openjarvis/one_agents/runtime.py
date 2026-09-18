@@ -1606,7 +1606,7 @@ _MEDIA_TREND_CATEGORIES: tuple[tuple[str, str], ...] = (
 )
 
 
-def _compact_media_evidence(evidence: dict[str, Any], *, max_items: int = 20) -> dict[str, Any]:
+def _compact_media_evidence(evidence: dict[str, Any], *, max_per_category: int = 5) -> dict[str, Any]:
     """Strips each eligible item to the fields a synthesis prompt actually
     needs before it goes into the model's context.
 
@@ -1619,17 +1619,36 @@ def _compact_media_evidence(evidence: dict[str, Any], *, max_items: int = 20) ->
     "digital heritage" narrative with fabricated individuals -- exactly the
     failure this skill's evidence discipline exists to prevent. Shrinking
     what actually reaches the model's context is the direct fix; the
-    shape-check below is the safety net for whenever it still slips."""
+    shape-check below is the safety net for whenever it still slips.
+
+    Changed 2026-09-19 from a flat [:max_items] slice on the merged list to
+    a per-category cap: confirmed live that viral_format's ~11 items (the
+    same recurring AI-trend meme, which is why it is the one category that
+    reliably clears commissioning_eligible's item-count bar) filled almost
+    the entire old 20-item budget on their own, crowding out
+    disaster_incident's real, specific, dated incidents (a Belagavi fire, a
+    Thaiyur gas-leak fire) entirely or near-entirely depending on category
+    order -- IRIS's own synthesis kept defaulting to the generic viral_
+    format theme not because it was the best PLACE candidate, but because
+    it was numerically the only thing reliably in context. A specific
+    single-event story does not need many items to be real; it needs ONE
+    good one. Capping per category instead of on the flat merge guarantees
+    every category gets a fair, bounded slice regardless of its raw volume
+    or position in _MEDIA_TREND_CATEGORIES."""
+    by_category: dict[str, list[dict[str, Any]]] = {}
+    for item in (evidence.get("eligible") or []):
+        by_category.setdefault(str(item.get("category") or ""), []).append(item)
     trimmed = []
-    for item in (evidence.get("eligible") or [])[:max_items]:
-        trimmed.append({
-            "evidence_id": item.get("evidence_id"),
-            "category": item.get("category"),
-            "title": item.get("title"),
-            "source_url": item.get("source_url"),
-            "published_at": item.get("published_at"),
-            "freshness_bucket": item.get("freshness_bucket"),
-        })
+    for items in by_category.values():
+        for item in items[:max_per_category]:
+            trimmed.append({
+                "evidence_id": item.get("evidence_id"),
+                "category": item.get("category"),
+                "title": item.get("title"),
+                "source_url": item.get("source_url"),
+                "published_at": item.get("published_at"),
+                "freshness_bucket": item.get("freshness_bucket"),
+            })
     return {
         "eligible": trimmed,
         "categories": evidence.get("categories", {}),
