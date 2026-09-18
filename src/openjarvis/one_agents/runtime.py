@@ -3744,7 +3744,7 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         + avoid
         + "\n\nYou already have everything above -- the location catalogue, the "
         "evidence, and the operating method. Do not write a free-form summary "
-        "of the evidence. Reply with ONLY the following six lines, nothing "
+        "of the evidence. Reply with ONLY the following nine lines, nothing "
         "before or after them:\n"
         "PRIORITY: <one line — what this run should optimise for>\n"
         "REGION: <the zone you'd prefer if it were free, or 'rotation'>\n"
@@ -3755,7 +3755,15 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "SACRED_SITE: <none, or which protocol element applies and how the "
         "angle already respects it>\n"
         "BRIEF: <6-12 lines: who the audience is, why run now, what would make "
-        "this one perform, and the honest risk that it underperforms>",
+        "this one perform, and the honest risk that it underperforms>\n"
+        "PLACE: <only if the evidence names a real, specific, current local "
+        "incident with a real place — the exact place name (market/complex/"
+        "landmark), else leave empty>\n"
+        "INCIDENT_SUMMARY: <only if PLACE is non-empty — what actually happened, "
+        "per the cited evidence only, no invented figures/blame, else empty>\n"
+        "SEARCH_TERMS: <only if PLACE is non-empty — comma-separated real, "
+        "current search phrases from the actual coverage (place name + "
+        "incident type + 'today'/'news'), else empty>",
         evidence=media_evidence,
     )
 
@@ -3785,6 +3793,9 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     priority = _marker(brief, "PRIORITY")
     region = _marker(brief, "REGION", "rotation").lower()
     angle = _marker(brief, "ANGLE")
+    incident_place = _marker(brief, "PLACE")
+    incident_summary = _marker(brief, "INCIDENT_SUMMARY")
+    incident_search_terms = _marker(brief, "SEARCH_TERMS")
     lowered_task = task.lower()
     facebook_positive = bool(
         "facebook" in lowered_task
@@ -3802,12 +3813,14 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     # request such as "post this carousel" silently became a before/after.
     # "spotlight"/"trend spotlight" was added 2026-09-13, replacing the same-
     # day-reverted editorialPriority/Angle wiring into the main reel -- see
-    # imagineindia-trend-spotlight's package.json release_notes. Checked
-    # before before_after's "photo" match so a "trend spotlight" request
-    # never gets misread as a static before/after post.
+    # imagineindia-trend-spotlight's package.json release_notes. "news hook"/
+    # "hook reel" added 2026-09-18 after the Purohit Ji Ka Katla fire reel
+    # hit 216k views -- see imagineindia-news-hook-reel's package.json.
+    # Checked before before_after's "photo" match for the same reason.
     content_type = (
         "carousel" if re.search(r"\b(carousel|slides?|swipe)\b", lowered_task)
         else "trend_spotlight" if re.search(r"\bspotlight\b", lowered_task)
+        else "news_hook" if re.search(r"\b(news.?hook|hook.?reel)\b", lowered_task)
         else "before_after" if re.search(r"\b(before.?after|static|image|photo|post)\b", lowered_task)
         else "reel"
     )
@@ -3820,6 +3833,7 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "carousel": "carousel",
         "before_after": "before/after post",
         "trend_spotlight": "trend spotlight",
+        "news_hook": "news hook reel",
         "reel": "reel",
     }.get(content_type, "post")
 
