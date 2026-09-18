@@ -5439,7 +5439,163 @@ def abandoned_job_threads() -> list["threading.Thread"]:
             if t.name.startswith("job-") and t.is_alive()]
 
 
+def _finish_active_job(job: dict[str, Any], outcome: dict[str, Any]) -> None:
+    """Process a job thread's outcome once it has finished on its own
+    (i.e. NOT abandoned to the watchdog -- see _abandon_active_job for
+    that branch). Split out of run_worker 2026-09-19 so multiple jobs'
+    completions can each be processed independently once the worker loop
+    stopped blocking on a single thread.join() per iteration -- see
+    run_worker's own docstring for why that blocking was there and why it
+    had to go."""
+    if "error" in outcome:
+        trace = str(outcome.get("traceback") or "").strip()
+        fail_job(job["id"], RuntimeError(
+            f"{outcome['error']}\n\n{trace}" if trace else str(outcome["error"])
+        ))
+        return
+    result = outcome.get("result", {})
+    # The gate is asked for, not asserted.
+    #
+    # _await_human_upload is the handler saying "I have reached the
+    # point where a person uploads this by hand". Whether that needs a
+    # person is not the handler's call - it is declared in the agent's
+    # permissions.yaml and resolved through the floors registry, where
+    # publish_to_store is red for SCRIBE. A handler that asserts its
+    # own gate is the same shape as an agent asserting its own
+    # privileges, and it fails the same way: silently, on the day
+    # somebody edits it.
+    #
+    # None means the registry could not answer - tree absent, index
+    # stale - and None is not permission. Hold, and let a person look.
+    if result.pop("_blocked", False):
+        mark_blocked(job["id"], result)
+    elif result.pop("_await_growth_review", False):
+        mark_awaiting_growth_review(job["id"], result)
+    elif result.pop("_await_human_upload", False):
+        gated = floors_bridge.needs_approval(
+            job.get("agent_id", ""), "publish_to_store")
+        if gated is False:
+            finish_job(job["id"], result)
+        else:
+            mark_awaiting_upload(job["id"], result)
+    else:
+        finish_job(job["id"], result)
+
+
+def _abandon_active_job(job: dict[str, Any]) -> None:
+    """A job thread is still alive past its own watchdog deadline. Log it,
+    fail the queue row, and -- past a small threshold of these piling up --
+    exit the whole process so the memory they hold is actually reclaimed
+    (sys.exit raises SystemExit, which propagates straight out of this
+    call and out of run_worker's loop uncaught -- there is no return from
+    that branch, by design). Split out of run_worker 2026-09-19, same
+    reason as _finish_active_job -- see run_worker's docstring."""
+    # We cannot forcibly kill a Python thread, so it keeps running
+    # in the background (and will simply be ignored when/if it
+    # eventually finishes), but the queue row itself is freed up
+    # immediately so the dashboard stops showing a permanently
+    # frozen RUNNING card and the worker loop can keep picking up
+    # other queued jobs.
+    #
+    # What was invisible until now: that abandoned thread does not
+    # free the memory it was holding (API response bytes, image/
+    # video buffers, whatever the stuck step had in scope) - it just
+    # sits there, alive, forever, because nothing ever joins it.
+    # Confirmed live 2026-09-12: this worker process's RSS grew to
+    # 3.27 GB over ~2 hours with no other explanation found in this
+    # file's module-level state. This does not free that memory -
+    # a thread genuinely cannot be force-killed from the outside in
+    # Python - but it makes every abandonment loud in the log with a
+    # running total, so the leak is a number someone can watch
+    # instead of a silent multi-GB surprise discovered in Task
+    # Manager. abandoned_job_threads() reads threading.enumerate()
+    # directly rather than keeping a separate list, so the count can
+    # never drift from reality the way a hand-maintained counter
+    # could.
+    still_abandoned = abandoned_job_threads()
+    watchdog_seconds = _job_watchdog_seconds(job)
+    print(
+        f"[one-agents] job {job['id']} ({job.get('agent_id')}) exceeded its "
+        f"watchdog and was abandoned running in the background - "
+        f"{len(still_abandoned)} such thread(s) now alive. Each one holds "
+        f"memory that will not be freed until it finishes on its own; a "
+        f"climbing count here is the leading indicator of the RSS growth "
+        f"that used to go unnoticed until it reached multiple GB.",
+        flush=True,
+    )
+    fail_job(
+        job["id"],
+        TimeoutError(
+            f"Job exceeded watchdog timeout of {watchdog_seconds:.0f}s "
+            "and was marked failed so it would not stay stuck forever. "
+            "The underlying step may still finish in the background; "
+            "re-run the task if needed."
+        ),
+    )
+    if job.get("agent_id") == "hermes":
+        _publishing_event(
+            job, agent="HERMES", event_type="research_timeout",
+            stage="watchdog", summary="Research stopped by the job watchdog",
+            details={"timeout_seconds": watchdog_seconds}, status="blocked",
+        )
+
+    # Observability alone (the log line above) does not stop the
+    # leak - it only lets a human notice it. The one thing that
+    # DOES reclaim the memory an abandoned thread holds is ending
+    # the process: every thread here is daemon=True, so the
+    # interpreter does not wait for them on exit - they, and
+    # whatever they were holding, are gone the moment this process
+    # is. So past a small threshold, exit deliberately rather than
+    # let the count climb toward another 3.27 GB. This is safe only
+    # because something outside this process restarts it when it's
+    # gone - see start-one.ps1's dedup guard, and the scheduled task
+    # that calls it periodically (ONE-AutoRestart) so a bounce here
+    # is a few minutes of no new jobs claimed, not a dead worker.
+    max_abandoned = int(os.environ.get("ONE_WORKER_MAX_ABANDONED_THREADS", "3"))
+    if len(still_abandoned) >= max_abandoned:
+        print(
+            f"[one-agents] {len(still_abandoned)} abandoned job thread(s) reached "
+            f"the limit ({max_abandoned}) - exiting deliberately so the memory "
+            f"they hold is actually reclaimed, and a fresh worker can be started. "
+            f"This process depends on something else (start-one.ps1 / the "
+            f"ONE-AutoRestart scheduled task) noticing it is gone and restarting "
+            f"it; if that is not in place, the worker stays down until someone "
+            f"runs start-one.ps1 by hand.",
+            flush=True,
+        )
+        import sys
+        sys.exit(1)
+
+
 def run_worker(poll_seconds: float = 2.0) -> None:
+    """Claim and run queued jobs.
+
+    Concurrency fix (2026-09-19): this used to claim ONE job, spawn its
+    thread, then immediately worker_thread.join(timeout=watchdog) -- which
+    BLOCKS this entire loop, including the next claim_job() call, until
+    that one job either finishes or hits its (up to multi-hour, for
+    SCRIBE/MUSE-style LAO waits) watchdog. Confirmed live 2026-09-18/19:
+    while a MUSE job was mid-reel, a second, unrelated, few-second HERMES
+    research job sat "queued" the entire time -- the whole 25-agent company
+    could only ever have ONE agent genuinely executing at once, no matter
+    how many floors looked busy in the 3D building (which only reflects
+    whatever WAS actually claimed, so it was reporting the truth -- the
+    truth was just "everything else is waiting in a single global line").
+    That is also why two floors "running" at once only ever showed one
+    speech bubble: only one was ever really running.
+
+    Fixed by tracking multiple active job threads (bounded by
+    ONE_WORKER_MAX_CONCURRENT_JOBS, default 6) instead of blocking on one.
+    Each loop iteration reaps any finished/expired threads first (freeing a
+    slot), then claims new jobs up to the concurrency limit. claim_job()'s
+    own BEGIN IMMEDIATE + conditional UPDATE (see its docstring) already
+    made concurrent claims race-safe before this change -- multiple threads
+    calling it around the same moment was already fine, this function
+    simply never let that happen. Every job thread's own completion
+    handling (_finish_active_job) and watchdog-abandonment handling
+    (_abandon_active_job) is unchanged in substance, just called per-thread
+    instead of inline after a single join().
+    """
     import threading
 
     # A worker that dies mid-poll leaves its job in 'running' forever, because
@@ -5460,6 +5616,12 @@ def run_worker(poll_seconds: float = 2.0) -> None:
         print(f"[one-agents] restart recovery skipped: {exc}", flush=True)
     _reconcile_publishing_projection()
 
+    try:
+        max_concurrent = max(1, int(os.environ.get("ONE_WORKER_MAX_CONCURRENT_JOBS", "6")))
+    except ValueError:
+        max_concurrent = 6
+
+    active: dict[str, dict[str, Any]] = {}  # job_id -> {thread, job, outcome, deadline}
     last_schedule_check = 0.0
     last_leak_check = 0.0
     while True:
@@ -5478,135 +5640,46 @@ def run_worker(poll_seconds: float = 2.0) -> None:
                 print(f"[one-agents] {len(stuck)} abandoned job thread(s) still alive: "
                       f"{', '.join(t.name for t in stuck)}", flush=True)
             last_leak_check = time.time()
-        job = claim_job()
-        if not job:
-            time.sleep(poll_seconds)
-            continue
 
-        outcome: dict[str, Any] = {}
+        # Reap anything finished or expired BEFORE claiming more, so a slot
+        # a job just vacated is available to the claim pass below in the
+        # same iteration.
+        for job_id in list(active.keys()):
+            entry = active[job_id]
+            thread: threading.Thread = entry["thread"]
+            if not thread.is_alive():
+                thread.join()  # already finished; this just reaps it, no wait
+                _finish_active_job(entry["job"], entry["outcome"])
+                del active[job_id]
+            elif time.time() >= entry["deadline"]:
+                _abandon_active_job(entry["job"])  # raises SystemExit past the threshold
+                del active[job_id]
 
-        def _target() -> None:
-            try:
-                outcome["result"] = execute_job(job)
-            except Exception as exc:  # noqa: BLE001 - surfaced via outcome
-                outcome["error"] = exc
-                import traceback
-                outcome["traceback"] = traceback.format_exc()
+        # Claim new work up to the concurrency limit.
+        while len(active) < max_concurrent:
+            job = claim_job()
+            if not job:
+                break
 
-        worker_thread = threading.Thread(
-            target=_target, name=f"job-{job['id']}", daemon=True
-        )
-        worker_thread.start()
-        worker_thread.join(timeout=_job_watchdog_seconds(job))
+            outcome: dict[str, Any] = {}
 
-        if worker_thread.is_alive():
-            # The job is still running past the outer watchdog window.
-            # We cannot forcibly kill a Python thread, so it keeps running
-            # in the background (and will simply be ignored when/if it
-            # eventually finishes), but the queue row itself is freed up
-            # immediately so the dashboard stops showing a permanently
-            # frozen RUNNING card and the worker loop can keep picking up
-            # other queued jobs.
-            #
-            # What was invisible until now: that abandoned thread does not
-            # free the memory it was holding (API response bytes, image/
-            # video buffers, whatever the stuck step had in scope) - it just
-            # sits there, alive, forever, because nothing ever joins it.
-            # Confirmed live 2026-09-12: this worker process's RSS grew to
-            # 3.27 GB over ~2 hours with no other explanation found in this
-            # file's module-level state. This does not free that memory -
-            # a thread genuinely cannot be force-killed from the outside in
-            # Python - but it makes every abandonment loud in the log with a
-            # running total, so the leak is a number someone can watch
-            # instead of a silent multi-GB surprise discovered in Task
-            # Manager. abandoned_job_threads() reads threading.enumerate()
-            # directly rather than keeping a separate list, so the count can
-            # never drift from reality the way a hand-maintained counter
-            # could.
-            still_abandoned = abandoned_job_threads()
-            print(
-                f"[one-agents] job {job['id']} ({job.get('agent_id')}) exceeded its "
-                f"watchdog and was abandoned running in the background - "
-                f"{len(still_abandoned)} such thread(s) now alive. Each one holds "
-                f"memory that will not be freed until it finishes on its own; a "
-                f"climbing count here is the leading indicator of the RSS growth "
-                f"that used to go unnoticed until it reached multiple GB.",
-                flush=True,
+            def _make_target(job: dict[str, Any], outcome: dict[str, Any]):
+                def _target() -> None:
+                    try:
+                        outcome["result"] = execute_job(job)
+                    except Exception as exc:  # noqa: BLE001 - surfaced via outcome
+                        outcome["error"] = exc
+                        import traceback
+                        outcome["traceback"] = traceback.format_exc()
+                return _target
+
+            worker_thread = threading.Thread(
+                target=_make_target(job, outcome), name=f"job-{job['id']}", daemon=True
             )
-            fail_job(
-                job["id"],
-                TimeoutError(
-                    f"Job exceeded watchdog timeout of {_job_watchdog_seconds(job):.0f}s "
-                    "and was marked failed so it would not stay stuck forever. "
-                    "The underlying step may still finish in the background; "
-                    "re-run the task if needed."
-                ),
-            )
-            if job.get("agent_id") == "hermes":
-                _publishing_event(
-                    job, agent="HERMES", event_type="research_timeout",
-                    stage="watchdog", summary="Research stopped by the job watchdog",
-                    details={"timeout_seconds": _job_watchdog_seconds(job)}, status="blocked",
-                )
+            worker_thread.start()
+            active[job["id"]] = {
+                "thread": worker_thread, "job": job, "outcome": outcome,
+                "deadline": time.time() + _job_watchdog_seconds(job),
+            }
 
-            # Observability alone (the log line above) does not stop the
-            # leak - it only lets a human notice it. The one thing that
-            # DOES reclaim the memory an abandoned thread holds is ending
-            # the process: every thread here is daemon=True, so the
-            # interpreter does not wait for them on exit - they, and
-            # whatever they were holding, are gone the moment this process
-            # is. So past a small threshold, exit deliberately rather than
-            # let the count climb toward another 3.27 GB. This is safe only
-            # because something outside this process restarts it when it's
-            # gone - see start-one.ps1's dedup guard, and the scheduled task
-            # that calls it periodically (ONE-AutoRestart) so a bounce here
-            # is a few minutes of no new jobs claimed, not a dead worker.
-            max_abandoned = int(os.environ.get("ONE_WORKER_MAX_ABANDONED_THREADS", "3"))
-            if len(still_abandoned) >= max_abandoned:
-                print(
-                    f"[one-agents] {len(still_abandoned)} abandoned job thread(s) reached "
-                    f"the limit ({max_abandoned}) - exiting deliberately so the memory "
-                    f"they hold is actually reclaimed, and a fresh worker can be started. "
-                    f"This process depends on something else (start-one.ps1 / the "
-                    f"ONE-AutoRestart scheduled task) noticing it is gone and restarting "
-                    f"it; if that is not in place, the worker stays down until someone "
-                    f"runs start-one.ps1 by hand.",
-                    flush=True,
-                )
-                import sys
-                sys.exit(1)
-            continue
-
-        if "error" in outcome:
-            trace = str(outcome.get("traceback") or "").strip()
-            fail_job(job["id"], RuntimeError(
-                f"{outcome['error']}\n\n{trace}" if trace else str(outcome["error"])
-            ))
-        else:
-            result = outcome.get("result", {})
-            # The gate is asked for, not asserted.
-            #
-            # _await_human_upload is the handler saying "I have reached the
-            # point where a person uploads this by hand". Whether that needs a
-            # person is not the handler's call - it is declared in the agent's
-            # permissions.yaml and resolved through the floors registry, where
-            # publish_to_store is red for SCRIBE. A handler that asserts its
-            # own gate is the same shape as an agent asserting its own
-            # privileges, and it fails the same way: silently, on the day
-            # somebody edits it.
-            #
-            # None means the registry could not answer - tree absent, index
-            # stale - and None is not permission. Hold, and let a person look.
-            if result.pop("_blocked", False):
-                mark_blocked(job["id"], result)
-            elif result.pop("_await_growth_review", False):
-                mark_awaiting_growth_review(job["id"], result)
-            elif result.pop("_await_human_upload", False):
-                gated = floors_bridge.needs_approval(
-                    job.get("agent_id", ""), "publish_to_store")
-                if gated is False:
-                    finish_job(job["id"], result)
-                else:
-                    mark_awaiting_upload(job["id"], result)
-            else:
-                finish_job(job["id"], result)
+        time.sleep(poll_seconds)
