@@ -3763,16 +3763,24 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "BRIEF: <6-12 lines: who the audience is, why run now, what would make "
         "this one perform, and the honest risk that it underperforms>\n"
         "PLACE: <ONE single, specific, real place only — one market/complex/"
-        "landmark name (e.g. 'Purohit Ji Ka Katla, Tripolia Bazaar, Jaipur'), "
-        "NEVER a list of multiple places, NEVER a place type or category. "
-        "Only fill this in if the evidence reports ONE concrete, dated event "
-        "AT that one place, with at least one specific citable detail (a "
-        "number, a named cause, a specific reported consequence) that could "
-        "only be true of that exact place today — not a general pattern "
-        "true of several similar sites. 'Several heritage sites face "
-        "closures' or 'X and Y temples both have safety concerns' is NOT a "
-        "valid PLACE — that is a theme, not an incident; leave PLACE empty "
-        "in that case, even if the theme itself is real and evidenced>\n"
+        "landmark name, optionally with its area/city/state appended after "
+        "a comma the way a place is normally written (e.g. 'Purohit Ji Ka "
+        "Katla, Tripolia Bazaar, Jaipur' is ONE place). NEVER two or more "
+        "DIFFERENT places joined by 'and'/'&'/'/' or listed as alternatives "
+        "('sites like X or Y'), never a place type or category. Only fill "
+        "this in if the evidence reports ONE concrete, freshly reported, "
+        "DATED EVENT (something that happened or was reported this week: a "
+        "fire, a collapse, an accident, structural failure, a specific "
+        "closure announcement) AT that one place — NOT an ongoing policy, "
+        "standing conservation program, or general state of affairs. A "
+        "generic sentence like 'emergency closures to prevent irreversible "
+        "structural failure and save irreplaceable knowledge and lived "
+        "practices' is a THEME, not an incident, even attached to one named "
+        "site — it must instead read like a news report of one specific "
+        "thing that happened (what broke/closed/caught fire, roughly when, "
+        "and any concrete citable consequence: a number, a duration, a "
+        "named cause). If nothing in the evidence is that specific, leave "
+        "PLACE empty rather than dressing up a theme as an incident>\n"
         "INCIDENT_SUMMARY: <only if PLACE is exactly one specific place — "
         "the one concrete reported event there today, per the cited "
         "evidence only, no invented figures/blame, else empty>\n"
@@ -3938,14 +3946,30 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         # run still returned "Konark Sun Temple, Meenakshi Amman Temple" --
         # a multi-site theme dressed as an incident, not the Jaipur-fire-
         # style single concrete event this format needs. Don't just trust
-        # the model followed the "one place only" instruction -- reject any
-        # PLACE that looks like a list (comma, "&", " and ", "/", or more
-        # than one capitalized multi-word name) rather than shipping a
-        # generic-theme reel under this format's higher specificity bar.
+        # the model followed the instructions -- two independent checks:
+        # (1) PLACE joining two DIFFERENT places with "and"/"&"/"/" or
+        # "like X or Y" -- NOT a bare comma, which is the normal way to
+        # write one place's area/city/state ("Purohit Ji Ka Katla, Tripolia
+        # Bazaar, Jaipur" is ONE place; an earlier version of this check
+        # wrongly flagged that shape as a live false positive on "Sanchi
+        # Stupa, Madhya Pradesh", also one place).
+        # (2) INCIDENT_SUMMARY reading as a generic ongoing-policy THEME
+        # rather than one dated event -- confirmed live twice on 2026-09-18
+        # that the model defaults to the same canned "emergency closures to
+        # save irreplaceable knowledge/lived practices" phrasing regardless
+        # of which site name it plugs in, which is a theme, not a report of
+        # something that actually happened this week.
         looks_like_multiple_places = bool(
-            incident_place and re.search(r",| and |&|/", incident_place)
+            incident_place and re.search(r"\b and \b|&|/| like .+ or ", incident_place, re.I)
         )
-        if not strong or not incident_place or looks_like_multiple_places:
+        looks_like_generic_theme = bool(
+            incident_summary and re.search(
+                r"irreplaceable knowledge|lived practices|critical safety pause|"
+                r"before (it|they) vanish|several (heritage )?sites|multiple sites",
+                incident_summary, re.I,
+            )
+        )
+        if not strong or not incident_place or looks_like_multiple_places or looks_like_generic_theme:
             stages.clear_stage("ia")
             result["handed_to"] = None
             result["note"] = (
