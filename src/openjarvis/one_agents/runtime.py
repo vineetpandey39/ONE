@@ -1594,6 +1594,15 @@ _MEDIA_TREND_CATEGORIES: tuple[tuple[str, str], ...] = (
     ("civic_infra", "India road construction traffic infrastructure protest news"),
     ("festival", "India festival pilgrimage crowd temple news"),
     ("viral_format", "India viral AI photo trend social media"),
+    # Added 2026-09-18 after a direct comparison: the 4 categories above
+    # structurally cannot surface a fire/collapse/safety incident (the
+    # Purohit Ji Ka Katla fire and the Surat Salasar Textile Market fire
+    # both fell entirely outside heritage_monument's temple-only scope and
+    # civic_infra's road/traffic-only scope). This is imagineindia-news-
+    # hook-reel's primary source category -- without it, that format's own
+    # commissioning_eligible gate can never fire on the exact story type it
+    # exists for.
+    ("disaster_incident", "India market fire building collapse accident news today"),
 )
 
 
