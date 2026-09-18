@@ -1910,8 +1910,36 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
             # the unstripped prefix dominates the extracted query terms and
             # returns nothing a real headline would ever match.
             research_query = re.sub(r"^\[ONE trigger: [^\]]+\]\s*", "", task).strip() or task
+            def _survivable(call: Any, empty: dict[str, Any]) -> Any:
+                # All five evidence calls for one topic sit in a single try block
+                # inside the floor's collect(), so one slow site deletes the whole
+                # candidate. Confirmed live 2026-09-19: openlibrary.org timed out
+                # at 12s on all six topics, every candidate vanished, the catalog
+                # evidence went empty, and the freshness gate blocked the book -
+                # while Google and Apple had already answered the same question.
+                # Missing evidence is handed over as missing instead; the floor's
+                # own scorer still refuses to call a candidate eligible when its
+                # competition is genuinely unknown, so the gate is untouched.
+                def guarded(*args: Any, **kwargs: Any) -> dict[str, Any]:
+                    try:
+                        return call(*args, **kwargs)
+                    except Exception as exc:  # noqa: BLE001
+                        return {**empty, "source_type": "unavailable",
+                                "unavailable_reason": f"{type(exc).__name__}: {exc}"[:200]}
+                return guarded
+
             radar_snapshot = engine.collect(
-                research_query, reusable, markets=markets, supply_collector=supply_collector
+                research_query, reusable, markets=markets,
+                supply_collector=_survivable(supply_collector,
+                                             {"raw_signal": {"total_items": None}, "role": "competition"}),
+                open_supply_collector=_survivable(engine.open_library_supply,
+                                                 {"total_items": None, "role": "competition"}),
+                intent_collector=_survivable(engine.google_book_intent,
+                                             {"book_intent_suggestions": [], "suggestions": [],
+                                              "role": "reader_intent"}),
+                persistence_collector=_survivable(engine.discussion_persistence,
+                                                  {"result_count": 0, "items": [],
+                                                   "role": "discussion_persistence"}),
             )
             radar_text = json.dumps(radar_snapshot, ensure_ascii=False, separators=(",", ":"))
         else:
