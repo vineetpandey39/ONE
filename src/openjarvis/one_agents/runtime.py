@@ -3762,11 +3762,20 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "angle already respects it>\n"
         "BRIEF: <6-12 lines: who the audience is, why run now, what would make "
         "this one perform, and the honest risk that it underperforms>\n"
-        "PLACE: <only if the evidence names a real, specific, current local "
-        "incident with a real place — the exact place name (market/complex/"
-        "landmark), else leave empty>\n"
-        "INCIDENT_SUMMARY: <only if PLACE is non-empty — what actually happened, "
-        "per the cited evidence only, no invented figures/blame, else empty>\n"
+        "PLACE: <ONE single, specific, real place only — one market/complex/"
+        "landmark name (e.g. 'Purohit Ji Ka Katla, Tripolia Bazaar, Jaipur'), "
+        "NEVER a list of multiple places, NEVER a place type or category. "
+        "Only fill this in if the evidence reports ONE concrete, dated event "
+        "AT that one place, with at least one specific citable detail (a "
+        "number, a named cause, a specific reported consequence) that could "
+        "only be true of that exact place today — not a general pattern "
+        "true of several similar sites. 'Several heritage sites face "
+        "closures' or 'X and Y temples both have safety concerns' is NOT a "
+        "valid PLACE — that is a theme, not an incident; leave PLACE empty "
+        "in that case, even if the theme itself is real and evidenced>\n"
+        "INCIDENT_SUMMARY: <only if PLACE is exactly one specific place — "
+        "the one concrete reported event there today, per the cited "
+        "evidence only, no invented figures/blame, else empty>\n"
         "SEARCH_TERMS: <only if PLACE is non-empty — comma-separated real, "
         "current search phrases from the actual coverage (place name + "
         "incident type + 'today'/'news'), else empty>",
@@ -3924,13 +3933,28 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
             bool(cat.get("commissioning_eligible"))
             for cat in media_evidence.get("categories", {}).values()
         )
-        if not strong or not incident_place:
+        # Defense-in-depth (added 2026-09-18 after a live failure): the
+        # synthesis prompt asks for exactly ONE specific place, but a live
+        # run still returned "Konark Sun Temple, Meenakshi Amman Temple" --
+        # a multi-site theme dressed as an incident, not the Jaipur-fire-
+        # style single concrete event this format needs. Don't just trust
+        # the model followed the "one place only" instruction -- reject any
+        # PLACE that looks like a list (comma, "&", " and ", "/", or more
+        # than one capitalized multi-word name) rather than shipping a
+        # generic-theme reel under this format's higher specificity bar.
+        looks_like_multiple_places = bool(
+            incident_place and re.search(r",| and |&|/", incident_place)
+        )
+        if not strong or not incident_place or looks_like_multiple_places:
             stages.clear_stage("ia")
             result["handed_to"] = None
             result["note"] = (
-                "No genuinely real, specific local incident found today "
-                "(either evidence was too thin, or nothing named a real "
-                "place/problem) -- not forcing a News Hook Reel without one. "
+                "No genuinely real, SINGLE specific local incident found "
+                "today (either evidence was too thin, or the only usable "
+                "signal was a multi-site theme rather than one concrete "
+                "event at one place: "
+                + (incident_place or "(none)")
+                + ") -- not forcing a News Hook Reel on a generic theme. "
                 "Try again later, or ask for the regular reel instead."
             )
             return result
