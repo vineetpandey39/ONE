@@ -1143,6 +1143,12 @@ IA_BEFORE_AFTER_PROCESS_NAME = "ImagineIndia Before/After Post"
 # instead of the main reel's 5-frame Bible structure, so IRIS's research
 # has somewhere it can genuinely drive the visual content.
 IA_TREND_SPOTLIGHT_PROCESS_NAME = "ImagineIndia Trend Spotlight"
+# Added 2026-09-18 after the Purohit Ji Ka Katla / Tripolia Bazaar fire reel
+# hit 216k views (vs an ~8.9k median) -- a THIRD separate LAO process, same
+# 5-frame production complexity as the main reel but a crisis-hook/reveal
+# story grammar grounded in a real, current, specific local incident IRIS
+# researches, with no location catalogue at all.
+IA_NEWS_HOOK_PROCESS_NAME = "ImagineIndia News Hook Reel"
 # Matches the imagineindia-instagram-reel package's own input_schema default
 # for locationManifestPath (package.json). Duplicated here (not read from the
 # package) only so _peek_next_ia_location below can predict a location
@@ -3906,6 +3912,29 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
             )
             return result
 
+    # News Hook Reel is ad hoc for the same reason as Trend Spotlight, plus
+    # a stricter bar: it has NO location catalogue at all, so it needs a
+    # genuinely real, SPECIFIC, current local incident (a real named place
+    # having a real named problem), not just a strong theme. Gate on BOTH
+    # commissioning_eligible evidence AND a non-empty PLACE marker -- the
+    # synthesis prompt leaves PLACE empty on any day it cannot honestly name
+    # a real specific incident, per its own instructions above.
+    if content_type == "news_hook":
+        strong = any(
+            bool(cat.get("commissioning_eligible"))
+            for cat in media_evidence.get("categories", {}).values()
+        )
+        if not strong or not incident_place:
+            stages.clear_stage("ia")
+            result["handed_to"] = None
+            result["note"] = (
+                "No genuinely real, specific local incident found today "
+                "(either evidence was too thin, or nothing named a real "
+                "place/problem) -- not forcing a News Hook Reel without one. "
+                "Try again later, or ask for the regular reel instead."
+            )
+            return result
+
     # --- the handoff ------------------------------------------------------
     # head_briefs_worker (stages.py) owns the CARRYING_TO_WORKER/BRIEFING/
     # RECEIVING/AWAITING_WORKER choreography -- see its docstring for why
@@ -3921,7 +3950,10 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
                         "region": region, "angle": angle, "origin_job": job["id"],
                         "content_type": content_type, "topic": task,
                         "publish_target": publish_target,
-                        "publish_authorized": publish_authorized}),
+                        "publish_authorized": publish_authorized,
+                        "incident_place": incident_place,
+                        "incident_summary": incident_summary,
+                        "incident_search_terms": incident_search_terms}),
             mode="execute",
             tier="fast",
         ),
@@ -3949,6 +3981,8 @@ def _iris_report(job: dict[str, Any]) -> dict[str, Any]:
         "before-after": "before/after post",
         "trend_spotlight": "trend spotlight",
         "trend-spotlight": "trend spotlight",
+        "news_hook": "news hook reel",
+        "news-hook": "news hook reel",
         "reel": "reel",
     }.get(content_type, "post")
     stages.set_stage("ia", stages.REPORTING, f"Reviewing MUSE's finished {content_label}")
@@ -4235,7 +4269,13 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         return _run_muse_carousel(job, brief)
     is_before_after = content_type in ("before_after", "before-after", "beforeafter")
     is_trend_spotlight = content_type in ("trend_spotlight", "trend-spotlight", "spotlight")
-    kind_label = "before/after post" if is_before_after else "trend spotlight" if is_trend_spotlight else "reel"
+    is_news_hook = content_type in ("news_hook", "news-hook")
+    kind_label = (
+        "before/after post" if is_before_after
+        else "trend spotlight" if is_trend_spotlight
+        else "news hook reel" if is_news_hook
+        else "reel"
+    )
 
     stages.worker_confirms_receipt(
         "muse",
@@ -4246,6 +4286,7 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     process_name = (
         os.environ.get("LAO_IA_BEFORE_AFTER_PROCESS", IA_BEFORE_AFTER_PROCESS_NAME) if is_before_after
         else os.environ.get("LAO_IA_TREND_SPOTLIGHT_PROCESS", IA_TREND_SPOTLIGHT_PROCESS_NAME) if is_trend_spotlight
+        else os.environ.get("LAO_IA_NEWS_HOOK_PROCESS", IA_NEWS_HOOK_PROCESS_NAME) if is_news_hook
         else os.environ.get("LAO_IA_PROCESS", IA_PROCESS_NAME)
     )
 
@@ -4310,7 +4351,14 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         # ARE its required content, not an optional hint.
         lao_input_args: dict[str, Any] = (
             {"editorialPriority": priority, "editorialAngle": angle}
-            if is_trend_spotlight else {}
+            if is_trend_spotlight
+            else {
+                "incidentPlace": str(brief.get("incident_place") or ""),
+                "incidentSummary": str(brief.get("incident_summary") or ""),
+                "incidentSearchTerms": str(brief.get("incident_search_terms") or ""),
+            }
+            if is_news_hook
+            else {}
         )
         started = tool.execute(
             action="start", mode="dry_run", process_name=process_name,
@@ -4379,7 +4427,12 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
             last = {"raw": probe.content}
         status = str((last.get("job") or {}).get("status") or status)
         elapsed = int((time.time() - (deadline - max_wait)) // 60)
-        verb = "Composing" if is_before_after else "Spotlighting" if is_trend_spotlight else "Shooting"
+        verb = (
+            "Composing" if is_before_after
+            else "Spotlighting" if is_trend_spotlight
+            else "Hooking" if is_news_hook
+            else "Shooting"
+        )
         stages.set_stage(
             "muse", stages.EXECUTING,
             (f"{verb} “{headline[:70]}” · LAO {status} · {elapsed}m" if headline
@@ -4419,6 +4472,14 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         # always the researched headline, never a place name.
         run_dir = str((out.get("final_video") or {}).get("path") or "")
         title = headline or f"Trend Spotlight (LAO job {lao_job_id[:8]})"
+        published = str((out.get("meta_publish_result") or {}).get("status") or "") == "published"
+    elif is_news_hook:
+        # imagineindia-news-hook-reel has no location catalogue either --
+        # title is the real incident place IRIS/MUSE carried through, not a
+        # catalogue name.
+        run_dir = str((out.get("final_video_with_audio") or out.get("final_video") or {}).get("path") or "")
+        incident_place_out = str(brief.get("incident_place") or "")
+        title = incident_place_out or headline or f"News Hook Reel (LAO job {lao_job_id[:8]})"
         published = str((out.get("meta_publish_result") or {}).get("status") or "") == "published"
     else:
         reel = out.get("reel") or out.get("meta_publish") or {}
