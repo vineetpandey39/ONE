@@ -1323,8 +1323,22 @@ def _research_synthesis(prompt: str, max_tokens: int = 2200,
 
 
 def _marker(text: str, key: str, default: str = "") -> str:
+    """Extract "KEY: value" from free-form LLM synthesis output.
+
+    Bug fixed 2026-09-18: the original regex used bare \\s* around the
+    colon and value, and \\s matches newlines -- so a marker with an EMPTY
+    value (no content on its own line) let \\s* silently cross into the
+    NEXT line and capture that line's own "OTHER_KEY:" label text as if it
+    were this key's value. Every caller before the imagineindia-news-hook-
+    reel wiring always had non-empty values for every marker it asked for,
+    so this never surfaced -- PLACE/INCIDENT_SUMMARY/SEARCH_TERMS are the
+    first markers ever deliberately allowed to come back empty. Fixed by
+    restricting internal whitespace to space/tab only ([ \\t]*), which
+    cannot cross a newline, so an empty-valued line correctly fails to
+    match and this returns `default` instead of leaking the next line.
+    """
     match = re.search(
-        rf"^\s*\**{re.escape(key)}\**\s*:\s*\**(.+?)\**\s*$",
+        rf"^[ \t]*\**{re.escape(key)}\**[ \t]*:[ \t]*\**(.+?)\**[ \t]*$",
         text, re.MULTILINE | re.IGNORECASE,
     )
     return match.group(1).strip() if match else default
