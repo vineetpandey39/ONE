@@ -1634,6 +1634,61 @@ def _sanjeevani_trends() -> Any | None:
         return None
 
 
+_NEWS_HOOK_GENERIC = {"road", "marg", "market", "bazaar", "bazar", "chowk", "nagar", "city",
+                      "bridge", "flyover", "bypass", "highway", "station", "complex", "area",
+                      "near", "the", "and", "block", "sector", "colony", "gali", "lane"}
+
+
+def _news_hook_ledger_path() -> Path:
+    return Path(IA_LOCATIONS_MANIFEST_PATH).with_name("NewsHook_Ledger.json")
+
+
+def _news_hook_ledger_load() -> list[dict[str, Any]]:
+    try:
+        data = json.loads(_news_hook_ledger_path().read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _news_hook_place_tokens(place: str) -> list[str]:
+    words = re.findall(r"[a-z0-9]{3,}", place.lower())
+    return [w for w in words if w not in _NEWS_HOOK_GENERIC]
+
+
+def _news_hook_already_covered(text: str, ledger: list[dict[str, Any]], *, days: int = 14) -> str:
+    """The ledger entry this story repeats, or "". A place covered inside `days`
+    is skipped: a real incident trends 2-3 days, so without this the same story
+    is picked on consecutive runs. A place needs ALL its distinctive words (max
+    two) in the headlines, so a city name alone never blocks a different story."""
+    now = datetime.now(timezone.utc)
+    low = text.lower()
+    for row in ledger:
+        try:
+            when = datetime.fromisoformat(str(row.get("at")))
+        except ValueError:
+            continue
+        if (now - when).days >= days:
+            continue
+        tokens = _news_hook_place_tokens(str(row.get("place") or ""))[:2]
+        if tokens and all(re.search(rf"\b{re.escape(t)}\b", low) for t in tokens):
+            return str(row.get("place"))
+    return ""
+
+
+def _news_hook_ledger_record(place: str, summary: str, job_id: str) -> None:
+    """Called when IRIS briefs MUSE: the tracker for a package that has no
+    location catalogue to mark used. Never raises -- tracking must not stop a run."""
+    try:
+        ledger = _news_hook_ledger_load()
+        ledger.append({"place": place, "summary": summary[:300], "job_id": job_id,
+                       "at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+        _news_hook_ledger_path().write_text(
+            json.dumps(ledger[-200:], indent=2, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def _iris_news_hook_discovery(avoid: str) -> dict[str, Any]:
     """News-hook research via Sanjeevani's trend_discovery (2026-09-19) instead
     of five fixed keyword queries + a 9B model choosing an incident out of a raw
@@ -1678,6 +1733,14 @@ def _iris_news_hook_discovery(avoid: str) -> dict[str, Any]:
                 and c["n_sources"] >= min_outlets
                 and c["positive_hits"] >= 1 and c["negative_hits"] == 0
                 and not sacred.search(" ".join(c["headlines"]))]
+    ledger = _news_hook_ledger_load()
+    repeats = []
+    for c in list(eligible):
+        hit = _news_hook_already_covered(" ".join(c["headlines"]), ledger)
+        if hit:
+            eligible.remove(c)
+            repeats.append({"title": c["title"], "already_covered": hit})
+    summary["skipped_already_covered"] = repeats
     if not eligible:
         return {"brief": "", "pick": None, "summary": summary,
                 "note": f"No trending story today is fresh (<= {max_age:.0f}h since first "
@@ -4297,6 +4360,8 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     # head_briefs_worker (stages.py) owns the CARRYING_TO_WORKER/BRIEFING/
     # RECEIVING/AWAITING_WORKER choreography -- see its docstring for why
     # this can't just be a bare set_stage/sleep/enqueue sequence per floor.
+    if content_type == "news_hook" and incident_place:
+        _news_hook_ledger_record(incident_place, incident_summary, str(job.get("id") or ""))
     worker = stages.head_briefs_worker(
         "ia", "muse",
         carrying_detail=f"Taking the {content_label} brief to MUSE: {(priority or angle)[:60]}",
