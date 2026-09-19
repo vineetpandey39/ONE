@@ -4686,6 +4686,11 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
                 "incidentSearchTerms": str(brief.get("incident_search_terms") or ""),
             }
             if is_news_hook
+            # 2026-09-19: the static before/after package (v1.7.0) writes its
+            # image prompts from short guardrails + this optional trend angle,
+            # so IRIS's Sanjeevani finding is a soft theme hint for ChatGPT,
+            # not a script. Empty = ChatGPT picks the place's natural story.
+            else {"trendBrief": str(angle or "")[:400]} if is_before_after
             else {}
         )
         started = tool.execute(
