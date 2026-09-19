@@ -1606,24 +1606,57 @@ _MEDIA_TREND_CATEGORIES: tuple[tuple[str, str], ...] = (
 )
 
 
-def _iris_news_hook_discovery(avoid: str) -> dict[str, Any]:
-    """News-hook research via trend_discovery (2026-09-19) instead of five fixed
-    keyword queries + a 9B model choosing an incident out of a raw evidence dump.
-
-    Code finds, clusters, fit-scores and AGE-VERIFIES today's India-wide trending
-    stories (see trend_discovery's docstring); the local model only picks one of
-    the few already-verified-fresh candidates and writes it up from THEIR
-    headlines. Dates and freshness are never the model's call. Returns
-    {"brief","pick","note","summary"}; brief=="" means nothing usable today."""
-    from openjarvis.one_agents import trend_discovery
-
-    lib = _sanjeevani_research()
-    if lib is None:
-        return {"brief": "", "pick": None, "summary": {},
-                "note": "Sanjeevani library unavailable -- cannot run trend discovery"}
-    max_age = float(os.environ.get("ONE_NEWS_HOOK_MAX_EVENT_AGE_HOURS", "72"))
+def _sanjeevani_trends() -> Any | None:
+    """Sanjeevani's trend_discovery module -- additive, lives next to
+    research_library.py (Sanjeevani is the single source of information; ONE
+    only loads and calls it, same pattern as _sanjeevani_research)."""
+    import importlib.util
+    import sys
+    lib_path = Path(os.environ.get(
+        "SANJEEVANI_RESEARCH_LIBRARY", r"E:\ONE-SUITE\sanjeevani\research_library.py"))
+    path = lib_path.with_name("trend_discovery.py")
+    if not path.is_file():
+        return None
+    key = "sanjeevani_trend_discovery"
+    cached = sys.modules.get(key)
+    if cached is not None:
+        return cached
     try:
-        found = trend_discovery.discover(lib, top_n=10, max_event_age_hours=max_age)
+        spec = importlib.util.spec_from_file_location(key, path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[key] = module
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        sys.modules.pop(key, None)
+        return None
+
+
+def _iris_news_hook_discovery(avoid: str) -> dict[str, Any]:
+    """News-hook research via Sanjeevani's trend_discovery (2026-09-19) instead
+    of five fixed keyword queries + a 9B model choosing an incident out of a raw
+    evidence dump.
+
+    Sanjeevani finds, clusters, fit-scores and AGE-VERIFIES today's India-wide
+    trending stories. CODE then picks the candidate (fresh, verified, not
+    sacred, no politics/crime words, covered by >= ONE_NEWS_HOOK_MIN_OUTLETS
+    outlets, highest score) -- a first version let the local model pick and it
+    chose a police-misconduct story over a 7-outlet highway-crash story, and on
+    another run answered "none" for the same input, so choosing is not the
+    model's job. The model only WRITES UP the chosen story from its own
+    headlines. Returns {"brief","pick","note","summary"}; brief=="" means
+    nothing usable today. `avoid` is accepted for signature symmetry."""
+    trends = _sanjeevani_trends()
+    lib = _sanjeevani_research()
+    if trends is None or lib is None:
+        return {"brief": "", "pick": None, "summary": {},
+                "note": "Sanjeevani trend_discovery unavailable -- cannot run trend discovery"}
+    max_age = float(os.environ.get("ONE_NEWS_HOOK_MAX_EVENT_AGE_HOURS", "72"))
+    min_outlets = int(os.environ.get("ONE_NEWS_HOOK_MIN_OUTLETS", "3"))
+    try:
+        found = trends.discover(lib, top_n=15, max_event_age_hours=max_age)
     except Exception as exc:  # noqa: BLE001
         return {"brief": "", "pick": None, "summary": {},
                 "note": f"Trend discovery failed: {type(exc).__name__}: {exc}"[:300]}
@@ -1633,45 +1666,46 @@ def _iris_news_hook_discovery(avoid: str) -> dict[str, Any]:
         "pool_fresh_headlines": found["pool_fresh"], "clusters": found["clusters"],
         "sources_ok": len(found["sources_ok"]), "sources_failed": found["sources_failed"],
         "x_trends_sample": found["x_trends_sample"][:8],
-        "max_event_age_hours": max_age,
+        "max_event_age_hours": max_age, "min_outlets": min_outlets,
         "candidates": [
             {"title": c["title"], "sources": c["n_sources"], "score": c["score"],
              "first_report_age_hours": (c.get("first_report") or {}).get("age_hours"),
              "verified": c["verified"], "stale": c["stale"]}
             for c in found["candidates"]],
     }
-    fresh = [c for c in found["candidates"] if c["verified"] and not c["stale"]
-             and not sacred.search(" ".join(c["headlines"]))][:6]
-    if not fresh:
+    eligible = [c for c in found["candidates"]
+                if c["verified"] and not c["stale"]
+                and c["n_sources"] >= min_outlets
+                and c["positive_hits"] >= 1 and c["negative_hits"] == 0
+                and not sacred.search(" ".join(c["headlines"]))]
+    if not eligible:
         return {"brief": "", "pick": None, "summary": summary,
-                "note": "No trending story passed the freshness check today (every "
-                        "candidate was stale, unverifiable, or sacred-site-centred)."}
-    lines = []
-    for i, c in enumerate(fresh, 1):
-        age = (c.get("first_report") or {}).get("age_hours")
-        lines.append(f"{i}. [{c['n_sources']} outlets, first reported ~{age}h ago] "
-                     + " || ".join(c["headlines"][:3]))
+                "note": f"No trending story today is fresh (<= {max_age:.0f}h since first "
+                        f"report), verified, covered by >= {min_outlets} outlets, and a "
+                        "visible place-based civic story (stale, thin, sacred-site or "
+                        "non-visual stories were skipped)."}
+    pick = eligible[0]
+    age = (pick.get("first_report") or {}).get("age_hours")
+    summary["picked"] = {"title": pick["title"], "first_report": pick.get("first_report"),
+                         "outlets": pick["n_sources"]}
     prompt = (
         "You are IRIS, head of Media & Content at ImagineIndia.\n\n"
-        "Below are today's trending India stories. Code has ALREADY verified each "
-        f"was first reported within the last {max_age:.0f} hours and is covered by "
-        "several outlets -- do not judge dates.\n\n"
-        + "\n".join(lines) + avoid +
-        "\n\nPick the ONE story best for an ImagineIndia reel: a real, specific "
-        "place with a visible physical problem (collapse, flooding, crowding, blocked "
-        "access, failing infrastructure) that can be drawn as crisis -> hidden "
-        "systemic reveal -> fix. Deaths/injuries may be in the story but the reel "
-        "shows the systemic/infrastructure reveal, never victims. Use ONLY facts in "
-        "the headlines above: no invented numbers, causes, people or places. PLACE "
-        "must be ONE place named in the chosen story's headlines, with its city. If "
-        "no story fits, reply PICK: 0.\n\nReply with ONLY these lines, nothing else:\n"
-        "PICK: <story number, or 0>\n"
+        f"Today's story (code-verified: first reported ~{age}h ago, covered by "
+        f"{pick['n_sources']} outlets):\n"
+        + "\n".join(f"- {h}" for h in pick["headlines"][:5]) +
+        "\n\nWrite the reel brief from these headlines ONLY: no invented numbers, "
+        "causes, people or places. PLACE = ONE place named in the headlines, with its "
+        "city (if only a road/bypass/bridge is named, use that with the city). "
+        "ANGLE = the systemic/infrastructure question this story raises, phrased as a "
+        "question if the headlines do not state a cause -- never invent a cause. "
+        "Deaths/injuries may be in the story; the reel never centres victims.\n\n"
+        "Reply with ONLY these lines, nothing else:\n"
         "PLACE: <one place, with city>\n"
         "INCIDENT_SUMMARY: <what happened, headline facts only>\n"
         "SEARCH_TERMS: <comma-separated real search phrases from the headlines>\n"
         "PRIORITY: <one line -- what this reel should optimise for>\n"
         "REGION: rotation\n"
-        "ANGLE: <one line -- the hidden systemic reveal>\n"
+        "ANGLE: <one line -- the systemic question>\n"
         "VIRAL_SCORE: <0-100>\n"
         "SACRED_SITE: none\n"
         "BRIEF: <4-8 lines: audience, why now, honest risk>"
@@ -1679,85 +1713,7 @@ def _iris_news_hook_discovery(avoid: str) -> dict[str, Any]:
     text, err = _research_synthesis(prompt, evidence={"eligible": [], "catalog_evidence": []})
     if not text:
         return {"brief": "", "pick": None, "summary": summary, "note": err or "model returned nothing"}
-    digits = re.search(r"\d+", _marker(text, "PICK"))
-    index = int(digits.group()) if digits else 0
-    if not 1 <= index <= len(fresh):
-        return {"brief": "", "pick": None, "summary": summary,
-                "note": "IRIS found no fresh candidate with a real place + visible problem today."}
-    pick = fresh[index - 1]
-    summary["picked"] = {"title": pick["title"], "first_report": pick.get("first_report")}
     return {"brief": text, "pick": pick, "summary": summary, "note": ""}
-
-
-def _incident_first_report_age_hours(place: str, *, window_days: int = 21) -> dict[str, Any]:
-    """How long ago the EARLIEST news report about `place` appeared.
-
-    Added 2026-09-19 after IRIS's news-hook research surfaced "Satya Niketan,
-    Delhi" as a fresh incident when the collapse was actually ~13 days old
-    (2026-09-06): Sanjeevani's freshness filter (google_news `when:2d`,
-    GDELT `timespan=2d`) judges the ARTICLE's publish date, not the EVENT's,
-    and a ThePrint follow-up about the political aftermath ("...has rewritten
-    DUSU campaign") was published inside the window, so an old incident
-    looked new. A reel built on a 2-week-old story misses the viral window
-    (owner direction: latest news only, last ~2 days matter). This asks
-    Google News for the same place over a much wider window and reads the
-    oldest matching headline's date -- the incident's real first-report age.
-
-    Returns {"age_hours": float|None, "earliest": iso|None, "matches": int,
-    "verified": bool}. verified=False (network failure, no matching
-    headlines) means "could not measure", which callers must treat as
-    unverified -- never as proof of freshness."""
-    import email.utils
-    import urllib.parse
-    import xml.etree.ElementTree as ET
-
-    core = re.split(r",|\(|\bin\b", place, maxsplit=1)[0].strip()
-    if len(core) < 4:
-        return {"age_hours": None, "earliest": None, "matches": 0, "verified": False}
-    try:
-        url = "https://news.google.com/rss/search?" + urllib.parse.urlencode({
-            "q": f'{core} when:{window_days}d', "hl": "en-IN", "gl": "IN", "ceid": "IN:en"})
-        # Deliberately NOT a quoted phrase query: Google News returned an EMPTY
-        # feed for '"Satya Niketan" when:21d' (flaky, 1147 bytes) while the same
-        # words unquoted returned 100 articles. The exact-phrase requirement is
-        # enforced below by matching the place name in each headline instead.
-        # Sanjeevani's own _get, NOT httpx: it verifies TLS against Sanjeevani's
-        # bundled windows-trust.pem. A first version of this check used httpx's
-        # default certificate store, which fails CERTIFICATE_VERIFY_FAILED on
-        # this machine -- inside the worker that silently came back
-        # "unverified" and let a 13-day-old incident through as not-stale.
-        lib = _sanjeevani_research()
-        if lib is not None and hasattr(lib, "_get"):
-            raw = lib._get(url, timeout=20, attempts=3)
-        else:
-            response = httpx.get(url, timeout=20, follow_redirects=True,
-                                 headers={"User-Agent": "Mozilla/5.0 (ONE-IRIS freshness check)"})
-            response.raise_for_status()
-            raw = response.content
-        root = ET.fromstring(raw)
-        now = datetime.now(timezone.utc)
-        needle = core.lower()
-        dates: list[datetime] = []
-        for node in root.findall("./channel/item"):
-            title = (node.findtext("title") or "").lower()
-            stamp = (node.findtext("pubDate") or "").strip()
-            if needle not in title or not stamp:
-                continue
-            try:
-                parsed = email.utils.parsedate_to_datetime(stamp)
-            except (TypeError, ValueError):
-                continue
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            dates.append(parsed)
-        if not dates:
-            return {"age_hours": None, "earliest": None, "matches": 0, "verified": False}
-        earliest = min(dates)
-        return {"age_hours": round((now - earliest).total_seconds() / 3600, 1),
-                "earliest": earliest.isoformat(), "matches": len(dates), "verified": True}
-    except Exception as exc:  # noqa: BLE001 - a failed check must never break research
-        return {"age_hours": None, "earliest": None, "matches": 0, "verified": False,
-                "error": f"{type(exc).__name__}: {exc}"[:300]}
 
 
 def _compact_media_evidence(evidence: dict[str, Any], *, max_per_category: int = 5) -> dict[str, Any]:
@@ -4142,7 +4098,8 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "prior_reels_considered": len(already),
     }
 
-    # Event-age check (see _incident_first_report_age_hours): measured before
+    # Event-age check (Sanjeevani trend_discovery.first_report_age, carried on
+    # the picked candidate -- article dates are not event dates): measured before
     # the research-only return so a research-only run also SHOWS whether the
     # incident IRIS picked is actually fresh -- that is exactly what an owner
     # testing IRIS's self-reliance needs to see.
@@ -4166,7 +4123,7 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         age = ({"age_hours": (pick["first_report"] or {}).get("age_hours"),
                 "earliest": (pick["first_report"] or {}).get("earliest"),
                 "verified": bool(pick.get("verified"))}
-               if pick else _incident_first_report_age_hours(incident_place))
+               if pick else {"age_hours": None, "earliest": None, "verified": False})
         result["incident_first_report_age_hours"] = age["age_hours"]
         result["incident_first_report_earliest"] = age["earliest"]
         result["incident_age_verified"] = age["verified"]
