@@ -2449,8 +2449,38 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     evidence: list[dict[str, Any]] = []
     if winner.get("evidence"):
         evidence.extend(dict(row) for row in winner["evidence"].values() if isinstance(row, dict))
-    elif radar_snapshot.get("items"):
-        evidence.append(dict(radar_snapshot["items"][0]))
+    # BIBLOS asks for three kinds of evidence by name: demand_discovery,
+    # demand_corroboration and competition. The winner's own bundle carries
+    # reader intent, persistence and competition, and the discovery signals
+    # that produced the candidate in the first place only reached BIBLOS when
+    # there was no winner at all - so a real winner could never be audited and
+    # every candidate came back UNKNOWN. They are added properly now.
+    #
+    # Sanjeevani and Floor 5 also name the same things differently: a search
+    # index calls a signal news_context or social_discussion, the portfolio
+    # calls it demand_discovery. Translated here, at the boundary between the
+    # two vocabularies, and only the label changes - no item is added,
+    # reweighted or invented, and anything unrecognised keeps its own name so
+    # BIBLOS can still refuse it.
+    discovery_roles = {"news_context": "demand_discovery",
+                       "social_discussion": "demand_discovery",
+                       "technical_community": "demand_discovery",
+                       "web_discovery": "demand_discovery",
+                       "demand_discovery": "demand_discovery",
+                       "news_corroboration": "demand_corroboration",
+                       "discussion_persistence": "demand_corroboration"}
+    seen_roles = {str(row.get("role") or "") for row in evidence}
+    for row in (radar_snapshot.get("items") or []):
+        if not isinstance(row, dict):
+            continue
+        mapped = discovery_roles.get(str(row.get("role") or ""))
+        if not mapped or mapped in seen_roles:
+            continue
+        item = dict(row)
+        item["role"] = mapped
+        item["role_as_captured"] = row.get("role")
+        evidence.append(item)
+        seen_roles.add(mapped)
     cited = _marker(brief, "EVIDENCE")
     if cited:
         evidence.append({"source": cited, "role": "demand_corroboration",
