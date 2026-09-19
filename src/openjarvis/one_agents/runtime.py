@@ -1606,6 +1606,89 @@ _MEDIA_TREND_CATEGORIES: tuple[tuple[str, str], ...] = (
 )
 
 
+def _iris_news_hook_discovery(avoid: str) -> dict[str, Any]:
+    """News-hook research via trend_discovery (2026-09-19) instead of five fixed
+    keyword queries + a 9B model choosing an incident out of a raw evidence dump.
+
+    Code finds, clusters, fit-scores and AGE-VERIFIES today's India-wide trending
+    stories (see trend_discovery's docstring); the local model only picks one of
+    the few already-verified-fresh candidates and writes it up from THEIR
+    headlines. Dates and freshness are never the model's call. Returns
+    {"brief","pick","note","summary"}; brief=="" means nothing usable today."""
+    from openjarvis.one_agents import trend_discovery
+
+    lib = _sanjeevani_research()
+    if lib is None:
+        return {"brief": "", "pick": None, "summary": {},
+                "note": "Sanjeevani library unavailable -- cannot run trend discovery"}
+    max_age = float(os.environ.get("ONE_NEWS_HOOK_MAX_EVENT_AGE_HOURS", "72"))
+    try:
+        found = trend_discovery.discover(lib, top_n=10, max_event_age_hours=max_age)
+    except Exception as exc:  # noqa: BLE001
+        return {"brief": "", "pick": None, "summary": {},
+                "note": f"Trend discovery failed: {type(exc).__name__}: {exc}"[:300]}
+    sacred = re.compile(r"\b(temple|mandir|mosque|masjid|gurdwara|church|dargah|shrine|ghat|"
+                        r"immersion|visarjan|puja|navratri|kanwar|yatra|pilgrim|idol|ganesh)\b", re.I)
+    summary = {
+        "pool_fresh_headlines": found["pool_fresh"], "clusters": found["clusters"],
+        "sources_ok": len(found["sources_ok"]), "sources_failed": found["sources_failed"],
+        "x_trends_sample": found["x_trends_sample"][:8],
+        "max_event_age_hours": max_age,
+        "candidates": [
+            {"title": c["title"], "sources": c["n_sources"], "score": c["score"],
+             "first_report_age_hours": (c.get("first_report") or {}).get("age_hours"),
+             "verified": c["verified"], "stale": c["stale"]}
+            for c in found["candidates"]],
+    }
+    fresh = [c for c in found["candidates"] if c["verified"] and not c["stale"]
+             and not sacred.search(" ".join(c["headlines"]))][:6]
+    if not fresh:
+        return {"brief": "", "pick": None, "summary": summary,
+                "note": "No trending story passed the freshness check today (every "
+                        "candidate was stale, unverifiable, or sacred-site-centred)."}
+    lines = []
+    for i, c in enumerate(fresh, 1):
+        age = (c.get("first_report") or {}).get("age_hours")
+        lines.append(f"{i}. [{c['n_sources']} outlets, first reported ~{age}h ago] "
+                     + " || ".join(c["headlines"][:3]))
+    prompt = (
+        "You are IRIS, head of Media & Content at ImagineIndia.\n\n"
+        "Below are today's trending India stories. Code has ALREADY verified each "
+        f"was first reported within the last {max_age:.0f} hours and is covered by "
+        "several outlets -- do not judge dates.\n\n"
+        + "\n".join(lines) + avoid +
+        "\n\nPick the ONE story best for an ImagineIndia reel: a real, specific "
+        "place with a visible physical problem (collapse, flooding, crowding, blocked "
+        "access, failing infrastructure) that can be drawn as crisis -> hidden "
+        "systemic reveal -> fix. Deaths/injuries may be in the story but the reel "
+        "shows the systemic/infrastructure reveal, never victims. Use ONLY facts in "
+        "the headlines above: no invented numbers, causes, people or places. PLACE "
+        "must be ONE place named in the chosen story's headlines, with its city. If "
+        "no story fits, reply PICK: 0.\n\nReply with ONLY these lines, nothing else:\n"
+        "PICK: <story number, or 0>\n"
+        "PLACE: <one place, with city>\n"
+        "INCIDENT_SUMMARY: <what happened, headline facts only>\n"
+        "SEARCH_TERMS: <comma-separated real search phrases from the headlines>\n"
+        "PRIORITY: <one line -- what this reel should optimise for>\n"
+        "REGION: rotation\n"
+        "ANGLE: <one line -- the hidden systemic reveal>\n"
+        "VIRAL_SCORE: <0-100>\n"
+        "SACRED_SITE: none\n"
+        "BRIEF: <4-8 lines: audience, why now, honest risk>"
+    )
+    text, err = _research_synthesis(prompt, evidence={"eligible": [], "catalog_evidence": []})
+    if not text:
+        return {"brief": "", "pick": None, "summary": summary, "note": err or "model returned nothing"}
+    digits = re.search(r"\d+", _marker(text, "PICK"))
+    index = int(digits.group()) if digits else 0
+    if not 1 <= index <= len(fresh):
+        return {"brief": "", "pick": None, "summary": summary,
+                "note": "IRIS found no fresh candidate with a real place + visible problem today."}
+    pick = fresh[index - 1]
+    summary["picked"] = {"title": pick["title"], "first_report": pick.get("first_report")}
+    return {"brief": text, "pick": pick, "summary": summary, "note": ""}
+
+
 def _incident_first_report_age_hours(place: str, *, window_days: int = 21) -> dict[str, Any]:
     """How long ago the EARLIEST news report about `place` appeared.
 
@@ -3793,7 +3876,14 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     # instead and merges them -- see that skill's SKILL.md for why.
     media_evidence: dict[str, Any] = {"eligible": [], "catalog_evidence": [], "categories": {}}
     reusable = _sanjeevani_research()
-    if reusable is not None:
+    _early = task.lower()
+    discovery_mode = bool(re.search(r"\b(news.?hook|hook.?reel)\b", _early)
+                          and not re.search(r"\b(carousel|slides?|swipe|spotlight)\b", _early))
+    discovered: dict[str, Any] = {}
+    if discovery_mode:
+        stages.set_stage("ia", stages.RESEARCHING, "Scanning today's India-wide trending stories")
+        discovered = _iris_news_hook_discovery(avoid)
+    if reusable is not None and not discovery_mode:
         try:
             media_evidence = _media_trend_evidence(reusable)
         except Exception as exc:  # evidence failure is surfaced by synthesis
@@ -3818,7 +3908,7 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - learning must never stop IRIS
         print(f"[one-agents] IRIS ImagineIndia learning skipped: {type(exc).__name__}: {exc}"[:400], flush=True)
     predicted_location = _peek_next_ia_location(IA_LOCATIONS_MANIFEST_PATH)
-    if predicted_location and predicted_location.get("name") and reusable is not None:
+    if predicted_location and predicted_location.get("name") and reusable is not None and not discovery_mode:
         try:
             loc_query = (
                 f"{predicted_location['name']} {predicted_location.get('state', '')} "
@@ -3853,7 +3943,7 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     # prevents a large evidence bundle from silently deleting the agent's
     # contract." Evidence now comes first; the reply-shape spec is the last
     # thing in the prompt.
-    brief, note = _research_synthesis(
+    brief, note = (discovered.get("brief", ""), discovered.get("note", "")) if discovery_mode else _research_synthesis(
         "You are IRIS, head of Media & Content at a digital holding company, "
         "signing off the next ImagineIndia Instagram reel run.\n\n"
         f"Request: {task}\n\n"
@@ -3964,8 +4054,11 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         stages.clear_stage("ia")
         return {
             "agent": "IRIS", "mode": "blocked", "_blocked": True,
-            "content": "Sanjeevani local research could not produce a grounded editorial brief.",
+            "content": ("No fresh, verified trending story worth a news-hook reel today."
+                        if discovery_mode else
+                        "Sanjeevani local research could not produce a grounded editorial brief."),
             "blocked_reason": note,
+            "discovery": discovered.get("summary") if discovery_mode else None,
             "handed_to": None,
         }
 
@@ -4055,8 +4148,25 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     # testing IRIS's self-reliance needs to see.
     max_event_age_hours = float(os.environ.get("ONE_NEWS_HOOK_MAX_EVENT_AGE_HOURS", "72"))
     incident_stale = False
+    pick = discovered.get("pick") if discovery_mode else None
+    if discovery_mode and incident_place:
+        # Grounding: the model may only name a place that literally appears in
+        # the picked story's own headlines (it has blended cities before --
+        # "Satya Niketan, Mumbai"). Compare the place's core name, case-blind.
+        core = re.split(r",|\(", incident_place, maxsplit=1)[0].strip().lower()
+        headline_text = " ".join((pick or {}).get("headlines", [])).lower()
+        if not pick or len(core) < 4 or core not in headline_text:
+            result["discovery_ungrounded_place"] = incident_place
+            incident_place = ""
+    if discovery_mode:
+        result["discovery"] = discovered.get("summary", {})
+        if discovered.get("note") and not brief:
+            result["discovery_note"] = discovered["note"]
     if content_type == "news_hook" and incident_place:
-        age = _incident_first_report_age_hours(incident_place)
+        age = ({"age_hours": (pick["first_report"] or {}).get("age_hours"),
+                "earliest": (pick["first_report"] or {}).get("earliest"),
+                "verified": bool(pick.get("verified"))}
+               if pick else _incident_first_report_age_hours(incident_place))
         result["incident_first_report_age_hours"] = age["age_hours"]
         result["incident_first_report_earliest"] = age["earliest"]
         result["incident_age_verified"] = age["verified"]

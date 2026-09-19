@@ -59,7 +59,7 @@ PUBLISHER_FEEDS = {
     "Google News Top": "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en",
     "Google News Nation": "https://news.google.com/rss/headlines/section/topic/NATION?hl=en-IN&gl=IN&ceid=IN:en",
 }
-REDDIT = ["india", "IndiaSpeaks", "mumbai", "delhi", "bangalore", "hyderabad", "chennai", "kolkata"]
+REDDIT = ["india", "IndiaSpeaks"]
 
 STOP = set("""about above after again against among also amid been before being between both
 but can could did does done down during each from further had has have having her here him his
