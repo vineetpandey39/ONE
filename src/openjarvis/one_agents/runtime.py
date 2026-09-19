@@ -1634,10 +1634,20 @@ def _incident_first_report_age_hours(place: str, *, window_days: int = 21) -> di
     try:
         url = "https://news.google.com/rss/search?" + urllib.parse.urlencode({
             "q": f'"{core}" when:{window_days}d', "hl": "en-IN", "gl": "IN", "ceid": "IN:en"})
-        response = httpx.get(url, timeout=20, follow_redirects=True,
-                             headers={"User-Agent": "Mozilla/5.0 (ONE-IRIS freshness check)"})
-        response.raise_for_status()
-        root = ET.fromstring(response.text)
+        # Sanjeevani's own _get, NOT httpx: it verifies TLS against Sanjeevani's
+        # bundled windows-trust.pem. A first version of this check used httpx's
+        # default certificate store, which fails CERTIFICATE_VERIFY_FAILED on
+        # this machine -- inside the worker that silently came back
+        # "unverified" and let a 13-day-old incident through as not-stale.
+        lib = _sanjeevani_research()
+        if lib is not None and hasattr(lib, "_get"):
+            raw = lib._get(url, timeout=20, attempts=3)
+        else:
+            response = httpx.get(url, timeout=20, follow_redirects=True,
+                                 headers={"User-Agent": "Mozilla/5.0 (ONE-IRIS freshness check)"})
+            response.raise_for_status()
+            raw = response.content
+        root = ET.fromstring(raw)
         now = datetime.now(timezone.utc)
         needle = core.lower()
         dates: list[datetime] = []
@@ -1658,8 +1668,9 @@ def _incident_first_report_age_hours(place: str, *, window_days: int = 21) -> di
         earliest = min(dates)
         return {"age_hours": round((now - earliest).total_seconds() / 3600, 1),
                 "earliest": earliest.isoformat(), "matches": len(dates), "verified": True}
-    except Exception:  # noqa: BLE001 - a failed check must never break research
-        return {"age_hours": None, "earliest": None, "matches": 0, "verified": False}
+    except Exception as exc:  # noqa: BLE001 - a failed check must never break research
+        return {"age_hours": None, "earliest": None, "matches": 0, "verified": False,
+                "error": f"{type(exc).__name__}: {exc}"[:300]}
 
 
 def _compact_media_evidence(evidence: dict[str, Any], *, max_per_category: int = 5) -> dict[str, Any]:
@@ -4127,6 +4138,19 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
                 incident_summary, re.I,
             )
         )
+        if incident_place and not result.get("incident_age_verified"):
+            # Unverified is NOT fresh. The whole point of this check is that
+            # a story can look new (a recent aftermath article) while the
+            # event is weeks old -- so if the event's age cannot be measured,
+            # do not commission on a guess.
+            stages.clear_stage("ia")
+            result["handed_to"] = None
+            result["note"] = (
+                f"Could not verify how old '{incident_place}' is (no wide-window "
+                "news match / lookup failed) -- not commissioning a news-hook reel on "
+                "an unverified date. Retry, or ask for the regular reel."
+            )
+            return result
         if incident_stale and incident_place and not looks_like_multiple_places:
             stages.clear_stage("ia")
             result["handed_to"] = None
