@@ -2200,10 +2200,24 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         f"Floor-owned operating method:\n{_publishing_skill_text()}\n\n"
         f"Machine-captured official/public evidence (discovery and catalog supply; neither proves sales):\n{research_evidence}\n\n"
         f"Deterministic winner: {json.dumps(winner, ensure_ascii=False)}\n\n"
+        # The evidence is news, so the model kept building the book on top of it:
+        # on 2026-09-19 it commissioned a title whose whole "why now" was Meta and
+        # Accenture reorganising their management layers, and the sourcing gate
+        # refused it a step later, as it should - we cannot check what either
+        # company did. The evidence proves a subject is being discussed. It is
+        # not the subject, and the names in it are not ours to repeat.
+        "The captured evidence tells you WHAT subject readers are circling right "
+        "now. It is not the book. Do not carry its names into the commission: the "
+        "ANGLE and the BRIEF must not name a single real company, institution, "
+        "government body, product or living person, and 'why now' must rest on "
+        "what the reader is dealing with in their own life or work - not on what "
+        "some organisation announced. A brief that leans on a named organisation "
+        "is refused at the next gate and the whole run is wasted.\n\n"
         "Reply in exactly this shape:\n"
         "MODE: fiction | nonfiction\n"
         "REGION: <primary market, e.g. global or india>\n"
-        "ANGLE: <one line — the specific hook this book leads with>\n"
+        "ANGLE: <one line — the specific hook this book leads with, naming no real "
+        "organisation or person>\n"
         "DEMAND_SCORE: <0-100>\nPACKAGING_SCORE: <0-100>\n"
         "CONVERSION_SCORE: <0-100>\nDIFFERENTIATION_SCORE: <0-100>\n"
         "EXPANSION_SCORE: <0-100>\nRIGHTS_SCORE: <0-100>\nPERFORMANCE_SCORE: <0-100>\n"
