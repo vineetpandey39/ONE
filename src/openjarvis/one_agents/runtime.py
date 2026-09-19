@@ -1606,6 +1606,62 @@ _MEDIA_TREND_CATEGORIES: tuple[tuple[str, str], ...] = (
 )
 
 
+def _incident_first_report_age_hours(place: str, *, window_days: int = 21) -> dict[str, Any]:
+    """How long ago the EARLIEST news report about `place` appeared.
+
+    Added 2026-09-19 after IRIS's news-hook research surfaced "Satya Niketan,
+    Delhi" as a fresh incident when the collapse was actually ~13 days old
+    (2026-09-06): Sanjeevani's freshness filter (google_news `when:2d`,
+    GDELT `timespan=2d`) judges the ARTICLE's publish date, not the EVENT's,
+    and a ThePrint follow-up about the political aftermath ("...has rewritten
+    DUSU campaign") was published inside the window, so an old incident
+    looked new. A reel built on a 2-week-old story misses the viral window
+    (owner direction: latest news only, last ~2 days matter). This asks
+    Google News for the same place over a much wider window and reads the
+    oldest matching headline's date -- the incident's real first-report age.
+
+    Returns {"age_hours": float|None, "earliest": iso|None, "matches": int,
+    "verified": bool}. verified=False (network failure, no matching
+    headlines) means "could not measure", which callers must treat as
+    unverified -- never as proof of freshness."""
+    import email.utils
+    import urllib.parse
+    import xml.etree.ElementTree as ET
+
+    core = re.split(r",|\(|\bin\b", place, maxsplit=1)[0].strip()
+    if len(core) < 4:
+        return {"age_hours": None, "earliest": None, "matches": 0, "verified": False}
+    try:
+        url = "https://news.google.com/rss/search?" + urllib.parse.urlencode({
+            "q": f'"{core}" when:{window_days}d', "hl": "en-IN", "gl": "IN", "ceid": "IN:en"})
+        response = httpx.get(url, timeout=20, follow_redirects=True,
+                             headers={"User-Agent": "Mozilla/5.0 (ONE-IRIS freshness check)"})
+        response.raise_for_status()
+        root = ET.fromstring(response.text)
+        now = datetime.now(timezone.utc)
+        needle = core.lower()
+        dates: list[datetime] = []
+        for node in root.findall("./channel/item"):
+            title = (node.findtext("title") or "").lower()
+            stamp = (node.findtext("pubDate") or "").strip()
+            if needle not in title or not stamp:
+                continue
+            try:
+                parsed = email.utils.parsedate_to_datetime(stamp)
+            except (TypeError, ValueError):
+                continue
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            dates.append(parsed)
+        if not dates:
+            return {"age_hours": None, "earliest": None, "matches": 0, "verified": False}
+        earliest = min(dates)
+        return {"age_hours": round((now - earliest).total_seconds() / 3600, 1),
+                "earliest": earliest.isoformat(), "matches": len(dates), "verified": True}
+    except Exception:  # noqa: BLE001 - a failed check must never break research
+        return {"age_hours": None, "earliest": None, "matches": 0, "verified": False}
+
+
 def _compact_media_evidence(evidence: dict[str, Any], *, max_per_category: int = 5) -> dict[str, Any]:
     """Strips each eligible item to the fields a synthesis prompt actually
     needs before it goes into the model's context.
@@ -3844,8 +3900,15 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "concrete dated development at one real place all qualify equally; "
         "the requirement is specificity, not subject matter. Only fill this "
         "in if the evidence reports ONE concrete, freshly reported, DATED "
-        "EVENT (something that happened or was reported this week) AT that "
-        "one place — NOT an ongoing policy, standing conservation program, "
+        "EVENT that itself happened or was FIRST reported within the last "
+        "2-3 days AT that one place. The EVENT must be new, not just the "
+        "article: a follow-up, aftermath, political-fallout, investigation-"
+        "update or crackdown story published today about an OLDER incident "
+        "(e.g. headlines saying an old tragedy 'has rewritten' a campaign, "
+        "or a probe/demolition drive that followed it) does NOT qualify — "
+        "prefer items in the 0-24h bucket whose headline reads like a "
+        "first report of something that just happened. NOT an ongoing "
+        "policy, standing conservation program, "
         "or general state of affairs. A generic sentence like 'emergency "
         "closures to prevent irreversible structural failure and save "
         "irreplaceable knowledge and lived practices' is a THEME, not an "
@@ -3971,6 +4034,20 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "prior_reels_considered": len(already),
     }
 
+    # Event-age check (see _incident_first_report_age_hours): measured before
+    # the research-only return so a research-only run also SHOWS whether the
+    # incident IRIS picked is actually fresh -- that is exactly what an owner
+    # testing IRIS's self-reliance needs to see.
+    max_event_age_hours = float(os.environ.get("ONE_NEWS_HOOK_MAX_EVENT_AGE_HOURS", "72"))
+    incident_stale = False
+    if content_type == "news_hook" and incident_place:
+        age = _incident_first_report_age_hours(incident_place)
+        result["incident_first_report_age_hours"] = age["age_hours"]
+        result["incident_first_report_earliest"] = age["earliest"]
+        result["incident_age_verified"] = age["verified"]
+        incident_stale = bool(age["verified"] and age["age_hours"] > max_event_age_hours)
+        result["incident_stale"] = incident_stale
+
     # Same default as HERMES: dispatching the floor head means "get it done".
     # Research-only is the explicit exception, asked for in plain words.
     research_only = bool(re.search(r"\b(plan|draft|prepare|research)\b", task.lower()))
@@ -4050,6 +4127,19 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
                 incident_summary, re.I,
             )
         )
+        if incident_stale and incident_place and not looks_like_multiple_places:
+            stages.clear_stage("ia")
+            result["handed_to"] = None
+            result["note"] = (
+                f"'{incident_place}' is NOT a fresh incident: the earliest "
+                f"news report found for it is ~{result.get('incident_first_report_age_hours')}h old "
+                f"(first seen {result.get('incident_first_report_earliest')}), past the "
+                f"{max_event_age_hours:.0f}h limit. Sanjeevani's 2-day window matched a recent "
+                "follow-up/aftermath article about an older event, not a new event -- a reel "
+                "on it now would miss the viral window. Not commissioning; try again when a "
+                "genuinely new incident appears."
+            )
+            return result
         if not strong or not incident_place or looks_like_multiple_places or looks_like_generic_theme:
             stages.clear_stage("ia")
             result["handed_to"] = None
