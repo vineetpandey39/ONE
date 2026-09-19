@@ -66,7 +66,7 @@ function agentIcon(agent: Agent): LucideIcon | null {
   }
   return null;
 }
-type Job = { id: string; agent_id: string; task: string; mode: string; status: string; progress: number; result?: string; error?: string };
+type Job = { id: string; agent_id: string; task: string; mode: string; status: string; progress: number; result?: string; error?: string; created_at?: string; updated_at?: string };
 type Memory = { title: string; path: string; updated: string; preview: string };
 type MemoryGraphNode = {
   id: string;
@@ -1364,6 +1364,25 @@ export function OneCockpit() {
     agent,
     jobs: status.jobs.filter((job) => job.agent_id === agent.id).slice(0, 3),
   })).filter((section) => section.jobs.length), [status.agents, status.jobs]);
+  // When a job started and where it stands: queued/started time from
+  // created_at, and for a finished job the time it ended (updated_at) and how
+  // long it took. Timestamps arrive as ISO strings straight from the queue db.
+  function jobTiming(job: Job) {
+    const toDate = (iso?: string) => {
+      if (!iso) return null;
+      const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+    const started = toDate(job.created_at);
+    if (!started) return null;
+    const fmt = (d: Date) => d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+    const active = job.status === 'running' || job.status === 'queued';
+    const ended = toDate(job.updated_at);
+    if (active || !ended || ended < started) return `${job.status === 'queued' ? 'queued' : 'started'} ${fmt(started)}`;
+    const sec = Math.round((ended.getTime() - started.getTime()) / 1000);
+    const took = sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+    return `started ${fmt(started)} · ${job.status} ${fmt(ended)} · took ${took}`;
+  }
   function jobResult(job: Job) {
     if (job.agent_id === 'alfa') return alfaResult(job);
     if (!job.result) return null;
@@ -1940,6 +1959,7 @@ export function OneCockpit() {
                 )}
               </div>
               <p>{job.task}</p>
+              {jobTiming(job) && <small className="one-job-time">{jobTiming(job)}</small>}
               {jobResult(job) && <small className="one-alfa-result">{jobResult(job)}</small>}
               <div className="one-progress"><i style={{ width: `${job.progress}%` }} /></div>
               {job.error && <em>{job.error}</em>}
@@ -1985,6 +2005,7 @@ export function OneCockpit() {
                     )}
                   </div>
                   <p>{job.task}</p>
+                  {jobTiming(job) && <small className="one-job-time">{jobTiming(job)}</small>}
                   {jobResult(job) && <small>{jobResult(job)}</small>}
                   {job.error && <em>{job.error}</em>}
                 </div>

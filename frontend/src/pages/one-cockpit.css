@@ -216,6 +216,7 @@ body { margin: 0; background: #02060b; }
 .one-agent-run p { margin: 5px 0; color: #a8c1d1; font-size: 11px; line-height: 1.35; max-height: 30px; overflow: hidden; }
 .one-agent-run small { display: block; color: #62e4ae; font-size: 10px; }
 .one-agent-run em { display: block; color: #ff8795; font-size: 10px; font-style: normal; }
+.one-job-strip small.one-job-time, .one-agent-run small.one-job-time { display: block; margin: 2px 0 4px; color: #7693a7; font-size: 9.5px; letter-spacing: 0.3px; font-variant-numeric: tabular-nums; }
 .one-jobhunt-board { margin-top: 28px; }
 .one-jobhunt-summary strong { color: #71d7ff; }
 .one-jobhunt-note { margin: 10px 0 0; padding: 8px 11px; border-left: 2px solid #f0bd57; color: #d9c79a; font-size: 12px; line-height: 1.45; background: #271b065c; border-radius: 4px; }
