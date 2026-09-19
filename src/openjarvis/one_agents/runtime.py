@@ -1633,7 +1633,11 @@ def _incident_first_report_age_hours(place: str, *, window_days: int = 21) -> di
         return {"age_hours": None, "earliest": None, "matches": 0, "verified": False}
     try:
         url = "https://news.google.com/rss/search?" + urllib.parse.urlencode({
-            "q": f'"{core}" when:{window_days}d', "hl": "en-IN", "gl": "IN", "ceid": "IN:en"})
+            "q": f'{core} when:{window_days}d', "hl": "en-IN", "gl": "IN", "ceid": "IN:en"})
+        # Deliberately NOT a quoted phrase query: Google News returned an EMPTY
+        # feed for '"Satya Niketan" when:21d' (flaky, 1147 bytes) while the same
+        # words unquoted returned 100 articles. The exact-phrase requirement is
+        # enforced below by matching the place name in each headline instead.
         # Sanjeevani's own _get, NOT httpx: it verifies TLS against Sanjeevani's
         # bundled windows-trust.pem. A first version of this check used httpx's
         # default certificate store, which fails CERTIFICATE_VERIFY_FAILED on
