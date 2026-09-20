@@ -32,6 +32,7 @@ AGENTS: dict[str, dict[str, str]] = {
     "scribe": {"name": "SCRIBE", "role": "KDP manuscript production worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
     "biblos": {"name": "BIBLOS", "role": "Publishing demand validation and commercial scoring worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
     "mercury": {"name": "MERCURY", "role": "Publishing rights and distribution-route worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
+    "imprimatur": {"name": "IMPRIMATUR", "role": "Governed KDP draft upload, submission, and ASIN monitoring worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
     "leda": {"name": "LEDA", "role": "Consent-safe reader audience worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
     "metron": {"name": "METRON", "role": "Publishing measurement and attribution worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
     # Floor 5's second worker, added 2026-08-26. Starts only after HERMES
@@ -2732,6 +2733,84 @@ def _run_mercury(job: dict[str, Any]) -> dict[str, Any]:
             "content": "Rights-safe route proposed; no store was changed."}
 
 
+def _run_imprimatur(job: dict[str, Any]) -> dict[str, Any]:
+    """Prepare, submit, and monitor one KDP listing as resumable phases."""
+    from openjarvis.tools.approval_store import ApprovalStore, STATUS_APPROVED
+    from openjarvis.tools.kdp_browser_publisher import (
+        poll_asin, prepare_draft, submit_approved, validate_packet,
+    )
+
+    payload = _json_task(job)
+    mode = str(payload.get("phase") or "prepare").strip().lower()
+    run_dir = str(payload.get("run_dir") or "")
+    scribe_job_id = str(payload.get("scribe_job_id") or "")
+    if not run_dir or not scribe_job_id:
+        raise RuntimeError("IMPRIMATUR requires run_dir and scribe_job_id")
+    packet = validate_packet(run_dir)
+
+    if mode == "prepare":
+        stages.worker_confirms_receipt("imprimatur", f"Preparing KDP draft for {packet.title}")
+        stages.set_stage("imprimatur", stages.EXECUTING, "Uploading manuscript and cover to a KDP draft")
+        draft = prepare_draft(packet, headless=False)
+        action = ApprovalStore().queue_action(
+            action_type="kdp_publish",
+            description=f"Publish Kindle eBook: {packet.title}",
+            payload={
+                "agent_id": "imprimatur", "phase": "submit", "run_dir": run_dir,
+                "scribe_job_id": scribe_job_id, "title": packet.title,
+                "checksums": packet.checksums,
+            },
+            permission_key=f"kdp_publish:{packet.checksums['manuscript']}",
+            tier="high", ttl_hours=72,
+        )
+        stages.set_stage("imprimatur", stages.AWAITING_UPLOAD,
+                         f"Draft ready; waiting for Olympus approval: {packet.title}")
+        _publishing_event(job, agent="IMPRIMATUR", event_type="kdp_draft_ready",
+                          stage="approval_gate", summary="KDP draft prepared; final submission gated",
+                          details={"approval_id": action.id, "draft": draft}, status="awaiting_approval")
+        return {"agent": "IMPRIMATUR", "phase": "approval", "approval_id": action.id,
+                "draft": draft, "content": "KDP draft is complete and queued for per-title approval."}
+
+    approval_id = str(payload.get("approval_id") or "")
+    action = ApprovalStore().get_action(approval_id) if approval_id else None
+    if mode == "submit":
+        if action is None or action.status != STATUS_APPROVED:
+            raise PermissionError("KDP submission requires an approved, unexpired per-title A3 action")
+        if action.payload.get("checksums") != packet.checksums:
+            raise PermissionError("Approved KDP files no longer match the submission packet")
+        stages.set_stage("imprimatur", stages.EXECUTING, f"Submitting approved title: {packet.title}")
+        submitted = submit_approved(packet, approval_id, headless=False)
+        poll_job = enqueue_job("imprimatur", json.dumps({
+            "phase": "poll", "run_dir": run_dir, "scribe_job_id": scribe_job_id,
+            "approval_id": approval_id,
+        }), mode="execute", tier="fast")
+        return {"agent": "IMPRIMATUR", "phase": "submitted", "submission": submitted,
+                "handed_to": {"agent": "IMPRIMATUR", "job_id": poll_job["id"]},
+                "content": "Approved KDP title submitted; ASIN monitoring started."}
+
+    if mode == "poll":
+        stages.set_stage("imprimatur", stages.EXECUTING, f"Checking KDP status for {packet.title}")
+        status = poll_asin(packet, headless=True)
+        asin = str(status.get("asin") or "")
+        if asin:
+            evidence = {"asin": asin, "title": packet.title,
+                        "status": status.get("kdp_status"), "source": "KDP Bookshelf"}
+            confirmed = confirm_scribe_upload(
+                scribe_job_id, evidence,
+                rationale=f"IMPRIMATUR verified ASIN {asin} in the authenticated KDP Bookshelf.",
+            )
+            stages.clear_stage("imprimatur")
+            return {"agent": "IMPRIMATUR", "phase": "complete", "asin": asin,
+                    "kdp_status": status.get("kdp_status"), "handoff": confirmed,
+                    "content": f"ASIN {asin} verified; publishing lifecycle released."}
+        stages.set_stage("imprimatur", stages.AWAITING_WORKER,
+                         f"Amazon is still processing {packet.title}; ASIN not assigned yet")
+        return {"agent": "IMPRIMATUR", "phase": "awaiting_asin", "status": status,
+                "content": "Amazon is still processing the title. ASIN check can be resumed safely."}
+
+    raise ValueError(f"Unknown IMPRIMATUR phase: {mode}")
+
+
 def _run_leda(job: dict[str, Any]) -> dict[str, Any]:
     payload = _json_task(job); logic = _publishing_growth_logic()
     title = str(payload.get("title") or "(untitled)")
@@ -3713,14 +3792,19 @@ def _run_alfa(job: dict[str, Any]) -> dict[str, Any]:
         result.update({"distribution": payload.get("distribution"), "economics": economics,
                        "requires_human": "Amazon KDP upload -- growth and rights review passed"})
         mark_awaiting_upload(scribe_id, result)
+        publisher_job = enqueue_job("imprimatur", json.dumps({
+            "phase": "prepare", "run_dir": result.get("run_dir"),
+            "scribe_job_id": scribe_id, "title": title,
+        }), mode="execute", tier="heavy")
         stages.set_stage("scribe", stages.AWAITING_UPLOAD,
-                         f"“{title}” cleared growth review — awaiting manual KDP upload")
+                         f"“{title}” cleared review — IMPRIMATUR is preparing the KDP draft")
         _publishing_event(job, agent="ALFA", event_type="economics_proposal",
                           stage="economics_gate", summary="Economics reviewed; manual upload gate opened",
                           details=economics, status="awaiting_approval")
         return {"agent": "ALFA", "economics": economics,
                 "released_job": scribe_id,
-                "content": "Economics proposal attached; SCRIBE moved to the OLYMPUS upload gate."}
+                "handed_to": {"agent": "IMPRIMATUR", "job_id": publisher_job["id"]},
+                "content": "Economics proposal attached; KDP draft preparation started."}
     return _local_plan(job)
 
 
@@ -5707,6 +5791,7 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         "biblos": _run_biblos,
         "scribe": _run_scribe,
         "mercury": _run_mercury,
+        "imprimatur": _run_imprimatur,
         "peitho": _run_peitho,
         "leda": _run_leda,
         "metron": _run_metron,

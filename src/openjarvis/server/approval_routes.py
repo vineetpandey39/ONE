@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, Optional
 
@@ -61,8 +62,18 @@ async def approve_action(action_id: str) -> Dict[str, Any]:
     if action is None:
         raise HTTPException(status_code=404, detail="Action not found")
     store.update_status(action_id, STATUS_APPROVED)
+    continuation = None
+    if action.action_type == "kdp_publish":
+        # Approval only unlocks the exact immutable packet reviewed by Olympus.
+        # The browser submission still runs in the normal governed worker.
+        from openjarvis.one_agents.runtime import enqueue_job
+
+        payload = dict(action.payload)
+        payload["approval_id"] = action_id
+        continuation = enqueue_job("imprimatur", json.dumps(payload),
+                                   mode="execute", tier="heavy")
     logger.info("Action %s approved via UI", action_id)
-    return {"status": "approved", "id": action_id}
+    return {"status": "approved", "id": action_id, "continuation": continuation}
 
 
 @router.post("/v1/approvals/{action_id}/deny")
