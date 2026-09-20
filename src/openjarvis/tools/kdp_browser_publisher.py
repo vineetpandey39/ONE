@@ -35,7 +35,8 @@ def _sha256(path: Path) -> str:
 
 
 def _first_existing(base: Path, names: tuple[str, ...]) -> Path | None:
-    return next((base / name for name in names if (base / name).is_file()), None)
+    roots = (base, base / "visual_assets")
+    return next((root / name for root in roots for name in names if (root / name).is_file()), None)
 
 
 @dataclass(frozen=True)
@@ -96,7 +97,7 @@ def validate_packet(run_dir: str | Path) -> SubmissionPacket:
         raise ValueError("KDP metadata requires title, author, and a 50+ character description")
 
     keywords = value("keywords", "Keywords", default=[])
-    categories = value("categories", "Categories", default=[])
+    categories = value("categories", "Categories", "categories_bisac", default=[])
     if isinstance(keywords, str):
         keywords = [part.strip() for part in keywords.split(",") if part.strip()]
     if isinstance(categories, str):
@@ -306,4 +307,3 @@ def poll_asin(packet: SubmissionPacket, *, headless: bool = True) -> dict[str, A
     finally:
         context.close()
         getattr(context, "_lao_playwright", None) and context._lao_playwright.stop()  # type: ignore[attr-defined]
-
