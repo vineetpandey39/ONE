@@ -2759,6 +2759,11 @@ def _run_imprimatur(job: dict[str, Any]) -> dict[str, Any]:
                 "agent_id": "imprimatur", "phase": "submit", "run_dir": run_dir,
                 "scribe_job_id": scribe_job_id, "title": packet.title,
                 "checksums": packet.checksums,
+                "price_usd": packet.price_usd,
+                "ai_disclosure": {
+                    "text": packet.ai_generated_text,
+                    "images": packet.ai_generated_images,
+                },
             },
             permission_key=f"kdp_publish:{packet.checksums['manuscript']}",
             tier="high", ttl_hours=72,
@@ -2803,10 +2808,30 @@ def _run_imprimatur(job: dict[str, Any]) -> dict[str, Any]:
             return {"agent": "IMPRIMATUR", "phase": "complete", "asin": asin,
                     "kdp_status": status.get("kdp_status"), "handoff": confirmed,
                     "content": f"ASIN {asin} verified; publishing lifecycle released."}
+        # Do not occupy the single ONE worker while Amazon reviews the title.
+        # A daemon timer re-enqueues the lightweight check; the on-disk publish
+        # state remains the recovery source if ONE is restarted between checks.
+        import threading
+
+        try:
+            delay = max(300.0, float(os.environ.get("ONE_KDP_ASIN_POLL_SECONDS", "1800")))
+        except ValueError:
+            delay = 1800.0
+        next_payload = {
+            "phase": "poll", "run_dir": run_dir, "scribe_job_id": scribe_job_id,
+            "approval_id": approval_id, "poll_attempt": int(payload.get("poll_attempt") or 0) + 1,
+        }
+        timer = threading.Timer(
+            delay,
+            lambda: enqueue_job("imprimatur", json.dumps(next_payload), mode="execute", tier="fast"),
+        )
+        timer.daemon = True
+        timer.start()
         stages.set_stage("imprimatur", stages.AWAITING_WORKER,
                          f"Amazon is still processing {packet.title}; ASIN not assigned yet")
         return {"agent": "IMPRIMATUR", "phase": "awaiting_asin", "status": status,
-                "content": "Amazon is still processing the title. ASIN check can be resumed safely."}
+                "next_check_seconds": delay,
+                "content": "Amazon is still processing the title. ASIN monitoring remains active."}
 
     raise ValueError(f"Unknown IMPRIMATUR phase: {mode}")
 

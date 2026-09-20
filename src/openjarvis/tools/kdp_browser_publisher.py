@@ -54,6 +54,7 @@ class SubmissionPacket:
     categories: list[str]
     ai_generated_text: bool
     ai_generated_images: bool
+    price_usd: str
     checksums: dict[str, str]
 
     def to_dict(self) -> dict[str, Any]:
@@ -120,6 +121,8 @@ def validate_packet(run_dir: str | Path) -> SubmissionPacket:
         author=author, language=str(value("language", "Language", default="English")),
         description=description, keywords=list(keywords)[:7], categories=list(categories)[:3],
         ai_generated_text=ai_text, ai_generated_images=ai_images,
+        price_usd=str(value("price_usd", "ebook_price_usd",
+                            default=os.environ.get("KDP_DEFAULT_EBOOK_PRICE_USD", "4.99"))),
         checksums={
             "metadata": _sha256(metadata_path),
             "manuscript": _sha256(manuscript),
@@ -184,6 +187,20 @@ def _fill_label(page: Any, labels: tuple[str, ...], value: str, *, required: boo
     return False
 
 
+def _choose(page: Any, labels: tuple[str, ...], *, required: bool = False) -> bool:
+    for label in labels:
+        try:
+            control = page.get_by_label(re.compile(label, re.I)).first
+            if control.is_visible(timeout=900):
+                control.check(force=True)
+                return True
+        except Exception:
+            continue
+    if required:
+        raise RuntimeError("KDP choice not found: " + " / ".join(labels))
+    return False
+
+
 def open_session(*, headless: bool = False) -> Any:
     """Open the dedicated profile. First use intentionally allows login."""
     from playwright.sync_api import sync_playwright
@@ -217,8 +234,16 @@ def prepare_draft(packet: SubmissionPacket, *, headless: bool = False) -> dict[s
         _fill_label(page, (r"Subtitle",), packet.subtitle, required=False)
         _fill_label(page, (r"Primary author", r"Author"), packet.author)
         _fill_label(page, (r"Description",), packet.description)
+        _choose(page, (r"I own the copyright", r"necessary publishing rights"))
         for index, keyword in enumerate(packet.keywords, start=1):
             _fill_label(page, (rf"Keyword.*{index}",), keyword, required=False)
+        # Amazon requires honest disclosure. Generated content is the safe
+        # default in validate_packet when the LAO packet omitted this field.
+        if packet.ai_generated_text or packet.ai_generated_images:
+            _choose(page, (r"Yes.*AI-generated", r"AI-generated content.*Yes"))
+        else:
+            _choose(page, (r"No.*AI-generated", r"AI-generated content.*No"))
+        _choose(page, (r"No.*sexually explicit", r"not.*sexually explicit"))
 
         # Save details before upload. KDP wording differs across locales, so
         # role/name fallbacks are preferred over brittle generated classes.
@@ -248,6 +273,11 @@ def prepare_draft(packet: SubmissionPacket, *, headless: bool = False) -> dict[s
         else:
             raise TimeoutError("KDP manuscript/cover processing did not complete within 20 minutes")
 
+        _click(page, (r"Save and Continue", r"Save as Draft"))
+        page.wait_for_timeout(2000)
+        _choose(page, (r"All territories", r"worldwide rights"))
+        _fill_label(page, (r"Amazon.com.*price", r"List Price"), packet.price_usd,
+                    required=False)
         _click(page, (r"Save as Draft",), required=False)
         screenshot = str(Path(packet.run_dir) / "kdp_draft_ready.png")
         page.screenshot(path=screenshot, full_page=True)
