@@ -239,31 +239,41 @@ def prepare_draft(packet: SubmissionPacket, *, headless: bool = False) -> dict[s
     """Create the eBook draft and stop before the final rights/price submit."""
     write_state(packet, "PREPARING_DRAFT")
     context = open_session(headless=headless)
-    page = context.pages[0] if context.pages else context.new_page()
+    page = next((candidate for candidate in context.pages
+                 if "/title-setup/kindle/new/details" in candidate.url),
+                context.pages[0] if context.pages else context.new_page())
     try:
-        page.goto(KDP_CREATE_URL, wait_until="domcontentloaded", timeout=90_000)
+        if "/title-setup/kindle/new/details" not in page.url:
+            page.goto(KDP_CREATE_URL, wait_until="domcontentloaded", timeout=90_000)
         if "signin" in page.url.lower() or page.get_by_text("Sign in", exact=True).count():
             write_state(packet, "LOGIN_REQUIRED", url=page.url)
             raise RuntimeError(
                 "KDP persistent profile needs its one-time login. Complete login in the opened window, "
                 "then run the publisher again. Credentials are never stored by ONE."
             )
-        _click(page, (r"Create eBook", r"Kindle eBook"))
-        page.wait_for_load_state("domcontentloaded")
-        _fill_label(page, (r"Book title", r"Title"), packet.title)
-        _fill_label(page, (r"Subtitle",), packet.subtitle, required=False)
-        _fill_label(page, (r"Primary author", r"Author"), packet.author)
-        _fill_label(page, (r"Description",), packet.description)
-        _choose(page, (r"I own the copyright", r"necessary publishing rights"))
+        if "/title-setup/kindle/new/details" not in page.url:
+            _click(page, (r"Create eBook", r"Kindle eBook"))
+            page.wait_for_load_state("domcontentloaded")
+        page.locator("#data-title").fill(packet.title)
+        if packet.subtitle:
+            page.locator("#data-subtitle").fill(packet.subtitle)
+        author_parts = packet.author.rsplit(" ", 1)
+        first_name = author_parts[0] if len(author_parts) > 1 else ""
+        last_name = author_parts[-1]
+        page.locator("#data-primary-author-first-name").fill(first_name)
+        page.locator("#data-primary-author-last-name").fill(last_name)
+        editor = page.frame_locator("iframe[title*='Rich Text Editor']").locator("body")
+        editor.fill(packet.description)
+        page.locator("#non-public-domain").check(force=True)
         for index, keyword in enumerate(packet.keywords, start=1):
-            _fill_label(page, (rf"Keyword.*{index}",), keyword, required=False)
+            page.locator(f"#data-keywords-{index - 1}").fill(keyword)
         # Amazon requires honest disclosure. Generated content is the safe
         # default in validate_packet when the LAO packet omitted this field.
         if packet.ai_generated_text or packet.ai_generated_images:
             _choose(page, (r"Yes.*AI-generated", r"AI-generated content.*Yes"))
         else:
             _choose(page, (r"No.*AI-generated", r"AI-generated content.*No"))
-        _choose(page, (r"No.*sexually explicit", r"not.*sexually explicit"))
+        page.locator("input[name='data[is_adult_content]-radio'][value='false']").check(force=True)
 
         # Save details before upload. KDP wording differs across locales, so
         # role/name fallbacks are preferred over brittle generated classes.
