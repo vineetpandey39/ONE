@@ -206,6 +206,16 @@ def open_session(*, headless: bool = False) -> Any:
     from playwright.sync_api import sync_playwright
 
     pw = sync_playwright().start()
+    cdp_url = os.environ.get("LAO_KDP_CDP_URL", "http://127.0.0.1:9333")
+    try:
+        browser = pw.chromium.connect_over_cdp(cdp_url, timeout=2500)
+        if browser.contexts:
+            context = browser.contexts[0]
+            context._lao_playwright = pw  # type: ignore[attr-defined]
+            context._lao_cdp_browser = browser  # type: ignore[attr-defined]
+            return context
+    except Exception:
+        pass
     context = pw.chromium.launch_persistent_context(
         str(profile_dir()), channel="chrome", headless=headless,
         viewport={"width": 1440, "height": 1000}, accept_downloads=True,
@@ -213,6 +223,16 @@ def open_session(*, headless: bool = False) -> Any:
     )
     context._lao_playwright = pw  # type: ignore[attr-defined]
     return context
+
+
+def close_session(context: Any) -> None:
+    """Disconnect from a shared CDP browser or close an owned context."""
+    pw = getattr(context, "_lao_playwright", None)
+    shared = getattr(context, "_lao_cdp_browser", None)
+    if shared is None:
+        context.close()
+    if pw is not None:
+        pw.stop()
 
 
 def prepare_draft(packet: SubmissionPacket, *, headless: bool = False) -> dict[str, Any]:
@@ -287,8 +307,7 @@ def prepare_draft(packet: SubmissionPacket, *, headless: bool = False) -> dict[s
         write_state(packet, "BLOCKED", error=f"{type(exc).__name__}: {exc}", url=page.url)
         raise
     finally:
-        context.close()
-        getattr(context, "_lao_playwright", None) and context._lao_playwright.stop()  # type: ignore[attr-defined]
+        close_session(context)
 
 
 def submit_approved(packet: SubmissionPacket, approval_id: str, *, headless: bool = False) -> dict[str, Any]:
@@ -314,8 +333,7 @@ def submit_approved(packet: SubmissionPacket, approval_id: str, *, headless: boo
         return write_state(packet, "SUBMITTED", approval_id=approval_id,
                            submitted_at=_now(), evidence_screenshot=screenshot)
     finally:
-        context.close()
-        getattr(context, "_lao_playwright", None) and context._lao_playwright.stop()  # type: ignore[attr-defined]
+        close_session(context)
 
 
 def poll_asin(packet: SubmissionPacket, *, headless: bool = True) -> dict[str, Any]:
@@ -335,5 +353,4 @@ def poll_asin(packet: SubmissionPacket, *, headless: bool = True) -> dict[str, A
         return write_state(packet, "AWAITING_ASIN",
                            kdp_status=status_match.group(0) if status_match else "unknown")
     finally:
-        context.close()
-        getattr(context, "_lao_playwright", None) and context._lao_playwright.stop()  # type: ignore[attr-defined]
+        close_session(context)
