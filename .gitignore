@@ -39,9 +39,16 @@ Thumbs.db
 # Secrets
 .env
 .env.*
+# one.env is ONE's real local config (one.env.example says "copy to one.env"),
+# and it matches neither pattern above -- .env.* needs a dot before the suffix.
+# sync-one-github.ps1 excludes it from the clean-repo push and fails closed if
+# it ever slips through, but that guard only covers that one script; a plain
+# `git add -A` in this tree had nothing stopping it.
+one.env
 # ...but keep checked-in example/templates (never contain real secrets)
 !.env.example
 !**/.env.example
+!one.env.example
 
 # Project
 *.sqlite
