@@ -5349,6 +5349,37 @@ def _kairos_collect(query: str) -> dict[str, Any]:
     return reusable.collect(query, markets=["IN", "US"])
 
 
+def _kairos_verified_feed(pillar: str = "news", *,
+                          force: bool = False) -> dict[str, Any]:
+    """KAIROS's source port: PostForge's verified last-24-hours feed.
+
+    The same call the cockpit tab makes, so the carousel job and the operator
+    are looking at one list. Deliberately additive to `collect`, not a
+    replacement: `collect` answers an open question, this answers "what is
+    publishable in this pillar right now", and only items whose own source page
+    proved their date and claim come back.
+    """
+    from openjarvis.postforge import feed
+
+    return feed.refresh(pillar, force=force)
+
+
+def _ports_accepts(ports_type: Any, name: str) -> bool:
+    """Whether the floors-side Ports declares `name`.
+
+    Ports is defined in one-company/floors, which is not part of this
+    repository and is versioned separately, so a checkout can be older than
+    this file. An unknown keyword would TypeError every KAIROS job -- carousel
+    and revenue both -- so a new port is offered, never assumed.
+    """
+    import inspect
+
+    try:
+        return name in inspect.signature(ports_type).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 def _kairos_chatgpt(prompt: str) -> tuple[str, str]:
     """One carousel copy candidate through LAO's logged-in ChatGPT session.
 
@@ -5571,8 +5602,10 @@ def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 4 worker for aibyvineet: PostForge's carousel job, rebuilt on ONE.
 
     Its logic lives in one-company/floors. This wrapper only injects the ports:
-    Sanjeevani for evidence and local copy, LAO for ChatGPT copy and visuals,
-    and the one-media host for public URLs. The Instagram publisher goes
+    Sanjeevani for evidence and local copy, PostForge's verified feed for
+    publishable sources, LAO for ChatGPT copy and visuals, and the one-media
+    host for public URLs. ``verified_feed`` is offered only when the floors-side
+    Ports declares it, so an older floors checkout keeps working untouched. The Instagram publisher goes
     through social_accounts' cross-post guard, and KAIROS itself refuses to
     call it while the brand is not marked postable. If the floors tree is
     unavailable this degrades to the local planner rather than failing the job.
@@ -5624,29 +5657,29 @@ def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
             raise RuntimeError("the company revenue ledger is unavailable")
         return ledger.declare_source(floor_id, name, connected=connected, blocked_on=blocked_on)
 
-    return kairos.run(
-        job,
-        kairos.Ports(
-            research=_research_synthesis,
-            remember=memory.remember,
-            set_stage=stages.set_stage,
-            clear_stage=stages.clear_stage,
-            enqueue=enqueue_job,
-            output_dir=_home() / "agent_outputs",
-            collect=_kairos_collect if _sanjeevani_research() is not None else None,
-            chatgpt=_kairos_chatgpt,
-            generate_images=lambda prompts, target: _kairos_lao_images(prompts, target, job_id=job_id),
-            upload=upload if host is not None else None,
-            publish=publish if media is not None else None,
-            confirm_receipt=stages.worker_confirms_receipt,
-            insights=insights if media is not None and hasattr(media, "graph_reader") else None,
-            video_search=_kairos_video_search if _sanjeevani_reel() is not None else None,
-            web_search=_kairos_web_search if _sanjeevani_research() is not None else None,
-            read_page=_kairos_read_page if _sanjeevani_research() is not None else None,
-            graph_for=graph_for if media is not None and hasattr(media, "graph_reader") else None,
-            declare_revenue_source=declare_revenue_source,
-        ),
+    ports: dict[str, Any] = dict(
+        research=_research_synthesis,
+        remember=memory.remember,
+        set_stage=stages.set_stage,
+        clear_stage=stages.clear_stage,
+        enqueue=enqueue_job,
+        output_dir=_home() / "agent_outputs",
+        collect=_kairos_collect if _sanjeevani_research() is not None else None,
+        chatgpt=_kairos_chatgpt,
+        generate_images=lambda prompts, target: _kairos_lao_images(prompts, target, job_id=job_id),
+        upload=upload if host is not None else None,
+        publish=publish if media is not None else None,
+        confirm_receipt=stages.worker_confirms_receipt,
+        insights=insights if media is not None and hasattr(media, "graph_reader") else None,
+        video_search=_kairos_video_search if _sanjeevani_reel() is not None else None,
+        web_search=_kairos_web_search if _sanjeevani_research() is not None else None,
+        read_page=_kairos_read_page if _sanjeevani_research() is not None else None,
+        graph_for=graph_for if media is not None and hasattr(media, "graph_reader") else None,
+        declare_revenue_source=declare_revenue_source,
     )
+    if _ports_accepts(kairos.Ports, "verified_feed"):
+        ports["verified_feed"] = _kairos_verified_feed
+    return kairos.run(job, kairos.Ports(**ports))
 
 
 def _run_herald(job: dict[str, Any]) -> dict[str, Any]:
