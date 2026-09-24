@@ -154,6 +154,24 @@ def check_refresh(pillar: str) -> bool:
     return False
 
 
+def check_kairos() -> bool:
+    """Is KAIROS's carousel brief actually being grounded in the feed?"""
+    from openjarvis.one_agents import runtime
+
+    switch = os.environ.get("ONE_KAIROS_VERIFIED_FEED", "1").strip().lower()
+    if switch in ("0", "false", "no"):
+        say(WARN, "KAIROS grounding is switched off", "ONE_KAIROS_VERIFIED_FEED=" + switch)
+        return False
+
+    pillar = os.environ.get("ONE_KAIROS_PILLAR") or os.environ.get("TITAN_DEFAULT_PILLAR") or "news"
+    angle, path, count = runtime._kairos_grounded_angle("self-check", "selfcheck", [])
+    if not count:
+        say(WARN, "KAIROS would be briefed un-grounded today", f"Pillar '{pillar}' verified nothing; the lane falls back to the operator's own angle, exactly as before this feed existed.")
+        return False
+    say(OK, f"KAIROS brief carries {count} verified source(s)", f"Pillar '{pillar}', evidence at {path}")
+    return True
+
+
 def check_ollama() -> bool:
     """Generation needs a local model; refresh does not."""
     base = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
@@ -178,6 +196,7 @@ def main() -> int:
     check_bundle()
     if check_sanjeevani():
         check_refresh(pillar)
+        check_kairos()
     check_ollama()
 
     print("\nEach FAIL above carries its own fix. WARN means that step is not blocking the feed.")

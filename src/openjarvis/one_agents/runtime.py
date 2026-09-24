@@ -5229,6 +5229,14 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
             # existed. A research miss enriches nothing today, but must not
             # stop a day the calendar never asked it to gate.
             grounded_angle = f"{task.strip()} Today's fixed pillar is '{pillar}' — stay within it."
+    elif brand.get("slug") == "aibyvineet":
+        grounded_angle, evidence_path, evidence_count = _kairos_grounded_angle(
+            task, str(job.get("id") or ""), prior)
+        if evidence_count:
+            memory.remember(
+                agent="IRIS", floor_id="4", floor_name=brand["vault_floor_name"],
+                kind="aibyvineet Verified Sources", body=grounded_angle, task=task,
+                tags=["aibyvineet", "postforge", "sanjeevani", "verified"])
 
     # ``worker`` names who this handover is actually for. Without it the
     # building can only guess, and a head briefing its second worker walks to
@@ -5378,6 +5386,80 @@ def _ports_accepts(ports_type: Any, name: str) -> bool:
         return name in inspect.signature(ports_type).parameters
     except (TypeError, ValueError):
         return False
+
+
+def _kairos_grounded_angle(task: str, job_id: str,
+                           prior: list[str]) -> tuple[str, str, int]:
+    """Ground the aibyvineet carousel brief in PostForge's verified feed.
+
+    Deliberately the same shape as the LinkedIn Authority grounding in
+    _iris_dispatch_brand: the head researches, the brief carries the evidence,
+    and the worker executes a brief it did not invent. It needs nothing from
+    the floors tree -- `angle`, `evidence_path` and `evidence_count` are
+    existing fields of the handover JSON that this file already builds.
+
+    The facts are copied from the feed verbatim rather than summarised by a
+    model: every item has already been re-opened at its own URL and proved its
+    date and claim, so a synthesis step here could only add drift.
+
+    On any miss -- feed off, Sanjeevani absent, nothing verified today -- this
+    returns the operator's own task untouched. That lane can publish under a
+    standing authority, so a research failure has to leave today's behaviour
+    exactly as it was rather than post something thinner.
+    """
+    switch = os.environ.get("ONE_KAIROS_VERIFIED_FEED", "1").strip().lower()
+    if switch in ("0", "false", "no"):
+        return task, "", 0
+
+    pillar = (os.environ.get("ONE_KAIROS_PILLAR")
+              or os.environ.get("TITAN_DEFAULT_PILLAR") or "news").strip()
+    try:
+        payload = _kairos_verified_feed(pillar)
+    except Exception as exc:  # noqa: BLE001 - a research miss must not stop the lane
+        print(f"[one-agents] {job_id} verified feed unavailable "
+              f"({type(exc).__name__}: {exc}); briefing KAIROS with "
+              "the operator's own angle", flush=True)
+        return task, "", 0
+
+    items = list(payload.get("items") or [])
+    if not items:
+        print(f"[one-agents] {job_id} verified feed returned nothing inside "
+              f"{payload.get('freshnessHours')}h ({payload.get('rejected')} rejected); "
+              "briefing KAIROS with the operator's own angle", flush=True)
+        return task, "", 0
+
+    lines = [
+        f"{index}. {item.get('headline', '')}"
+        f"\n   Source: {item.get('source', '')}"
+        f" | Published: {item.get('publishedAt', '')}"
+        f"\n   URL: {item.get('url', '')}"
+        f"\n   Summary: {item.get('summary', '')}"
+        for index, item in enumerate(items, start=1)
+    ]
+    body = "\n".join(lines)
+    angle = (
+        f"{task.strip()}\n\n"
+        "Use ONLY these source-verified items from the last "
+        f"{payload.get('freshnessHours')} hours. Each one was re-opened at its "
+        "own URL and kept only because the page proved its date and supported "
+        "its headline. Do not introduce any other claim, product name, number "
+        "or date.\n\n"
+        f"{body}"
+    )
+    if prior:
+        seen = json.dumps(prior[:15], ensure_ascii=False)
+        angle += f"\n\nAvoid repeating these prior angles: {seen}"
+
+    output_dir = _home() / "agent_outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    evidence_file = output_dir / f"{job_id}-aibyvineet-sources.md"
+    evidence_file.write_text(
+        f"# IRIS - aibyvineet verified sources\n\nPillar: {pillar}\nRequest: {task}\n"
+        f"Window: {payload.get('freshnessHours')}h"
+        f" | Rejected: {payload.get('rejected')}\n\n"
+        f"Researched by: Sanjeevani, verified by PostForge\n\n{body}\n",
+        encoding="utf-8")
+    return angle, str(evidence_file), len(items)
 
 
 def _kairos_chatgpt(prompt: str) -> tuple[str, str]:
