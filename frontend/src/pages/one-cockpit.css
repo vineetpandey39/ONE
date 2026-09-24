@@ -1473,3 +1473,57 @@ body { margin: 0; background: #02060b; }
   .one-connection-rail { position: static; }
   .one-vault-list { grid-template-columns: 1fr; }
 }
+
+/* PostForge board — the verified-source cockpit tab. Palette follows the
+   surrounding operations panels; the only new accent is the amber used for
+   rejections, so a stale-heavy refresh reads differently from an empty one. */
+.one-postforge-owner { display: inline-flex; align-items: center; gap: 6px; color: #67caee; font-size: 11px; }
+.one-postforge-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 12px; }
+.one-postforge-tabs button { border: 1px solid #17384f; border-radius: 6px; background: #06111d; color: #9db9c9; font-size: 12px; padding: 7px 14px; cursor: pointer; }
+.one-postforge-tabs button.active { border-color: #1f8dbc; background: #072033; color: #d7f6ff; }
+.one-postforge-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.one-postforge-controls select { border: 1px solid #17384f; border-radius: 6px; background: #06111d; color: #d3e8f5; font-size: 12px; padding: 8px 10px; }
+.one-postforge-controls button { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #1d4b67; border-radius: 6px; background: #071724; color: #67caee; font-size: 12px; padding: 8px 14px; cursor: pointer; }
+.one-postforge-controls button.primary { border-color: #1f8dbc; background: #0b2c44; color: #d7f6ff; }
+.one-postforge-controls button.generate { border-color: #1d5a49; background: #07231c; color: #4fd8a6; }
+.one-postforge-controls button:disabled { opacity: .45; cursor: not-allowed; }
+.one-postforge-controls .spin { animation: one-spin 1s linear infinite; }
+.one-postforge-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+.one-postforge-summary > div { min-width: 0; border: 1px solid #17384f; border-radius: 6px; background: #050d17cc; padding: 12px; }
+.one-postforge-summary span { display: block; color: #57cfff; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; }
+.one-postforge-summary strong { display: block; margin-top: 6px; color: #d3e8f5; font-size: 18px; }
+.one-postforge-message { padding: 10px 12px; border-left: 2px solid #e6a23c; background: rgba(230, 162, 60, .07); color: #c8d9e4; font-size: 12px; }
+.one-postforge-panes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.one-postforge-pane { min-width: 0; border: 1px solid #17384f; border-radius: 6px; background: #04101a; padding: 14px; }
+.one-postforge-pane h4 { margin: 6px 0 12px; color: #d3e8f5; font-size: 17px; font-weight: 500; }
+.one-postforge-empty { border: 1px dashed #17384f; border-radius: 6px; background: #06111d; padding: 14px; }
+.one-postforge-empty strong { display: block; color: #d3e8f5; font-size: 13px; }
+.one-postforge-empty span { display: block; margin-top: 6px; color: #789caf; font-size: 11px; line-height: 1.5; }
+.one-postforge-item { display: grid; grid-template-columns: auto 1fr; gap: 10px; margin-bottom: 8px; border: 1px solid #142f43; border-radius: 6px; background: #06111d; padding: 11px; cursor: pointer; }
+.one-postforge-item.selected { border-color: #1f8dbc; background: #072033; }
+.one-postforge-item input { margin-top: 3px; accent-color: #1f8dbc; }
+.one-postforge-item strong { display: block; color: #d3e8f5; font-size: 13px; line-height: 1.4; }
+.one-postforge-item p { margin: 6px 0; color: #9db9c9; font-size: 11px; line-height: 1.5; }
+.one-postforge-item a { display: inline-flex; align-items: center; gap: 5px; color: #67caee; font-size: 10px; word-break: break-all; }
+.one-postforge-meta { display: inline-flex; align-items: center; gap: 5px; margin-top: 5px; color: #4fd8a6; font: 10px/1.4 var(--one-mono, monospace); }
+.one-postforge-rejected { margin-top: 10px; color: #c89b4c; font-size: 11px; }
+.one-postforge-rejected ul { margin: 8px 0 0; padding-left: 16px; display: grid; gap: 6px; }
+.one-postforge-rejected code { color: #9db9c9; font-size: 10px; word-break: break-all; }
+.one-postforge-rejected span { display: block; color: #789caf; font-size: 10px; }
+.one-postforge-hook { color: #67caee; font-size: 12px; }
+.one-postforge-hook b { margin-right: 6px; color: #57cfff; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; }
+.one-postforge-cover { margin: 8px 0 12px; color: #d7f6ff; font-size: 20px; font-weight: 600; letter-spacing: .02em; }
+.one-postforge-cover em { display: block; margin-top: 4px; color: #789caf; font-size: 11px; font-style: normal; text-transform: uppercase; letter-spacing: .1em; }
+.one-postforge-slide { margin-bottom: 8px; border-left: 2px solid #1f8dbc; padding-left: 10px; }
+.one-postforge-slide b { color: #57cfff; font-size: 9px; letter-spacing: 1px; }
+.one-postforge-slide strong { display: block; margin-top: 3px; color: #d3e8f5; font-size: 13px; }
+.one-postforge-slide span { display: block; color: #789caf; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.one-postforge-slide p { margin: 6px 0 4px; color: #9db9c9; font-size: 11px; line-height: 1.5; }
+.one-postforge-slide a { color: #67caee; font-size: 10px; }
+.one-postforge-caption { margin-top: 12px; color: #d3e8f5; font-size: 12px; line-height: 1.6; }
+.one-postforge-cta { color: #4fd8a6; font-size: 11px; }
+.one-postforge-tags { color: #67caee; font-size: 11px; word-break: break-word; }
+@media (max-width: 1100px) {
+  .one-postforge-panes { grid-template-columns: 1fr; }
+  .one-postforge-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

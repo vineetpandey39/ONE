@@ -30,6 +30,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { getBase } from '../lib/api';
+import { PostForgeBoard } from '../components/PostForgeBoard';
 import { JarvisCore } from './JarvisCore';
 import type { CoreState } from './JarvisCore';
 import './one-cockpit.css';
@@ -2064,6 +2065,8 @@ export function OneCockpit() {
           })}
         </div>
       </section>
+
+      <PostForgeBoard />
 
       <section className="one-operations one-jobhunt-board">
         <div className="one-operations-head">

@@ -1611,6 +1611,12 @@ def include_all_routes(app) -> None:
     app.include_router(optimize_router)
     app.include_router(alfa_router)
 
+    from openjarvis.server.postforge_routes import (
+        router as postforge_router,  # noqa: PLC0415
+    )
+
+    app.include_router(postforge_router)
+
     # Agent Manager routes (if available)
     try:
         if hasattr(app.state, "agent_manager") and app.state.agent_manager:
