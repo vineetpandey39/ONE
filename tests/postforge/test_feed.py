@@ -325,14 +325,15 @@ def test_verify_item_rejects_a_row_without_a_usable_url():
 class _Library:
     """Stands in for Sanjeevani: the two calls feed.py actually makes."""
 
-    def __init__(self, rows):
+    def __init__(self, rows, mode="searxng"):
         self.rows = rows
+        self.mode = mode
         self.queries: list[str] = []
 
     def searxng(self, queries, time_range=""):
         self.queries.extend(queries)
         assert time_range == "day"
-        return list(self.rows), "test"
+        return list(self.rows), self.mode
 
 
 def test_refresh_keeps_only_what_its_own_page_proves(monkeypatch):
@@ -368,6 +369,24 @@ def test_refresh_keeps_only_what_its_own_page_proves(monkeypatch):
     assert payload["freshnessHours"] == 24
     assert payload["researcher"] == "sanjeevani"
     assert library.queries, "refresh must actually search"
+
+
+def test_refresh_records_which_discovery_path_answered():
+    """A live run with SearXNG uninstalled still returned rows, tagged
+    bing_web_rss. Without this the operator cannot tell a healthy fallback from
+    a healthy SearXNG -- both just look like a working feed."""
+    feed.clear_cache()
+    library = _Library([], mode="bing_web_rss")
+    payload = feed.refresh(
+        "news", library=library, fetch=lambda url: "", now=NOW, force=True
+    )
+    assert payload["discovery"] == "bing_web_rss"
+
+
+def test_search_rows_reports_an_unnamed_mode_rather_than_none():
+    library = _Library([], mode=None)
+    rows, mode = feed.search_rows(["q"], library=library)
+    assert (rows, mode) == ([], "unknown")
 
 
 def test_refresh_skips_the_fetch_for_a_row_already_far_outside_the_window():

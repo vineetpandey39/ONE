@@ -618,13 +618,23 @@ def select_queries(
     return [primary, *rotated][:limit]
 
 
-def search_rows(queries: Sequence[str], *, library: Any = None) -> list[dict[str, Any]]:
-    """Sanjeevani's SearXNG, pinned to its own day window."""
+def search_rows(
+    queries: Sequence[str], *, library: Any = None
+) -> tuple[list[dict[str, Any]], str]:
+    """Sanjeevani's discovery, pinned to its own day window.
+
+    Returns the rows and the mode Sanjeevani reports. The mode matters: the
+    entry point is named ``searxng``, but it falls back when the self-hosted
+    instance is gone -- a live run with SearXNG uninstalled still returned rows,
+    tagged ``bing_web_rss``. Discarding the mode made a healthy fallback and a
+    healthy SearXNG look identical, and the operator could not tell which one
+    was feeding the cockpit.
+    """
     reusable = library if library is not None else _sanjeevani()
     if reusable is None:
         raise SanjeevaniUnavailable(_MISSING_LIBRARY)
-    rows, _mode = reusable.searxng(list(queries), time_range="day")
-    return [row for row in rows if isinstance(row, dict)]
+    rows, mode = reusable.searxng(list(queries), time_range="day")
+    return [row for row in rows if isinstance(row, dict)], str(mode or "unknown")
 
 
 def read_page(url: str, *, library: Any = None) -> str:
@@ -807,7 +817,7 @@ def refresh(
     reader = fetch or (lambda url: read_page(url, library=reusable))
 
     queries = select_queries(pillar, today=moment.isoformat())
-    rows = search_rows(queries, library=reusable)
+    rows, discovery = search_rows(queries, library=reusable)
     candidates = unique_items(
         row_to_candidate(row)
         for row in rows
@@ -853,6 +863,9 @@ def refresh(
         "sourceChecked": True,
         "cached": False,
         "researcher": "sanjeevani",
+        # Which of Sanjeevani's discovery paths actually answered, e.g.
+        # "bing_web_rss" when the self-hosted SearXNG is not running.
+        "discovery": discovery,
     }
     _CACHE[key] = (moment.timestamp(), payload)
     return payload
