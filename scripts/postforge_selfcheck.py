@@ -19,13 +19,65 @@ Nothing here writes; the live refresh is the same one the tab runs.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 STATIC = REPO / "src" / "openjarvis" / "server" / "static"
+
+def _candidate_pythons() -> list[Path]:
+    """Where ONE's own interpreter usually lives, nearest first."""
+    names = ("Scripts/python.exe", "bin/python", "bin/python3")
+    roots = (REPO / ".venv", REPO / "venv", REPO.parent / ".venv", REPO.parent / "venv")
+    return [root / name for root in roots for name in names]
+
+
+def _has_openjarvis(python: Path) -> bool:
+    try:
+        done = subprocess.run(
+            [str(python), "-c", "import openjarvis"],
+            capture_output=True, timeout=60, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
+def _bootstrap_interpreter() -> None:
+    """Re-run under the interpreter that actually has openjarvis.
+
+    ONE runs from its own venv, so `python scripts/postforge_selfcheck.py` picks
+    up the system interpreter, which has never had openjarvis installed. Making
+    the operator hunt for the venv is the wrong answer to a question the script
+    can settle itself: look for the venv, re-exec under it, and only report an
+    honest failure when no interpreter on the machine can see the package.
+    """
+    if importlib.util.find_spec("openjarvis") is not None:
+        return
+    if os.environ.get("_POSTFORGE_SELFCHECK_REEXEC") == "1":
+        return  # already re-executed once; let the check below report honestly
+
+    for python in _candidate_pythons():
+        if not python.is_file() or not _has_openjarvis(python):
+            continue
+        print(f"Re-running under {python}\n")
+        env = {**os.environ, "_POSTFORGE_SELFCHECK_REEXEC": "1"}
+        raise SystemExit(
+            subprocess.run([str(python), str(Path(__file__).resolve()), *sys.argv[1:]],
+                           env=env, check=False).returncode
+        )
+
+    # No venv found. The package source sits at REPO/src, so an editable-style
+    # path fix is still worth trying before giving up -- it is enough for the
+    # checks that do not need ONE's third-party dependencies.
+    source = REPO / "src"
+    if (source / "openjarvis").is_dir():
+        sys.path.insert(0, str(source))
+
 
 OK = "  OK   "
 BAD = " FAIL  "
@@ -49,10 +101,11 @@ def check_code() -> bool:
     except ImportError as exc:
         # Nearly always the wrong interpreter rather than missing code: ONE runs
         # from its own venv, and the system python has no openjarvis installed.
+        tried = ", ".join(str(path) for path in _candidate_pythons() if path.is_file())
         say(BAD, "PostForge module not importable", f"{exc}\n"
-            "Most likely this is the wrong python. Run it with the interpreter ONE "
-            "itself uses, e.g. .venv\\Scripts\\python.exe scripts/postforge_selfcheck.py\n"
-            "If that python also cannot see it, the branch is not applied in this tree.")
+            f"Interpreters tried: {tried or 'none found next to the repo'}\n"
+            "If ONE's venv lives elsewhere, run this script with that python "
+            "directly. Otherwise the branch is not applied in this tree.")
         return False
 
 
@@ -194,6 +247,7 @@ def check_ollama() -> bool:
 def main() -> int:
     pillar = sys.argv[1] if len(sys.argv) > 1 else "news"
     print(f"PostForge self-check ({pillar})\n")
+    _bootstrap_interpreter()
 
     if not check_code():
         return 1
