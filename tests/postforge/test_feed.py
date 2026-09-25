@@ -154,6 +154,53 @@ def test_looks_evergreen_only_flags_launch_language_on_a_product_path():
 # ---------------------------------------------------------------------------
 
 
+def test_row_to_candidate_reads_sanjeevanis_own_row_shape():
+    """The live shape, captured from a real refresh on 2026-09-25.
+
+    Sanjeevani names the link ``source_url`` and the date ``published_at``, and
+    sends no snippet. Reading only ``url`` silently dropped every row, which
+    looked identical to "no AI news today" -- nothing was rejected, because
+    nothing was ever a candidate.
+    """
+    row = {
+        "source_type": "bing_web_rss",
+        "source_url": "https://www.ndtv.com/latest",
+        "title": "Latest News",
+        "published_at": "Fri, 25 Sept 2026 11:14:00 GMT",
+        "captured_at": "2026-09-25T15:44:12.998663+00:00",
+        "age_hours": 4.5,
+        "role": "web_discovery",
+    }
+    candidate = feed.row_to_candidate(row)
+
+    assert candidate["url"] == "https://www.ndtv.com/latest"
+    assert candidate["headline"] == "Latest News"
+    assert candidate["date"] == "Fri, 25 Sept 2026 11:14:00 GMT"
+    # The hostname beats source_type: "ndtv.com" is a source, "bing_web_rss"
+    # is the pipe the row arrived through.
+    assert candidate["source"] == "ndtv.com"
+
+
+def test_rfc_2822_dates_keep_their_time_of_day():
+    # Flooring this to midnight would add up to 24h of apparent age, which at a
+    # 24-hour window silently ages live stories out of the feed.
+    assert feed.parse_item_date("Fri, 25 Sept 2026 11:14:00 GMT") == datetime(
+        2026, 9, 25, 11, 14, tzinfo=timezone.utc
+    )
+    assert feed.parse_item_date("25 Sept 2026 11:14:00 +05:30") == datetime(
+        2026, 9, 25, 5, 44, tzinfo=timezone.utc
+    )
+    assert feed.parse_item_date("Sept 25, 2026 11:14 UTC") == datetime(
+        2026, 9, 25, 11, 14, tzinfo=timezone.utc
+    )
+
+
+def test_a_date_without_a_clock_still_lands_at_midnight():
+    assert feed.parse_item_date("September 24, 2026") == datetime(
+        2026, 9, 24, tzinfo=timezone.utc
+    )
+
+
 def test_normalize_item_fills_source_from_the_host_when_the_row_omits_it():
     item = feed.normalize_item(
         {"url": "https://www.theverge.com/a", "headline": "x"}, 0, "news", 24

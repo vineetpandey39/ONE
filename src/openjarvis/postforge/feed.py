@@ -218,8 +218,14 @@ _ISO_DATE = re.compile(
     r"\s*(Z|[+-]\d{2}:?\d{2})?",
     re.I,
 )
-_TEXT_DATE_MDY = re.compile(r"([a-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})", re.I)
-_TEXT_DATE_DMY = re.compile(r"(\d{1,2})\s+([a-z]{3,9})\.?,?\s+(\d{4})", re.I)
+# The clock half is optional but load-bearing: Sanjeevani dates rows RFC-2822
+# style ("Fri, 25 Sept 2026 11:14:00 GMT"), and flooring that to midnight ages a
+# live story by most of a day -- fatal at a 24-hour window.
+_CLOCK = (
+    r"(?:[\s,]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?(?:\s*(GMT|UTC|Z|[+-]\d{2}:?\d{2}))?"
+)
+_TEXT_DATE_MDY = re.compile(r"([a-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})" + _CLOCK, re.I)
+_TEXT_DATE_DMY = re.compile(r"(\d{1,2})\s+([a-z]{3,9})\.?,?\s+(\d{4})" + _CLOCK, re.I)
 
 
 class SanjeevaniUnavailable(RuntimeError):
@@ -325,10 +331,24 @@ def parse_item_date(value: Any) -> datetime | None:
         month = _MONTHS.get(month_name[:3].lower())
         if not month:
             continue
+        zone = found.group(7) or ""
+        tz = timezone.utc
+        if zone and zone.upper() not in ("Z", "GMT", "UTC"):
+            sign = -1 if zone[0] == "-" else 1
+            digits = zone[1:].replace(":", "")
+            tz = timezone(
+                sign * timedelta(hours=int(digits[:2]), minutes=int(digits[2:4]))
+            )
         try:
             return datetime(
-                int(found.group(3)), month, int(day_text), tzinfo=timezone.utc
-            )
+                int(found.group(3)),
+                month,
+                int(day_text),
+                int(found.group(4) or 0),
+                int(found.group(5) or 0),
+                int(found.group(6) or 0),
+                tzinfo=tz,
+            ).astimezone(timezone.utc)
         except ValueError:
             return None
     return None
@@ -531,14 +551,19 @@ def _sanjeevani() -> Any:
     return _sanjeevani_research()
 
 
-_ROW_URL_KEYS = ("url", "link", "href")
+# Sanjeevani's collector rows name these ``source_url`` and ``published_at`` and
+# carry no snippet at all, which is exactly why every field is read from the
+# first spelling present instead of one hardcoded name. Confirmed against a live
+# row: source_type, source_url, title, published_at, captured_at, age_hours,
+# freshness_bucket, freshness_eligible, evidence_id, market, role, raw_signal.
+_ROW_URL_KEYS = ("source_url", "url", "link", "href")
 _ROW_TITLE_KEYS = ("title", "headline", "name")
 _ROW_SUMMARY_KEYS = ("content", "snippet", "summary", "description", "text")
 _ROW_DATE_KEYS = (
+    "published_at",
     "publishedDate",
     "published_date",
     "publishedAt",
-    "published_at",
     "date",
     "pubdate",
 )
