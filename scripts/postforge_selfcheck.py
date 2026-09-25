@@ -47,7 +47,12 @@ def check_code() -> bool:
         say(OK, "PostForge module importable", f"{len(feed.PILLARS)} pillars, {feed.fresh_hours()}h window")
         return True
     except ImportError as exc:
-        say(BAD, "PostForge module missing", f"{exc}\ngit pull, then: git checkout claude/jolly-volta-1p85uu")
+        # Nearly always the wrong interpreter rather than missing code: ONE runs
+        # from its own venv, and the system python has no openjarvis installed.
+        say(BAD, "PostForge module not importable", f"{exc}\n"
+            "Most likely this is the wrong python. Run it with the interpreter ONE "
+            "itself uses, e.g. .venv\\Scripts\\python.exe scripts/postforge_selfcheck.py\n"
+            "If that python also cannot see it, the branch is not applied in this tree.")
         return False
 
 
