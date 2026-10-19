@@ -8,7 +8,7 @@ import urllib.request
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
 SOURCE_HOSTS = frozenset({"science.nasa.gov", "www.nasa.gov", "www.esa.int", "www.isro.gov.in"})
 MEDIA_HOSTS = SOURCE_HOSTS | {"images-api.nasa.gov", "images-assets.nasa.gov", "assets.science.nasa.gov"}
@@ -22,15 +22,35 @@ def validate_url(url: str, hosts=SOURCE_HOSTS) -> str:
     return url
 
 
+def _http_url(url: str) -> str:
+    """Return an allowlisted URL that urllib can send on the wire.
+
+    NASA's image catalogue occasionally returns otherwise valid HTTPS links
+    whose path contains literal spaces. ``urllib`` rejects those links before
+    making a request. Encode only the URL components (while preserving
+    existing escapes and query delimiters), then run the normal host gate on
+    the exact URL that will be requested.
+    """
+    validate_url(url, MEDIA_HOSTS)
+    parsed = urlsplit(url)
+    encoded = urlunsplit((
+        parsed.scheme,
+        parsed.netloc,
+        quote(parsed.path, safe="/%:@!$&'()*+,;=-._~"),
+        quote(parsed.query, safe="=&?/%:+,;@-._~"),
+        quote(parsed.fragment, safe="/%?:@!$&'()*+,;=-._~"),
+    ))
+    validate_url(encoded, MEDIA_HOSTS)
+    return encoded
+
+
 class _Redirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        validate_url(newurl, MEDIA_HOSTS)
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        return super().redirect_request(req, fp, code, msg, headers, _http_url(newurl))
 
 
 def read_public(url: str, *, limit: int = 4_000_000) -> bytes:
-    validate_url(url, MEDIA_HOSTS)
-    request = urllib.request.Request(url, headers={"User-Agent": "ONE-PLANEXIUM/1.0 (science evidence)"})
+    request = urllib.request.Request(_http_url(url), headers={"User-Agent": "ONE-PLANEXIUM/1.0 (science evidence)"})
     with urllib.request.build_opener(_Redirect()).open(request, timeout=45) as response:
         validate_url(response.url, MEDIA_HOSTS)
         data = response.read(limit + 1)
