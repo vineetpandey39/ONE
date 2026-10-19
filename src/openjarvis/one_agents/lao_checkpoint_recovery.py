@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -91,7 +92,7 @@ def activate_engine():
     return hashlib.sha256(target.read_bytes()).hexdigest()
 
 
-def resume_failed(connect, previous):
+def resume_failed(connect, previous, *, reviewed_conversation_url=""):
     """Retry the existing LAO checkpoint once and attach ONE to its successor."""
     from openjarvis.one_agents.floor_watch import _enqueue_collection
     payload = json.loads(previous.get("task") or "{}")
@@ -102,7 +103,9 @@ def resume_failed(connect, previous):
         raise RuntimeError("No external checkpoint to resume")
     api = client()
     parent = api.get(f"/jobs/{external}")
-    checkpoint_of(parent)
+    checkpoint = checkpoint_of(parent)
+    if reviewed_conversation_url and not re.fullmatch(r"https://chatgpt\.com/c/[A-Za-z0-9_-]{8,}", reviewed_conversation_url):
+        raise RuntimeError("Reviewed recovery URL must identify a ChatGPT conversation")
     root = Path(os.environ.get("OPENJARVIS_HOME", Path.home() / ".openjarvis")) / "lao_recovery"
     root.mkdir(parents=True, exist_ok=True)
     key = hashlib.sha256(external.encode()).hexdigest()
@@ -121,7 +124,16 @@ def resume_failed(connect, previous):
             os.close(fd)
         except FileExistsError:
             raise RuntimeError("Earlier LAO retry outcome needs reconciliation; no duplicate POST")
-        successor = api.post(f"/jobs/{external}/retry", {})
+        if reviewed_conversation_url:
+            # Legacy checkpoints predate browser provenance. A human-reviewed
+            # exact conversation may enrich it, never change saved vars/step.
+            enriched = {**checkpoint, "browser_context": {
+                **(checkpoint.get("browser_context") or {}),
+                "conversation_url": reviewed_conversation_url}}
+            inputs = {**(parent.get("input_args") or {}), "__resume_checkpoint__": enriched}
+            successor = api.post("/jobs", {"process_id": parent["process_id"], "input_args": inputs})
+        else:
+            successor = api.post(f"/jobs/{external}/retry", {})
         successor_id = successor.get("id")
         if not successor_id or successor_id == external:
             raise RuntimeError("LAO retry returned no distinct successor; reconciliation required")

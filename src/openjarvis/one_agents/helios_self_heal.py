@@ -869,7 +869,8 @@ def heal_failure(connect: Connect, finding: Any) -> str:
         try:
             from openjarvis.one_agents.lao_checkpoint_recovery import activate_engine, resume_failed
             activate_engine()
-            action = resume_failed(connect, _row(connect, finding.job_id))
+            action = resume_failed(connect, _row(connect, finding.job_id),
+                                   reviewed_conversation_url=repair.get("reviewed_conversation_url", ""))
         except Exception as exc:
             return f"{PENDING_PREFIX}verified engine repair; deployment/resume pending: {exc}"
     else:
