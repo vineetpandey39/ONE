@@ -432,7 +432,13 @@ def scan(
                 job_id=job_id,
                 summary=f"{agent_id}'s most recent job failed: {error[:160]}",
                 auto_fix="",
-                evidence={"error": error[:1200], "task": str(row["task"] or "")[:400]},
+                # The root cause is normally at the *end* of a Python
+                # traceback. Keeping only the first 1,200 characters made
+                # HELIOS repair a caller frame while the real PLANEXIUM JSON
+                # parser failure was silently omitted. Preserve a bounded but
+                # useful traceback and enough commission context for a model
+                # to reproduce the correct gate.
+                evidence={"error": error[-12000:], "task": str(row["task"] or "")[:4000]},
             ))
 
     # D3 -- a stage bubble with no live job behind it. This is the "HERMES is

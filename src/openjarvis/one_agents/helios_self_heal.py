@@ -35,7 +35,10 @@ from typing import Any, Callable
 
 
 Connect = Callable[[], sqlite3.Connection]
-SAFE_RETRY_AGENTS = {"lyra", "vista", "echo"}
+# These workers own durable checkpoints and can safely receive a new queue row
+# after a verified repair. PLANEXIUM's ProductionContext resumes the unfinished
+# mission and verifies each accepted artifact instead of starting a second film.
+SAFE_RETRY_AGENTS = {"lyra", "vista", "echo", "planexium"}
 FLOOR12_AGENTS = {"helios", "fabula", "yatra", "lyra", "vista", "echo", "planexium", "chandan"}
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ALLOWED_REPOS = (REPO_ROOT, Path(r"C:\Users\pc\Documents\LAO\vista"))
@@ -628,7 +631,7 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
         "Do not run production, browsers, uploads, downloads, voice generation, credential commands, "
         "network publishing, git commit, git push, reset, checkout, clean, or delete. Preserve API and "
         "checkpoint compatibility. If evidence is insufficient, make no changes and say so.\n\n"
-        f"Failure evidence:\n{json.dumps(evidence, ensure_ascii=True)[:7000]}"
+        f"Failure evidence:\n{json.dumps(evidence, ensure_ascii=True)[:16000]}"
     )
     attempts: list[dict[str, Any]] = []
     for name, command in _cli_commands(prompt, repo):
