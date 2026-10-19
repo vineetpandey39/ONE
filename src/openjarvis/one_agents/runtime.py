@@ -208,6 +208,18 @@ def _enqueue_floor_watches() -> None:
             )
             if not recent:
                 continue
+            # A long diagnosis/repair can legitimately outlast one interval.
+            # Do not launch a second copy of the same floor head's checker:
+            # concurrent HELIOS runs can race on the same clean working tree,
+            # commit gate, and failed-job checkpoint. The schedule has already
+            # advanced above, so the next normal interval will check again.
+            active_watch = db.execute(
+                "SELECT 1 FROM jobs WHERE agent_id = ? AND mode = 'watch' "
+                "AND status IN ('queued', 'running') LIMIT 1",
+                (head_id,),
+            ).fetchone()
+            if active_watch:
+                continue
             db.execute(
                 "INSERT INTO jobs (id, agent_id, task, mode, status, created_at, updated_at) "
                 "VALUES (?, ?, ?, 'watch', 'queued', ?, ?)",
