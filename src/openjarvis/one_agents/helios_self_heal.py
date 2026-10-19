@@ -216,13 +216,17 @@ def _cli_commands(prompt: str, repo: Path) -> list[tuple[str, list[str]]]:
     commands: list[tuple[str, list[str]]] = []
     claude = shutil.which("claude")
     if claude:
-        commands.append(("claude", [claude, "-p", "--permission-mode", "acceptEdits",
-                                     "--allowedTools", "Read,Glob,Grep,Edit,Write,Bash",
-                                     prompt]))
+        # allowedTools is variadic in current Claude Code. When the prompt sat
+        # after it, Claude parsed the traceback as another tool rule and then
+        # reported that --print had no prompt. Put the positional prompt first.
+        commands.append(("claude", [claude, prompt, "--print", "--permission-mode", "acceptEdits",
+                                     "--allowedTools", "Read,Glob,Grep,Edit,Write,Bash"]))
     codex = shutil.which("codex")
     if codex:
+        # Current Codex makes --approve-for-me and an explicit --sandbox
+        # mutually exclusive; approve-for-me already selects workspace-write.
         commands.append(("codex", [codex, "exec", "--ephemeral", "--approve-for-me",
-                                    "--sandbox", "workspace-write", "--cd", str(repo), prompt]))
+                                    "--cd", str(repo), prompt]))
     qwen = shutil.which("qwen")
     if qwen:
         commands.append(("qwen", [qwen, "--sandbox", "-p", prompt]))
