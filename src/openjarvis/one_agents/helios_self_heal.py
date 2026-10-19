@@ -279,12 +279,12 @@ def _cli_commands(prompt: str, repo: Path) -> list[tuple[str, list[str]]]:
         # This path needs no Qwen Code executable. Keep it present even when
         # the scheduled worker has a short PATH and cannot resolve qwen.cmd.
         commands.append(("qwen-local-tools", ["ollama-native", "-m", local_model, "-p", prompt]))
-    if qwen:
-        # Resolve credentials lazily from LAO only when this final fallback runs.
-        nemotron_model = os.environ.get("NEMOTRON_MODEL", "").strip()
-        if nemotron_model:
-            commands.append(("nemotron", [qwen, "--sandbox", "--approval-mode", "yolo",
-                                           "-m", nemotron_model, "-p", prompt]))
+    # Direct OpenAI-compatible tool calling avoids depending on Qwen Code's
+    # executable/profile for the final paid fallback. Credentials are resolved
+    # only when this last-resort command actually runs.
+    nemotron_model = os.environ.get("NEMOTRON_MODEL", "").strip()
+    if nemotron_model:
+        commands.append(("nemotron-native-tools", ["nvidia-native", "-m", nemotron_model, "-p", prompt]))
     return commands
 
 
@@ -462,10 +462,100 @@ def _run_qwen_native_tools(command: list[str], *, repo: Path, timeout: int) -> s
                                        "\n".join(output), "Qwen exceeded native tool-call limit")
 
 
+def _run_nemotron_native_tools(command: list[str], *, repo: Path, timeout: int) -> subprocess.CompletedProcess[str]:
+    """Last-resort NVIDIA chat-completions tool runner; key stays in memory."""
+    model = command[command.index("-m") + 1]
+    prompt = command[command.index("-p") + 1]
+    host = os.environ.get("NVIDIA_HOST", "https://integrate.api.nvidia.com").rstrip("/")
+    url = (host if host.endswith("/v1") else host + "/v1") + "/chat/completions"
+    key = _resolve_nemotron_key()
+    tools = [
+        {"type": "function", "function": {"name": "list_files", "description": "List Python source/test files in an allow-listed folder.",
+         "parameters": {"type": "object", "properties": {"relative_dir": {"type": "string"}}, "required": ["relative_dir"]}}},
+        {"type": "function", "function": {"name": "read_file", "description": "Read one allow-listed Python source/test file.",
+         "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}},
+        {"type": "function", "function": {"name": "write_file", "description": "Replace the contents of one existing allow-listed Python file.",
+         "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+                        "required": ["path", "content"]}}},
+    ]
+    system = (
+        "You are HELIOS's bounded code-repair model. Diagnose the supplied failure and use only "
+        "list_files/read_file/write_file tools for the smallest fix. Never run commands, access "
+        "credentials, or edit files outside the host-enforced allowlist. Never claim an edit unless "
+        "write_file was called; the host will run tests and decide whether to commit."
+    )
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": prompt},
+    ]
+    output: list[str] = []
+    write_count = 0
+    deadline = time.monotonic() + timeout
+    for _ in range(16):
+        remaining = max(1, int(deadline - time.monotonic()))
+        body = json.dumps({"model": model, "messages": messages, "tools": tools,
+                           "stream": False, "temperature": 0.1, "max_tokens": 2048}).encode()
+        request = urllib.request.Request(url, data=body, headers={
+            "Authorization": f"Bearer {key}", "Content-Type": "application/json",
+        })
+        try:
+            with urllib.request.urlopen(request, timeout=remaining) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+            return subprocess.CompletedProcess(command, 1, "", f"Nemotron request failed: {type(exc).__name__}")
+        choices = result.get("choices") or []
+        message = (choices[0].get("message") or {}) if choices else {}
+        messages.append(message)
+        content = str(message.get("content") or "")
+        if content:
+            output.append(content)
+        calls = message.get("tool_calls") or []
+        if not calls:
+            return subprocess.CompletedProcess(command, 0 if write_count else 1,
+                                               "\n".join(output),
+                                               "" if write_count else "Nemotron returned no native tool calls or edits")
+        for call in calls:
+            function = call.get("function") or {}
+            name = str(function.get("name") or "")
+            args = function.get("arguments") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {}
+            try:
+                if name == "list_files":
+                    folder = _qwen_tool_directory(repo, args.get("relative_dir"))
+                    listed = sorted(item.relative_to(repo).as_posix() for item in folder.rglob("*.py")
+                                    if item.is_file() and _allowed_patch_path(repo, item.relative_to(repo).as_posix()))[:100]
+                    tool_result = "\n".join(listed)
+                elif name in {"read_file", "write_file"}:
+                    path = _qwen_tool_path(repo, args.get("path"))
+                    if name == "read_file":
+                        tool_result = path.read_text(encoding="utf-8")[:120000]
+                    else:
+                        new_content = str(args.get("content") or "")
+                        if len(new_content) > 500000:
+                            raise ValueError("file content exceeds repair limit")
+                        path.write_text(new_content, encoding="utf-8")
+                        write_count += 1
+                        tool_result = f"Wrote {path.relative_to(repo).as_posix()}"
+                else:
+                    raise ValueError("tool not allow-listed")
+            except (OSError, ValueError) as exc:
+                tool_result = f"Tool rejected: {exc}"
+            messages.append({"role": "tool", "tool_call_id": str(call.get("id") or uuid.uuid4().hex),
+                             "content": tool_result})
+    return subprocess.CompletedProcess(command, 1 if not write_count else 0,
+                                       "\n".join(output), "Nemotron exceeded native tool-call limit")
+
+
 def _run_cli(name: str, command: list[str], *, repo: Path, timeout: int) -> subprocess.CompletedProcess[str]:
     """Run Qwen Code with a disposable isolated profile; other CLIs inherit env."""
     if name == "qwen-local-tools":
         return _run_qwen_native_tools(command, repo=repo, timeout=timeout)
+    if name == "nemotron-native-tools":
+        return _run_nemotron_native_tools(command, repo=repo, timeout=timeout)
     if name not in {"qwen-local", "nemotron"}:
         return subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=timeout)
     model = command[command.index("-m") + 1]
@@ -546,7 +636,10 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
         stages.set_stage("helios", stages.EXECUTING,
                          f"Diagnosing {str(evidence.get('agent') or 'Floor 12').upper()} failure with {name} CLI")
         try:
-            done = _run_cli(name, command, repo=repo, timeout=timeout)
+            cli_timeout = timeout
+            if name == "qwen-local-tools":
+                cli_timeout = min(timeout, max(60, int(os.environ.get("ONE_HELIOS_LOCAL_TIMEOUT_SECONDS", "300"))))
+            done = _run_cli(name, command, repo=repo, timeout=cli_timeout)
             attempts.append({"cli": name, "returncode": done.returncode,
                              "output": (done.stdout or done.stderr or "")[-1200:]})
         except Exception as exc:  # noqa: BLE001 - fallback is the point
