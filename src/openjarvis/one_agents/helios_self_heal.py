@@ -219,7 +219,8 @@ def resume_checkpoint(connect: Connect, job_id: str) -> str:
 
 
 def _git(repo: Path, *args: str, timeout: int = 120) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=timeout)
 
 
 def _repo_for(evidence: dict[str, Any]) -> Path | None:
@@ -560,7 +561,8 @@ def _run_cli(name: str, command: list[str], *, repo: Path, timeout: int) -> subp
     if name == "nemotron-native-tools":
         return _run_nemotron_native_tools(command, repo=repo, timeout=timeout)
     if name not in {"qwen-local", "nemotron"}:
-        return subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(command, cwd=repo, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=timeout)
     model = command[command.index("-m") + 1]
     with tempfile.TemporaryDirectory(prefix="helios-qwen-") as profile:
         profile_path = Path(profile)
@@ -580,7 +582,7 @@ def _run_cli(name: str, command: list[str], *, repo: Path, timeout: int) -> subp
         env["USERPROFILE"] = str(profile_path)
         env["HOME"] = str(profile_path)
         return subprocess.run(command, cwd=repo, env=env, capture_output=True,
-                              text=True, timeout=timeout)
+                              text=True, encoding="utf-8", errors="replace", timeout=timeout)
 
 
 def _allowed_patch_path(repo: Path, path: str) -> bool:
@@ -668,7 +670,8 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
         stages.set_stage("helios", stages.EXECUTING, f"Testing {name} repair before retry")
         check = subprocess.run(
             _repair_test_command(repo),
-            cwd=repo, capture_output=True, text=True, timeout=1200,
+            cwd=repo, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=1200,
         )
         if check.returncode:
             _git(repo, "restore", "--worktree", "--", *names)
