@@ -92,7 +92,7 @@ def activate_engine():
     return hashlib.sha256(target.read_bytes()).hexdigest()
 
 
-def resume_failed(connect, previous, *, reviewed_conversation_url=""):
+def resume_failed(connect, previous, *, reviewed_conversation_url="", resume_user_stopped=False):
     """Retry the existing LAO checkpoint once and attach ONE to its successor."""
     from openjarvis.one_agents.floor_watch import _enqueue_collection
     payload = json.loads(previous.get("task") or "{}")
@@ -112,7 +112,8 @@ def resume_failed(connect, previous, *, reviewed_conversation_url=""):
     receipt = root / (key + ".json")
     lock = root / (key + ".lock")
     if not receipt.exists():
-        if parent.get("status") != "Failed":
+        allowed_terminal = {"Failed", "Stopped"} if resume_user_stopped else {"Failed"}
+        if parent.get("status") not in allowed_terminal:
             raise RuntimeError("External job is not failed; refuse duplicate retry")
         active = [j for j in api.list_jobs("production")
                   if j.get("process_id") == parent.get("process_id")
