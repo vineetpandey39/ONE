@@ -246,6 +246,9 @@ def _cli_commands(prompt: str, repo: Path) -> list[tuple[str, list[str]]]:
 def _qwen_settings(model: str) -> dict[str, Any]:
     """Build a disposable Qwen Code provider config; never persist credentials."""
     ollama = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+    # Qwen's --sandbox runs inside Docker, where loopback points at the
+    # container rather than the Windows host's Ollama service.
+    ollama = ollama.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal")
     ollama_base = ollama if ollama.endswith("/v1") else ollama + "/v1"
     providers: list[dict[str, Any]] = [{
         "id": os.environ.get("ONE_HELIOS_LOCAL_MODEL", "qwen3.5:9b").strip() or "qwen3.5:9b",
