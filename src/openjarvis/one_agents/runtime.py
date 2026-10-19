@@ -529,7 +529,29 @@ def resume_yatra_visual_job(job_id: str) -> dict[str, Any]:
             raise ValueError("FABULA receipt does not match this successful production checkpoint")
         plan = receipt_path.parent.parent / "production-plan.json"
         if not plan.is_file():
-            raise ValueError("Saved YATRA production plan is missing; cannot safely resume")
+            # The visual worker renders the opening map before it copies the
+            # immutable LAO plan into the asset folder.  A map failure could
+            # therefore leave a complete paid narration receipt but no local
+            # plan, and the resume gate introduced on 2026-10-18 refused the
+            # otherwise safe checkpoint. Recover only from the exact attached
+            # LAO checkpoint and prove that its script is the one that was
+            # narrated before creating the missing local copy.
+            source = _yatra_preproduction_file(checkpoint)
+            records = json.loads(source.read_text(encoding="utf-8"))
+            record = records[0] if records else {}
+            script_value = str(narration.get("script_file") or "").strip()
+            script_path = Path(script_value).resolve() if script_value else None
+            if (not script_path or not script_path.is_file()
+                    or script_path.parent != receipt_path.parent
+                    or script_path.read_text(encoding="utf-8").strip()
+                    != str(record.get("full_script") or "").strip()):
+                raise ValueError(
+                    "Local production plan is missing and the immutable LAO script cannot be "
+                    "matched to this narration receipt"
+                )
+            _validate_yatra_contract(record, _YATRA_EXPECTED_SCENES)
+            plan.parent.mkdir(parents=True, exist_ok=True)
+            plan.write_bytes(source.read_bytes())
     except (OSError, TypeError, json.JSONDecodeError) as exc:
         raise ValueError(f"Saved narration checkpoint is unreadable: {exc}") from exc
 
