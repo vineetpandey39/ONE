@@ -21,6 +21,29 @@ def fingerprint(value) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def _marked_json(text: str, begin: str, end: str):
+    """Decode a marked JSON response, tolerating prose and markdown fences."""
+    text = str(text or "")
+    if begin in text:
+        text = text.split(begin, 1)[1]
+    if end in text:
+        text = text.split(end, 1)[0]
+    text = text.strip().strip("`").strip()
+    fence = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text, re.I)
+    if fence:
+        text = fence.group(1).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # Some providers add a short sentence inside the markers. Restrict
+        # recovery to one complete object and let schema validation reject it.
+        start = text.find("{")
+        finish = text.rfind("}")
+        if start < 0 or finish < start:
+            raise
+        return json.loads(text[start:finish + 1])
+
+
 def stock_search(description: str) -> tuple[str, str, list[str]]:
     """Translate an authored visual brief into literal catalog search terms."""
     positive = re.split(r",|\bno\b", description, maxsplit=1, flags=re.I)[0]
@@ -154,10 +177,7 @@ class ChatGPTAdapter:
             "timeout_ms": 240000, "as": "science_script"}}]
         with self.lease():
             out, _ = self.draft.run("planexium-science-script", steps, {}, self.context.artifact("receipts/writer.json"))
-        text = str(out.get("science_script") or "")
-        if "BEGIN_PLANEXIUM_JSON" in text:
-            text = text.split("BEGIN_PLANEXIUM_JSON", 1)[1].split("END_PLANEXIUM_JSON", 1)[0]
-        return json.loads(text.strip().strip("`"))
+        return _marked_json(out.get("science_script"), "BEGIN_PLANEXIUM_JSON", "END_PLANEXIUM_JSON")
 
     def direct(self, science, voice):
         from openjarvis.one_agents.planexium_direction import motion_prompt
@@ -166,10 +186,7 @@ class ChatGPTAdapter:
             "timeout_ms": 360000, "as": "motion_copy"}}]
         out, _ = self.draft.run("planexium-science-script-motion", steps, {},
                                self.context.artifact("receipts/motion-director.json"))
-        text = str(out.get("motion_copy") or "")
-        if "BEGIN_PLANEXIUM_MOTION_JSON" in text:
-            text = text.split("BEGIN_PLANEXIUM_MOTION_JSON", 1)[1].split("END_PLANEXIUM_MOTION_JSON", 1)[0]
-        return json.loads(text.strip().strip("`"))
+        return _marked_json(out.get("motion_copy"), "BEGIN_PLANEXIUM_MOTION_JSON", "END_PLANEXIUM_MOTION_JSON")
 
     def editorial(self, science):
         prompt=('Act as a factual space documentary editor. Return JSON between BEGIN_PLANEXIUM_EDIT and END_PLANEXIUM_EDIT. '
@@ -196,9 +213,7 @@ class ChatGPTAdapter:
             'prompt':prompt,'expected_markers':['BEGIN_PLANEXIUM_EDIT','END_PLANEXIUM_EDIT'],
             'timeout_ms':360000,'as':'editorial_plan'}}]
         out,_=self.draft.run('planexium-science-script-editorial',steps,{},self.context.artifact('receipts/editorial.json'))
-        text=str(out.get('editorial_plan') or '')
-        text=text.split('BEGIN_PLANEXIUM_EDIT',1)[-1].split('END_PLANEXIUM_EDIT',1)[0]
-        result=json.loads(text.strip().strip('`'))
+        result=_marked_json(out.get('editorial_plan'), 'BEGIN_PLANEXIUM_EDIT', 'END_PLANEXIUM_EDIT')
         if not isinstance(result.get('music_query'),str) or not 6<=len(result.get('stock_requests',[]))<=8:
             raise ValueError('Editorial plan needs music and 6-8 relevant footage briefs')
         for request in result['stock_requests']:
