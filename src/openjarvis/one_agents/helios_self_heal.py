@@ -188,13 +188,31 @@ def resume_checkpoint(connect: Connect, job_id: str) -> str:
         return f"queued HELIOS resume {new_id} before any duplicate worker handoff"
 
     if agent == "fabula":
+        # FABULA owns two materially different stages.  A preproduction
+        # contract failure happens before narration and can safely reattach to
+        # the same successful LAO checkpoint.  Treating that like a failed
+        # paid narration left complete ChatGPT drafts stranded even when the
+        # parser had just been repaired.
+        try:
+            payload = json.loads(str(previous.get("task") or "{}"))
+        except (TypeError, ValueError):
+            payload = {}
+        error = str(previous.get("error") or "").casefold()
+        before_voice = (
+            payload.get("stage") != "narration"
+            and bool(previous.get("external_job"))
+            and ("narration was not started" in error or "no voice credits were spent" in error)
+        )
+        if before_voice:
+            new_id = _queue_copy(connect, previous)
+            return f"queued FABULA preproduction checkpoint resume {new_id} (no voice was spent)"
+
         # A finished receipt means voice credits were already spent and the
         # only missing action is the YATRA handoff. Never call FABULA again.
         try:
             yatra_active = _active_for_agent(connect, "yatra", job_id)
             if yatra_active:
                 return f"FABULA receipt handoff deferred; YATRA already has active job {yatra_active}"
-            payload = json.loads(str(previous.get("task") or "{}"))
             from openjarvis.one_agents import runtime
             _, _, folder, checkpoint = runtime._travel_checkpoint(payload)
             receipt = runtime._YATRA_ASSET_ROOT / folder / "narration" / "fabula-receipt.json"
