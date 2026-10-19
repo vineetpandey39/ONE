@@ -266,7 +266,7 @@ def _cli_commands(prompt: str, repo: Path) -> list[tuple[str, list[str]]]:
     return commands
 
 
-def _qwen_settings(model: str) -> dict[str, Any]:
+def _qwen_settings(model: str, *, include_nemotron: bool = False) -> dict[str, Any]:
     """Build a disposable Qwen Code provider config; never persist credentials."""
     ollama = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
     # Qwen's --sandbox runs inside Docker, where loopback points at the
@@ -294,7 +294,7 @@ def _qwen_settings(model: str) -> dict[str, Any]:
     # The key is inherited only for the paid fallback attempt; it is never
     # written to the disposable Qwen configuration or logged.
     nemotron = os.environ.get("NEMOTRON_MODEL", "").strip()
-    if nemotron and os.environ.get("NVIDIA_API_KEY", "").strip():
+    if include_nemotron and nemotron:
         providers.append({
             "id": nemotron,
             "name": "NVIDIA Nemotron fallback",
@@ -318,6 +318,13 @@ def _qwen_settings(model: str) -> dict[str, Any]:
     }
 
 
+def _resolve_nemotron_key() -> str:
+    """Fetch NVIDIA credentials from LAO's production vault, in memory only."""
+    from openjarvis.one_agents.runtime import _resolve_lao_secret
+
+    return _resolve_lao_secret("nvidiaApiKey").strip()
+
+
 def _run_cli(name: str, command: list[str], *, repo: Path, timeout: int) -> subprocess.CompletedProcess[str]:
     """Run Qwen Code with a disposable isolated profile; other CLIs inherit env."""
     if name not in {"qwen-local", "nemotron"}:
@@ -327,10 +334,15 @@ def _run_cli(name: str, command: list[str], *, repo: Path, timeout: int) -> subp
         profile_path = Path(profile)
         qwen_dir = profile_path / ".qwen"
         qwen_dir.mkdir()
-        (qwen_dir / "settings.json").write_text(
-            json.dumps(_qwen_settings(model), ensure_ascii=True), encoding="utf-8"
-        )
         env = os.environ.copy()
+        if name == "nemotron":
+            # The secret enters only this child process, never settings.json,
+            # audit events, or the long-lived worker environment.
+            env["NVIDIA_API_KEY"] = _resolve_nemotron_key()
+        (qwen_dir / "settings.json").write_text(
+            json.dumps(_qwen_settings(model, include_nemotron=name == "nemotron"),
+                       ensure_ascii=True), encoding="utf-8"
+        )
         # Node's os.homedir() on Windows uses USERPROFILE. Redirect Qwen
         # config/session writes to the disposable profile, not the user's.
         env["USERPROFILE"] = str(profile_path)
@@ -403,41 +415,47 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
             _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
             continue
         _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
+        if done.returncode != 0:
+            continue
         changed = _git(repo, "status", "--porcelain")
-        if done.returncode == 0 and changed.stdout.strip():
-            break
-    else:
-        return {"ok": False, "reason": "no model CLI produced a patch: " + _attempt_reason(attempts),
-                "attempts": attempts}
+        if not changed.stdout.strip():
+            continue
 
-    # Block changes outside Floor 12 runtime/tests. This also prevents a model
-    # from changing credentials, floor governance, or another business line.
-    names = _git(repo, "diff", "--name-only").stdout.splitlines()
-    allowed = all(_allowed_patch_path(repo, path) for path in names)
-    if not names or not allowed:
-        _git(repo, "restore", "--worktree", "--", *names)
-        return {"ok": False, "reason": "CLI patch escaped HELIOS's file boundary", "attempts": attempts}
+        # Block changes outside Floor 12 runtime/tests. This also prevents a
+        # model from changing credentials, floor governance, or another line.
+        names = _git(repo, "diff", "--name-only").stdout.splitlines()
+        if not names or not all(_allowed_patch_path(repo, path) for path in names):
+            _git(repo, "restore", "--worktree", "--", *names)
+            attempts[-1]["repair_check"] = "patch escaped HELIOS's file boundary"
+            _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
+            continue
 
-    stages.set_stage("helios", stages.EXECUTING,
-                     f"Testing {attempts[-1].get('cli', 'CLI')} repair before retry")
-    check = subprocess.run(
-        _repair_test_command(repo),
-        cwd=repo, capture_output=True, text=True, timeout=1200,
-    )
-    if check.returncode:
-        _git(repo, "restore", "--worktree", "--", *names)
-        return {"ok": False, "reason": "Floor 12 regression tests failed",
-                "tests": (check.stdout + check.stderr)[-2000:], "attempts": attempts}
+        stages.set_stage("helios", stages.EXECUTING, f"Testing {name} repair before retry")
+        check = subprocess.run(
+            _repair_test_command(repo),
+            cwd=repo, capture_output=True, text=True, timeout=1200,
+        )
+        if check.returncode:
+            _git(repo, "restore", "--worktree", "--", *names)
+            attempts[-1]["repair_check"] = "Floor 12 regression tests failed"
+            attempts[-1]["test_output"] = (check.stdout + check.stderr)[-1200:]
+            _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
+            # An unverified patch did not repair the failure; continue with a
+            # clean tree so the next configured model gets its own attempt.
+            continue
 
-    _git(repo, "add", "--", *names)
-    stages.set_stage("helios", stages.EXECUTING, "Committing the verified Floor 12 repair")
-    commit = _git(repo, "commit", "-m", "HELIOS self-heal Floor 12 failure")
-    if commit.returncode:
-        return {"ok": False, "reason": "verified patch could not be committed",
-                "commit_error": commit.stderr[-1200:], "attempts": attempts}
-    sha = _git(repo, "rev-parse", "--short", "HEAD").stdout.strip()
-    return {"ok": True, "cli": attempts[-1].get("cli"), "commit": sha,
-            "files": names, "attempts": attempts}
+        _git(repo, "add", "--", *names)
+        stages.set_stage("helios", stages.EXECUTING, "Committing the verified Floor 12 repair")
+        commit = _git(repo, "commit", "-m", "HELIOS self-heal Floor 12 failure")
+        if commit.returncode:
+            return {"ok": False, "reason": "verified patch could not be committed",
+                    "commit_error": commit.stderr[-1200:], "attempts": attempts}
+        sha = _git(repo, "rev-parse", "--short", "HEAD").stdout.strip()
+        return {"ok": True, "cli": name, "commit": sha,
+                "files": names, "attempts": attempts}
+
+    return {"ok": False, "reason": "no model CLI produced a verified patch: " + _attempt_reason(attempts),
+            "attempts": attempts}
 
 
 def heal_failure(connect: Connect, finding: Any) -> str:
