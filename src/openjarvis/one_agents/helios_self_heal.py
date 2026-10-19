@@ -512,11 +512,18 @@ def _run_nemotron_native_tools(command: list[str], *, repo: Path, timeout: int) 
             return subprocess.CompletedProcess(command, 1, "", f"Nemotron request failed: {type(exc).__name__}")
         choices = result.get("choices") or []
         message = (choices[0].get("message") or {}) if choices else {}
+        raw_content = message.get("content")
+        calls = message.get("tool_calls") or _nemotron_content_tool_calls(raw_content)
+        if calls and not message.get("tool_calls"):
+            # Some Nemotron turns serialize a tool request into content even
+            # though the same endpoint normally returns OpenAI tool_calls.
+            # Normalize it before adding the assistant turn so the following
+            # role=tool message has a valid matching call id.
+            message = {**message, "content": None, "tool_calls": calls}
         messages.append(message)
-        content = str(message.get("content") or "")
+        content = str(raw_content or "")
         if content:
             output.append(content)
-        calls = message.get("tool_calls") or []
         if not calls:
             return subprocess.CompletedProcess(command, 0 if write_count else 1,
                                                "\n".join(output),
@@ -555,6 +562,49 @@ def _run_nemotron_native_tools(command: list[str], *, repo: Path, timeout: int) 
                              "content": tool_result})
     return subprocess.CompletedProcess(command, 1 if not write_count else 0,
                                        "\n".join(output), "Nemotron exceeded native tool-call limit")
+
+
+def _nemotron_content_tool_calls(content: Any) -> list[dict[str, Any]]:
+    """Normalize Nemotron's occasional content-encoded function requests."""
+    found: list[dict[str, Any]] = []
+
+    def collect(value: Any) -> None:
+        if isinstance(value, list):
+            for item in value:
+                collect(item)
+            return
+        if not isinstance(value, dict):
+            return
+        if isinstance(value.get("function"), dict):
+            function = value["function"]
+            name = str(function.get("name") or "")
+            args = function.get("arguments") or function.get("parameters") or {}
+        else:
+            name = str(value.get("name") or "")
+            args = value.get("arguments") or value.get("parameters") or {}
+        if name:
+            found.append({
+                "id": str(value.get("id") or f"call-{uuid.uuid4().hex}"),
+                "type": "function",
+                "function": {"name": name, "arguments": args},
+            })
+
+    if isinstance(content, (dict, list)):
+        collect(content)
+        return found
+    text = str(content or "")
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        collect(value)
+        if found:
+            break
+    return found
 
 
 def _run_cli(name: str, command: list[str], *, repo: Path, timeout: int) -> subprocess.CompletedProcess[str]:
