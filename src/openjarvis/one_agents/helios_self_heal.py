@@ -8,8 +8,10 @@ the two decisions separate:
 * edit code only in a clean, allow-listed Git repository, run the repository's
   Floor 12 tests, then create a local commit (never push).
 
-Claude Code is preferred. Codex and Qwen are fallbacks.  A model failure is a
-diagnostic failure, not permission to bypass the gates below.
+Claude Code and Codex are tried first. Qwen Code is then run against the
+installed local Ollama Qwen model (not the unauthenticated Qwen cloud CLI
+default); NVIDIA Nemotron is the final, explicitly configured remote fallback.
+A model failure is a diagnostic failure, not permission to bypass the gates.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import uuid
 from contextlib import closing
 from datetime import datetime, timezone
@@ -229,8 +232,79 @@ def _cli_commands(prompt: str, repo: Path) -> list[tuple[str, list[str]]]:
                                     "--cd", str(repo), prompt]))
     qwen = shutil.which("qwen")
     if qwen:
-        commands.append(("qwen", [qwen, "--sandbox", "-p", prompt]))
+        # Qwen Code has no implicit local backend. _run_cli supplies an
+        # isolated profile pinned to Ollama, avoiding cloud-auth prompts.
+        local_model = os.environ.get("ONE_HELIOS_LOCAL_MODEL", "qwen3.5:9b").strip()
+        if local_model:
+            commands.append(("qwen-local", [qwen, "--sandbox", "-m", local_model, "-p", prompt]))
+        nemotron_model = os.environ.get("NEMOTRON_MODEL", "").strip()
+        if nemotron_model and os.environ.get("NVIDIA_API_KEY", "").strip():
+            commands.append(("nemotron", [qwen, "--sandbox", "-m", nemotron_model, "-p", prompt]))
     return commands
+
+
+def _qwen_settings(model: str) -> dict[str, Any]:
+    """Build a disposable Qwen Code provider config; never persist credentials."""
+    ollama = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+    ollama_base = ollama if ollama.endswith("/v1") else ollama + "/v1"
+    providers: list[dict[str, Any]] = [{
+        "id": os.environ.get("ONE_HELIOS_LOCAL_MODEL", "qwen3.5:9b").strip() or "qwen3.5:9b",
+        "name": "Local Ollama Qwen",
+        "baseUrl": ollama_base,
+        "envKey": "OLLAMA_API_KEY",
+        "generationConfig": {
+            "timeout": 900000,
+            "streamIdleTimeoutMs": 900000,
+            "maxRetries": 0,
+            "contextWindowSize": 32768,
+            "samplingParams": {"temperature": 0.1, "max_tokens": 8192},
+        },
+    }]
+    # The key is inherited only for the paid fallback attempt; it is never
+    # written to the disposable Qwen configuration or logged.
+    nemotron = os.environ.get("NEMOTRON_MODEL", "").strip()
+    if nemotron and os.environ.get("NVIDIA_API_KEY", "").strip():
+        providers.append({
+            "id": nemotron,
+            "name": "NVIDIA Nemotron fallback",
+            "baseUrl": os.environ.get("NVIDIA_HOST", "https://integrate.api.nvidia.com").rstrip("/") + "/v1",
+            "envKey": "NVIDIA_API_KEY",
+            "generationConfig": {
+                "timeout": 900000,
+                "streamIdleTimeoutMs": 900000,
+                "maxRetries": 0,
+                "contextWindowSize": 32768,
+                "samplingParams": {"temperature": 0.1, "max_tokens": 8192},
+            },
+        })
+    return {
+        "security": {"auth": {"selectedType": "openai"}},
+        "model": {"name": model},
+        "modelProviders": {"openai": providers},
+        # Ollama accepts a non-empty key on its local OpenAI-compatible route.
+        "env": {"OLLAMA_API_KEY": "ollama"},
+    }
+
+
+def _run_cli(name: str, command: list[str], *, repo: Path, timeout: int) -> subprocess.CompletedProcess[str]:
+    """Run Qwen Code with a disposable isolated profile; other CLIs inherit env."""
+    if name not in {"qwen-local", "nemotron"}:
+        return subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=timeout)
+    model = command[command.index("-m") + 1]
+    with tempfile.TemporaryDirectory(prefix="helios-qwen-") as profile:
+        profile_path = Path(profile)
+        qwen_dir = profile_path / ".qwen"
+        qwen_dir.mkdir()
+        (qwen_dir / "settings.json").write_text(
+            json.dumps(_qwen_settings(model), ensure_ascii=True), encoding="utf-8"
+        )
+        env = os.environ.copy()
+        # Node's os.homedir() on Windows uses USERPROFILE. Redirect Qwen
+        # config/session writes to the disposable profile, not the user's.
+        env["USERPROFILE"] = str(profile_path)
+        env["HOME"] = str(profile_path)
+        return subprocess.run(command, cwd=repo, env=env, capture_output=True,
+                              text=True, timeout=timeout)
 
 
 def _allowed_patch_path(repo: Path, path: str) -> bool:
@@ -289,7 +363,7 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
         stages.set_stage("helios", stages.EXECUTING,
                          f"Diagnosing {str(evidence.get('agent') or 'Floor 12').upper()} failure with {name} CLI")
         try:
-            done = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=timeout)
+            done = _run_cli(name, command, repo=repo, timeout=timeout)
             attempts.append({"cli": name, "returncode": done.returncode,
                              "output": (done.stdout or done.stderr or "")[-1200:]})
         except Exception as exc:  # noqa: BLE001 - fallback is the point
