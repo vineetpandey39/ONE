@@ -497,8 +497,18 @@ def _run_nemotron_native_tools(command: list[str], *, repo: Path, timeout: int) 
     deadline = time.monotonic() + timeout
     for _ in range(16):
         remaining = max(1, int(deadline - time.monotonic()))
-        body = json.dumps({"model": model, "messages": messages, "tools": tools,
-                           "stream": False, "temperature": 0.1, "max_tokens": 2048}).encode()
+        body = json.dumps({
+            "model": model,
+            "messages": messages,
+            "tools": tools,
+            # Nemotron can otherwise return a prose diagnosis without touching
+            # the repository. Require a real host-enforced tool call until one
+            # allow-listed write has happened; only then may it summarize.
+            "tool_choice": "required" if write_count == 0 else "auto",
+            "stream": False,
+            "temperature": 0.1,
+            "max_tokens": 2048,
+        }).encode()
         request = urllib.request.Request(url, data=body, headers={
             "Authorization": f"Bearer {key}", "Content-Type": "application/json",
         })

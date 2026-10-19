@@ -10070,6 +10070,7 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
                 # fallback fix is not stranded in the long-lived worker's
                 # module cache until an unrelated process restart.
                 from openjarvis.one_agents import helios_self_heal
+                importlib.reload(floor_watch)
                 importlib.reload(helios_self_heal)
             return floor_watch.watch_floor(_connect, head_id)
         finally:
