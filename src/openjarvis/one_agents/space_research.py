@@ -159,36 +159,43 @@ def discover_topic(recent: set[str], *, read=read_public) -> dict:
 
 def nasa_image(query: str, directory: Path, *, read=read_public, exclude_sha256=()) -> dict:
     """Find and download a NASA catalog image with its original metadata/credit."""
-    catalog = json.loads(read("https://images-api.nasa.gov/search?" + urlencode({"q": query, "media_type": "image", "page_size": 10})))
     terms = set(re.findall(r"[a-z]{3,}", query.casefold()))
-    for item in catalog.get("collection", {}).get("items", []):
-        data = (item.get("data") or [{}])[0]
-        title = data.get("title", "")
-        keywords = " ".join(data.get("keywords") or [])
-        if terms and not terms.intersection(re.findall(r"[a-z]{3,}", (title + " " + keywords).casefold())):
-            continue
-        link = next((x.get("href") for x in item.get("links", []) if x.get("render") == "image"), None)
-        if not link:
-            continue
-        validate_url(link, MEDIA_HOSTS)
-        raw = read(link)
-        if hashlib.sha256(raw).hexdigest() in exclude_sha256:
-            continue
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / "source.jpg"
-        path.write_bytes(raw)
-        from PIL import Image
+    # Some NASA catalog entries are indexed under a broad subject (for example,
+    # "Jupiter") rather than a scene-specific phrase. Retry only with a
+    # progressively shorter prefix; every candidate still has to match the
+    # original query terms below, so broadening cannot admit unrelated imagery.
+    words = re.findall(r"[a-z]{3,}", query.casefold())
+    searches = list(dict.fromkeys([query] + [" ".join(words[:n]) for n in range(len(words) - 1, 0, -1)]))
+    for search in searches:
+        catalog = json.loads(read("https://images-api.nasa.gov/search?" + urlencode({"q": search, "media_type": "image", "page_size": 10})))
+        for item in catalog.get("collection", {}).get("items", []):
+            data = (item.get("data") or [{}])[0]
+            title = data.get("title", "")
+            keywords = " ".join(data.get("keywords") or [])
+            if terms and not terms.intersection(re.findall(r"[a-z]{3,}", (title + " " + keywords).casefold())):
+                continue
+            link = next((x.get("href") for x in item.get("links", []) if x.get("render") == "image"), None)
+            if not link:
+                continue
+            validate_url(link, MEDIA_HOSTS)
+            raw = read(link)
+            if hashlib.sha256(raw).hexdigest() in exclude_sha256:
+                continue
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / "source.jpg"
+            path.write_bytes(raw)
+            from PIL import Image
 
-        with Image.open(path) as image:
-            image.verify()
-        receipt = {"provider": "NASA", "path": str(path), "nasa_id": data.get("nasa_id"),
-                   "source_url": item.get("href"), "download_url": link, "title": title,
-                   "credit": data.get("photographer") or data.get("secondary_creator") or data.get("center") or "NASA",
-                   "rights_url": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
-                   "metadata": data, "sha256": hashlib.sha256(raw).hexdigest(),
-                   "rights_review_required": True, "subject_review_required": True}
-        (directory / "source-receipt.json").write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
-        return receipt
+            with Image.open(path) as image:
+                image.verify()
+            receipt = {"provider": "NASA", "path": str(path), "nasa_id": data.get("nasa_id"),
+                       "source_url": item.get("href"), "download_url": link, "title": title,
+                       "credit": data.get("photographer") or data.get("secondary_creator") or data.get("center") or "NASA",
+                       "rights_url": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+                       "metadata": data, "sha256": hashlib.sha256(raw).hexdigest(),
+                       "rights_review_required": True, "subject_review_required": True}
+            (directory / "source-receipt.json").write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
+            return receipt
     raise ValueError("No subject-matching NASA catalog image found; do not invent a substitute")
 
 
