@@ -236,10 +236,16 @@ def _cli_commands(prompt: str, repo: Path) -> list[tuple[str, list[str]]]:
         # isolated profile pinned to Ollama, avoiding cloud-auth prompts.
         local_model = os.environ.get("ONE_HELIOS_LOCAL_MODEL", "qwen3.5:9b").strip()
         if local_model:
-            commands.append(("qwen-local", [qwen, "--sandbox", "-m", local_model, "-p", prompt]))
+            # Headless Qwen Code otherwise emits a tool-call request and exits
+            # without applying it. Auto-approve only inside its disposable
+            # Docker sandbox; the host-side diff/path/test/commit gates below
+            # remain the authority for accepting any repair.
+            commands.append(("qwen-local", [qwen, "--sandbox", "--approval-mode", "yolo",
+                                            "-m", local_model, "-p", prompt]))
         nemotron_model = os.environ.get("NEMOTRON_MODEL", "").strip()
         if nemotron_model and os.environ.get("NVIDIA_API_KEY", "").strip():
-            commands.append(("nemotron", [qwen, "--sandbox", "-m", nemotron_model, "-p", prompt]))
+            commands.append(("nemotron", [qwen, "--sandbox", "--approval-mode", "yolo",
+                                           "-m", nemotron_model, "-p", prompt]))
     return commands
 
 
