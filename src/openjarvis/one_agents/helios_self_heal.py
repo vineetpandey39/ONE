@@ -8,7 +8,7 @@ the two decisions separate:
 * edit code only in a clean, allow-listed Git repository, run the repository's
   Floor 12 tests, then create a local commit (never push).
 
-Claude Code and Codex are tried first. Qwen Code is then run against the
+Codex is primary, followed by Claude Code. Qwen Code is then run against the
 installed local Ollama Qwen model (not the unauthenticated Qwen cloud CLI
 default), followed by native Ollama tool calls if Qwen Code emits pseudo-calls.
 NVIDIA Nemotron is the final remote fallback, with its key resolved from LAO.
@@ -293,8 +293,9 @@ def _cli_commands(prompt: str, repo: Path) -> list[tuple[str, list[str]]]:
         # CLI account does not expose. Pin HELIOS to a model in the installed
         # Codex CLI catalog so one stale desktop preference cannot disable
         # this fallback for every autonomous repair.
-        codex_model = os.environ.get("ONE_HELIOS_CODEX_MODEL", "gpt-6-luna").strip() or "gpt-6-luna"
-        commands.append(("codex", [codex, "exec", "--model", codex_model,
+        codex_model = os.environ.get("ONE_HELIOS_CODEX_MODEL", "gpt-5.6-sol").strip() or "gpt-5.6-sol"
+        commands.insert(0, ("codex", [codex, "exec", "--model", codex_model,
+                                    "-c", 'model_reasoning_effort="high"',
                                     "--ephemeral", "--approve-for-me",
                                     "--cd", str(repo), prompt]))
     # Use the same direct Ollama model as Sanjeevani. Qwen Code added a second
@@ -641,6 +642,17 @@ def _run_cli(name: str, command: list[str], *, repo: Path, timeout: int) -> subp
         return _run_qwen_native_tools(command, repo=repo, timeout=timeout)
     if name == "nemotron-native-tools":
         return _run_nemotron_native_tools(command, repo=repo, timeout=timeout)
+    if name == "codex":
+        env = os.environ.copy()
+        # ONE isolates HOME for caches; Codex subscription authentication
+        # belongs to the Windows owner, not that empty runtime profile.
+        owner = env.get("ONE_OWNER_PROFILE") or env.get("USERPROFILE", "")
+        if not env.get("CODEX_HOME") and owner:
+            env["CODEX_HOME"] = str(Path(owner) / ".codex")
+        # This route uses the owner's subscription, never an inherited API key.
+        env.pop("OPENAI_API_KEY", None)
+        return subprocess.run(command, cwd=repo, env=env, capture_output=True,
+                              text=True, encoding="utf-8", errors="replace", timeout=timeout)
     if name not in {"qwen-local", "nemotron"}:
         return subprocess.run(command, cwd=repo, capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=timeout)

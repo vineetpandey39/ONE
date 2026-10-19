@@ -9828,7 +9828,21 @@ def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, 
             break
     if status != "Successful":
         stages.clear_stage(owner); stages.clear_stage("helios")
-        raise RuntimeError(f"YATRA workflow ended as {status}")
+        # LAO carries the actionable failure detail in the terminal job and
+        # its logs. Preserve it in ONE's job error so a missing checkpoint is
+        # not the only clue left after a failed preproduction run.
+        job_detail = last.get("job") or {}
+        detail = " | ".join(
+            str(value).strip() for value in (
+                job_detail.get("error"), job_detail.get("message"),
+                last.get("error"),
+            ) if str(value or "").strip()
+        )
+        logs = last.get("logs")
+        if not detail and logs:
+            detail = str(logs).strip()
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"YATRA workflow ended as {status}{suffix}")
 
     # A script with no footage is not a deliverable, so the same run goes on to
     # fetch the stock every scene needs and to film the official-source demos.
