@@ -7164,7 +7164,11 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     # this can't just be a bare set_stage/sleep/enqueue sequence per floor.
     if content_type == "news_hook" and incident_place:
         _news_hook_ledger_record(incident_place, incident_summary, str(job.get("id") or ""))
-    _require_active_job(job, f"commission {worker_id.upper()}")
+    # This Floor 4 commissioning path always hands the approved brief to
+    # MUSE. `worker_id` belongs to the YouTube/brand router below and is not
+    # defined in IRIS; keeping this explicit prevents before/after and reel
+    # trigger runs from dying with a NameError after research is complete.
+    _require_active_job(job, "commission MUSE")
     worker = stages.head_briefs_worker(
         "ia", "muse",
         carrying_detail=f"Taking the {content_label} brief to MUSE: {(priority or angle)[:60]}",
