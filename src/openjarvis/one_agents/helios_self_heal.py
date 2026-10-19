@@ -259,6 +259,11 @@ def _qwen_settings(model: str) -> dict[str, Any]:
     providers: list[dict[str, Any]] = [{
         "id": os.environ.get("ONE_HELIOS_LOCAL_MODEL", "qwen3.5:9b").strip() or "qwen3.5:9b",
         "name": "Local Ollama Qwen",
+        # Ollama exposes OpenAI Chat Completions (including native tool_calls).
+        # Pin the wire protocol: Qwen Code's newer Responses route is not
+        # implemented by Ollama, and a plain-text pseudo-tool reply can look
+        # successful while no tool ever ran.
+        "wireApi": "chat-completions",
         "baseUrl": ollama_base,
         "envKey": "OLLAMA_API_KEY",
         "generationConfig": {
@@ -276,6 +281,7 @@ def _qwen_settings(model: str) -> dict[str, Any]:
         providers.append({
             "id": nemotron,
             "name": "NVIDIA Nemotron fallback",
+            "wireApi": "chat-completions",
             "baseUrl": os.environ.get("NVIDIA_HOST", "https://integrate.api.nvidia.com").rstrip("/") + "/v1",
             "envKey": "NVIDIA_API_KEY",
             "generationConfig": {
