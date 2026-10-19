@@ -77,6 +77,22 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _which_cli(name: str) -> str | None:
+    """Resolve CLIs even when ONE was started by a task with a short PATH."""
+    found = shutil.which(name)
+    if found or name != "codex":
+        return found
+    local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+    if not local_app_data:
+        return None
+    root = Path(local_app_data) / "OpenAI" / "Codex" / "bin"
+    candidates = list(root.glob("*/*codex*.exe")) + list(root.glob("*/codex.exe"))
+    candidates = [item for item in candidates if item.is_file()]
+    if not candidates:
+        return None
+    return str(max(candidates, key=lambda item: item.stat().st_mtime))
+
+
 def _row(connect: Connect, job_id: str) -> dict[str, Any] | None:
     with closing(connect()) as db:
         item = db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -217,20 +233,20 @@ def _repo_for(evidence: dict[str, Any]) -> Path | None:
 
 def _cli_commands(prompt: str, repo: Path) -> list[tuple[str, list[str]]]:
     commands: list[tuple[str, list[str]]] = []
-    claude = shutil.which("claude")
+    claude = _which_cli("claude")
     if claude:
         # allowedTools is variadic in current Claude Code. When the prompt sat
         # after it, Claude parsed the traceback as another tool rule and then
         # reported that --print had no prompt. Put the positional prompt first.
         commands.append(("claude", [claude, prompt, "--print", "--permission-mode", "acceptEdits",
                                      "--allowedTools", "Read,Glob,Grep,Edit,Write,Bash"]))
-    codex = shutil.which("codex")
+    codex = _which_cli("codex")
     if codex:
         # Current Codex makes --approve-for-me and an explicit --sandbox
         # mutually exclusive; approve-for-me already selects workspace-write.
         commands.append(("codex", [codex, "exec", "--ephemeral", "--approve-for-me",
                                     "--cd", str(repo), prompt]))
-    qwen = shutil.which("qwen")
+    qwen = _which_cli("qwen")
     if qwen:
         # Qwen Code has no implicit local backend. _run_cli supplies an
         # isolated profile pinned to Ollama, avoiding cloud-auth prompts.
