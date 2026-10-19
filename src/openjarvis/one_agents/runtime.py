@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import importlib.util
 import json
 import os
@@ -10051,6 +10052,13 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         head_id = str(job["agent_id"])
         stages.set_stage(head_id, stages.EXECUTING, "Checking this floor for failed or stuck work")
         try:
+            if head_id == "helios":
+                # HELIOS's bounded repair runner is intentionally lazy-loaded
+                # by floor_watch. Reload it for each pass so a committed
+                # fallback fix is not stranded in the long-lived worker's
+                # module cache until an unrelated process restart.
+                from openjarvis.one_agents import helios_self_heal
+                importlib.reload(helios_self_heal)
             return floor_watch.watch_floor(_connect, head_id)
         finally:
             stages.clear_stage(head_id)

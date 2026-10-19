@@ -266,24 +266,20 @@ def _cli_commands(prompt: str, repo: Path) -> list[tuple[str, list[str]]]:
                                     "--ephemeral", "--approve-for-me",
                                     "--cd", str(repo), prompt]))
     qwen = _which_cli("qwen")
+    # Qwen Code has no implicit local backend. _run_cli supplies an isolated
+    # profile pinned to Ollama, avoiding cloud-auth prompts.
+    local_model = os.environ.get("ONE_HELIOS_LOCAL_MODEL", "qwen3.5:9b").strip()
+    if local_model:
+        # Headless Qwen Code otherwise emits a tool-call request and exits
+        # without applying it. Auto-approve only inside its disposable Docker
+        # sandbox; host-side diff/path/test/commit gates remain authoritative.
+        if qwen:
+            commands.append(("qwen-local", [qwen, "--sandbox", "--approval-mode", "yolo",
+                                              "-m", local_model, "-p", prompt]))
+        # This path needs no Qwen Code executable. Keep it present even when
+        # the scheduled worker has a short PATH and cannot resolve qwen.cmd.
+        commands.append(("qwen-local-tools", ["ollama-native", "-m", local_model, "-p", prompt]))
     if qwen:
-        # Qwen Code has no implicit local backend. _run_cli supplies an
-        # isolated profile pinned to Ollama, avoiding cloud-auth prompts.
-        local_model = os.environ.get("ONE_HELIOS_LOCAL_MODEL", "qwen3.5:9b").strip()
-        if local_model:
-            # Headless Qwen Code otherwise emits a tool-call request and exits
-            # without applying it. Auto-approve only inside its disposable
-            # Docker sandbox; the host-side diff/path/test/commit gates below
-            # remain the authority for accepting any repair.
-            if qwen:
-                commands.append(("qwen-local", [qwen, "--sandbox", "--approval-mode", "yolo",
-                                                  "-m", local_model, "-p", prompt]))
-            # This path needs no Qwen Code executable. Production's scheduled
-            # worker has a deliberately short PATH on some logon sessions, so
-            # the local-model recovery must remain available even when qwen.cmd
-            # cannot be resolved. Native Ollama tool calls are the verified
-            # fallback for pseudo-tool text and for an absent Qwen CLI.
-            commands.append(("qwen-local-tools", ["ollama-native", "-m", local_model, "-p", prompt]))
         # Resolve credentials lazily from LAO only when this final fallback runs.
         nemotron_model = os.environ.get("NEMOTRON_MODEL", "").strip()
         if nemotron_model:
