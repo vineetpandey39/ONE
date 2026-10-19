@@ -105,6 +105,10 @@ New-Item -ItemType Directory -Force -Path $runtimeHome | Out-Null
 # Preserve the real Windows owner profile for discovering separately installed
 # CLIs. HOME/USERPROFILE below intentionally isolate ONE runtime data on E:.
 $env:ONE_OWNER_PROFILE = $env:USERPROFILE
+# Claude Code stores subscription OAuth under the owner's .claude directory.
+# Keep runtime caches isolated on E: without hiding that authenticated session
+# from HELIOS's bounded CLI repair fallback.
+$env:CLAUDE_CONFIG_DIR = Join-Path $env:ONE_OWNER_PROFILE ".claude"
 $env:HOME = $runtimeHome
 $env:USERPROFILE = $runtimeHome
 $runtimeDrive = Split-Path -Qualifier $runtimeHome
