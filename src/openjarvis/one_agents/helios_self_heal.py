@@ -23,6 +23,9 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
+import urllib.request
 import uuid
 from contextlib import closing
 from datetime import datetime, timezone
@@ -256,8 +259,13 @@ def _cli_commands(prompt: str, repo: Path) -> list[tuple[str, list[str]]]:
             # without applying it. Auto-approve only inside its disposable
             # Docker sandbox; the host-side diff/path/test/commit gates below
             # remain the authority for accepting any repair.
-            commands.append(("qwen-local", [qwen, "--sandbox", "--approval-mode", "yolo",
-                                            "-m", local_model, "-p", prompt]))
+            if qwen:
+                commands.append(("qwen-local", [qwen, "--sandbox", "--approval-mode", "yolo",
+                                                  "-m", local_model, "-p", prompt]))
+            # Qwen Code can return pseudo-tool-call text with exit 0 under an
+            # OpenAI-compatible Ollama provider. Keep a native Ollama tool-call
+            # runner as the same local-model tier's verified fallback.
+            commands.append(("qwen-local-tools", ["ollama-native", "-m", local_model, "-p", prompt]))
         # Resolve credentials lazily from LAO only when this final fallback runs.
         nemotron_model = os.environ.get("NEMOTRON_MODEL", "").strip()
         if nemotron_model:
@@ -325,8 +333,125 @@ def _resolve_nemotron_key() -> str:
     return _resolve_lao_secret("nvidiaApiKey").strip()
 
 
+def _qwen_tool_path(repo: Path, raw_path: Any) -> Path:
+    """Resolve a Qwen file-tool path to an existing, allow-listed Python file."""
+    relative = str(raw_path or "").replace("\\", "/")
+    candidate = Path(relative)
+    if not relative or candidate.is_absolute() or ".." in candidate.parts:
+        raise ValueError("path must be a safe repository-relative path")
+    normalized = candidate.as_posix()
+    if not normalized.endswith(".py") or not _allowed_patch_path(repo, normalized):
+        raise ValueError("path is outside HELIOS's Python source/test allowlist")
+    resolved = (repo / candidate).resolve()
+    if not resolved.is_relative_to(repo.resolve()) or not resolved.is_file():
+        raise ValueError("path must resolve to an existing file inside the repository")
+    return resolved
+
+
+def _qwen_tool_directory(repo: Path, raw_path: Any) -> Path:
+    relative = str(raw_path or "").replace("\\", "/")
+    candidate = Path(relative)
+    if not relative or candidate.is_absolute() or ".." in candidate.parts:
+        raise ValueError("directory must be a safe repository-relative path")
+    resolved = (repo / candidate).resolve()
+    if not resolved.is_relative_to(repo.resolve()) or not resolved.is_dir():
+        raise ValueError("directory must exist inside the repository")
+    if not any((candidate / "__allowlist_probe__.py").as_posix().startswith(prefix)
+               for prefix in ("src/openjarvis/one_agents/", "tests/one_agents/")):
+        if repo.resolve() != ALLOWED_REPOS[1].resolve():
+            raise ValueError("directory is outside HELIOS's source/test allowlist")
+    return resolved
+
+
+def _run_qwen_native_tools(command: list[str], *, repo: Path, timeout: int) -> subprocess.CompletedProcess[str]:
+    """Run local Qwen with Ollama-native tools; no shell or arbitrary commands."""
+    model = command[command.index("-m") + 1]
+    prompt = command[command.index("-p") + 1]
+    base_url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+    if base_url.endswith("/v1"):
+        base_url = base_url[:-3]
+    url = base_url + "/api/chat"
+    tools = [
+        {"type": "function", "function": {"name": "list_files", "description": "List Python source/test files in an allow-listed folder.",
+         "parameters": {"type": "object", "properties": {"relative_dir": {"type": "string"}}, "required": ["relative_dir"]}}},
+        {"type": "function", "function": {"name": "read_file", "description": "Read one allow-listed Python source/test file.",
+         "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}},
+        {"type": "function", "function": {"name": "write_file", "description": "Replace the contents of one existing allow-listed Python file.",
+         "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}},
+    ]
+    system = (
+        "You are HELIOS's local code-repair model. Diagnose the supplied failure. "
+        "Use list_files/read_file/write_file tools to inspect and make the smallest fix. "
+        "You may edit only existing allow-listed Python source/test files. Never claim an edit unless "
+        "write_file was called. Do not run commands, access credentials, or touch production data. "
+        "After edits, summarize the change; the host will run tests and decide whether to commit."
+    )
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": prompt},
+    ]
+    output: list[str] = []
+    write_count = 0
+    deadline = time.monotonic() + timeout
+    for _ in range(16):
+        remaining = max(1, int(deadline - time.monotonic()))
+        body = json.dumps({"model": model, "messages": messages, "tools": tools,
+                           "stream": False, "options": {"temperature": 0.1, "num_ctx": 32768}}).encode()
+        request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=remaining) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+            return subprocess.CompletedProcess(command, 1, "", f"Local Ollama Qwen request failed: {type(exc).__name__}")
+        message = result.get("message") or {}
+        messages.append(message)
+        content = str(message.get("content") or "")
+        if content:
+            output.append(content)
+        calls = message.get("tool_calls") or []
+        if not calls:
+            return subprocess.CompletedProcess(command, 0 if write_count else 1,
+                                               "\n".join(output),
+                                               "" if write_count else "Qwen returned no native tool calls or edits")
+        for call in calls:
+            function = call.get("function") or {}
+            name = str(function.get("name") or "")
+            args = function.get("arguments") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {}
+            try:
+                if name == "list_files":
+                    folder = _qwen_tool_directory(repo, args.get("relative_dir"))
+                    listed = sorted(item.relative_to(repo).as_posix() for item in folder.rglob("*.py")
+                                    if item.is_file() and _allowed_patch_path(repo, item.relative_to(repo).as_posix()))[:100]
+                    tool_result = "\n".join(listed)
+                elif name in {"read_file", "write_file"}:
+                    path = _qwen_tool_path(repo, args.get("path"))
+                    if name == "read_file":
+                        tool_result = path.read_text(encoding="utf-8")[:120000]
+                    else:
+                        new_content = str(args.get("content") or "")
+                        if len(new_content) > 500000:
+                            raise ValueError("file content exceeds repair limit")
+                        path.write_text(new_content, encoding="utf-8")
+                        write_count += 1
+                        tool_result = f"Wrote {path.relative_to(repo).as_posix()}"
+                else:
+                    raise ValueError("tool not allow-listed")
+            except (OSError, ValueError) as exc:
+                tool_result = f"Tool rejected: {exc}"
+            messages.append({"role": "tool", "tool_name": name, "content": tool_result})
+    return subprocess.CompletedProcess(command, 1 if not write_count else 0,
+                                       "\n".join(output), "Qwen exceeded native tool-call limit")
+
+
 def _run_cli(name: str, command: list[str], *, repo: Path, timeout: int) -> subprocess.CompletedProcess[str]:
     """Run Qwen Code with a disposable isolated profile; other CLIs inherit env."""
+    if name == "qwen-local-tools":
+        return _run_qwen_native_tools(command, repo=repo, timeout=timeout)
     if name not in {"qwen-local", "nemotron"}:
         return subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=timeout)
     model = command[command.index("-m") + 1]
