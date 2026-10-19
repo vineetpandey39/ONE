@@ -10,7 +10,8 @@ the two decisions separate:
 
 Claude Code and Codex are tried first. Qwen Code is then run against the
 installed local Ollama Qwen model (not the unauthenticated Qwen cloud CLI
-default); NVIDIA Nemotron is the final, explicitly configured remote fallback.
+default), followed by native Ollama tool calls if Qwen Code emits pseudo-calls.
+NVIDIA Nemotron is the final remote fallback, with its key resolved from LAO.
 A model failure is a diagnostic failure, not permission to bypass the gates.
 """
 
