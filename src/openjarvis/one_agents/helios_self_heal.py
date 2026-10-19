@@ -258,14 +258,17 @@ def _cli_commands(prompt: str, repo: Path) -> list[tuple[str, list[str]]]:
             # remain the authority for accepting any repair.
             commands.append(("qwen-local", [qwen, "--sandbox", "--approval-mode", "yolo",
                                             "-m", local_model, "-p", prompt]))
+        # Do not gate this fallback on the service process environment. The
+        # authoritative credential lives in LAO's vault and is resolved only
+        # if execution reaches this final fallback.
         nemotron_model = os.environ.get("NEMOTRON_MODEL", "").strip()
-        if nemotron_model and os.environ.get("NVIDIA_API_KEY", "").strip():
+        if nemotron_model:
             commands.append(("nemotron", [qwen, "--sandbox", "--approval-mode", "yolo",
                                            "-m", nemotron_model, "-p", prompt]))
     return commands
 
 
-def _qwen_settings(model: str) -> dict[str, Any]:
+def _qwen_settings(model: str, *, include_nemotron: bool = False) -> dict[str, Any]:
     """Build a disposable Qwen Code provider config; never persist credentials."""
     ollama = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
     # Qwen's --sandbox runs inside Docker, where loopback points at the
@@ -293,7 +296,7 @@ def _qwen_settings(model: str) -> dict[str, Any]:
     # The key is inherited only for the paid fallback attempt; it is never
     # written to the disposable Qwen configuration or logged.
     nemotron = os.environ.get("NEMOTRON_MODEL", "").strip()
-    if nemotron and os.environ.get("NVIDIA_API_KEY", "").strip():
+    if include_nemotron and nemotron:
         providers.append({
             "id": nemotron,
             "name": "NVIDIA Nemotron fallback",
@@ -317,6 +320,16 @@ def _qwen_settings(model: str) -> dict[str, Any]:
     }
 
 
+def _resolve_nemotron_key() -> str:
+    """Fetch NVIDIA credentials from LAO's production vault, in memory only."""
+    # Reuse ONE's established robot-to-vault resolver. It reads the active
+    # isolated LAO robot config and does not require a human login or copy the
+    # secret to disk. Import lazily to avoid the runtime/floor-watch cycle.
+    from openjarvis.one_agents.runtime import _resolve_lao_secret
+
+    return _resolve_lao_secret("nvidiaApiKey").strip()
+
+
 def _run_cli(name: str, command: list[str], *, repo: Path, timeout: int) -> subprocess.CompletedProcess[str]:
     """Run Qwen Code with a disposable isolated profile; other CLIs inherit env."""
     if name not in {"qwen-local", "nemotron"}:
@@ -326,10 +339,15 @@ def _run_cli(name: str, command: list[str], *, repo: Path, timeout: int) -> subp
         profile_path = Path(profile)
         qwen_dir = profile_path / ".qwen"
         qwen_dir.mkdir()
-        (qwen_dir / "settings.json").write_text(
-            json.dumps(_qwen_settings(model), ensure_ascii=True), encoding="utf-8"
-        )
         env = os.environ.copy()
+        if name == "nemotron":
+            # The LAO secret enters only this child process environment; it is
+            # never serialized into settings.json, logs, or the parent worker.
+            env["NVIDIA_API_KEY"] = _resolve_nemotron_key()
+        (qwen_dir / "settings.json").write_text(
+            json.dumps(_qwen_settings(model, include_nemotron=name == "nemotron"),
+                       ensure_ascii=True), encoding="utf-8"
+        )
         # Node's os.homedir() on Windows uses USERPROFILE. Redirect Qwen
         # config/session writes to the disposable profile, not the user's.
         env["USERPROFILE"] = str(profile_path)
