@@ -32,7 +32,14 @@ already does for restart orphans), and clearing a stage record, which is
 display state. Anything that would edit code, touch credentials, or change a
 governance declaration is NOT auto-applied. It becomes a written proposal.
 
-That boundary is not arbitrary. ``lao_healer``'s own docstring records that an
+That remains the default boundary for every floor except Floor 12. On
+2026-10-19 the Chairman explicitly authorized HELIOS to become a bounded
+self-healing master: it may ask Claude Code, Codex, then Qwen to repair the
+latest YouTube-floor failure, verify the patch, create a local commit, and
+resume only a checkpoint-safe worker. ``helios_self_heal`` enforces the clean
+repository, path, test, no-push and no-paid-voice boundaries for that exception.
+
+The original boundary was not arbitrary. ``lao_healer``'s own docstring records that an
 earlier draft escalated to a Claude Code CLI pass with
 ``--permission-mode bypassPermissions`` "so it could autonomously run repair
 commands", and that this "was rejected before it ever shipped". The Chairman
@@ -83,6 +90,11 @@ DEFAULT_LOOKBACK_SECONDS = 6 * 3600
 STALE_HEARTBEAT_SECONDS = 300.0
 
 _TERMINAL_LAO_OK = {"Successful"}
+
+
+def _lao_output_is_collectable(error: str) -> bool:
+    """False when LAO succeeded but ONE deliberately rejected its output."""
+    return "YATRA preproduction contract is incomplete" not in (error or "")
 
 
 def _home() -> Path:
@@ -351,7 +363,7 @@ def scan(
         # D1 -- the external system finished the work; we recorded a failure.
         # This is the 2026-08-28 SCRIBE/LAO case: the book was written, the
         # cover rendered, the packet built, and ONE's row said 'failed'.
-        if status == "failed" and external_job:
+        if status == "failed" and external_job and _lao_output_is_collectable(error):
             lao_status, successor = _lao_reconcile(external_job)
             if lao_status in _TERMINAL_LAO_OK:
                 findings.append(Finding(
@@ -430,6 +442,20 @@ def scan(
     return findings
 
 
+# How long an awaiting_upload bubble is allowed to sit before it counts as
+# stale. Long enough for a slow publish or a queued title to clear on its own,
+# short enough that the building is not lying to the Chairman for a day.
+AWAITING_UPLOAD_GRACE_SECONDS = 6 * 3600
+
+
+def _age_seconds_from(since: Any) -> float:
+    """Seconds since a stage's epoch stamp; unreadable reads as infinitely old."""
+    try:
+        return max(0.0, time.time() - float(since))
+    except (TypeError, ValueError):
+        return float("inf")
+
+
 def _stale_stage_findings(connect: Connect, agents: list[str]) -> list[Finding]:
     from openjarvis.one_agents import stages
 
@@ -440,9 +466,15 @@ def _stale_stage_findings(connect: Connect, agents: list[str]) -> list[Finding]:
             record = current.get(agent_id)
             if not record:
                 continue
-            # awaiting_upload is a legitimate block on a human's real-world
-            # action (the KDP upload). It is supposed to sit there.
-            if record.get("stage") == stages.AWAITING_UPLOAD:
+            # awaiting_upload used to be skipped forever: the KDP upload was a
+            # human's real-world action, so a bubble that sat there was correct.
+            # Publishing became autonomous on 2026-09-24, and the exemption
+            # outlived it - SCRIBE kept telling the building it was waiting on
+            # an upload for a book that was already on sale. Recent still means
+            # "genuinely mid-flow"; older than this means something stalled and
+            # the floor deserves to hear about it.
+            if (record.get("stage") == stages.AWAITING_UPLOAD
+                    and _age_seconds_from(record.get("since")) < AWAITING_UPLOAD_GRACE_SECONDS):
                 continue
             # mode != 'watch' for the same reason _latest_job_per_agent excludes
             # it, and it bit twice before being fixed in both places: the head's
@@ -538,6 +570,9 @@ def apply_fix(connect: Connect, finding: Finding) -> str:
         return _enqueue_collection(connect, finding.job_id, external) if external else ""
     if finding.auto_fix == "clear_stage":
         return _clear_stage(finding.agent_id)
+    if finding.auto_fix == "helios_self_heal":
+        from openjarvis.one_agents import helios_self_heal
+        return helios_self_heal.heal_failure(connect, finding)
     return ""
 
 
@@ -621,11 +656,32 @@ def watch_floor(
     show what the head actually did rather than a bare 'ran'.
     """
     findings = scan(connect, head_id, lookback_seconds=lookback_seconds)
+    if head_id == "helios":
+        # The Chairman explicitly authorized Floor 12's head to repair the
+        # latest failed YouTube job and resume its saved checkpoint. All other
+        # floor heads retain the diagnosis-only policy above.
+        for finding in findings:
+            if finding.code == "D4" and finding.job_id:
+                finding.auto_fix = "helios_self_heal"
     healed: list[dict[str, str]] = []
     proposed: list[dict[str, str]] = []
 
     for finding in findings:
         action = apply_fix(connect, finding)
+        pending_self_heal = False
+        if finding.auto_fix == "helios_self_heal":
+            from openjarvis.one_agents import helios_self_heal
+            pending_self_heal = action.startswith(helios_self_heal.PENDING_PREFIX)
+        if pending_self_heal:
+            # A transient blocker (most commonly concurrent dirty work) is not
+            # a heal and must not enter the once-only healed ledger.  Keeping
+            # the original failed row eligible lets HELIOS diagnose it on the
+            # next pass instead of silently converting it into a blind retry.
+            proposed.append({"agent": finding.agent_id, "code": finding.code,
+                             "summary": finding.summary, "diagnosis": action})
+            _log({"head": head_id, "outcome": "pending_self_heal",
+                  **asdict(finding), "diagnosis": action})
+            continue
         if action:
             _remember_healed(finding.job_id or f"{finding.agent_id}:{finding.code}", finding.code, action)
             healed.append({"agent": finding.agent_id, "code": finding.code,

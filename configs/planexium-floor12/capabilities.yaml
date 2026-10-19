@@ -1,0 +1,50 @@
+agent_id: planexium
+default_policy: deny
+allowed_capabilities:
+- file:read
+- file:write
+- memory:read
+- memory:write
+- tool:invoke
+- network:fetch
+denied_capabilities:
+- system:admin
+- schedule:create
+- channel:send
+tools:
+- lao_orchestrator
+data_access:
+- PUBLIC
+- INTERNAL
+filesystem_scope:
+  read:
+  - data/planexium/**
+  - floors/floor_12_youtube_studio/agents/planexium/**
+  - C:/Users/pc/.lao/browser-sessions/planexium-chatgpt/**
+  - C:/Users/pc/.lao/browser-sessions/planexium-envato/**
+  - C:/Users/pc/.lao/browser-sessions/planexium-capture/**
+  - C:/Users/pc/Documents/LAO/yatra-edit/**
+  - C:/Users/pc/Documents/LAO/yatra-acquisition/workflow.yaml
+  - C:/Users/pc/Documents/LAO/yatra-capture/workflow.yaml
+  - C:/Users/pc/AppData/Local/Packages/Claude_*/LocalCache/Roaming/Claude/local-agent-mode-sessions/**/outputs/lao-platform/robot-worker/obs_ws.py
+  write:
+  - data/planexium/**
+  - floors/floor_12_youtube_studio/artifacts/planexium/**
+  - C:/Users/pc/.lao/browser-sessions/planexium-chatgpt/**
+  - C:/Users/pc/.lao/browser-sessions/planexium-envato/**
+  - C:/Users/pc/.lao/browser-sessions/planexium-capture/**
+  - C:/Users/pc/Downloads/YATRA/.envato-provider.lock
+environment_scope:
+- PLANEXIUM_CONFIG
+- OPENJARVIS_HOME
+network_access:
+  default: deny
+  allowed_hosts:
+  - 127.0.0.1
+  - science.nasa.gov
+  - www.nasa.gov
+  - images-api.nasa.gov
+  - images-assets.nasa.gov
+  - assets.science.nasa.gov
+  - www.esa.int
+  - www.isro.gov.in

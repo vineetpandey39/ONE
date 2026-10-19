@@ -90,6 +90,39 @@ def check_model() -> dict[str, Any]:
                       remediation="Start Ollama (ollama serve). The Ghost Agent (cloud) can still answer if a cloud key is set.")
 
 
+def check_models_on_cpu() -> dict[str, Any]:
+    """No local model may sit on the GPU (the Chairman's rule since 2026-10-02).
+
+    The 8 GB RTX 3070 Ti also drives the monitor: a 9B model loaded onto it took the whole PC down. Ollama is
+    held to the CPU by OLLAMA_LLM_LIBRARY=cpu (user variable + start-one.ps1) and every ONE/Sanjeevani call adds
+    num_gpu=0. This probe reads Ollama's own /api/ps: any loaded model with VRAM in use, or a server started
+    without the guard, is critical, so a reverted guard shows up on the dashboard the same minute."""
+    host = (
+        os.environ.get("OLLAMA_HOST")
+        or os.environ.get("ONE_OLLAMA_HOST")
+        or "http://127.0.0.1:11434"
+    ).rstrip("/")
+    fix = ("Unload it (ollama stop <model>), make sure the user variable OLLAMA_LLM_LIBRARY=cpu exists, then restart "
+           "Ollama and ONE (start-one.ps1). Never set ONE_LLM_ALLOW_GPU=1 on this machine.")
+    try:
+        import httpx
+
+        r = httpx.get(f"{host}/api/ps", timeout=_TIMEOUT, verify=False)
+        loaded = r.json().get("models", []) if r.status_code == 200 else []
+    except Exception as exc:  # noqa: BLE001 - Ollama being down is check_model's finding, not this one's
+        return _probe("models_on_cpu", True, f"Ollama not readable ({exc}); nothing can be on the GPU through it.")
+    on_gpu = [f"{m.get('name')} ({int(m.get('size_vram') or 0) // (1024 * 1024)} MB)"
+              for m in loaded if int(m.get("size_vram") or 0) > 0]
+    if on_gpu:
+        return _probe("models_on_cpu", False, "Local model on the GPU: " + ", ".join(on_gpu), severity="crit",
+                      remediation=fix)
+    if os.environ.get("OLLAMA_LLM_LIBRARY", "").lower() != "cpu":
+        return _probe("models_on_cpu", False, "ONE is running without OLLAMA_LLM_LIBRARY=cpu; the next model "
+                      "Ollama loads could land on the GPU.", severity="crit", remediation=fix)
+    names = ", ".join(str(m.get("name")) for m in loaded) or "none loaded"
+    return _probe("models_on_cpu", True, f"All local models on the CPU ({names}).")
+
+
 def check_queue() -> dict[str, Any]:
     """Agent job queue reachable, and flag jobs stuck 'running' for a long time."""
     p = _home() / "agent_queue.db"
@@ -169,7 +202,7 @@ def system_health(app: Any = None) -> dict[str, Any]:
         probes.append(check_ghost_agent(app))
     except Exception as exc:  # noqa: BLE001
         probes.append(_probe("ghost_agent", False, f"probe crashed: {exc}"))
-    for fn in (check_model, check_queue, check_disk):
+    for fn in (check_model, check_models_on_cpu, check_queue, check_disk):
         try:
             probes.append(fn())
         except Exception as exc:  # noqa: BLE001

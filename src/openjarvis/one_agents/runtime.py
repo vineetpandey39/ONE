@@ -2,31 +2,39 @@
 
 from __future__ import annotations
 
-import json
+import hashlib
 import importlib.util
+import json
 import os
 import re
 import sqlite3
+import subprocess
 import sys
 import time
+import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
-from openjarvis.one_agents import floor_watch, floors_bridge, job_recovery, memory, stages
+from openjarvis.one_agents import (
+    floor_watch, floors_bridge, job_recovery, linkedin_growth, memory, publishing_strategy, stages,
+)
 
 
 AGENTS: dict[str, dict[str, str]] = {
+    "helios": {"name": "HELIOS", "role": "Multi-channel YouTube commissioning, resource coordination and delivery reconciliation head", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "head"},
     "zeus": {"name": "ZEUS", "role": "Cross-division orchestration, escalation, and resource-allocation operator", "floor_id": "11", "floor_name": "ONE-JARVIS Executive Command", "division": "executive"},
     "athena": {"name": "ATHENA", "role": "Opportunity discovery, research, and scoring operator", "floor_id": "10", "floor_name": "Venture & Opportunity Lab", "division": "venture_lab"},
     "jobhunt": {"name": "DAEDALUS", "role": "Micro-SaaS and AI product build/QA operator", "floor_id": "9", "floor_name": "Micro-SaaS & AI Product Factory", "division": "micro_saas"},
     "titan": {"name": "TITAN", "role": "Apps, websites, and games build/ship operator", "floor_id": "8", "floor_name": "Apps / Websites / Games", "division": "apps_web_games"},
     "beta": {"name": "BETA", "role": "Browser extensions, plugins, and utility-tools delivery operator", "floor_id": "7", "floor_name": "Digital Utilities", "division": "digital_utilities"},
     "apollo": {"name": "APOLLO", "role": "Courses, templates, and digital-product operator", "floor_id": "6", "floor_name": "Digital Products & Education", "division": "digital_products"},
-    "hermes": {"name": "HERMES", "role": "KDP fiction/non-fiction research and publishing operator", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "head"},
+    "hermes": {"name": "HERMES", "role": "KDP authority-catalogue research and publishing operator", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "head"},
     # First worker agent under a floor head — sits at an open desk on Floor 5
     # and is the one that actually drives LAO's KDP factory to completion.
     "scribe": {"name": "SCRIBE", "role": "KDP manuscript production worker", "floor_id": "5", "floor_name": "Book Publishing (KDP)", "division": "publishing", "seat": "worker", "reports_to": "hermes"},
@@ -55,7 +63,13 @@ AGENTS: dict[str, dict[str, str]] = {
     # router in one-company/floors/floor_04_media, never by preference order --
     # guessing wrong here means posting to the wrong account.
     "kairos": {"name": "KAIROS", "role": "aibyvineet carousel worker and Floor 4 revenue agent: turns @imagineindia.ai and @aibyvineet reach into income - money-funnel reviews, brand deals, media kits, affiliate and product plans (drafts only, sends nothing without the Chairman)", "floor_id": "4", "floor_name": "Media & Content", "division": "media", "seat": "worker", "reports_to": "ia"},
-    "herald": {"name": "HERALD", "role": "LinkedIn authority-post production and publishing worker", "floor_id": "4", "floor_name": "Media & Content", "division": "media", "seat": "worker", "reports_to": "ia"},
+    "herald": {"name": "HERALD", "role": "LinkedIn authority-post production and publishing worker (Growth floor, reports to ARES)", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth", "seat": "worker", "reports_to": "ares"},
+    "planexium": {"name": "PLANEXIUM", "role": "The Planexium science production worker using local Windows narration and shared services", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
+    "yatra": {"name": "YATRA", "role": "Sonia Travel Vlogs Envato acquisition, OBS capture and video assembly worker", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
+    "fabula": {"name": "FABULA", "role": "YouTube narration production and approved voice checkpoint worker", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
+    "lyra": {"name": "LYRA", "role": "YouTube SEO, metadata and thumbnail experiment packaging specialist", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
+    "echo": {"name": "ECHO", "role": "YouTube subtitles, localization, comments and governed upload completion worker", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
+    "vista": {"name": "VISTA", "role": "YouTube vertical short-form production worker; consumes HELIOS research and produces governed Shorts", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
     "ares": {"name": "ARES", "role": "SEO, social, and cross-floor distribution operator", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth"},
     "alfa": {"name": "ALFA", "role": "Pricing, funnels, and revenue-attribution operator", "floor_id": "2", "floor_name": "Commerce & Monetization", "division": "commerce"},
     "poseidon": {"name": "POSEIDON", "role": "Finance, HR, Admin, and Legal/Compliance operator", "floor_id": "1", "floor_name": "Corporate Services", "division": "corporate"},
@@ -247,12 +261,43 @@ def _enqueue_due_recurring_jobs() -> None:
             trigger_module = importlib.util.module_from_spec(spec)
             sys.modules["one_company_triggers"] = trigger_module
             spec.loader.exec_module(trigger_module)
+        # Keep durable rows aligned with the source registry. This preserves
+        # enabled/next-fire state, but prevents a floor migration from leaving
+        # an old head receiving the canonical trigger forever.
+        if hasattr(trigger_module, "reconcile_defaults"):
+            trigger_module.reconcile_defaults()
 
         def active_count(agent_id: str) -> int:
+            """How much work this head's FLOOR already has in flight.
+
+            A trigger's max_concurrent_jobs is about the floor's capacity, not
+            the head's own calendar. This counted the head alone, so on
+            2026-09-24 the 09:00 KDP trigger fired while SCRIBE was still
+            writing the book commissioned at 08:38 -- HERMES itself was idle,
+            so the guard saw an empty floor. Nothing would have serialised the
+            two either: ONE_WORKER_MAX_CONCURRENT_JOBS defaults to 6, so both
+            commissions would have driven the same LAO process and the same
+            logged-in browser profile at once.
+
+            mode != 'watch' for the reason the watch scheduler already
+            documents a few lines above: a head's own watch job is not floor
+            work, and counting it would make every floor look permanently
+            busy and silently starve every trigger.
+            """
+            # Floor 12 is intentionally flow-concurrent: a long YATRA visual
+            # run must not suppress a due VISTA slot, community poll or a
+            # second channel's research. Its workers already guard their
+            # scarce browser/OBS/download resources at the adapter level, so
+            # the scheduler only prevents duplicate HELIOS commissions here.
+            # Other floors retain their proven floor-wide serialization.
+            agents = ([agent_id] if agent_id == "helios"
+                      else (floor_watch.floor_agents(agent_id) or [agent_id]))
+            placeholders = ",".join("?" for _ in agents)
             with _connect() as db:
                 return int(db.execute(
-                    "SELECT COUNT(*) FROM jobs WHERE agent_id=? AND status IN ('queued','running')",
-                    (agent_id,),
+                    f"SELECT COUNT(*) FROM jobs WHERE agent_id IN ({placeholders}) "
+                    "AND mode != 'watch' AND status IN ('queued','running')",
+                    tuple(agents),
                 ).fetchone()[0])
 
         def dispatch(agent_id: str, task: str, mode: str, priority: str) -> dict[str, Any]:
@@ -307,7 +352,7 @@ def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def enqueue_job(agent_id: str, task: str, mode: str = "plan", tier: str = "fast") -> dict[str, Any]:
+def enqueue_job(agent_id: str, task: str, mode: str = "plan", tier: str = "fast", *, dedupe_key: str = "") -> dict[str, Any]:
     agent_id = agent_id.strip().lower()
     if agent_id not in AGENTS:
         raise ValueError(f"Unknown agent: {agent_id}")
@@ -359,6 +404,17 @@ def enqueue_job(agent_id: str, task: str, mode: str = "plan", tier: str = "fast"
     job_id = f"{agent_id}-{uuid.uuid4().hex[:12]}"
     now = _now()
     with _connect() as db:
+        db.execute("CREATE TABLE IF NOT EXISTS handoff_keys (key TEXT PRIMARY KEY, job_id TEXT NOT NULL)")
+        if dedupe_key:
+            db.execute("BEGIN IMMEDIATE")
+            previous = db.execute("SELECT job_id FROM handoff_keys WHERE key = ?", (dedupe_key,)).fetchone()
+            if previous:
+                existing = db.execute("SELECT * FROM jobs WHERE id = ?", (previous["job_id"],)).fetchone()
+                # A key stops a second, duplicate handoff of live or finished work. It must not pin a handoff to a
+                # job that failed: IRIS's verified Vietnam master was "handed" to ARES's morning failure (raised
+                # because no master existed yet) and ARES never ran on it (2026-10-06).
+                if existing and existing["status"] not in ("failed", "cancelled"):
+                    return dict(existing)
         db.execute(
             "INSERT INTO jobs (id, agent_id, task, mode, tier, status, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)",
@@ -367,12 +423,35 @@ def enqueue_job(agent_id: str, task: str, mode: str = "plan", tier: str = "fast"
             # makes the receiving agent misclassify the handoff as a new task.
             (job_id, agent_id, task[:100000], mode, tier, now, now),
         )
+        if dedupe_key:
+            # REPLACE: after a failed job the key now points at its retry.
+            db.execute("INSERT OR REPLACE INTO handoff_keys (key, job_id) VALUES (?, ?)", (dedupe_key, job_id))
     return get_job(job_id) or {}
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:
     with _connect() as db:
         return _row(db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone())
+
+
+def _job_is_active(job_id: str) -> bool:
+    """True only while the queue still owns this execution.
+
+    A watchdog cannot kill the Python thread it timed out. Long-running floor
+    handlers must therefore check queue ownership before creating downstream
+    work, otherwise an already-failed HERMES run can still commission a book.
+    """
+    job = get_job(job_id)
+    return bool(job and job.get("status") in {"queued", "running"})
+
+
+def _require_active_job(job: dict[str, Any], action: str) -> None:
+    """Stop a released/cancelled worker before it creates downstream work."""
+    # Direct handler/unit invocations are intentionally supported and carry no
+    # claimed queue status. Worker-owned jobs do, so only those need the live
+    # ownership lookup.
+    if job.get("status") in {"queued", "running"} and not _job_is_active(str(job.get("id") or "")):
+        raise RuntimeError(f"Job no longer owns the queue row; refusing to {action}")
 
 
 def list_agent_jobs(agent_id: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -394,12 +473,92 @@ def list_agent_jobs(agent_id: str, limit: int = 20) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def resume_yatra_visual_job(job_id: str) -> dict[str, Any]:
+    """Safely retry a failed visual-only YATRA job from its saved checkpoint.
+
+    This intentionally refuses discovery/script/narration jobs: those stages
+    can change the approved story or spend voice credits. Visual resumes must
+    carry a successful FABULA receipt and a durable production plan, and only
+    one YATRA queue job may be active at a time. Accepted files are reused by
+    the normal visual checkpoint handlers.
+    """
+    previous = get_job(job_id)
+    if not previous:
+        raise ValueError("YATRA job not found")
+    if previous.get("agent_id") != "yatra" or previous.get("mode") != "execute":
+        raise ValueError("Only failed YATRA execute jobs can be resumed here")
+    if previous.get("status") != "failed":
+        raise ValueError("Resume is available only for failed jobs")
+    try:
+        payload = json.loads(str(previous.get("task") or ""))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("The failed job has no readable saved task") from exc
+    if not isinstance(payload, dict) or payload.get("stage") != "visuals":
+        raise ValueError("Only the saved visual stage can be resumed; narration is not retried")
+    checkpoint = str(payload.get("preproduction_job") or "").strip()
+    receipt_value = str(payload.get("narration_receipt") or "").strip()
+    if not checkpoint or not receipt_value:
+        raise ValueError("Saved visual task is missing its preproduction or narration checkpoint")
+    receipt_path = Path(receipt_value).resolve()
+    asset_root = _YATRA_ASSET_ROOT.resolve()
+    try:
+        receipt_path.relative_to(asset_root)
+    except ValueError as exc:
+        raise ValueError("Narration checkpoint is outside the YATRA asset library") from exc
+    if receipt_path.name != "fabula-receipt.json" or not receipt_path.is_file():
+        raise ValueError("Successful FABULA narration receipt is missing; refusing a paid regeneration")
+    try:
+        envelope = json.loads(receipt_path.read_text(encoding="utf-8"))
+        narration = envelope.get("narration") or {}
+        if (str(envelope.get("checkpoint") or "") != checkpoint
+                or narration.get("ok") is not True
+                or str(narration.get("status") or "") != "Successful"):
+            raise ValueError("FABULA receipt does not match this successful production checkpoint")
+        plan = receipt_path.parent.parent / "production-plan.json"
+        if not plan.is_file():
+            raise ValueError("Saved YATRA production plan is missing; cannot safely resume")
+    except (OSError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Saved narration checkpoint is unreadable: {exc}") from exc
+
+    active = [item for item in list_agent_jobs("yatra", 100)
+              if item.get("id") != job_id and item.get("status") in {"queued", "running"}]
+    if active:
+        raise ValueError(f"YATRA already has active job {active[0].get('id')}; wait before resuming")
+    return enqueue_job("yatra", str(previous["task"]), mode="execute",
+                       tier=str(previous.get("tier") or "fast"),
+                       dedupe_key=f"yatra-visual-resume:{job_id}")
+
+
 def list_jobs(limit: int = 20) -> list[dict[str, Any]]:
     with _connect() as db:
         rows = db.execute(
             "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (max(1, min(limit, 100)),)
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def latest_jobs_by_agent() -> dict[str, dict[str, Any]]:
+    """The newest real job for every agent, whatever else has happened since.
+
+    list_jobs(12) is a system-wide window, so an agent that finished its work
+    an hour ago simply vanishes from it once any twelve other jobs run - and a
+    panel built on that window reports a floor as idle while it is mid-mission.
+    The OLYMPUS decision list was moved off that window on 2026-09-13 for
+    exactly this reason; the publishing flow strip was not, and showed HERMES
+    through IMPRIMATUR as "Awaiting mission" on the day they published a book.
+
+    mode != 'watch' for the reason the watch scheduler documents: a head's own
+    watch job is not floor work, and counting it would make every floor look
+    busy with nothing.
+    """
+    with _connect() as db:
+        rows = db.execute(
+            "SELECT j.* FROM jobs j JOIN ("
+            "  SELECT agent_id, MAX(created_at) AS newest FROM jobs"
+            "  WHERE mode != 'watch' GROUP BY agent_id"
+            ") latest ON j.agent_id = latest.agent_id AND j.created_at = latest.newest"
+        ).fetchall()
+    return {str(row["agent_id"]): dict(row) for row in rows}
 
 
 def agent_stats() -> list[dict[str, Any]]:
@@ -1323,6 +1482,174 @@ def _research_synthesis(prompt: str, max_tokens: int = 2200,
     return "", note + "; cloud-model fallback is forbidden for floor heads"
 
 
+# source_url is deliberately absent. Measured 2026-09-24: the 53 items carried
+# 16,371 chars of URL - half the bundle - and these are Google News RSS links,
+# base64 blobs up to 806 chars that tokenise at roughly one token per character.
+# The prompts tell the model to cite the evidence_id in square brackets, and
+# _evidence_urls() maps those ids back to real URLs afterwards, so nothing that
+# reaches the brief is lost.
+#
+# That claim was only true of the media floor until 2026-10-14. This floor's
+# own contract asked for "URLs or named current sources" - one it could not
+# supply and one nothing could check - so every KDP run obeyed its prompt and
+# failed the provenance gate. Both prompts now ask for the ids.
+# Keys whose values are links. Dropped from anything handed to a model that
+# is being asked to cite ids: a link is the wrong answer and a tempting one.
+_URL_KEYS = frozenset({"url", "source_url", "link", "permalink",
+                       "canonical_url", "source_urls"})
+_RADAR_ITEM_FIELDS = ("evidence_id", "title", "age_hours",
+                      "freshness_bucket", "freshness_eligible", "role", "source_type")
+_RADAR_CANDIDATE_FIELDS = ("topic", "score", "build_eligible", "blockers")
+_RADAR_WINNER_FIELDS = ("topic", "score", "build_eligible", "dimensions", "blockers")
+
+
+def _cited_sources_block(snapshot: dict[str, Any], brief: str) -> str:
+    """The cited evidence ids, expanded back into their real source URLs."""
+    urls = _evidence_urls(snapshot, brief)
+    if not urls:
+        return ""
+    rows = chr(10).join("- `" + eid + "` " + url for eid, url in sorted(urls.items()))
+    return chr(10) + "## Sources cited above" + chr(10) * 2 + rows + chr(10)
+
+def _evidence_block(brief: str) -> str:
+    """Everything written under "EVIDENCE:", not just the rest of that line.
+
+    _marker deliberately stops at the newline (see its own docstring), which
+    is right for one-line fields and wrong for this one: evidence is written
+    as a bullet list under the label, so the label's own line is blank and
+    _marker returned "". The gate then reported "direct evidence URLs: 0"
+    about a field it had never actually read.
+    """
+    match = re.search(r"^[ \t]*\**EVIDENCE\**[ \t]*:", brief, re.MULTILINE | re.IGNORECASE)
+    if not match:
+        return ""
+    rest = brief[match.end():]
+    # Stops at the next ALL-CAPS marker line, which is how this contract
+    # separates fields.
+    end = re.search(r"^[ \t]*\**[A-Z][A-Z_]{3,}\**[ \t]*:", rest, re.MULTILINE)
+    return rest[:end.start()].strip() if end else rest.strip()
+
+
+def _unknown_cited_ids(snapshot: dict[str, Any], evidence: str) -> int:
+    """Bracketed ids that no radar item in this run carries.
+
+    Distinct from citing nothing at all, and far more telling: it means the
+    model produced identifier-shaped text rather than reading one. Seen twice
+    on 2026-10-14 - first a base64 fragment it had never been shown, then the
+    prompt's own specimen id copied verbatim. Counting them separately keeps
+    "cited nothing" and "cited something invented" from reading alike.
+    """
+    known = {str(item.get("evidence_id") or "")
+             for item in (snapshot.get("items") or []) if isinstance(item, dict)}
+    cited = set(re.findall(r"\[([A-Za-z0-9_\-]{8,})\]", evidence or ""))
+    return len(cited - known)
+
+
+def _unresolved_citations(snapshot: dict[str, Any], evidence: str) -> int:
+    """Quoted sources in the evidence that this run never actually collected.
+
+    Measured on run hermes-a75ab9b40ca8 (2026-10-10): the snapshot held 48
+    finance and retirement items, and the model's evidence cited 26 quoted
+    mental-health headlines, none of which appeared in it. The gate rejected
+    the run, correctly - but reported it as missing URLs, which reads like a
+    formatting nit rather than fabricated provenance. Counting these makes
+    the difference legible in the refusal.
+    """
+    titles = [str(item.get("title") or "").strip().lower()
+              for item in (snapshot.get("items") or []) if isinstance(item, dict)]
+    unresolved = 0
+    for quote in re.findall(r"[\"“]([^\"”]{15,200})[\"”]", evidence):
+        probe = quote[:60].lower()
+        if not any(probe in title or title[:60] in quote.lower() for title in titles if title):
+            unresolved += 1
+    return unresolved
+
+
+def _evidence_urls(snapshot: dict[str, Any], text: str) -> dict[str, str]:
+    """Map every evidence_id the model cited back to its real source_url.
+
+    The ids travel to the model; the URLs stay here. Only ids actually present
+    in the snapshot are returned, so a hallucinated id resolves to nothing
+    rather than to a plausible-looking link.
+    """
+    known = {str(item.get("evidence_id") or ""): str(item.get("source_url") or "")
+             for item in (snapshot.get("items") or []) if isinstance(item, dict)}
+    known.pop("", None)
+    cited = set(re.findall(r"[0-9a-f]{20}", str(text or "")))
+    return {eid: url for eid, url in known.items() if eid in cited and url}
+
+
+def _without_urls(value: Any) -> Any:
+    """The same structure with every URL taken out of it.
+
+    The winner row goes into the commission prompt whole, and its persistence
+    evidence carries one Google News link per item - 66 of them on 2026-10-14,
+    against zero evidence_ids, in 30,535 characters. The prompt asks the model
+    to end each claim with "the evidence_id of the radar item it comes from",
+    and those links were the only identifier-shaped strings sitting next to the
+    facts it was reasoning about. It copied them: two of the three ids the
+    16:30 run cited are verbatim Google News URL fragments from this payload,
+    and the third, once it was following the pattern, appears nowhere in the
+    snapshot at all. Five runs were refused by the provenance gate for this.
+
+    The real evidence_ids live on the radar items, which reach the model as
+    their own bundle. Taking the links out leaves nothing else to reach for -
+    and takes most of the payload's size with them, which the context window
+    has been short of before (see research_evidence above).
+    """
+    if isinstance(value, dict):
+        return {key: _without_urls(item) for key, item in value.items()
+                if key not in _URL_KEYS}
+    if isinstance(value, list):
+        return [_without_urls(item) for item in value]
+    if isinstance(value, str) and value.strip().lower().startswith(("http://", "https://")):
+        return ""
+    return value
+
+
+def _compact_radar(snapshot: dict[str, Any], *, max_items: int = 30,
+                   include_items: bool = True) -> dict[str, Any]:
+    """The demand snapshot cut down to what a local model can actually hold.
+
+    Keeps every field the prompt tells the model it may cite -- the evidence_id
+    and source_url above all -- and drops what it is forbidden to quote anyway:
+    raw_signal, score_reasons, and each candidate's own nested evidence bundle.
+    Roughly 310,000 chars becomes roughly 37,000.
+    """
+    if not isinstance(snapshot, dict):
+        return {}
+    items = [
+        {key: item.get(key) for key in _RADAR_ITEM_FIELDS}
+        for item in (snapshot.get("items") or [])[:max_items]
+        if isinstance(item, dict)
+    ]
+    candidates = [
+        {key: row.get(key) for key in _RADAR_CANDIDATE_FIELDS}
+        for row in (snapshot.get("candidates") or [])
+        if isinstance(row, dict)
+    ]
+    winner = snapshot.get("winner") or {}
+    return {
+        "captured_at": snapshot.get("captured_at"),
+        "markets": snapshot.get("markets"),
+        "queries": snapshot.get("queries"),
+        "freshness_counts": snapshot.get("freshness_counts"),
+        "freshness_policy": snapshot.get("freshness_policy"),
+        "source_health": snapshot.get("source_health"),
+        "corroboration": snapshot.get("corroboration"),
+        "commissioning_eligible": snapshot.get("commissioning_eligible"),
+        # The prompt copy leaves these out: the same rows already travel as the
+        # untrusted-evidence bundle, and sending them twice is what pushed the
+        # payload past the context window in the first place.
+        "items": items if include_items else "supplied separately as UNTRUSTED EVIDENCE",
+        "item_count_total": len(snapshot.get("items") or []),
+        "catalog_evidence": (snapshot.get("catalog_evidence") if include_items
+                             else "supplied separately as UNTRUSTED EVIDENCE"),
+        "candidates": candidates,
+        "winner": {key: winner.get(key) for key in _RADAR_WINNER_FIELDS} if isinstance(winner, dict) else {},
+    }
+
+
 def _marker(text: str, key: str, default: str = "") -> str:
     """Extract "KEY: value" from free-form LLM synthesis output.
 
@@ -1425,16 +1752,21 @@ def _ia_peek_pick_from_zone(zone_name: str, manifest: dict, today, cooldown_days
         if used_date and state:
             if state not in state_last_used or used_date > state_last_used[state]:
                 state_last_used[state] = used_date
-    for tier_types in (_IA_PEEK_LANDMARK_TYPES, _IA_PEEK_LOCAL_ICON_TYPES, _IA_PEEK_WATER_TYPES):
+    for tier_types in (None, _IA_PEEK_LANDMARK_TYPES, _IA_PEEK_LOCAL_ICON_TYPES, _IA_PEEK_WATER_TYPES):
         if tier_types is _IA_PEEK_WATER_TYPES and water_blocked:
             continue
-        tier_entries = [e for e in entries if e.get("type") in tier_types]
+        if tier_types is None:  # density-first pass, mirrors workflow_engine._ia_pick_from_zone
+            tier_entries = [e for e in entries if int(e.get("density") or 0) >= 5
+                            and not (water_blocked and e.get("type") in _IA_PEEK_WATER_TYPES)]
+        else:
+            tier_entries = [e for e in entries if e.get("type") in tier_types]
         if not tier_entries:
             continue
         eligible = [e for e in tier_entries if _ia_peek_days_since(e.get("used_date"), today) >= cooldown_days]
         if not eligible:
             continue
-        eligible.sort(key=lambda e: (round(_ia_peek_candidate_weight(e, weights) * 10) / 10,
+        eligible.sort(key=lambda e: (int(e.get("density") or 3),
+                                     round(_ia_peek_candidate_weight(e, weights) * 10) / 10,
                                      _ia_peek_days_since(state_last_used.get(e.get("state")), today)),
                       reverse=True)
         return eligible[0]
@@ -1633,6 +1965,482 @@ def _sanjeevani_trends() -> Any | None:
     except Exception:
         sys.modules.pop(key, None)
         return None
+
+
+def _sanjeevani_travel() -> Any | None:
+    """Sanjeevani's travel_discovery module (scored, news-led travel stories); same loading pattern as above."""
+    import importlib.util
+    import sys
+    lib_path = Path(os.environ.get(
+        "SANJEEVANI_RESEARCH_LIBRARY", r"E:\ONE-SUITE\sanjeevani\research_library.py"))
+    path = lib_path.with_name("travel_discovery.py")
+    if not path.is_file():
+        return None
+    key = "sanjeevani_travel_discovery"
+    cached = sys.modules.get(key)
+    if cached is not None:
+        return cached
+    try:
+        spec = importlib.util.spec_from_file_location(key, path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[key] = module
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        sys.modules.pop(key, None)
+        return None
+
+
+# The Chairman's rule (2026-10-08): a story about India or Indian travellers is told in Hinglish with the Hindi in
+# Devanagari; a story from outside India is told entirely in English. Every stage reads the video's language from
+# here - script, voice lexicon, spoken-language tag, subtitles - so the two never disagree.
+SONIA_LANGUAGES: dict[str, dict[str, Any]] = {
+    "hinglish": {
+        "label": "Hinglish (Hindi in Devanagari)",
+        "targetLanguage": ("Natural conversational Hinglish; Hindi words in Devanagari, "
+                           "English terms and official place names in Latin"),
+        "scriptRule": "",  # the package's own Devanagari rule
+        "lexicon": True,
+    },
+    "en": {
+        "label": "English",
+        "targetLanguage": "Natural conversational English, warm and clear for Indian travellers; no Hindi",
+        "scriptRule": (
+            "SCRIPT AND PRONUNCIATION RULE - mandatory for every spoken line: write the whole narration in natural, "
+            "conversational English. Use no Hindi or Hinglish words and no Devanagari script at all. Keep brand "
+            "names, airline names and official place names in their usual spelling. Prefer short, plain words that "
+            "a voice reads naturally; spell out symbols and abbreviations that would sound awkward when spoken. "
+            "Before returning, scan every narration line and remove any Hindi word that slipped in."),
+        "lexicon": False,
+    },
+}
+
+
+_BARE_CUE = re.compile(r"(?m)^[ \t]*\[?[ \t]*(\d{1,2}):(\d{2})[ \t]*[–—-][ \t]*(\d{1,2}):(\d{2})[ \t]*\]?[ \t]*$")
+
+
+def normalize_script_cues(script: str) -> str:
+    """Rewrite every cue line as [m:ss–m:ss], the one shape the voice, SEO and subtitle parsers all read.
+
+    The first English script (Air France, 2026-10-08) wrote its cues as bare "00:00 – 00:30" lines. The robot's
+    ElevenLabs step only splits on bracketed cues, so it sent all 12,974 characters in one request and ElevenLabs
+    refused anything over 10,000; the chapter and subtitle parsers would have missed them too."""
+    return _BARE_CUE.sub(lambda m: f"[{int(m[1])}:{m[2]}–{int(m[3])}:{m[4]}]", script or "")
+
+
+def sonia_video_language(pick: dict[str, Any]) -> str:
+    """'hinglish' when the chosen story concerns India or Indian travellers, otherwise 'en'."""
+    india = bool(pick.get("india_angle")) or str(pick.get("destination") or "").strip().lower() == "india"
+    return "hinglish" if india else "en"
+
+
+def sonia_language_profile(payload_or_record: dict[str, Any] | None) -> dict[str, Any]:
+    """The language profile a job or plan record carries; older runs without one were Hinglish."""
+    key = str((payload_or_record or {}).get("language") or "hinglish").strip().lower()
+    return SONIA_LANGUAGES.get(key, SONIA_LANGUAGES["hinglish"]) | {"key": key if key in SONIA_LANGUAGES else "hinglish"}
+
+
+_SONIA_TRAVEL_INTENT = re.compile(
+    r"\b(?:visa|e-?visa|entry rule|passport|immigration|touris(?:m|t)|travell?er|travel advisory|"
+    r"hotel|resort|hostel|stay|itinerary|attraction|things to do|best time to visit|weather advisory|"
+    r"airline|airport|airfare|ticket fare|flight cancellations?|scheduled flights?|passenger flights?|"
+    r"direct flights?|new flight route|route launch|train|railway|"
+    r"cruise|ferry|booking|baggage|transit|layover|road trip)\b", re.I)
+
+
+def _sonia_has_travel_intent(candidate: dict[str, Any]) -> bool:
+    """A place in a headline is not a travel story.
+
+    The Queen Suthida fighter-flight story scored for Thailand and YouTube
+    velocity despite changing no traveller decision. Require an explicit
+    trip-planning, destination, transport or entry signal before commission.
+    """
+    text = " ".join([str(candidate.get("title") or ""),
+                     *[str(v) for v in candidate.get("headlines") or []]])
+    return bool(_SONIA_TRAVEL_INTENT.search(text))
+
+
+_STORY_STOP = {"the", "a", "an", "to", "of", "in", "on", "for", "and", "or", "its", "it",
+               "with", "from", "by", "as", "at", "is", "are", "new", "now", "this", "that",
+               "what", "how", "why", "you", "your", "check", "travel", "flights", "flight"}
+
+
+def _story_tokens(text: str) -> set[str]:
+    words = re.findall(r"[a-z0-9]+", str(text or "").casefold())
+    return {w for w in words if len(w) > 2 and w not in _STORY_STOP}
+
+
+def _sonia_repeats_recent_story(headline: str, recent_titles: list[str],
+                                *, overlap: float = 0.4) -> str:
+    """The recent title this headline retells, or '' when it is a new story.
+
+    The policy has two different rules and they are not the same window:
+    same_day_destination_reuse is about the destination and lasts a day, while
+    duplicate_window_days is about the story and lasts a month. Applying the
+    month to the destination blocks every popular country - on 2026-10-17 it
+    left Japan, Singapore, Thailand, Vietnam and the UAE all "covered in the
+    last 38 videos" and no story could be commissioned at all.
+
+    So the month is applied here, to the story itself. "Air India Adds
+    Non-stop Delhi To Osaka Flights To Its February 2027 Roster" and
+    yesterday's "Japan Flights 2027: Delhi to Osaka vs Tokyo Direct Routes"
+    share delhi, osaka and 2027; a different Japan story does not.
+    """
+    wanted = _story_tokens(headline)
+    if len(wanted) < 3:
+        return ""
+    for title in recent_titles:
+        seen = _story_tokens(title)
+        if not seen:
+            continue
+        shared = wanted & seen
+        # Measured against the shorter of the two, and with a floor on the
+        # count. A news headline carries a lot of filler the title of a Short
+        # does not: the Osaka pair shares delhi, osaka and 2027, which is
+        # three of the seven words in the shorter one but only three of ten in
+        # the longer, so a one-sided ratio missed it.
+        if len(shared) >= 3 and len(shared) / min(len(wanted), len(seen)) >= overlap:
+            return title
+    return ""
+
+
+def _sonia_content_policy() -> dict[str, Any]:
+    """VISTA's own content policy, as data rather than as a document.
+
+    floor_12_youtube_studio/agents/vista/content-policy.json has declared
+    duplicate_window_days, same_day_destination_reuse and the weekday hooks
+    since the floor was written, and no code had ever read it - the same shape
+    as Floor 05's capabilities.yaml, which left IMPRIMATUR dormant. Read now,
+    with the file's own numbers as the defaults so a missing file changes
+    nothing.
+    """
+    root = floors_bridge.floors_root()
+    if root is not None:
+        path = (root / "floor_12_youtube_studio" / "agents" / "vista" / "content-policy.json")
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+    return {"duplicate_window_days": 30}
+
+
+def _sonia_recent_topics(prior: list[str], *, limit: int = 25,
+                         include_shorts: bool = False,
+                         within_days: float | None = None) -> list[str]:
+    """Merge durable upload and commission history into IRIS's variety gate.
+
+    Obsidian ``ANGLE:`` notes are useful memory, but they are not the delivery
+    ledger. A successful upload can lack that prose marker, and a failed
+    production still needs to reserve its topic so the next trigger does not
+    commission the same story again. Read both authorities before discovery.
+    """
+    # (when, title): everything is ordered by recency before it is used, because
+    # the caller only looks at the first few. The Osaka Short of 2026-10-16 sat
+    # at position 25 of 25 - it reached the list only through the upload ledger,
+    # which was appended last - so the next day's check never saw it and
+    # commissioned the same story again.
+    dated: list[tuple[float, str]] = []
+    found: list[str] = []
+    output_dir = _home() / "agent_outputs"
+    try:
+        rankings = sorted(
+            output_dir.glob("*-yatra-story-ranking.json"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        job_ids = [path.name.removesuffix("-yatra-story-ranking.json") for path in rankings[:limit * 3]]
+        job_tasks: dict[str, str] = {}
+        if job_ids:
+            placeholders = ",".join("?" for _ in job_ids)
+            try:
+                db = _connect()
+                try:
+                    job_tasks = {
+                        str(row["id"]): str(row["task"] or "")
+                        for row in db.execute(
+                            f"SELECT id, task FROM jobs WHERE id IN ({placeholders})", tuple(job_ids),
+                        )
+                    }
+                finally:
+                    db.close()
+            except (OSError, sqlite3.Error):
+                job_tasks = {}
+        for path in rankings[:limit * 3]:
+            job_id = path.name.removesuffix("-yatra-story-ranking.json")
+            task = job_tasks.get(job_id)
+            if (not include_shorts) and task is not None and not (
+                "Sonia Travel Vlogs - Every other day 00:30 IST" in task
+                or "completed through YATRA" in task
+            ):
+                # VISTA Shorts use the same research helper and filename
+                # suffix, and their three daily slots must not evict a week of
+                # long-form history from YATRA's repeat window. But a Short
+                # asking what has already been covered has to see the other
+                # Shorts - skipping them is what let 17 October repeat 16
+                # October's Delhi-Osaka story - so the caller says which it is.
+                continue
+            row = json.loads(path.read_text(encoding="utf-8"))
+            title = str(row.get("pick") or "").strip()
+            if title:
+                dated.append((path.stat().st_mtime, title))
+            if len(dated) >= limit * 2:
+                break
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        pass
+
+    ledger_path = Path(os.environ.get(
+        "ONE_SONIA_UPLOAD_LEDGER",
+        r"C:\Users\pc\Documents\LAO\yatra-upload\upload-ledger.json",
+    ))
+    try:
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+        rows = ledger.values() if isinstance(ledger, dict) else ledger
+        for row in rows:
+            title = str((row or {}).get("title") or "").strip()
+            if not title:
+                continue
+            when = 0.0
+            try:
+                when = datetime.fromisoformat(str((row or {}).get("uploaded_at") or "")).timestamp()
+            except ValueError:
+                when = 0.0
+            dated.append((when, title))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        pass
+
+    dated.sort(key=lambda row: row[0], reverse=True)
+    if within_days is not None:
+        edge = datetime.now(timezone.utc).timestamp() - within_days * 86400
+        # An undated entry (a memory note) keeps its place rather than being
+        # dropped for having no clock.
+        dated = [row for row in dated if row[0] == 0.0 or row[0] >= edge]
+    found = [title for _, title in dated]
+    found.extend(str(value).strip() for value in prior if str(value).strip())
+    unique: list[str] = []
+    seen: set[str] = set()
+    for title in found:
+        key = re.sub(r"[^a-z0-9]+", " ", title.casefold()).strip()
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(title)
+    return unique[:limit]
+
+
+def _sonia_brief_repeat(brief: str, prior: list[str], *, window: int = 7) -> str:
+    """Return the recent title that repeats an evergreen fallback destination.
+
+    News discovery owns its own destination gate.  Search-demand fallback is
+    model-written, so it needs an independent deterministic gate before any
+    narration or paid voice work begins.  Require the brief's explicit
+    Destination/Topic field and compare that destination with the last week of
+    durable uploads/commissions.  An absent field is unsafe rather than an
+    invitation to guess.
+    """
+    match = re.search(
+        r"(?im)^\s*(?:\*{0,2})destination(?:\s*/\s*topic)?(?:\*{0,2})\s*:\s*(.+?)\s*$",
+        brief or "",
+    )
+    if not match:
+        return "missing explicit Destination/Topic field"
+    destination = re.sub(r"[^a-z0-9]+", " ", match.group(1).casefold()).strip()
+    destination = re.sub(r"\b(?:specifically|general|destination|topic)\b.*$", "", destination).strip()
+    if not destination:
+        return "missing explicit Destination/Topic field"
+    for title in prior[:max(1, window)]:
+        normalized = re.sub(r"[^a-z0-9]+", " ", str(title).casefold()).strip()
+        if re.search(rf"\b{re.escape(destination)}\b", normalized):
+            return str(title)
+    return ""
+
+
+def _vista_same_day_commissions(*, now: datetime | None = None) -> list[dict[str, str]]:
+    """Return today's live/finished VISTA stories from the durable job ledger.
+
+    VISTA runs three independent slots. Memory is prose, not a reliable
+    concurrency/deduplication primitive: the 13:00 brief used to be invisible
+    to the 18:00 picker because ``memory.prior_titles`` only reads ``ANGLE:``
+    records. The queue already contains the typed headline and destination
+    before VISTA starts, so use it as the authority.
+    """
+    ist = ZoneInfo("Asia/Kolkata")
+    local_day = (now or datetime.now(ist)).astimezone(ist).date()
+    rows: list[dict[str, str]] = []
+    db = _connect()
+    try:
+        jobs = db.execute(
+            "SELECT id, task, created_at FROM jobs "
+            "WHERE agent_id = 'vista' AND status IN ('queued', 'running', 'completed') "
+            "ORDER BY created_at DESC LIMIT 100"
+        ).fetchall()
+    finally:
+        db.close()
+    for job in jobs:
+        try:
+            created = datetime.fromisoformat(str(job["created_at"]))
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            if created.astimezone(ist).date() != local_day:
+                continue
+            payload = json.loads(str(job["task"] or "{}"))
+            if payload.get("brand") != "sonia_travel_vlogs" or payload.get("content_format") != "youtube_short":
+                continue
+            story = (payload.get("production_spec") or {}).get("story") or {}
+            headline = str(story.get("headline") or "").strip()
+            destination = str(story.get("destination") or "").strip()
+            if headline or destination:
+                rows.append({"job_id": str(job["id"]), "headline": headline, "destination": destination})
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return rows
+
+
+def _vista_repeat_story(story: dict[str, Any], commissions: list[dict[str, str]]) -> dict[str, str] | None:
+    """Find an exact same-day headline or destination repeat."""
+    normal = lambda value: re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+    headline = normal(story.get("headline"))
+    destination = normal(story.get("destination"))
+    for prior in commissions:
+        if headline and headline == normal(prior.get("headline")):
+            return prior
+        if destination and destination == normal(prior.get("destination")):
+            return prior
+    return None
+
+
+def _sonia_story_pick(reusable: Any, prior: list[str], job_id: str, travel: Any | None = None,
+                      *, check_all_prior: bool = False,
+                      recent_stories: list[str] | None = None) -> dict[str, Any]:
+    """Choose today's Sonia Travel Vlogs story from scored, fresh travel news (any country, Indian viewer).
+
+    Returns {"status": "picked", ...} with the evidence and prompt for the write-up, {"status": "none", "reason": ...}
+    when discovery worked but nothing is commissionable today, or {"status": "unavailable"} when the module could not
+    run (the caller then falls back to the old single-query research). CODE picks; the model only writes up."""
+    travel = travel or _sanjeevani_travel()
+    if travel is None:
+        return {"status": "unavailable"}
+    max_age = float(os.environ.get("ONE_SONIA_MAX_EVENT_AGE_HOURS", "96"))
+    min_outlets = int(os.environ.get("ONE_SONIA_MIN_OUTLETS", "2"))
+    try:
+        found = travel.discover(reusable, top_n=12, max_event_age_hours=max_age, youtube=travel.sanjeevani_youtube())
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "unavailable", "error": f"{type(exc).__name__}: {exc}"[:200]}
+    if not found.get("candidates"):
+        return {"status": "unavailable", "error": "travel discovery returned no destination stories"}
+    # choose() compares a story against recent_titles[:recent_window], so the
+    # window is a count of titles, not a span of time. For a Short the caller
+    # has already cut the list to the policy's duplicate window by date, and
+    # all of it must be checked: VISTA publishes three a day, so seven titles
+    # is two days, and 17 October repeated 16 October because the Short it
+    # would have matched sat at position 25.
+    recent_window = (len(prior) if check_all_prior
+                     else int(os.environ.get("ONE_SONIA_RECENT_DESTINATION_WINDOW", "7")))
+    pick, ranking = travel.choose(
+        found, list(prior), min_outlets=min_outlets, recent_window=recent_window,
+    )
+    for candidate in ranking:
+        if candidate.get("eligible") and not _sonia_has_travel_intent(candidate):
+            candidate["eligible"] = False
+            candidate.setdefault("verdict", []).append("outside Sonia niche: no traveller decision or destination utility")
+        # The policy's duplicate window, applied to the story rather than to
+        # the country: 17 October retold 16 October's Delhi-Osaka story, and
+        # the destination gate could not have caught it without blocking Japan
+        # for a month.
+        if candidate.get("eligible") and recent_stories:
+            repeat = _sonia_repeats_recent_story(
+                str(candidate.get("headline") or ""), recent_stories)
+            if repeat:
+                candidate["eligible"] = False
+                candidate.setdefault("verdict", []).append(
+                    f"already covered: {repeat[:70]}")
+    if pick is not None and not _sonia_has_travel_intent(pick):
+        pick = next((candidate for candidate in ranking if candidate.get("eligible")
+                     and _sonia_has_travel_intent(candidate)), None)
+    # Sunday's community poll lets viewers choose the next video. Their winner is taken when it is one of today's
+    # commissionable stories (same freshness and outlet gates as any pick); otherwise the score decides as usual.
+    viewer_vote = None
+    try:
+        from openjarvis.one_agents import sonia_community
+        community = sonia_community.load()
+        vote = community.viewer_vote()
+        if vote:
+            names = {str(vote.get("place") or "").lower(), str(vote.get("country") or "").lower()} - {""}
+            voted = [c for c in ranking if c.get("eligible") and str(c.get("destination") or "").lower() in names]
+            if voted:
+                pick = max(voted, key=lambda c: c["score"])
+                community.mark_vote_used(vote["post_id"], job_id)
+                viewer_vote = {"caption": vote.get("caption"), "votes": vote.get("votes"), "total": vote.get("total")}
+    except Exception:  # noqa: BLE001 - the vote is a bonus; discovery stands on its own
+        viewer_vote = None
+
+    def brief_row(c: dict[str, Any]) -> dict[str, Any]:
+        return {"title": c["title"], "destination": c["destination"], "score": c["score"], "outlets": c["n_sources"],
+                "latest_age_hours": c.get("latest_age_hours"), "breakdown": c.get("breakdown"),
+                "first_report_age_hours": (c.get("first_report") or {}).get("age_hours"),
+                "demand": c.get("demand"), "verdict": c.get("verdict")}
+
+    output_dir = _home() / "agent_outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ranking_path = output_dir / f"{job_id}-yatra-story-ranking.json"
+    ranking_path.write_text(json.dumps({
+        "freshness": found.get("freshness"), "sources_ok": len(found.get("sources_ok") or []),
+        "sources_failed": found.get("sources_failed"), "pool_fresh_headlines": found.get("pool_fresh"),
+        "destination_stories": found.get("clusters"), "max_event_age_hours": max_age, "min_outlets": min_outlets,
+        "pick": pick["title"] if pick else None, "viewer_vote": viewer_vote,
+        "ranking": [brief_row(c) for c in ranking],
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    if pick is None:
+        top = "; ".join(f"{c['destination']}: {c['title'][:60]} ({'; '.join(c['verdict'])})" for c in ranking[:3])
+        return {"status": "none", "ranking_path": str(ranking_path),
+                "reason": (f"no travel story today is fresh (first report within {max_age:.0f}h), verified, covered by "
+                           f">= {min_outlets} outlets, with a clear destination and not a repeat of the last "
+                           f"{recent_window} commissioned videos. "
+                           f"Closest: {top}")}
+    urls = pick.get("urls") or []
+    fastest = (pick.get("demand") or {}).get("fastest") or {}
+    # ollama_synthesize hands the model ONLY evidence["eligible"], ["catalog_evidence"], ["counts"] and ["policy"] and
+    # silently drops every other key. The first version of this put the story under "chosen_story", so the model saw
+    # zero eligible items and answered "INSUFFICIENT DATA ... COMMISSION: NO". Everything it must use therefore goes
+    # into eligible rows (each row is serialised whole) and the policy text. The (very long) news URLs stay out.
+    evidence = [{"evidence_id": f"story-{i}", "title": h, "url": urls[i] if i < len(urls) else "",
+                 "source": "Sanjeevani travel discovery", "role": "scored_news_story", "source_type": "news",
+                 "age_hours": pick.get("latest_age_hours"), "freshness_bucket": "within 96h", "freshness_eligible": True,
+                 "outlets_covering_the_story": pick["n_sources"], "destination": pick["destination"]}
+                for i, h in enumerate(pick["headlines"][:6])]
+    receipt = {"evidence_id": "selection", "title": f"Why Sanjeevani chose: {pick['title']}", "role": "scoring_receipt",
+               "source_type": "sanjeevani_scoring", "freshness_eligible": True, "destination": pick["destination"],
+               "viral_score": pick["score"], "score_breakdown": pick.get("breakdown"), "outlets": pick["sources"][:8],
+               "latest_report_age_hours": pick.get("latest_age_hours"),
+               "first_report_age_hours": (pick.get("first_report") or {}).get("age_hours"),
+               "fastest_fresh_youtube_video": ({"title": fastest.get("title"), "views_per_hour": fastest.get("views_per_hour"),
+                                                "age_hours": fastest.get("age_hours")} if fastest else None),
+               "other_stories_ranked_lower_do_not_use_as_topics": [
+                   {"title": c["title"], "destination": c["destination"], "score": c["score"]}
+                   for c in ranking if c["title"] != pick["title"]][:4]}
+    evidence.append(receipt)
+    synthesis_evidence = {
+        "eligible": evidence, "catalog_evidence": [],
+        "counts": {"story_headlines": len(evidence) - 1, "outlets": pick["n_sources"]},
+        "policy": "One story was chosen by code from today's scored travel news; the model only writes it up. Score = "
+                  "outlets covering it + India angle + how much Indians travel there + actionable words (visa, fee, "
+                  "flight, route, rule) + hook words + Google Trends match + freshness, plus a bonus for the fastest "
+                  "YouTube video of the last 48 h (views per hour). Views are context, not proof. The 'selection' row "
+                  "carries the scoring receipt; the 'story-N' rows are the dated headlines.",
+    }
+    prompt = (
+        "You are IRIS, Media floor head. Sanjeevani scored today's latest travel news from every country for Indian "
+        f"viewers and CODE chose ONE story: \"{pick['title']}\" (destination: {pick['destination']}). Commission a "
+        "Sonia Travel Vlogs video about THIS story only, from ONLY the evidence supplied. Produce a structured "
+        "TrendBrief containing: discovery date; target viewer; destination/topic (this single destination, never a "
+        "list of countries); why this story was chosen (use the 'selection' evidence row: its score breakdown and the YouTube velocity); viral "
+        "search terms; why-now signal; evidence IDs; strongest truthful hook; locations/scenes worth showing; "
+        "practical flight/hotel/visa questions; volatile facts requiring same-day official verification; and "
+        "explicit exclusions. Never widen the topic to the runner-ups, never invent a trend, a number or a quote, and "
+        "never imply Sonia visited. End with COMMISSION: YES or NO. "
+        f"Avoid prior topics: {json.dumps(prior[:15], ensure_ascii=False)}")
+    return {"status": "picked", "pick": pick, "ranking_path": str(ranking_path), "evidence": evidence,
+            "synthesis_evidence": synthesis_evidence, "prompt": prompt}
 
 
 _NEWS_HOOK_GENERIC = {"road", "marg", "market", "bazaar", "bazar", "chowk", "nagar", "city",
@@ -1993,6 +2801,16 @@ def _sourcing_gate(brief: str, kdp_mode: str) -> tuple[bool, str]:
         _marker(brief, "ANGLE"), _marker(brief, "BRIEF") or brief[:2000],
     ) if part)
 
+    # Only reportage-shaped nonfiction needs this audit. Sending every advice
+    # book to a probabilistic classifier produced false HIGH verdicts for
+    # ordinary subjects such as algorithms and underwriting platforms. The
+    # deterministic pair deliberately requires both an institutional subject
+    # and investigative/current-affairs framing.
+    entity = _REPORTAGE_ENTITY.search(candidate)
+    framing = _REPORTAGE_FRAMING.search(candidate)
+    if not (entity and framing):
+        return False, ""
+
     verdict, _note = _research_synthesis(
         "You are a sourcing auditor for a book pipeline that CANNOT research: it "
         "has no way to look a fact up, read a document, interview anyone, or "
@@ -2021,15 +2839,317 @@ def _sourcing_gate(brief: str, kdp_mode: str) -> tuple[bool, str]:
     # No usable verdict. Judge the shape of the text rather than waving the
     # candidate through: a named institution plus reportage framing is the
     # exact combination that produced the refused title.
-    entity = _REPORTAGE_ENTITY.search(candidate)
-    framing = _REPORTAGE_FRAMING.search(candidate)
-    if entity and framing:
-        return True, (
-            "sourcing auditor unavailable and the candidate reads as reportage "
-            f"about a real institution (matched '{entity.group(0)}' with "
-            f"'{framing.group(0).strip()}')"
+    return True, (
+        "sourcing auditor unavailable and the candidate reads as reportage "
+        f"about a real institution (matched '{entity.group(0)}' with "
+        f"'{framing.group(0).strip()}')"
+    )
+
+
+_KDP_TOPIC_FAMILIES = {
+    "automation": re.compile(r"\b(ai|automation|automated|algorithm|machine[ -]?learning)\b", re.I),
+    "access_paywall": re.compile(r"\b(paywall|subscription|inaccessible|access|afford|locked|exclusive)\w*\b", re.I),
+    "career_displacement": re.compile(r"\b(job|career|profession|worker|workplace|task|role|obsolesc|displac|redundan)\w*\b", re.I),
+    "retirement": re.compile(r"\b(retire|pension|epfo|nps|senior citizen)\w*\b", re.I),
+    "tax": re.compile(r"\b(tax|income tax|deduction|shelter|compliance)\w*\b", re.I),
+    "health_sleep": re.compile(r"\b(sleep|glymphatic|neurolog|circadian|night shift)\w*\b", re.I),
+    "relationship": re.compile(r"\b(relationship|intimacy|partner|marriage|dating)\w*\b", re.I),
+}
+
+
+def _kdp_topic_history() -> list[dict[str, str]]:
+    """Return durable topic records even when Obsidian memory is unavailable."""
+    root = Path.home() / "Documents" / "LAO" / "kdp-book-factory" / "output"
+    history: list[dict[str, str]] = []
+    for path in sorted(root.glob("*/topic_log.txt"), reverse=True):
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError:
+            continue
+        if text:
+            history.append({"topic": text, "source": str(path)})
+    for title in memory.prior_titles("5", "Book Publishing (KDP)", limit=50):
+        history.append({"topic": title, "source": "ONE Vault / Floor 05"})
+    return history
+
+
+def _topic_terms(text: str) -> set[str]:
+    stop = {
+        "about", "after", "again", "against", "being", "book", "build", "from",
+        "have", "into", "more", "their", "them", "these", "this", "through",
+        "what", "when", "where", "which", "while", "with", "without", "your",
+    }
+    return {
+        token for token in re.findall(r"[a-z0-9]+", text.lower())
+        if len(token) >= 4 and token not in stop
+    }
+
+
+def _find_kdp_topic_duplicate(candidate: str,
+                              history: list[dict[str, str]] | None = None) -> dict[str, Any] | None:
+    """Fail closed on the same title, language, or three-part subject concept.
+
+    ``history`` is the floor's prior topics. Pass a snapshot taken BEFORE this
+    run wrote anything: HERMES records its commissioning note in the vault, and
+    the vault is one of the sources this reads, so a check made afterwards
+    compares the candidate against itself. On 2026-09-24 that is exactly what
+    happened -- lexical_similarity 1.0 against a "previous" title that was the
+    candidate, written minutes earlier by the same run.
+    """
+    candidate = candidate.strip()
+    if not candidate:
+        return {"reason": "empty candidate topic", "candidate": candidate}
+    candidate_terms = _topic_terms(candidate)
+    candidate_families = {
+        name for name, pattern in _KDP_TOPIC_FAMILIES.items() if pattern.search(candidate)
+    }
+    for record in (_kdp_topic_history() if history is None else history):
+        previous = record["topic"]
+        previous_terms = _topic_terms(previous)
+        union = candidate_terms | previous_terms
+        lexical = len(candidate_terms & previous_terms) / len(union) if union else 0.0
+        previous_families = {
+            name for name, pattern in _KDP_TOPIC_FAMILIES.items() if pattern.search(previous)
+        }
+        shared_families = sorted(candidate_families & previous_families)
+        # Three shared subject dimensions catches paraphrases such as
+        # "tasks automated by unaffordable tools" vs "invisible automation &
+        # paywall tech" even when the proposed title itself is different.
+        if lexical >= 0.34 or len(shared_families) >= 3:
+            return {
+                "reason": "topic overlaps prior KDP commission",
+                "candidate": candidate,
+                "previous": previous,
+                "source": record["source"],
+                "lexical_similarity": round(lexical, 3),
+                "shared_concepts": shared_families,
+            }
+    return None
+
+
+KDP_PAYMENTS_SYNC_MARKER = "kdp payments sync"
+# Must match the rows already on the books; it is part of the upsert key.
+KDP_STORE = "amazon-kdp"
+
+
+def _revenue_service(module_name: str) -> Any | None:
+    """Import one of the company's shared revenue modules by path.
+
+    floors_bridge.load() cannot reach these: it resolves
+    <floor>/lib/<module>.py, and the revenue service lives at
+    _services/revenue/<module>.py with no lib package. Asking it anyway
+    returned None and the sync reported "the revenue service is unavailable"
+    while silently banking nothing - found 2026-09-24 when a listings refresh
+    said it had synced zero titles and had no error to show for it.
+
+    The directory goes on sys.path because these modules import each other by
+    bare name (kdp_payments does `import money`).
+    """
+    directory = floors_bridge.floors_root() / "_services" / "revenue"
+    target = directory / f"{module_name}.py"
+    if not target.is_file():
+        return None
+    if str(directory) not in sys.path:
+        sys.path.insert(0, str(directory))
+    try:
+        import importlib
+
+        return importlib.import_module(module_name)
+    except Exception as exc:  # noqa: BLE001 - a missing service must not stop the job
+        print(f"[one-agents] revenue service {module_name} unavailable: {exc}", flush=True)
+        return None
+
+
+def _publishing_lib(module_name: str) -> Any | None:
+    """One of Floor 5's own modules, or None if it cannot be loaded.
+
+    None rather than an exception: these enrich the nightly sync, and a
+    missing one must not stop the money half from being banked.
+    """
+    return floors_bridge.load("floor_05_publishing", module_name)
+
+
+def _kdp_listings_sync() -> dict[str, Any]:
+    """Refresh what the board counts as purchasable from the real shelf.
+
+    The listings table said 10 while the shelf carried three titles it had
+    never heard of, including the one published that morning - listings were
+    written once and never reconciled. Upsert only: KDP paginates, so a title
+    this read does not see has not necessarily gone, and marking it dead on
+    that basis would be worse than a stale count.
+    """
+    from openjarvis.tools import kdp_reports_reader as reports
+
+    money = _revenue_service("money")
+    if money is None:
+        return {"synced": 0, "reason": "the revenue service is unavailable"}
+    try:
+        shelf = reports.read_bookshelf(headless=True)
+    except Exception as exc:  # noqa: BLE001 - the money half already succeeded
+        return {"synced": 0, "error": f"{type(exc).__name__}: {exc}"[:200]}
+
+    # Exclusivity is read on the same pass because it is read from the same
+    # page, and because it is what decides whether a title can earn anywhere
+    # but Kindle. On 2026-09-26 eight of ten said "KDP Select: eBook enrolled".
+    eligibility = _publishing_lib("distribution_eligibility")
+
+    synced = []
+    for title in shelf:
+        if not title.get("asin") or not title.get("title"):
+            continue
+        free_on = ""
+        if eligibility is not None:
+            free_on = eligibility.verdict(title).get("wide_eligible_on") or ""
+        money.record_listing(
+            # The store label is half the upsert key. Writing "Amazon KDP"
+            # where the table already said "amazon-kdp" did not update ten
+            # listings, it created ten more.
+            "5", KDP_STORE, title["asin"], title["title"],
+            status=title.get("status") or "live",
+            url=f"https://www.amazon.com/dp/{title['asin']}",
+            price=title.get("price_usd"), currency="USD",
+            exclusive=title.get("kdp_select"),
+            exclusive_until=free_on,
+            published_on=title.get("submitted_on") or "",
         )
-    return False, ""
+        synced.append(title["asin"])
+
+    position = (eligibility.assess(shelf) if eligibility is not None
+                else {"summary": "the eligibility engine is unavailable"})
+    return {"synced": len(synced), "asins": synced,
+            "distribution": {k: position.get(k) for k in
+                             ("summary", "wide_eligible_count", "exclusive_count",
+                              "unknown_count", "next_title_free_on")},
+            "owner_actions": position.get("owner_actions", [])[:12]}
+
+
+def _kdp_payments_sync(job: dict[str, Any]) -> dict[str, Any]:
+    """Read KDP's payments report and put the settled money on the books.
+
+    METRON's work, not the head's. Floor 5 already seats a measurement and
+    attribution worker, and reading what a storefront actually paid is exactly
+    that job; HERMES commissions titles and reports upward. It ran under
+    HERMES for one night because the marker was hung on the head's handler as
+    the quickest place to attach a trigger, and the building showed it: the
+    floor head sitting at his desk announcing Amazon's payment totals.
+
+    Runs nightly because the only thing that changes between runs is the
+    calendar: KDP marks a payment "Paid" the day it is scheduled, so the same
+    rows sit there for days before the money exists. Settlement is decided by
+    the payment date, which is why the 29th needs no special case - the run
+    that morning simply finds two more rows on the settled side.
+
+    Idempotent on KDP's own payment numbers, so every other night is a no-op.
+
+    The two halves are independent on purpose
+    -----------------------------------------
+    The money and the shelf live on different Amazon hosts, and only one of
+    them keeps asking to be signed in again. Measured on 2026-09-29, same
+    browser and same profile within one minute: kdp.amazon.com/bookshelf
+    loaded signed in, and kdpreports.amazon.com/payments bounced to the
+    sign-in form. Reading the payments report first and letting it raise took
+    the shelf refresh down with it, so a night that could still have updated
+    the catalogue and its exclusivity updated nothing at all.
+    """
+    from openjarvis.tools import kdp_reports_reader as reports
+
+    # Paired with head_briefs_worker in _hermes_hands_payments_to_metron.
+    # Confirming receipt first is what makes the two of them stand together
+    # in the building instead of the head leaving before the worker reacts.
+    stages.worker_confirms_receipt("metron", "Got it - opening the payments report")
+    stages.set_stage("metron", stages.EXECUTING, "Reading KDP's payments report")
+    try:
+        payments_service = _revenue_service("kdp_payments")
+        try:
+            split = reports.read_payments(headless=True)
+        except Exception as exc:  # noqa: BLE001 - the shelf half may still work
+            return _payments_unreadable(job, exc)
+
+        if payments_service is None:
+            return {"agent": "METRON", "mode": "revenue_sync", "recorded": False,
+                    "reason": "the revenue service is unavailable; nothing was banked",
+                    **{k: split[k] for k in ("as_of", "settled_total", "scheduled_total", "currency")}}
+
+        recorded = payments_service.record_settled(split)
+        recorded["listings"] = _kdp_listings_sync()
+        _publishing_event(
+            job, agent="METRON", event_type="kdp_payments_synced", stage="revenue",
+            summary=(f"{recorded['currency']} {recorded['imported_total']} newly banked; "
+                     f"{recorded['currency']} {recorded['pending_total']} still promised"),
+            details={"imported": recorded["imported"], "pending": recorded["pending"],
+                     "as_of": recorded["as_of"]},
+        )
+        return {"agent": "METRON", "mode": "revenue_sync", "recorded": True, **recorded,
+                "content": (f"Banked {recorded['currency']} {recorded['imported_total']} from KDP; "
+                            f"{recorded['currency']} {recorded['pending_total']} is promised but "
+                            f"not yet paid.")}
+    finally:
+        # Clears on a failed read too. A worker left mid-stage keeps its
+        # speech bubble up for days, which is how the stale SCRIBE bubble
+        # happened; a nightly job must never be able to leave one behind.
+        stages.clear_stage("metron")
+
+
+def _payments_unreadable(job: dict[str, Any], error: Exception) -> dict[str, Any]:
+    """Report a payments read that failed, and do the half that still works.
+
+    The shelf refresh is the probe as well as the work. If it succeeds, the
+    profile is signed in and only kdpreports.amazon.com is asking again, which
+    is a materially different thing to tell the owner than "the KDP profile
+    needs its one-time login" - that sentence sent them to re-authenticate a
+    profile that was never logged out, and it hid that the shelf could have
+    been refreshed all along.
+    """
+    listings = _kdp_listings_sync()
+    profile_alive = bool(listings.get("synced"))
+    reason = (
+        "Amazon refused the payments report while the same profile read the "
+        "shelf fine in the same minute, so nothing is logged out. That host "
+        "only mints a session for a real browser window - check this read is "
+        "running headed and parked off-screen rather than headless, which is "
+        "what caused every previous occurrence. ONE never types a password; "
+        "if a window genuinely cannot be opened, run kdp-login.ps1."
+        if profile_alive else
+        "The KDP profile could not read the payments report or the shelf, so "
+        "the session itself has lapsed. Run kdp-login.ps1 and sign in there."
+    )
+    _publishing_event(
+        job, agent="METRON", event_type="kdp_payments_unreadable", stage="revenue",
+        summary=("The payments report needs a fresh sign-in; the shelf was refreshed"
+                 if profile_alive else "KDP could not be read at all"),
+        details={"listings": listings, "error": f"{type(error).__name__}: {error}"[:300]},
+        status="waiting" if profile_alive else "failed",
+    )
+    return {"agent": "METRON", "mode": "revenue_sync", "recorded": False,
+            "profile_signed_in": profile_alive, "reason": reason,
+            "listings": listings,
+            "error": f"{type(error).__name__}: {error}"[:300],
+            "content": reason}
+
+
+def _hermes_hands_payments_to_metron(job: dict[str, Any]) -> dict[str, Any]:
+    """Walk the nightly payments brief over to the worker whose job it is.
+
+    The trigger enters through the head because the scheduler refuses any
+    other target - dispatch() rejects a worker or anything with a
+    reports_to, so pointing the nightly trigger straight at METRON failed
+    with "Scheduled trigger refused non-head target: metron" and banked
+    nothing. That rule is right: a scheduled routine arrives at the floor's
+    head, who briefs a worker. The head is the door, not the desk.
+
+    So HERMES keeps the trigger and hands the work over properly, through
+    the floor's one handoff choreography, the same way he briefs SCRIBE.
+    """
+    return stages.head_briefs_worker(
+        "hermes", "metron",
+        carrying_detail="Taking the KDP payments brief to METRON",
+        briefing_detail="Read tonight's payments report and bank what has arrived",
+        receiving_detail="Taking the payments brief",
+        awaiting_detail="Waiting on METRON's payment reconciliation",
+        enqueue=lambda: enqueue_job("metron", str(job.get("task") or ""),
+                                    mode="execute", tier="fast"),
+    ) | {"agent": "HERMES", "mode": "delegated",
+         "content": "Handed tonight's KDP payments read to METRON."}
 
 
 def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
@@ -2057,6 +3177,20 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     if mode == "report":
         return _hermes_report(job)
 
+    # The money clock, not the book clock, and checked before anything else:
+    # reading the payments report is METRON's work, and the nightly trigger
+    # dispatches straight there. This branch only catches a payments job that
+    # still reaches the head - an old trigger, or a hand dispatch - and walks
+    # it to the right desk.
+    #
+    # It has to come before the research event and the stage below. While it
+    # sat after them, a sync left HERMES showing "researching" and put the
+    # banking summary in the head's own speech bubble, which is what the
+    # building was reporting on 2026-09-24: the head appeared to be reading
+    # Amazon's payments table instead of commissioning a title.
+    if KDP_PAYMENTS_SYNC_MARKER in str(job.get("task") or "").lower():
+        return _hermes_hands_payments_to_metron(job)
+
     mission_id = str(portfolio_payload.get("mission_id") or job["id"])
     _publishing_event(job, agent="HERMES", event_type="research_started",
                       stage="24h_demand_radar", summary="Fresh market-signal research started")
@@ -2069,6 +3203,9 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     # Read its own history first. Without this the floor happily re-commissions
     # a title it already published — the vault is what makes it memory.
     already = memory.prior_titles("5", "Book Publishing (KDP)")
+    # Frozen here, before this run writes its own brief and vault note, so the
+    # uniqueness gate can never reject a candidate for matching itself.
+    topic_history = _kdp_topic_history()
     avoid = (
         "\n\nAlready commissioned by this floor — do not repeat or closely "
         "overlap these:\n" + "\n".join(f"- {t}" for t in already[:15])
@@ -2103,6 +3240,15 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
             # the unstripped prefix dominates the extracted query terms and
             # returns nothing a real headline would ever match.
             research_query = re.sub(r"^\[ONE trigger: [^\]]+\]\s*", "", task).strip() or task
+            # The old generic category sweep repeatedly crowned wellness and
+            # personal-finance topics. Keep the collectors and scoring intact,
+            # but seed them with the catalogue's actual commercial territory.
+            # This is a research query, not a manuscript instruction.
+            if re.search(r"next governed KDP|book factory|authority-catalogue", research_query, re.I):
+                research_query = (
+                    "Windows PowerShell networking enterprise automation "
+                    "agentic AI operations governance practical guide"
+                )
             def _survivable(call: Any, empty: dict[str, Any]) -> Any:
                 # All five evidence calls for one topic sit in a single try block
                 # inside the floor's collect(), so one slow site deletes the whole
@@ -2161,6 +3307,13 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
                  "winner": (radar_snapshot.get("winner") or {}).get("topic"),
                  "winner_score": (radar_snapshot.get("winner") or {}).get("score")},
     )
+    if not _job_is_active(str(job["id"])):
+        stages.clear_stage("hermes")
+        return {
+            "agent": "HERMES", "mode": "cancelled", "handed_to": None,
+            "content": "Research finished after queue ownership expired; result discarded.",
+            "radar_snapshot": str(radar_path),
+        }
 
     # Freshness is a commissioning gate, not an informational event. Models
     # may interpret evidence only after deterministic acquisition meets this
@@ -2222,11 +3375,45 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
                 supply.append(radar.book_supply(query, timeout=10, limit=10))
             except Exception as exc:
                 supply.append({"query": query, "error": f"{type(exc).__name__}: {exc}"[:300]})
+    # The whole snapshot used to go into the prompt verbatim -- 261,503 chars on
+    # 2026-09-23 -- and the same evidence went in AGAIN as the untrusted-evidence
+    # bundle. Together ~80,000 tokens into a 16,384-token window, so Ollama
+    # dropped ~80% of it from the front: every day's fresh signals were cut and
+    # only the fixed instruction tail survived. That is why HERMES returned a
+    # byte-identical ANGLE on 20, 21, 22 and 23 September even though the
+    # deterministic winner changed (money -> business -> anxiety and depression).
+    # Send a compact view instead: same facts the model is allowed to cite
+    # (evidence_id, title, source_url, age, bucket), without the per-candidate
+    # evidence bundles that made up 180,395 of those chars.
     research_evidence = json.dumps(
-        {"trending_now": radar_snapshot, "book_supply": supply},
+        {"trending_now": _compact_radar(radar_snapshot, include_items=False),
+         "book_supply": "supplied separately as UNTRUSTED EVIDENCE"},
         ensure_ascii=False, separators=(",", ":"),
     )
+    # The engine scores topics without knowing what this floor has already
+    # published, so it happily re-crowned a subject the uniqueness gate would
+    # reject 300 lines later -- the whole run spent to be thrown away. Drop
+    # colliding topics here, while there is still a shortlist to fall back on.
+    shortlist = [row for row in (radar_snapshot.get("candidates") or [])
+                 if isinstance(row, dict) and row.get("build_eligible")]
+    fresh_shortlist = [row for row in shortlist
+                       if not _find_kdp_topic_duplicate(str(row.get("topic") or ""), topic_history)]
     winner = radar_snapshot.get("winner") or {}
+    if winner and _find_kdp_topic_duplicate(str(winner.get("topic") or ""), topic_history) and fresh_shortlist:
+        superseded = str(winner.get("topic") or "")
+        winner = fresh_shortlist[0]
+        radar_snapshot["winner"] = winner
+        _publishing_event(
+            job, agent="HERMES", event_type="winner_repointed",
+            stage="topic_uniqueness_gate",
+            summary=(f"Deterministic winner {superseded!r} was already commissioned; "
+                     f"promoted {winner.get('topic')!r} from the shortlist"),
+            details={"superseded": superseded, "promoted": winner.get("topic"),
+                     "shortlist": [row.get("topic") for row in fresh_shortlist]},
+        )
+    # Everything below the winner, newest-first, for the retry after synthesis.
+    remaining_shortlist = [row for row in fresh_shortlist
+                           if row.get("topic") != winner.get("topic")]
     _publishing_event(
         job, agent="HERMES", event_type="book_demand_shortlist_completed",
         stage="reader_intent_competition_score",
@@ -2239,13 +3426,18 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
                  "winner": winner.get("topic"), "winner_score": winner.get("score")},
     )
 
-    brief, note = _research_synthesis(
+    def _synthesis_prompt(active_winner: dict[str, Any], rejected: str = "") -> str:
+        return (
         "You are HERMES, head of Book Publishing at a digital holding company, "
         "commissioning the next Amazon KDP title.\n\n"
         f"Request: {task}\n\n"
-        "Decide what to commission and why. Ground it in what actually sells on "
-        "KDP: real reader demand, a specific reachable audience, and a gap a new "
-        "title can genuinely fill. Do not invent internal teams, tools, boards or "
+        "Commission a nonfiction utility book inside Vineet Pandey's demonstrated "
+        "authority lane: Windows, PowerShell, networking, enterprise automation, "
+        "agentic AI operations, AI governance, or an adjacent implementation "
+        "playbook. Reject generic wellness, retirement, romance, horror, lifestyle, "
+        "and trend-chasing concepts even if the raw trend is strong. Ground the "
+        "decision in purchase intent, a reachable buyer, and a defensible gap. "
+        "Do not invent internal teams, tools, boards or "
         "databases — the only production system is an automated drafting pipeline.\n\n"
         "That pipeline cannot research. It cannot look a fact up, read a document, "
         "interview anyone or verify a name, so do not commission a book whose honest "
@@ -2254,7 +3446,15 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "it would be invented and the book would be unpublishable. Nonfiction is "
         "welcome when it delivers a method, framework or skill the reader applies to "
         "their own life.\n\n"
-        "Use ONLY the captured evidence below and cite its exact source_url values. "
+        # The contradiction that cost four runs. This line survived the
+        # 2026-10-14 prompt-gate fix one screen below it, and it wins: asked
+        # for "exact source_url values" that were stripped before it ever saw
+        # the evidence, the model supplied URL-shaped tokens instead - on the
+        # 16:05 run, eight base64 Google News redirect fragments, none of
+        # which appear anywhere in its context. It was obeying the prompt.
+        "Use ONLY the captured evidence below, and cite it by the evidence_id "
+        "each radar item carries. The evidence deliberately carries no URLs: "
+        "there is no link to quote, and a URL-shaped citation is an invented one. "
         "The Floor 05 engine has already selected the winner deterministically. Use only "
         "that winner; do not replace it, alter its scores, or invent a different candidate. "
         "Do not claim you searched sources that are absent. A viral headline is not book demand: "
@@ -2263,7 +3463,8 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "signals in >48h or unknown buckets. Catalog supply is a separate current-index signal.\n\n"
         f"Floor-owned operating method:\n{_publishing_skill_text()}\n\n"
         f"Machine-captured official/public evidence (discovery and catalog supply; neither proves sales):\n{research_evidence}\n\n"
-        f"Deterministic winner: {json.dumps(winner, ensure_ascii=False)}\n\n"
+        f"Deterministic winner: "
+        f"{json.dumps(_without_urls(active_winner), ensure_ascii=False)}\n\n"
         # The evidence is news, so the model kept building the book on top of it:
         # on 2026-09-19 it commissioned a title whose whole "why now" was Meta and
         # Accenture reorganising their management layers, and the sourcing gate
@@ -2277,24 +3478,70 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "what the reader is dealing with in their own life or work - not on what "
         "some organisation announced. A brief that leans on a named organisation "
         "is refused at the next gate and the whole run is wasted.\n\n"
+        "Use the earning catalogue control as the packaging benchmark: an exact "
+        "utility phrase, a concrete outcome, high contrast, and a proof cue readable "
+        "at 120x192 pixels. Do not imitate its artwork. Reject dark cinematic "
+        "photography with a long abstract title and tiny subtitle. Prefer a literal "
+        "title under 60 characters and a $2.99-$4.99 launch-price hypothesis. "
+        "Define the lead magnet and distribution before manuscript production.\n\n"
         "Reply in exactly this shape:\n"
-        "MODE: fiction | nonfiction\n"
+        "MODE: nonfiction\n"
         "REGION: <primary market, e.g. global or india>\n"
         "ANGLE: <one line — the specific hook this book leads with, naming no real "
         "organisation or person>\n"
-        "DEMAND_SCORE: <0-100>\nPACKAGING_SCORE: <0-100>\n"
-        "CONVERSION_SCORE: <0-100>\nDIFFERENTIATION_SCORE: <0-100>\n"
-        "EXPANSION_SCORE: <0-100>\nRIGHTS_SCORE: <0-100>\nPERFORMANCE_SCORE: <0-100>\n"
-        "EVIDENCE: <URLs or named current sources supporting the scores>\n"
+        "TITLE: <literal benefit-led working title, preferably <=60 characters>\n"
+        "BUYER: <one specific role and problem>\n"
+        "PURCHASE_QUERY: <exact problem-led query a buyer would type>\n"
+        "SERIES: <Windows Power User Field Guides | Enterprise Automation Playbooks | Agentic AI Operations>\n"
+        "LAUNCH_PRICE_USD: <2.99-4.99 unless evidence justifies another price>\n"
+        "THUMBNAIL_PROMISE: <3-6 dominant words plus one concrete proof/benefit badge>\n"
+        "LEAD_MAGNET: <one useful checklist, command sheet, template, or workbook>\n"
+        "LINKEDIN_ANGLES: <three teaching-post angles>\n"
+        "A_PLUS_PLAN: <three visual modules>\n"
+        "DEMAND_SCORE: <0-100>\nBUYER_INTENT_SCORE: <0-100>\n"
+        "DIFFERENTIATION_SCORE: <0-100>\n"
+        "PACKAGING_SCORE: <0-100>\nTHUMBNAIL_CLARITY_SCORE: <0-100>\n"
+        "SERIES_FIT_SCORE: <0-100>\nLAUNCH_READINESS_SCORE: <0-100>\n"
+        # Asked for exactly what the gate accepts. This line used to read
+        # "URLs or named current sources", which was impossible and useless in
+        # turn: source_url is stripped before the model ever sees the evidence
+        # (it was half the token bundle), and a named source cannot be checked
+        # against anything. The model obeyed the line it was given - on
+        # 2026-10-13 it wrote "Recent reports on rising industrial maintenance
+        # costs" - and the gate correctly refused it. The instruction to cite
+        # evidence_ids existed only in the media floor's prompt, never here.
+        # No specimen id here on purpose. The first version of this line carried
+        # "e.g. [a1b2c3d4e5f60718293a]" and on 2026-10-14 the model copied that
+        # placeholder straight into its answer, then invented a second one with
+        # letters that are not even hex. A concrete example in a prompt is an
+        # answer the model is allowed to give.
+        "EVIDENCE: <one line per claim, each ending with the evidence_id of the "
+        "radar item it comes from, in square brackets. Copy the id exactly as it "
+        "appears in the radar above - never compose, shorten or invent one. A "
+        "claim you cannot tie to a radar item does not belong here>\n"
         "BRIEF:\n"
         "<8-14 lines: target reader, why now, competing titles, what makes this "
         "one different, and the honest commercial risk>"
-        + avoid,
-        max_tokens=2200, evidence={"eligible": radar_snapshot.get("items", []),
-                                   "catalog_evidence": supply,
-                                   "counts": radar_snapshot.get("freshness_counts", {}),
-                                   "policy": radar_snapshot.get("freshness_policy", "")},
-    )
+        + avoid
+        + (("\n\nThe angle you proposed a moment ago was rejected as a repeat "
+            "of a book this floor already commissioned:\n" + rejected + "\n"
+            "Commission the winner named above instead, and lead with a different "
+            "reader problem.") if rejected else "")
+        )
+
+    def _synthesise(active_winner: dict[str, Any], rejected: str = "") -> tuple[str, str]:
+        return _research_synthesis(
+            _synthesis_prompt(active_winner, rejected),
+            # Same items, same trimmed shape as the prompt's own copy: the full
+            # rows were being sent here as well, so the day's evidence arrived
+            # twice and neither copy survived the context window.
+            max_tokens=2200, evidence={"eligible": _compact_radar(radar_snapshot)["items"],
+                                       "catalog_evidence": supply,
+                                       "counts": radar_snapshot.get("freshness_counts", {}),
+                                       "policy": radar_snapshot.get("freshness_policy", "")},
+        )
+
+    brief, note = _synthesise(winner)
 
     if not brief:
         # Research evidence is a hard requirement. A local planning template
@@ -2323,20 +3570,27 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         return blocked
 
     required_markers = (
-        "DEMAND_SCORE", "PACKAGING_SCORE", "CONVERSION_SCORE",
-        "DIFFERENTIATION_SCORE", "EXPANSION_SCORE", "RIGHTS_SCORE",
-        "PERFORMANCE_SCORE", "EVIDENCE",
+        "TITLE", "BUYER", "PURCHASE_QUERY", "SERIES", "LAUNCH_PRICE_USD",
+        "THUMBNAIL_PROMISE", "LEAD_MAGNET", "LINKEDIN_ANGLES", "A_PLUS_PLAN",
+        "DEMAND_SCORE", "BUYER_INTENT_SCORE",
+        "DIFFERENTIATION_SCORE", "PACKAGING_SCORE", "THUMBNAIL_CLARITY_SCORE",
+        "SERIES_FIT_SCORE", "LAUNCH_READINESS_SCORE", "EVIDENCE",
     )
     if any(not _marker(brief, marker) for marker in required_markers):
         audit_text, audit_note = _research_synthesis(
             "Act as an evidence auditor, not a commissioning writer. Audit the candidate below "
             "against the captured reader-demand and book-competition evidence below. "
-            "Use only supplied source_url values; do not invent citations. "
-            "Return ONLY these eight one-line markers. Scores must be 0-100 or UNKNOWN; "
-            "EVIDENCE must contain direct URLs:\n"
-            "DEMAND_SCORE:\nPACKAGING_SCORE:\nCONVERSION_SCORE:\n"
-            "DIFFERENTIATION_SCORE:\nEXPANSION_SCORE:\nRIGHTS_SCORE:\n"
-            "PERFORMANCE_SCORE:\nEVIDENCE:\n\n"
+            # Same correction as the commissioning contract above: this asked
+            # for source_url, which the evidence it is handed does not carry.
+            "Cite only the evidence_id values supplied below; do not invent "
+            "citations or name sources that are not in them. "
+            "Return ONLY these markers. Scores must be 0-100 or UNKNOWN; "
+            "EVIDENCE must quote evidence_ids in square brackets:\n"
+            "TITLE:\nBUYER:\nPURCHASE_QUERY:\nSERIES:\nLAUNCH_PRICE_USD:\n"
+            "THUMBNAIL_PROMISE:\nLEAD_MAGNET:\nLINKEDIN_ANGLES:\nA_PLUS_PLAN:\n"
+            "DEMAND_SCORE:\nBUYER_INTENT_SCORE:\n"
+            "DIFFERENTIATION_SCORE:\nPACKAGING_SCORE:\nTHUMBNAIL_CLARITY_SCORE:\n"
+            "SERIES_FIT_SCORE:\nLAUNCH_READINESS_SCORE:\nEVIDENCE:\n\n"
             f"Candidate:\n{brief}\n\nCaptured evidence:\n{research_evidence}",
             max_tokens=1200, evidence={"eligible": radar_snapshot.get("items", []),
                                        "catalog_evidence": supply,
@@ -2350,12 +3604,28 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
 
     # A provider returning fluent prose is not the same thing as completing
     # the research contract.  Fail closed unless the post-audit brief has the
-    # full scorecard and at least one direct evidence URL.  This prevents the
+    # full scorecard and provenance a reader could follow.  This prevents the
     # monitor from labelling a generic trend summary as completed research.
-    missing_markers = [marker for marker in required_markers if not _marker(brief, marker)]
-    evidence_value = _marker(brief, "EVIDENCE")
+    #
+    # Provenance is a resolvable evidence id OR a literal URL. This system
+    # strips source_url before the model ever sees it - the URLs were half the
+    # token bundle, see _RADAR_ITEM_FIELDS - so demanding "https://" in the
+    # brief asked the model for something its own context forbids. Run
+    # hermes-a75ab9b40ca8 was rejected on 2026-10-10 for "direct evidence
+    # URLs: 0" having cited its sources correctly, by id, exactly as the
+    # system prompt instructs. An id counts only when it resolves against this
+    # run's own snapshot, so an invented one still fails the gate.
+    score_markers = {marker for marker in required_markers if marker.endswith("_SCORE")}
+    missing_markers = [
+        marker for marker in required_markers
+        if (not _marker(brief, marker) if marker in score_markers
+            else not re.search(rf"^[ \t]*\**{re.escape(marker)}\**[ \t]*:",
+                               brief, re.MULTILINE | re.IGNORECASE))
+    ]
+    evidence_value = _evidence_block(brief)
     direct_urls = re.findall(r"https?://[^\s,)]+", evidence_value)
-    if missing_markers or not direct_urls:
+    cited_ids = _evidence_urls(radar_snapshot, evidence_value or brief)
+    if missing_markers or not (direct_urls or cited_ids):
         stages.clear_stage("hermes")
         output_dir = _home() / "agent_outputs"
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -2363,7 +3633,8 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         rejected_path.write_text(
             "# HERMES — Rejected Research Output\n\n"
             f"Missing score fields: {', '.join(missing_markers) or 'none'}\n\n"
-            f"Direct evidence URLs: {len(direct_urls)}\n\n{brief}\n",
+            f"Provenance: {len(direct_urls)} direct URL(s), "
+            f"{len(cited_ids)} resolvable evidence id(s)\n\n{brief}\n",
             encoding="utf-8",
         )
         blocked = {
@@ -2371,7 +3642,13 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
             "content": "Research output failed the idea-scorecard quality gate.",
             "blocked_reason": (
                 f"missing score fields: {', '.join(missing_markers) or 'none'}; "
-                f"direct evidence URLs: {len(direct_urls)}"
+                f"provenance: {len(direct_urls)} url(s), {len(cited_ids)} evidence id(s)"
+                + (f"; {_unknown_cited_ids(radar_snapshot, evidence_value)} cited id(s) "
+                   "match no radar item"
+                   if _unknown_cited_ids(radar_snapshot, evidence_value) else "")
+                + (f"; {_unresolved_citations(radar_snapshot, evidence_value)} cited source(s) "
+                   "are not in this run's evidence"
+                   if _unresolved_citations(radar_snapshot, evidence_value) else "")
             ),
             "radar_snapshot": str(radar_path), "output": str(rejected_path),
         }
@@ -2386,11 +3663,66 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         )
         return blocked
 
-    kdp_mode = _marker(brief, "MODE", "auto").lower()
-    if kdp_mode not in {"fiction", "nonfiction"}:
-        kdp_mode = "auto"
+    kdp_mode = _marker(brief, "MODE", "nonfiction").lower()
+    if kdp_mode != "nonfiction":
+        kdp_mode = "nonfiction"
     region = _marker(brief, "REGION", "global").lower()
     angle = _marker(brief, "ANGLE")
+
+    # A repeat used to end the day 300 lines below this point, with the brief
+    # file and the vault note already written for a candidate that was always
+    # going to be thrown away -- four days in a row, 20-23 September. The engine
+    # scored six candidates and only ever the first was tried. Ask again with
+    # the next one, here, while nothing has been written yet.
+    for attempt, next_winner in enumerate(remaining_shortlist[:2], start=1):
+        collision = _find_kdp_topic_duplicate(angle, topic_history) if angle else None
+        if not collision:
+            break
+        _publishing_event(
+            job, agent="HERMES", event_type="duplicate_retry",
+            stage="topic_uniqueness_gate",
+            summary=(f"Angle repeated a prior commission; retrying with "
+                     f"{next_winner.get('topic')!r} (attempt {attempt})"),
+            details={"rejected_angle": angle, "collision": collision,
+                     "next_topic": next_winner.get("topic")},
+        )
+        retry_brief, retry_note = _synthesise(next_winner, angle)
+        if not retry_brief:
+            break
+        brief, note = retry_brief, retry_note
+        winner = next_winner
+        radar_snapshot["winner"] = next_winner
+        kdp_mode = _marker(brief, "MODE", "nonfiction").lower()
+        if kdp_mode != "nonfiction":
+            kdp_mode = "nonfiction"
+        region = _marker(brief, "REGION", "global").lower()
+        angle = _marker(brief, "ANGLE")
+
+    authority = publishing_strategy.authority_fit(
+        "\n".join((_marker(brief, "TITLE"), angle, _marker(brief, "PURCHASE_QUERY"), brief))
+    )
+    selected_series = _marker(brief, "SERIES")
+    allowed_series = {
+        "Windows Power User Field Guides", "Enterprise Automation Playbooks",
+        "Agentic AI Operations",
+    }
+    if not authority["passed"] or selected_series not in allowed_series:
+        stages.clear_stage("hermes")
+        reason = ("candidate is outside Vineet Pandey's demonstrated authority lane"
+                  if not authority["passed"] else
+                  "candidate did not select exactly one approved catalogue series")
+        _publishing_event(
+            job, agent="HERMES", event_type="research_blocked",
+            stage="authority_fit_gate", summary=f"Rejected: {reason}",
+            details={"reason": reason, "authority_matches": authority["matches"],
+                     "series": selected_series}, status="rejected",
+        )
+        return {
+            "agent": "HERMES", "mode": "blocked", "_blocked": True,
+            "content": "Candidate rejected before BIBLOS at the authority-catalogue gate.",
+            "blocked_reason": reason, "angle": angle,
+            "radar_snapshot": str(radar_path),
+        }
 
     unsourceable, sourcing_reason = _sourcing_gate(brief, kdp_mode)
     if unsourceable:
@@ -2436,7 +3768,11 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         f"{radar_snapshot.get('library') or 'floor-local-fallback'} "
         f"v{radar_snapshot.get('library_version') or 'unknown'}; synthesis: "
         f"{os.environ.get('ONE_LOCAL_RESEARCH_MODEL', 'qwen3.5:9b')}\n\n"
-        f"{brief}\n",
+        f"{brief}\n"
+        # The model cites evidence ids, not links: the URLs never go into
+        # the prompt because they were half its weight. Resolve the ones it
+        # actually cited, so the brief a human reads still carries sources.
+        + _cited_sources_block(radar_snapshot, brief),
         encoding="utf-8",
     )
 
@@ -2501,15 +3837,20 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError):
             return None
 
-    dimensions = dict(winner.get("biblos_dimensions") or {})
-    if not dimensions:
-        dimensions = {
-            "demand": score("DEMAND_SCORE"), "packaging": score("PACKAGING_SCORE"),
-            "conversion": score("CONVERSION_SCORE"),
-            "differentiation": score("DIFFERENTIATION_SCORE"),
-            "expansion": score("EXPANSION_SCORE"), "rights": score("RIGHTS_SCORE"),
-            "performance": score("PERFORMANCE_SCORE"),
-        }
+    # The discovery engine ranks topics; it does not know the author's
+    # authority, final title, thumbnail, series or launch plan. Those commercial
+    # dimensions must come from the finished commissioning brief rather than
+    # inheriting optimistic topic proxies from the trend engine.
+    dimensions = {
+        "demand": score("DEMAND_SCORE"),
+        "buyer_intent": score("BUYER_INTENT_SCORE"),
+        "authority_fit": authority["score"],
+        "differentiation": score("DIFFERENTIATION_SCORE"),
+        "packaging": score("PACKAGING_SCORE"),
+        "thumbnail_clarity": score("THUMBNAIL_CLARITY_SCORE"),
+        "series_fit": score("SERIES_FIT_SCORE"),
+        "launch_readiness": score("LAUNCH_READINESS_SCORE"),
+    }
     evidence: list[dict[str, Any]] = []
     if winner.get("evidence"):
         evidence.extend(dict(row) for row in winner["evidence"].values() if isinstance(row, dict))
@@ -2558,9 +3899,32 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         evidence.append({"role": "competition_unavailable", "captured_at": _now(),
                          "error": f"{type(exc).__name__}: {exc}"[:500]})
 
+    # Uniqueness is a deterministic gate, not another instruction for the
+    # model to follow. Stop here before BIBLOS spends a slot on a known topic;
+    # the same check runs again in _hermes_commission to close the race where
+    # another title is completed while this audit is in flight.
+    duplicate = _find_kdp_topic_duplicate(angle, topic_history)
+    if duplicate:
+        stages.clear_stage("hermes")
+        _publishing_event(
+            job, agent="HERMES", event_type="duplicate_rejected",
+            stage="topic_uniqueness_gate",
+            summary="Candidate duplicates KDP topic history; BIBLOS not started",
+            details=duplicate, status="rejected",
+        )
+        result.update({"handed_to": None, "duplicate": duplicate})
+        result["content"] = "Duplicate KDP topic rejected before commercial audit."
+        return result
+
     # New titles never go straight from an attractive brief into production.
     # BIBLOS is the commercial gate; only an evidence-complete 80+ candidate
     # comes back to HERMES for commissioning.
+    if not _job_is_active(str(job["id"])):
+        stages.clear_stage("hermes")
+        result["handed_to"] = None
+        result["note"] = "Queue ownership expired before BIBLOS handoff; no downstream job was created."
+        return result
+
     worker = stages.head_briefs_worker(
         "hermes", "biblos",
         carrying_detail=f"Taking the researched candidate to BIBLOS: {angle[:60]}",
@@ -2581,8 +3945,9 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     )
     result["handed_to"] = {"agent": "BIBLOS", "job_id": worker["id"]}
     result["note"] = (
-        "Candidate handed to BIBLOS. Production starts only if current evidence "
-        "is complete and the weighted commercial score is at least 80."
+        "Candidate handed to BIBLOS. Production starts only if purchase-intent "
+        "evidence is complete, every commercial hard floor passes, and the "
+        "weighted score is at least 85."
     )
     return result
 
@@ -2590,10 +3955,39 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
 def _hermes_commission(job: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     """Commission a BIBLOS-approved title; this is the only path to SCRIBE."""
     angle = str(payload.get("angle") or "")
+    # This runs in a later job, by which time the research phase has written its
+    # own commissioning note to the vault -- and the vault is one of the sources
+    # the history reads. An exact self-match here is that note, not a repeat:
+    # the research phase already cleared this exact string against a snapshot
+    # taken before it wrote anything. Anything short of an exact match, and any
+    # record from the book-factory output logs, still blocks as before.
+    history = [record for record in _kdp_topic_history()
+               if not (record.get("source") == "ONE Vault / Floor 05"
+                       and str(record.get("topic") or "").strip() == angle.strip())]
+    duplicate = _find_kdp_topic_duplicate(angle, history)
+    if duplicate:
+        stages.clear_stage("hermes")
+        _publishing_event(
+            job, agent="HERMES", event_type="duplicate_rejected",
+            stage="topic_uniqueness_gate",
+            summary="Previously commissioned KDP topic rejected before SCRIBE",
+            details=duplicate, status="rejected",
+        )
+        return {
+            "agent": "HERMES", "mode": "commission", "blocked": True,
+            "duplicate": duplicate, "handed_to": None,
+            "content": "Candidate duplicates an existing KDP topic; SCRIBE was not started.",
+        }
+    if not _job_is_active(str(job["id"])):
+        stages.clear_stage("hermes")
+        return {
+            "agent": "HERMES", "mode": "cancelled", "handed_to": None,
+            "content": "Queue ownership expired before SCRIBE handoff; no book was commissioned.",
+        }
     worker = stages.head_briefs_worker(
         "hermes", "scribe",
         carrying_detail=f"Taking the validated brief to SCRIBE: {angle[:60]}",
-        briefing_detail=f"SCRIBE, build this 80+ candidate: {angle[:100]}",
+        briefing_detail=f"SCRIBE, build this 85+ authority-lane candidate: {angle[:100]}",
         awaiting_detail="Waiting on SCRIBE to produce the enriched manuscript",
         enqueue=lambda: enqueue_job(
             "scribe", json.dumps(payload), mode="execute", tier="heavy"),
@@ -2667,12 +4061,12 @@ def _json_task(job: dict[str, Any]) -> dict[str, Any]:
 
 def _run_biblos(job: dict[str, Any]) -> dict[str, Any]:
     payload = _json_task(job)
-    logic = _publishing_growth_logic()
     stages.worker_confirms_receipt("biblos", "Auditing current demand evidence")
     stages.set_stage("biblos", stages.EXECUTING, "Scoring demand, conversion and expansion potential")
-    audit = logic.commercial_audit(str(payload.get("title_id") or job["id"]),
-                                   payload.get("dimensions") or {},
-                                   payload.get("evidence") or [])
+    audit = publishing_strategy.commercial_audit(
+        str(payload.get("title_id") or job["id"]),
+        payload.get("dimensions") or {}, payload.get("evidence") or [],
+    )
     missing_labels = list(audit.get("missing") or []) + list(audit.get("missing_evidence") or [])
     audit_summary = (
         f"Commercial score {audit['score']}/100"
@@ -2683,12 +4077,13 @@ def _run_biblos(job: dict[str, Any]) -> dict[str, Any]:
                       stage="commercial_gate", summary=audit_summary,
                       details={"score": audit["score"], "dimensions": audit.get("dimensions"),
                                "eligible": audit["build_eligible"], "missing": audit.get("missing"),
-                               "missing_evidence": audit.get("missing_evidence")},
+                               "missing_evidence": audit.get("missing_evidence"),
+                               "floor_failures": audit.get("floor_failures")},
                       status="running" if audit["build_eligible"] else "rejected")
     if not audit["build_eligible"]:
         stages.clear_stage("biblos"); stages.clear_stage("hermes")
         return {"agent": "BIBLOS", "audit": audit, "handed_to": None,
-                "content": "Candidate rejected before production; score must be 80+ with complete evidence."}
+                "content": "Candidate rejected before production; score must be 85+ with purchase-intent evidence and every commercial hard floor passed."}
     commission = dict(payload)
     commission.update({"phase": "commission", "audit": audit})
     worker = stages.head_briefs_worker(
@@ -2733,11 +4128,183 @@ def _run_mercury(job: dict[str, Any]) -> dict[str, Any]:
             "content": "Rights-safe route proposed; no store was changed."}
 
 
+def _queue_print_formats(job: dict[str, Any], packet: Any, run_dir: str,
+                         scribe_job_id: str, ebook_asin: str) -> dict[str, Any]:
+    """Build the print interior and queue whichever formats the length allows.
+
+    The factory emits A4, which is not a KDP trim, so the eBook manuscript can
+    never be a print interior; kdp_print_interior rewrites it to 6 x 9 with the
+    gutter that page count requires. Hardcover starts at 75 pages, so a short
+    book is simply a paperback - reported, not raised, because refusing the
+    whole run over a length KDP itself allows for paperback helps nobody.
+    """
+    from openjarvis.tools import kdp_print_packet as print_packet
+    from openjarvis.tools.kdp_paperback import preflight_paperback
+    from openjarvis.tools.kdp_print_interior import eligible_formats
+
+    # Both halves of this used to be estimates, and both were wrong. Format
+    # eligibility came from a word count, and the cover came from whatever the
+    # factory had already put in visual_assets - a wrap measuring 12.747 in
+    # around a 46-page book, a spine cut for roughly 220 pages. Building the
+    # packet renders the interior, counts the pages it actually has, and cuts
+    # the cover to that, which is the only order a physical book allows.
+    try:
+        packet_files = print_packet.build(run_dir)
+    except Exception as exc:  # noqa: BLE001 - the eBook is already live
+        return {"queued": [], "error": f"{type(exc).__name__}: {exc}"[:200]}
+
+    # Checked rather than trusted, against the same preflight a person would
+    # run. A rejected upload costs one of the format's two weekly slots.
+    check = preflight_paperback(run_dir)
+    if not check.ready:
+        return {"queued": [], "skipped": "the print packet does not pass preflight",
+                "errors": check.errors, **packet_files.to_dict()}
+
+    allowed = eligible_formats(packet_files.page_count)
+    queued: list[dict[str, Any]] = []
+    for fmt in ("paperback", "hardcover"):
+        if not allowed.get(fmt):
+            continue
+        child = enqueue_job("imprimatur", json.dumps({
+            "phase": "print", "format": fmt, "run_dir": run_dir,
+            "scribe_job_id": scribe_job_id, "ebook_asin": ebook_asin,
+            "interior_path": packet_files.interior_pdf,
+            "cover_path": packet_files.cover_pdf,
+        }), mode="execute", tier="fast")
+        queued.append({"format": fmt, "job_id": child["id"]})
+
+    _publishing_event(job, agent="IMPRIMATUR", event_type="print_formats_queued",
+                      stage="format_expansion",
+                      summary=(f"{len(queued)} print format(s) queued from a "
+                               f"{packet_files.page_count}-page interior"),
+                      details={"queued": queued, "eligibility": allowed.get("reasons", {}),
+                               "interior": packet_files.interior_pdf,
+                               "cover": packet_files.cover_pdf,
+                               "spine_in": round(packet_files.spine_in, 4)})
+    return {"queued": queued, "preflight": "passed", **allowed,
+            **packet_files.to_dict()}
+
+
+def _record_edition_isbn(title: str, fmt: str, draft: dict[str, Any]) -> dict[str, Any]:
+    """Put this edition's ISBN on the company register.
+
+    Reported rather than raised: the draft exists on Amazon either way, and
+    losing a prepared print edition because a register was unavailable would
+    be the wrong trade. What must not happen is the ISBN going unrecorded in
+    silence, so the outcome travels back in the job result.
+    """
+    isbn = str(draft.get("isbn") or "")
+    if not isbn:
+        return {"recorded": False, "reason": "KDP did not show an ISBN for this edition"}
+
+    register = _revenue_service("isbns")
+    if register is None:
+        return {"recorded": False, "isbn": isbn,
+                "reason": "the ISBN register is unavailable"}
+    source = str(draft.get("isbn_source") or register.KDP_FREE)
+    try:
+        row = register.assign(
+            isbn, title=title, fmt=fmt, source=source,
+            imprint="Independently published" if source == register.KDP_FREE else "")
+    except Exception as exc:  # noqa: BLE001
+        return {"recorded": False, "isbn": isbn,
+                "reason": f"{type(exc).__name__}: {exc}"[:160]}
+    return {"recorded": True, "isbn": row["isbn"], "source": row["source"],
+            "portable": row["source"] != register.KDP_FREE}
+
+
+CONTENT_OVERRIDE_ACTION = "kdp_content_override"
+
+
+def _content_safety_gate(job: dict[str, Any], run_dir: str, packet: Any) -> dict[str, Any] | None:
+    """Read the book against the house policy before Amazon ever sees it.
+
+    None when it may proceed. A refusal when it may not.
+
+    Floor 5 publishes unattended since 2026-09-24, and until this ran there
+    was no point at which anything read a finished manuscript for the risk
+    the owner named first - that a reader is provoked rather than entertained
+    and the brand is boycotted over a sentence nobody reviewed. The scanner
+    existed and nothing called it.
+
+    Placed at the top of IMPRIMATUR rather than inside one phase, so the eBook
+    draft, the submission and the print editions are all covered by the same
+    read. A book that cannot be sold as a Kindle edition cannot be sold as a
+    paperback either.
+
+    A block is not the end of the road. The rules are deliberately narrow but
+    they have been wrong before - on the live catalogue, "lust" once matched
+    inside "cluster" - so the owner can override one, per manuscript, through
+    OLYMPUS. The override is keyed to the manuscript's checksum: editing the
+    book invalidates it and the gate runs again on what was actually changed.
+    """
+    from openjarvis.tools import kdp_content_safety as safety
+    from openjarvis.tools.approval_store import ApprovalStore, STATUS_APPROVED
+
+    try:
+        manuscript = Path(run_dir, "book.md").read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        # Not a silent pass. A manuscript nobody can read is a manuscript
+        # nobody has checked, and that is the state this gate exists to end.
+        return {"agent": "IMPRIMATUR", "phase": "content_refused",
+                "reason": f"the manuscript could not be read for review: {exc}",
+                "content": "Publishing stopped: the manuscript could not be read for review."}
+
+    report = safety.scan(manuscript, marketing=str(getattr(packet, "description", "") or ""))
+    allowed, note = safety.may_publish(report)
+    checksum = str((getattr(packet, "checksums", {}) or {}).get("manuscript", ""))
+
+    if allowed:
+        if report.verdict == safety.REVIEW:
+            _publishing_event(
+                job, agent="IMPRIMATUR", event_type="content_findings_raised",
+                stage="content_policy", summary=note,
+                details={"findings": safety.passages_for_review(report)},
+                status="completed")
+        return None
+
+    store = ApprovalStore()
+    # Keyed to the manuscript's checksum, so an override covers the book the
+    # Chairman actually read and expires the moment a word of it changes.
+    permission_key = f"{CONTENT_OVERRIDE_ACTION}:{checksum}"
+    for prior in store.list_approved():
+        if (prior.action_type == CONTENT_OVERRIDE_ACTION
+                and prior.permission_key == permission_key):
+            _publishing_event(
+                job, agent="IMPRIMATUR", event_type="content_block_overridden",
+                stage="content_policy",
+                summary=f"The Chairman overrode: {report.summary()}",
+                details={"approval_id": prior.id, "report": report.to_dict()},
+                status="completed")
+            return None
+
+    action = store.queue_action(
+        action_type=CONTENT_OVERRIDE_ACTION,
+        description=f"House content policy blocked: {packet.title} - {report.summary()}",
+        payload={"agent_id": "imprimatur", "run_dir": run_dir, "title": packet.title,
+                 "report": report.to_dict()},
+        permission_key=permission_key, tier="high", ttl_hours=168,
+    )
+    stages.set_stage("imprimatur", stages.AWAITING_UPLOAD,
+                     f"Content policy blocked: {packet.title}")
+    _publishing_event(
+        job, agent="IMPRIMATUR", event_type="content_policy_blocked",
+        stage="content_policy", summary=note,
+        details={"approval_id": action.id, "report": report.to_dict()},
+        status="blocked")
+    return {"agent": "IMPRIMATUR", "phase": "content_refused",
+            "approval_id": action.id, "report": report.to_dict(),
+            "reason": note,
+            "content": (f"{note} Nothing was uploaded. The passages are on the "
+                        "approval if this is a false positive.")}
+
+
 def _run_imprimatur(job: dict[str, Any]) -> dict[str, Any]:
     """Prepare, submit, and monitor one KDP listing as resumable phases."""
     from openjarvis.tools.approval_store import ApprovalStore, STATUS_APPROVED
     from openjarvis.tools.kdp_browser_publisher import (
-        poll_asin, prepare_draft, submit_approved, validate_packet,
+        TitleCreationLimitReached, poll_asin, prepare_draft, prepare_print_draft,
+        submit_approved, validate_packet, write_state,
     )
 
     payload = _json_task(job)
@@ -2748,10 +4315,41 @@ def _run_imprimatur(job: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("IMPRIMATUR requires run_dir and scribe_job_id")
     packet = validate_packet(run_dir)
 
+    # Before any phase, because every phase ends at a storefront. The ASIN
+    # poll is exempt: it reads back a listing that is already live, and
+    # refusing it would only stop the company from learning the ASIN of a
+    # book it has already published.
+    if mode != "poll":
+        refused = _content_safety_gate(job, run_dir, packet)
+        if refused is not None:
+            return refused
+
     if mode == "prepare":
         stages.worker_confirms_receipt("imprimatur", f"Preparing KDP draft for {packet.title}")
         stages.set_stage("imprimatur", stages.EXECUTING, "Uploading manuscript and cover to a KDP draft")
-        draft = prepare_draft(packet, headless=False)
+        try:
+            draft = prepare_draft(packet, headless=False)
+        except TitleCreationLimitReached as limit:
+            # Amazon grants two new titles per format per week. The book is
+            # finished and unchanged; the only thing missing is a slot, so this
+            # waits for the next reset instead of failing a run that did
+            # everything right. Sunday 00:00 UTC, plus a few minutes so the
+            # retry never lands on the boundary itself.
+            now = datetime.now(timezone.utc)
+            days_ahead = (6 - now.weekday()) % 7 or 7
+            reset = (now + timedelta(days=days_ahead)).replace(
+                hour=0, minute=5, second=0, microsecond=0)
+            stages.set_stage("imprimatur", stages.AWAITING_UPLOAD,
+                             f"Waiting for Amazon's next title slot: {packet.title}")
+            _publishing_event(job, agent="IMPRIMATUR", event_type="title_slot_exhausted",
+                              stage="amazon_weekly_limit",
+                              summary="Amazon's weekly new-title limit is spent; the book keeps its place",
+                              details={"reset_at": reset.isoformat(), "title": packet.title},
+                              status="waiting")
+            return {"agent": "IMPRIMATUR", "phase": "waiting_for_slot",
+                    "retry_after": reset.isoformat(), "reason": str(limit),
+                    "content": ("Amazon's weekly new-title limit is spent. The finished book "
+                                f"is queued and will be published after {reset:%d %b %H:%M} UTC.")}
         action = ApprovalStore().queue_action(
             action_type="kdp_publish",
             description=f"Publish Kindle eBook: {packet.title}",
@@ -2768,6 +4366,34 @@ def _run_imprimatur(job: dict[str, Any]) -> dict[str, Any]:
             permission_key=f"kdp_publish:{packet.checksums['manuscript']}",
             tier="high", ttl_hours=72,
         )
+        # Standing owner policy (reconfirmed 2026-10-10): KDP production is
+        # autonomous through submission and ASIN reconciliation. Olympus is
+        # retained as an auditable action record, not a manual upload queue.
+        # Operations can fail closed instantly without a deployment by setting
+        # ONE_KDP_AUTO_PUBLISH=0.
+        auto_publish = os.environ.get("ONE_KDP_AUTO_PUBLISH", "1").strip().lower() \
+            not in {"0", "false", "no", "off"}
+        if auto_publish:
+            ApprovalStore().update_status(action.id, STATUS_APPROVED)
+            submit_job = enqueue_job("imprimatur", json.dumps({
+                "phase": "submit", "run_dir": run_dir,
+                "scribe_job_id": scribe_job_id, "title": packet.title,
+                "approval_id": action.id,
+            }), mode="execute", tier="fast",
+                dedupe_key=f"kdp-submit:{packet.checksums['manuscript']}")
+            stages.set_stage("imprimatur", stages.EXECUTING,
+                             f"KDP draft ready; autonomous submission queued: {packet.title}")
+            _publishing_event(
+                job, agent="IMPRIMATUR", event_type="kdp_auto_submit_queued",
+                stage="submission", summary="KDP draft prepared; standing policy queued submission",
+                details={"approval_id": action.id, "draft": draft,
+                         "submit_job_id": submit_job["id"]}, status="completed")
+            return {
+                "agent": "IMPRIMATUR", "phase": "auto_submit_queued",
+                "approval_id": action.id, "draft": draft,
+                "handed_to": {"agent": "IMPRIMATUR", "job_id": submit_job["id"]},
+                "content": "KDP draft is complete; autonomous submission is queued.",
+            }
         stages.set_stage("imprimatur", stages.AWAITING_UPLOAD,
                          f"Draft ready; waiting for Olympus approval: {packet.title}")
         _publishing_event(job, agent="IMPRIMATUR", event_type="kdp_draft_ready",
@@ -2775,6 +4401,60 @@ def _run_imprimatur(job: dict[str, Any]) -> dict[str, Any]:
                           details={"approval_id": action.id, "draft": draft}, status="awaiting_approval")
         return {"agent": "IMPRIMATUR", "phase": "approval", "approval_id": action.id,
                 "draft": draft, "content": "KDP draft is complete and queued for per-title approval."}
+
+    if mode == "print":
+        fmt = str(payload.get("format") or "paperback")
+        stages.set_stage("imprimatur", stages.EXECUTING,
+                         f"Setting up the {fmt} of {packet.title}")
+        try:
+            ready = prepare_print_draft(
+                # "ebook_id" is read too: a job queued before 2026-10-14
+                # carries the same ASIN under the older key.
+                packet, fmt, str(payload.get("ebook_asin")
+                                 or payload.get("ebook_id") or ""),
+                interior_path=str(payload.get("interior_path") or ""),
+                cover_path=str(payload.get("cover_path") or ""),
+                headless=False)
+        except TitleCreationLimitReached as limit:
+            # Each format has its own weekly allowance, so a spent paperback
+            # quota says nothing about hardcover and nothing about the eBook
+            # that is already on sale. Wait rather than fail.
+            stages.set_stage("imprimatur", stages.AWAITING_UPLOAD,
+                             f"Waiting for Amazon's next {fmt} slot: {packet.title}")
+            _publishing_event(job, agent="IMPRIMATUR", event_type="title_slot_exhausted",
+                              stage="amazon_weekly_limit",
+                              summary=f"Amazon's weekly {fmt} limit is spent; the book keeps its place",
+                              details={"format": fmt, "title": packet.title}, status="waiting")
+            return {"agent": "IMPRIMATUR", "phase": "waiting_for_slot", "format": fmt,
+                    "reason": str(limit),
+                    "content": f"The {fmt} is prepared and waiting for Amazon's next slot."}
+        # An ISBN is permanent and exists nowhere else the company can look it
+        # up: Amazon's free one is issued during this upload and never shown
+        # again outside the title. An edition whose ISBN nobody wrote down is
+        # an edition nobody can cite, so it goes on the register here, with
+        # which kind it is - a KDP ISBN means this edition can never be sold
+        # off Amazon, and that is the figure the distribution board reads.
+        recorded = _record_edition_isbn(packet.title, fmt, ready)
+
+        stages.set_stage("imprimatur", stages.AWAITING_UPLOAD,
+                         f"{fmt.title()} draft ready for review: {packet.title}")
+        # Not "awaiting_approval". Print publishing has been autonomous since
+        # 2026-09-24 and there is no approval gate on this path, so nothing is
+        # waiting on the Chairman - but the board said three of these were,
+        # and he reasonably asked what he was meant to decide. A status is a
+        # claim about who the work is sitting with, and this one was false.
+        pending = ready.get("ai_detail_pending") or []
+        _publishing_event(job, agent="IMPRIMATUR", event_type="print_draft_ready",
+                          stage="print_format",
+                          summary=(f"{fmt.title()} draft prepared; "
+                                   f"AI disclosure still needs {', '.join(pending)}"
+                                   if pending else f"{fmt.title()} draft prepared"),
+                          details={"format": fmt, "draft": ready.get("draft_url"),
+                                   "isbn": recorded, "ai_detail_pending": pending},
+                          status="blocked" if pending else "completed")
+        return {"agent": "IMPRIMATUR", "phase": "print_ready", "format": fmt,
+                "draft": ready, "isbn": recorded,
+                "content": f"{fmt.title()} draft is set up with the print interior and wrap cover."}
 
     approval_id = str(payload.get("approval_id") or "")
     action = ApprovalStore().get_action(approval_id) if approval_id else None
@@ -2798,14 +4478,33 @@ def _run_imprimatur(job: dict[str, Any]) -> dict[str, Any]:
         status = poll_asin(packet, headless=True)
         asin = str(status.get("asin") or "")
         if asin:
-            evidence = {"asin": asin, "title": packet.title,
-                        "status": status.get("kdp_status"), "source": "KDP Bookshelf"}
+            evidence = {
+                "asin": asin,
+                "title": packet.title,
+                "status": status.get("kdp_status"),
+                "source": "KDP Bookshelf",
+                "marketplace": "US",
+                "listing_url": f"https://www.amazon.com/dp/{asin}",
+                "confirmed_by": "IMPRIMATUR",
+            }
             confirmed = confirm_scribe_upload(
                 scribe_job_id, evidence,
                 rationale=f"IMPRIMATUR verified ASIN {asin} in the authenticated KDP Bookshelf.",
             )
             stages.clear_stage("imprimatur")
+            # SCRIBE has been sitting on awaiting_upload since it handed the
+            # book over. The ASIN is the proof that the wait is over, so the
+            # agent that ends the wait is the one that clears the bubble -
+            # otherwise the building keeps telling the Chairman a book is
+            # waiting to be uploaded while it is already on sale.
+            stages.clear_stage("scribe")
+            # The eBook is on sale; the same book can now earn as print too.
+            # Queued rather than done inline: each print format is its own
+            # browser run and its own weekly quota, and a failure in one must
+            # not undo the eBook that already succeeded.
+            print_plan = _queue_print_formats(job, packet, run_dir, scribe_job_id, asin)
             return {"agent": "IMPRIMATUR", "phase": "complete", "asin": asin,
+                    "print_formats": print_plan,
                     "kdp_status": status.get("kdp_status"), "handoff": confirmed,
                     "content": f"ASIN {asin} verified; publishing lifecycle released."}
         # Do not occupy the single ONE worker while Amazon reviews the title.
@@ -2821,6 +4520,18 @@ def _run_imprimatur(job: dict[str, Any]) -> dict[str, Any]:
             "phase": "poll", "run_dir": run_dir, "scribe_job_id": scribe_job_id,
             "approval_id": approval_id, "poll_attempt": int(payload.get("poll_attempt") or 0) + 1,
         }
+        # Persist the continuation inputs before scheduling the in-process
+        # timer. Worker startup can reconstruct this poll after a reboot or
+        # power loss instead of leaving the title parked forever.
+        write_state(
+            packet,
+            "AWAITING_ASIN",
+            kdp_status=status.get("kdp_status", "unknown"),
+            scribe_job_id=scribe_job_id,
+            approval_id=approval_id,
+            poll_attempt=next_payload["poll_attempt"],
+            next_check_seconds=delay,
+        )
         timer = threading.Timer(
             delay,
             lambda: enqueue_job("imprimatur", json.dumps(next_payload), mode="execute", tier="fast"),
@@ -2854,6 +4565,13 @@ def _run_leda(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_metron(job: dict[str, Any]) -> dict[str, Any]:
+    # Measurement has two halves and this is the money one: what the store
+    # actually paid, read from KDP's own report. Checked first because the
+    # baseline below expects a book payload and would otherwise open a
+    # seven-day loop on "(untitled)".
+    if KDP_PAYMENTS_SYNC_MARKER in str(job.get("task") or "").lower():
+        return _kdp_payments_sync(job)
+
     payload = _json_task(job); logic = _publishing_growth_logic()
     stages.worker_confirms_receipt("metron", "Establishing the seven-day performance baseline")
     report = logic.measurement_baseline(str(payload.get("title") or "(untitled)"),
@@ -3074,7 +4792,7 @@ def _run_peitho_lao_draft(angle_prompts: list[str], *, expected_markers: list[st
     poll_seconds = 15.0
     max_wait_seconds = 900.0  # login + 4 chat turns; generous but not open-ended
     deadline = time.time() + max_wait_seconds
-    terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
+    terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted", "Retried"}
     status = "Pending"
     while time.time() < deadline:
         time.sleep(poll_seconds)
@@ -3180,6 +4898,54 @@ def _generate_peitho_reel_scripts(run_dir: str, title: str) -> dict[str, Any]:
     return {"generated": any(a.get("generated") for a in angles), "angles": angles, "dir": str(scripts_dir)}
 
 
+_ANGLE_CONSTRAINT = re.compile(
+    r"\s*(?:,|--|—)?\s*(?:while |whilst )?"
+    r"(?:without (?:naming|mentioning|referencing)|naming no|mentioning no)\b[^.]*",
+    re.IGNORECASE,
+)
+# Phrases that only ever come from our own brief. If one reaches a shop page a
+# reader is being shown the instructions we wrote for the model.
+_INTERNAL_COPY_MARKERS = (
+    "kdp", "amazon", "without naming", "naming no", "generic advice",
+    "this brief", "the brief", "the prompt", "the angle", "target reader",
+    "commercial risk", "back-cover", "royalty", "browse-category",
+)
+
+
+def _reader_facing(text: str) -> str:
+    """An angle written for the floor, rewritten as something a reader may see.
+
+    HERMES is told the angle must name no real organisation, and the model
+    obligingly writes that instruction into the angle itself -- "...into a
+    competitive moat without naming specific nations or governments". Carried
+    verbatim into a shop description (2026-09-24, live) it reads as a note to
+    ourselves. Cut the clause; keep the hook.
+    """
+    cleaned = _ANGLE_CONSTRAINT.sub("", str(text or "")).strip().rstrip(",;-— ")
+    return (cleaned + ".") if cleaned and not cleaned.endswith(".") else cleaned
+
+
+def _strip_internal_copy(description: str) -> tuple[str, list[str]]:
+    """Drop sentences that talk about our own process instead of the book.
+
+    Returns the cleaned text and what was removed, so a caller can say plainly
+    that it intervened rather than quietly shipping different words.
+    """
+    kept: list[str] = []
+    dropped: list[str] = []
+    for block in str(description or "").split("\n"):
+        if not block.strip():
+            kept.append(block)
+            continue
+        sentences = re.split(r"(?<=[.!?])\s+", block)
+        good = [s for s in sentences
+                if not any(m in s.lower() for m in _INTERNAL_COPY_MARKERS)]
+        dropped.extend(s.strip() for s in sentences if s not in good and s.strip())
+        if good:
+            kept.append(" ".join(good).strip())
+    return ("\n").join(kept).strip(), dropped
+
+
 def _generate_kdp_packet(title: str, kdp_mode: str, region: str, angle: str, run_dir: str) -> dict[str, Any]:
     """Everything a human needs to paste into KDP's own wizard by hand.
 
@@ -3201,9 +4967,15 @@ def _generate_kdp_packet(title: str, kdp_mode: str, region: str, angle: str, run
         "You are SCRIBE, producing the exact fields a human will paste into "
         "Amazon KDP's Kindle eBook setup wizard for a finished manuscript. "
         "There is no KDP API -- this packet is what gets typed in by hand.\n\n"
-        f"Title: {title}\nMode: {kdp_mode}\nRegion: {region}\nAngle: {angle}\n\n"
-        "Ground every field in what actually sells on KDP right now, not "
-        "generic advice. Reply in exactly this shape:\n"
+        f"Title: {title}\nMode: {kdp_mode}\nRegion: {region}\n"
+        # The angle carries the floor own constraint clause; a reader must
+        # never see it, so the model is not shown it either.
+        f"What the book promises the reader: {_reader_facing(angle)}\n\n"
+        "Every field here is read by a shopper deciding whether to buy. Write "
+        "only about the book and what the reader gets. Never mention this "
+        "brief, the instructions, the platform, the listing process, pricing "
+        "mechanics, or any constraint we work under. Reply in exactly this "
+        "shape:\n"
         "SUBTITLE: <or NONE>\n"
         "DESCRIPTION:\n<150-300 word back-cover description in KDP's rich-"
         "text style -- short paragraphs, one bolded hook line, plain text, "
@@ -3222,6 +4994,17 @@ def _generate_kdp_packet(title: str, kdp_mode: str, region: str, angle: str, run
     if not packet:
         return {"generated": False, "note": note, "path": ""}
 
+    # Last line of defence. The wording above tells the model to keep our
+    # process out of the copy; this makes sure of it, because the description
+    # is pasted onto a public shop page and nobody reads it again first.
+    removed: list[str] = []
+    match = re.search(r"(?ms)^DESCRIPTION:\s*\n(.*?)(?=^[A-Z_]+:)", packet)
+    if match:
+        cleaned, removed = _strip_internal_copy(match.group(1))
+        if removed:
+            packet = (packet[:match.start(1)] + cleaned
+                      + ("\n" * 2) + packet[match.end(1):])
+
     # Written straight into the book's own run_dir (next to book.md,
     # cover.jpg, KDP_Book_Professional.docx, ...), not ONE's own
     # agent_outputs -- confirmed live 2026-08-27: the Chairman does the
@@ -3236,7 +5019,8 @@ def _generate_kdp_packet(title: str, kdp_mode: str, region: str, angle: str, run
         f"{packet}\n",
         encoding="utf-8",
     )
-    return {"generated": True, "content": packet, "path": str(packet_path)}
+    return {"generated": True, "content": packet, "path": str(packet_path),
+            "internal_copy_removed": removed}
 
 
 def _docx_embeds(docx_path: Path, image_path: Path) -> bool:
@@ -3259,6 +5043,96 @@ def _docx_embeds(docx_path: Path, image_path: Path) -> bool:
             )
     except Exception:  # noqa: BLE001 - unreadable means "cannot confirm", not "yes"
         return False
+
+
+def _cover_jpeg_from_art(visual: Path) -> str:
+    """Make the uploadable cover.jpg out of the art the model produced.
+
+    This used to be the overlay step's job, and the overlay paints our own
+    title and author over the art unless it decides the art already has
+    typography. It decides that by counting sharp luminance swings, which is a
+    fine proxy for text on a photograph and the wrong one here: on the first
+    house-style cover it correctly left the title alone and then painted the
+    full 86-character factory title across the benefit list, and stamped
+    VINEET PANDEY over the author bar the model had already set, because that
+    bar is dark yellow on dark navy and barely swings at all. The result read
+    twice and passed the reading test, since the title really was on it.
+
+    A cover we asked to be finished does not want anything painted on it, so
+    nothing is.
+    """
+    from PIL import Image
+
+    art = visual / "cover_raw.png"
+    if not art.is_file():
+        art = visual / "cover.png"
+    if not art.is_file():
+        raise FileNotFoundError(f"No cover art to convert in {visual}")
+    out = visual / "cover.jpg"
+    with Image.open(art) as img:
+        img = img.convert("RGB")
+        # KDP's own recommendation, and what every cover in this catalogue is.
+        if img.size != (1600, 2560):
+            img = img.resize((1600, 2560), Image.LANCZOS)
+        img.save(out, "JPEG", quality=92, optimize=True, progressive=False)
+    return str(out)
+
+
+def _cover_verdict(check: dict[str, Any]) -> str:
+    """One line about whether the cover says what the book is called."""
+    if not check:
+        return "not checked"
+    if check.get("ok") is None:
+        return f"could not be checked ({check.get('error', 'unknown')})"
+    share = check.get("title_coverage")
+    readable = f"{float(share):.0%} of the title readable" if share is not None else "unknown"
+    return ("reads correctly, " if check.get("ok") else "FAILED, ") + readable
+
+
+def _cover_packaging(run_dir: Path, brief: dict[str, Any]) -> dict[str, Any]:
+    """What the commission decided about how this book should be packaged.
+
+    HERMES picks a title, a thumbnail promise, a lead magnet and a series, and
+    none of it reached the cover: the brief handed to the factory carried only
+    the angle, so the factory invented its own title and drew a scene from
+    chapter one. Read back from the commission brief where there is one, and
+    from the book's own metadata otherwise.
+    """
+    out: dict[str, Any] = {"title": "", "subtitle": "", "author": "Vineet Pandey",
+                           "thumbnail_promise": "", "lead_magnet": "", "series": "",
+                           "keywords": []}
+    meta = run_dir / "kdp_metadata.json"
+    if meta.is_file():
+        try:
+            m = json.loads(meta.read_text(encoding="utf-8"))
+            out["title"] = str(m.get("title") or "")
+            out["subtitle"] = str(m.get("subtitle") or "")
+            out["author"] = str(m.get("author") or out["author"])
+            out["keywords"] = [str(k) for k in (m.get("keywords") or [])][:8]
+        except (OSError, json.JSONDecodeError):
+            pass
+    path = str(brief.get("brief_path") or "")
+    if not path and brief.get("origin_job"):
+        path = str(_home() / "agent_outputs" / f"{brief['origin_job']}.md")
+    if path and Path(path).is_file():
+        try:
+            text = Path(path).read_text(encoding="utf-8")
+        except OSError:
+            text = ""
+        for key, field in (("TITLE", "commissioned_title"),
+                           ("THUMBNAIL_PROMISE", "thumbnail_promise"),
+                           ("LEAD_MAGNET", "lead_magnet"),
+                           ("SERIES", "series")):
+            found = re.search(rf"^{key}:\s*(.+)$", text, re.MULTILINE)
+            if found:
+                out[field] = found.group(1).strip()
+    # The commissioned title is the short one the packaging was scored on; the
+    # factory's is the long one it wrote for itself.
+    short = str(out.pop("commissioned_title", "") or "")
+    if short and len(short) < len(out["title"] or short):
+        out["cover_title"] = short
+    out.setdefault("cover_title", out["title"])
+    return out
 
 
 def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[str, Any]:
@@ -3324,11 +5198,28 @@ def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[st
         except Exception:  # noqa: BLE001
             pass
 
+    # The cover brief is written here, not by the factory. Its own
+    # refresh_kdp_cover_prompts writes a scene - a character in silhouette
+    # somewhere atmospheric - and the workflow then forbids the image model
+    # any lettering at all, so every cover came back a dark photograph with a
+    # long title painted over it. This asks for the finished cover the
+    # catalogue's sellers actually have, built from what the commission
+    # already decided and threw away.
+    from openjarvis.tools import kdp_cover_brief, kdp_cover_qc
+
+    packaging = _cover_packaging(run_dir, brief)
+    cover_title = packaging.get("cover_title") or title or label
+    (visual / "cover_prompt.txt").write_text(
+        kdp_cover_brief.cover_prompt(
+            title=cover_title, subtitle=packaging["subtitle"],
+            author=packaging["author"],
+            thumbnail_promise=packaging["thumbnail_promise"],
+            lead_magnet=packaging["lead_magnet"], series=packaging["series"],
+            keywords=packaging["keywords"]),
+        encoding="utf-8")
+
     cover_png = str(visual / "cover.png")
     steps = [
-        {"action": "get_credential_optional", "args": {"assetName": "nvidiaApiKey", "as": "nvidia_credential"}},
-        {"action": "refresh_kdp_cover_prompts",
-         "args": {"run_dir": str(run_dir), "nvidia_credential": "{{nvidia_credential}}", "as": "prompts"}},
         {"action": "open_browser"},
         {"action": "get_credential", "args": {"assetName": "chatgptLogin", "as": "chatgpt_credential"}},
         {"action": "chatgpt_login_with_credential", "args": {"credential": "{{chatgpt_credential}}"}},
@@ -3338,18 +5229,17 @@ def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[st
          "args": {"prompt": "Generate an image using this exact prompt. Do not ask "
                             "follow-up questions. Prompt: {{cover_prompt_text}}",
                   "filename": cover_png, "always_nudge_fresh_image": True,
-                  # Portrait + no-lettering. Without this the first refresh
-                  # produced a landscape image covered in legible text.
-                  "cover_constraints": True}},
-        {"action": "overlay_cover_banner_text",
-         "args": {"run_dir": str(run_dir), "title": title or label,
-                  "subtitle": subtitle, "author": author}},
+                  # Off deliberately: that flag bans lettering, and the whole
+                  # point now is that the model sets the type. Portrait and
+                  # the 1600x2560 proportion are stated in the brief itself,
+                  # which is where the rest of the design lives too.
+                  "cover_constraints": False}},
+
         # The book file embeds the cover, so regenerating the image alone
         # leaves the DOCX still carrying the old one. The production workflow
         # runs this immediately after the overlay step for exactly that
         # reason; the first version of this draft stopped one step short and
         # produced a new cover that existed nowhere in the actual deliverable.
-        {"action": "render_kdp_docx", "args": {"run_dir": str(run_dir), "as": "final_docx"}},
     ]
 
     tool = LaoOrchestratorTool()
@@ -3392,14 +5282,75 @@ def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[st
         name: (visual / name).exists()
         for name in ("cover_prompt.txt", "cover_raw.png", "cover.jpg", "cover_wrap_print.pdf")
     }
+    # The model sets the type now, so the spelling is its to get wrong, and
+    # nothing downstream would notice: the file uploads either way. Read the
+    # cover back with the OCR Windows already has and say what it says.
+    cover_check: dict[str, Any] = {}
+    cover_file = Path(_cover_jpeg_from_art(visual))
+    try:
+        cover_check = kdp_cover_qc.check_cover(
+            cover_file, title=cover_title, author=packaging["author"],
+            # The long title the factory wrote for itself. If its words turn
+            # up on the cover as well, something painted over the art.
+            forbid=[t for t in (packaging.get("title"), title)
+                    if t and t != cover_title]).to_dict()
+    except Exception as exc:  # noqa: BLE001 - a failed reader is not a failed cover
+        cover_check = {"ok": None, "error": f"{type(exc).__name__}: {exc}"[:200]}
+    if status != "Successful":
+        stages.clear_stage("scribe")
+        raise RuntimeError(f"LAO cover refresh ended as {status} (job {lao_job_id[:8]})")
+    # A cover whose own title cannot be read off it is not a finished cover,
+    # whatever LAO says about the job. The previous prompt and art are beside
+    # it with a timestamp, so this refuses to call the refresh done rather
+    # than losing anything - and it refuses BEFORE the book is rebuilt around
+    # it, which is the whole reason the render is a second run.
+    if cover_check.get("ok") is False:
+        stages.clear_stage("scribe")
+        raise RuntimeError(
+            "The new cover did not pass its own reading test: "
+            + "; ".join(cover_check.get("notes") or ["unreadable"])
+            + f" Windows read: {str(cover_check.get('ocr_text') or '')[:200]!r}")
+
+    # The book file embeds the cover, so the DOCX has to be rebuilt after it -
+    # and only after it passes. This used to be the last step of the same run,
+    # which meant the book was re-rendered around whatever came back.
+    stages.set_stage("scribe", stages.EXECUTING,
+                     f"Rebuilding the book around the new cover: “{label[:60]}”")
+    render = tool.execute(action="run_draft",
+                          steps=[{"action": "render_kdp_docx",
+                                  "args": {"run_dir": str(run_dir), "as": "final_docx"}}],
+                          draft_name="scribe-cover-rerender",
+                          folder_id=_PEITHO_LAO_FOLDER_ID)
+    render_status = "not started"
+    if render.success:
+        try:
+            render_job = ((json.loads(render.content).get("job") or {}).get("id")) or ""
+        except json.JSONDecodeError:
+            render_job = ""
+        render_deadline = time.time() + 1800
+        render_status = "Pending"
+        while render_job and time.time() < render_deadline:
+            time.sleep(poll_seconds)
+            job_recovery.heartbeat(_connect, job["id"])
+            probe = tool.execute(action="status", process_name="",
+                                 scope="production", job_id=render_job)
+            if not probe.success:
+                continue
+            try:
+                render_status = str((json.loads(probe.content).get("job") or {}).get("status")
+                                    or render_status)
+            except json.JSONDecodeError:
+                continue
+            if render_status in terminal:
+                break
+    else:
+        render_status = f"refused: {render.content[:120]}"
+
     # Checked by content, not by existence: the DOCX is always there, and the
     # question that matters is whether it carries the cover we just made.
     produced["docx_has_new_cover"] = _docx_embeds(run_dir / "KDP_Book_Professional.docx",
                                                   visual / "cover.jpg")
     stages.clear_stage("scribe")
-
-    if status != "Successful":
-        raise RuntimeError(f"LAO cover refresh ended as {status} (job {lao_job_id[:8]})")
 
     memory.remember(
         agent="SCRIBE", floor_id="5", floor_name="Book Publishing (KDP)",
@@ -3408,7 +5359,8 @@ def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[st
               f"- LAO job: `{lao_job_id}` — {status}\n"
               f"- Run folder: `{run_dir}`\n"
               f"- Prompts rotated out: {', '.join(moved) or 'none'}\n"
-              f"- Produced: {', '.join(k for k, v in produced.items() if v) or 'nothing'}\n\n"
+              f"- Produced: {', '.join(k for k, v in produced.items() if v) or 'nothing'}\n"
+              f"- Cover text: {_cover_verdict(cover_check)}\n\n"
               "Front cover and paperback wrap are rebuilt; re-uploading them to "
               "KDP is still a manual step."),
         task=f"cover refresh / {label}",
@@ -3424,8 +5376,41 @@ def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[st
         "title": label,
         "rotated_out": moved,
         "produced": produced,
+        "cover_title": cover_title,
+        "cover_check": cover_check,
+        "rerender_status": render_status,
         "requires_human": "Re-upload the new cover to KDP; the listing is still in review.",
     }
+
+
+def _lao_failure_reason(lao_job_id: str, last_poll: dict[str, Any] | None = None) -> str:
+    """Why LAO stopped, in LAO's own words.
+
+    Asked of LAO directly because the poll response carries a status and not
+    a cause. Without this the floor reports "Failed" and the actual sentence -
+    on 2026-10-06, a Claude Code executable pinned to a version Windows had
+    already updated away - is only reachable by logging into LAO by hand.
+
+    Never raises. A reason that cannot be fetched must not turn a failed book
+    into a crashed agent on top of it.
+    """
+    reason = str(((last_poll or {}).get("job") or {}).get("error_message") or "").strip()
+    if reason:
+        return reason[:400]
+    if not lao_job_id:
+        return "LAO gave no reason and no job id to ask about"
+    try:
+        from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+
+        result = LaoOrchestratorTool().execute(action="status", job_id=lao_job_id)
+        payload = getattr(result, "data", None) or getattr(result, "content", None) or {}
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        job = (payload or {}).get("job") or payload or {}
+        reason = str(job.get("error_message") or "").strip()
+    except Exception as exc:  # noqa: BLE001 - diagnosing a failure, not adding one
+        return f"LAO gave no reason and could not be asked ({type(exc).__name__})"
+    return reason[:400] if reason else "LAO recorded no reason for the failure"
 
 
 def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
@@ -3445,6 +5430,7 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     kdp_mode = brief.get("kdp_mode") or "auto"
     region = brief.get("region") or "global"
     angle = str(brief.get("angle") or "").strip()
+    existing_run_dir = str(brief.get("existing_run_dir") or "").strip()
 
     # Re-run only the cover for a book that already exists, rather than writing
     # a new one. Added 2026-08-30: the cover pipeline gained a real composition
@@ -3496,6 +5482,25 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
         poll loop below is identical either way, which is the point: recovery
         reuses the ordinary path rather than a parallel one."""
         nonlocal last, lao_job_id
+        if existing_run_dir:
+            run_path = Path(existing_run_dir)
+            if not run_path.exists() or not (run_path / "KDP_Book_Professional.docx").exists():
+                raise RuntimeError(f"Existing KDP run is not complete: {existing_run_dir}")
+            title = ""
+            meta_path = run_path / "kdp_metadata.json"
+            if meta_path.exists():
+                try:
+                    title = str(json.loads(meta_path.read_text(encoding="utf-8")).get("title") or "")
+                except Exception:  # noqa: BLE001
+                    title = ""
+            lao_job_id = str(brief.get("existing_lao_job_id") or "reconciled-existing-run")
+            last = {"job": {"status": "Successful", "output_result": {
+                "book_draft": {"run_dir": str(run_path), "title": title, "resumed": True}
+            }}}
+            stages.set_stage("scribe", stages.EXECUTING,
+                             f"Reconciling completed KDP artifact: {title or run_path.name}",
+                             lao_job=lao_job_id)
+            return "Successful", last, lao_job_id
         if resume_id:
             lao_job_id = resume_id
             stages.set_stage(
@@ -3577,7 +5582,13 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
             )
 
         if status != "Successful":
-            raise RuntimeError(f"LAO KDP job ended as {status}")
+            # Carry LAO's own reason, not just its verdict. On 2026-10-06 this
+            # raised "LAO KDP job ended as Failed" and nothing else, while the
+            # sentence that mattered - a Claude Code path pinned to a version
+            # that had since been updated away - sat inside LAO. The Chairman
+            # had to go and find it himself, which is the floor's job.
+            raise RuntimeError(
+                f"LAO KDP job ended as {status}: {_lao_failure_reason(lao_job_id, last)}")
 
         return status, last, lao_job_id
 
@@ -3773,9 +5784,265 @@ def _latest_kdp_output() -> tuple[str, str]:
     return str(run), title
 
 
+def _sonia_seo_package(payload: dict[str, Any]) -> dict[str, Any]:
+    """Build a governed YouTube package from YATRA's verified master, for any destination."""
+    from openjarvis.one_agents import youtube_seo
+
+    asset_folder = str(payload.get("asset_folder") or "").strip()
+    root = _YATRA_ASSET_ROOT / asset_folder
+    plan_path = root / "production-plan.json"
+    master = Path(str((payload.get("cut") or {}).get("master") or root / "edit" / "master.mp4"))
+    if not plan_path.is_file() or not master.is_file():
+        raise RuntimeError("ARES needs YATRA's production plan and verified master")
+    record = (json.loads(plan_path.read_text(encoding="utf-8")) or [{}])[0]
+    package = youtube_seo.build_package(
+        record, master=master, plan_path=plan_path,
+        portrait_library=_YATRA_ASSET_ROOT / "_channel-assets" / "sonia-portraits")
+    out = root / "seo" / "youtube-seo-package.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
+    package["path"] = str(out)
+    return package
+
+
+def _radar_fetch(url: str) -> bytes:
+    """The trend radar's only door to the network: Sanjeevani's TLS-verified,
+    SSRF-guarded fetcher (it refuses private and loopback addresses)."""
+    reusable = _sanjeevani_research()
+    if reusable is None:
+        raise RuntimeError("Sanjeevani research library is unavailable")
+    return reusable._get(reusable._safe_public_url(url), timeout=15, limit=2_000_000, attempts=1)
+
+
+def _ares_dispatch_linkedin(job: dict[str, Any], li: Any) -> dict[str, Any]:
+    """Floor 3 head: build today's LinkedIn Authority brief, then brief HERALD.
+
+    The decisions (pillar, brief wording, standing-authority test) live in
+    floors/floor_03_growth/lib/linkedin_authority.py; this is only the plumbing.
+    ARES researches and decides; HERALD executes the brief and never chooses its
+    own topic or its own authority to publish.
+    """
+    task = str(job.get("task") or "")
+    mode = str(job.get("mode") or "plan").strip().lower()
+    channel = li.channel()
+    display = channel.get("display_name", "LinkedIn Authority")
+
+    # stages.set_stage() keeps one record per agent_id, so a second concurrent
+    # ARES flow (the Sonia SEO leg also uses this head) would overwrite the
+    # first's worker_job pointer. Decline visibly rather than silently skip.
+    current = (stages.get_stages() or {}).get("ares")
+    if current and current.get("stage") not in {"idle", None}:
+        detail = str(current.get("detail") or "").strip()
+        reason = (f"ARES is already mid-flow ({current.get('stage')}"
+                  + (f" - {detail}" if detail else "") + f"); {display} was not started.")
+        return {"agent": "ARES", "mode": "blocked", "_blocked": True, "content": reason,
+                "blocked_reason": reason, "handed_to": None}
+
+    stages.set_stage("ares", stages.RESEARCHING, task.strip()[:180] or f"Choosing the next {display} post")
+
+    prior = list(memory.prior_titles("3", channel["vault_floor_name"]))
+    legacy = channel.get("legacy_vault") or {}
+    if legacy:  # the channel's history before it moved to Floor 3
+        prior += [t for t in memory.prior_titles(str(legacy["floor_id"]), legacy["floor_name"]) if t not in prior]
+
+    weekday = datetime.now(ZoneInfo("Asia/Kolkata")).weekday()
+    pillar, pillar_query = li.pillar_for(weekday)
+    angle, evidence_path, evidence_count, ground_error = "", "", 0, ""
+
+    # LinkedIn v2 (2026-10-14): the radar picks a live tech trend by code. Any
+    # failure here keeps the v1 brief below, so the slot is never lost to v2.
+    v2_plan = None
+    try:
+        v2_plan = linkedin_growth.plan(weekday=weekday, fetch=_radar_fetch, prior_titles=prior, home=_home(),
+                                       job_id=str(job["id"]))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[one-agents] LinkedIn v2 plan failed, using the v1 brief: {type(exc).__name__}: {exc}", flush=True)
+    if v2_plan:
+        pillar = v2_plan["lane_label"]
+        angle = str(v2_plan["story"]["title"])
+        evidence_path = v2_plan["radar_path"]
+        evidence_count = len(v2_plan["story"].get("evidence", []))
+    else:
+        reusable = _sanjeevani_research()
+        if reusable is None:
+            ground_error = "Sanjeevani research library unavailable"
+        else:
+            try:
+                snapshot = reusable.collect(pillar_query, markets=["IN", "US", "GB"])
+                eligible = list(snapshot.get("eligible") or [])
+                evidence_count = len(eligible)
+                if not eligible:
+                    ground_error = "zero eligible current evidence"
+                else:
+                    brief, note = _research_synthesis(li.brief_prompt(pillar, prior), evidence=snapshot)
+                    if brief:
+                        angle = brief
+                    else:
+                        ground_error = note or "local synthesis returned no brief"
+            except Exception as exc:
+                ground_error = f"{type(exc).__name__}: {exc}"
+
+    if v2_plan:
+        pass  # the radar story and its audit file are already set above
+    elif angle:
+        output_dir = _home() / "agent_outputs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        evidence_file = output_dir / f"{job['id']}-linkedin-brief.md"
+        evidence_file.write_text(li.brief_document(task, pillar, angle), encoding="utf-8")
+        evidence_path = str(evidence_file)
+        memory.remember(agent="ARES", floor_id="3", floor_name=channel["vault_floor_name"],
+                        kind="LinkedIn Authority Brief", body=angle, task=task,
+                        tags=["linkedin", "authority", "sanjeevani", pillar.lower()])
+    elif li.requires_grounding(weekday):
+        # Saturday alone must stop rather than let ChatGPT invent a "trending"
+        # story the Content Bible says has to be real.
+        stages.clear_stage("ares")
+        return {"agent": "ARES", "mode": "blocked", "_blocked": True,
+                "content": f"LinkedIn Authority stopped: {ground_error}.",
+                "blocked_reason": ground_error, "handed_to": None}
+    else:
+        # Every other day lets ChatGPT pick a topic inside the day's pillar; a
+        # research miss enriches nothing today but must not stop that day.
+        angle = li.fallback_angle(task, pillar)
+
+    authorized = li.routine_publish_allowed(task)
+    if authorized:
+        authorized = _job_fired_by_trigger(str(channel.get("routine_trigger_id") or ""), str(job.get("id") or ""))
+        if not authorized:
+            print(f"[one-agents] {job.get('id')} names the {display} schedule but has no fire receipt; "
+                  "HERALD is briefed without publish authority", flush=True)
+
+    worker = stages.head_briefs_worker(
+        "ares", "herald",
+        carrying_detail=f"Taking the {display} brief to HERALD",
+        briefing_detail=f"HERALD, today's {display} post ({pillar}): {task.strip()[:90]}",
+        awaiting_detail=f"Waiting on HERALD to publish the {display} post",
+        enqueue=lambda: enqueue_job(
+            "herald",
+            json.dumps(li.worker_payload(
+                angle=angle, pillar=pillar, prior_titles=prior, origin_job=str(job["id"]),
+                evidence_path=evidence_path, evidence_count=evidence_count,
+                publish_authorized=authorized, v2=v2_plan)),
+            mode="execute", tier="fast"),
+    )
+    return {
+        "agent": "ARES", "mode": mode, "brand": li.SLUG, "pillar": pillar, "v2": bool(v2_plan),
+        "content": f"Briefed HERALD on today's {display} post ({pillar}).",
+        "prior_posts_considered": len(prior), "sanjeevani_evidence_count": evidence_count,
+        "evidence_path": evidence_path, "publish_authorized": authorized,
+        "handed_to": {"agent": "HERALD", "job_id": worker["id"]},
+        "note": "HERALD will execute the head-approved brief and hand its receipt back to ARES.",
+    }
+
+
+def _ares_report_linkedin(job: dict[str, Any], payload: dict[str, Any], li: Any) -> dict[str, Any]:
+    """Third leg: HERALD's verified receipt comes back to its head and is filed."""
+    channel = li.channel()
+    stages.set_stage("ares", stages.REPORTING, "Reporting the finished LinkedIn Authority post")
+    message = li.receipt_summary(payload)
+    if payload.get("v2_digest"):
+        message += "\n\n" + str(payload["v2_digest"])
+    title = payload.get("title") or "(details in the receipt)"
+    output_dir = _home() / "agent_outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{job['id']}.md"
+    output_path.write_text(f"# ARES - Delivery Report (LinkedIn Authority)\n\n{message}\n", encoding="utf-8")
+    remembered = memory.remember(
+        agent="ARES", floor_id="3", floor_name=channel["vault_floor_name"], kind="Delivery Report",
+        body=f"{message}\n\nANGLE: {title}\n",
+        tags=[li.SLUG, "growth", "linkedin post", "delivered"])
+    time.sleep(2.0)
+    stages.clear_stage("ares")
+    return {"agent": "ARES", "mode": "report", "brand": li.SLUG, "content": message, "title": title,
+            "format": payload.get("format") or "LinkedIn post", "published": bool(payload.get("published")),
+            "output": str(output_path), "vault_note": remembered.get("path")}
+
+
+def _run_lyra(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 12 YouTube packaging specialist.
+
+    LYRA owns the Sonia SEO/thumbnail package that previously made ARES a
+    cross-floor bottleneck. The payload and artifact paths stay compatible so
+    an in-flight production can resume across the migration.
+    """
+    payload = _json_task(job)
+    if payload.get("brand") == "planexium":
+        from openjarvis.one_agents.planexium import repackage_job
+        result = repackage_job(payload)
+        report = enqueue_job("helios", json.dumps({"brand": "planexium", "stage": "production_complete", **result}),
+                             mode="report", dedupe_key=f"planexium:{payload['mission_id']}:packaging-report")
+        return {**result, "agent": "LYRA", "handed_to": {"agent": "HELIOS", "job_id": report["id"]}}
+    if payload.get("brand") != "sonia_travel_vlogs" or payload.get("stage") != "seo":
+        return {"agent": "LYRA", "mode": "blocked", "_blocked": True,
+                "content": "LYRA accepts only HELIOS-approved YouTube packaging jobs.",
+                "blocked_reason": "unsupported LYRA payload", "handed_to": None}
+    stages.worker_confirms_receipt("lyra", "Received YATRA's verified master from HELIOS")
+    try:
+        stages.set_stage("lyra", stages.EXECUTING,
+                         "Building search, chapters, packaging and private-upload manifest")
+        package = _sonia_seo_package(payload)
+        stages.set_stage("lyra", stages.EXECUTING,
+                         "Generating and scoring three thumbnail variants in ChatGPT")
+        try:
+            from openjarvis.one_agents import ares_thumbnail
+            from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+            package["thumbnail_receipt"] = ares_thumbnail.make_thumbnail_experiment(
+                Path(package["path"]), tool=LaoOrchestratorTool(),
+                artifact_roots=_YATRA_ROBOT_ARTIFACTS, max_wait_seconds=780)
+        except Exception as exc:  # noqa: BLE001 - gate records the missing thumbnail
+            package["thumbnail_receipt"] = {
+                "ok": False, "stage": "error",
+                "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+            }
+        try:
+            from openjarvis.one_agents import youtube_publish
+            package["upload_gate"] = youtube_publish.prepare_gate(Path(package["path"]))
+        except Exception as exc:  # noqa: BLE001 - SEO package remains inspectable
+            package["upload_gate"] = {
+                "status": "unavailable",
+                "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+            }
+        stages.set_stage("lyra", stages.CARRYING_TO_HEAD,
+                         "Taking the SEO and private-upload package back to HELIOS")
+        _require_active_job(job, "hand the SEO package to HELIOS")
+        report = enqueue_job(
+            "helios",
+            json.dumps({**payload, "stage": "seo_complete",
+                        "format": "youtube_seo_package", "worker": "lyra",
+                        "seo": package, "published": False,
+                        "output": package["path"]}),
+            mode="report", tier="fast",
+            dedupe_key=f"travel:{payload.get('lao_job')}:seo-report",
+        )
+        return {"agent": "LYRA", "stage": "seo", "seo": package,
+                "published": False,
+                "handed_to": {"agent": "HELIOS", "job_id": report["id"]}}
+    finally:
+        stages.clear_stage("lyra")
+
+
 def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 3 - organic publishing distribution or the existing local plan."""
     payload = _json_task(job)
+    # LinkedIn Authority: the one channel Floor 3 owns (Chairman, 2026-10-13).
+    _task_text = str(job.get("task") or "")
+    _li = floors_bridge.load("floor_03_growth", "linkedin_authority")
+    if _li is not None and _li.is_linkedin_task(_task_text, payload):
+        if str(job.get("mode") or "").strip().lower() == "report" and payload.get("worker") == "herald":
+            return _ares_report_linkedin(job, payload, _li)
+        return _ares_dispatch_linkedin(job, _li)
+    if _li is None and "[linkedin-authority]" in _task_text.lower():
+        reason = "LinkedIn Authority stopped: Floor 3's linkedin_authority module could not be loaded."
+        return {"agent": "ARES", "mode": "blocked", "_blocked": True, "content": reason,
+                "blocked_reason": reason, "handed_to": None}
+    if payload.get("brand") == "sonia_travel_vlogs" and payload.get("stage") == "seo":
+        forwarded = enqueue_job(
+            "lyra", json.dumps(payload), mode="execute", tier="fast",
+            dedupe_key=f"travel:{payload.get('lao_job')}:lyra-migration",
+        )
+        return {"agent": "ARES", "mode": "handoff",
+                "content": "YouTube packaging moved to LYRA on Floor 12; payload forwarded unchanged.",
+                "handed_to": {"agent": "LYRA", "job_id": forwarded["id"]}}
     if payload.get("workflow") == "publishing_portfolio":
         title = str(payload.get("title") or "(untitled)")
         plan = {
@@ -3794,6 +6061,290 @@ def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
                 "handed_to": {"agent": "METRON", "job_id": metron_job["id"]},
                 "content": "Organic distribution plan drafted; no ad spend or external post executed."}
     return _local_plan(job)
+
+
+ECHO_LANGUAGE_UPLOADS_PER_SWEEP = 1  # at most ~15 min of ECHO per hour, so a VISTA upload never waits long
+ECHO_LANGUAGE_BUDGET_SECONDS = float(os.environ.get("ONE_ECHO_LANGUAGE_BUDGET_SECONDS", "900"))
+
+
+def _echo_missing_languages(uploader: Any) -> list[dict[str, Any]]:
+    """Translate and add the languages recent uploads still lack, newest first, one upload per hourly sweep.
+
+    A Short's upload translates inside a time budget, so some of its 14 languages can be missing at upload; until
+    2026-10-13 nothing added them later. Each language is saved as soon as it is translated, so a sweep that runs
+    out of time leaves its work for the next one. Only the translations are sent: the live title stays as it is."""
+    from openjarvis.one_agents import youtube_publish
+    results: list[dict[str, Any]] = []
+    for sha, entry, missing in uploader.pending_localization_entries()[:ECHO_LANGUAGE_UPLOADS_PER_SWEEP]:
+        try:
+            added, failed = youtube_publish.ensure_localizations(Path(entry["package"]), tuple(missing),
+                                                                 budget_seconds=ECHO_LANGUAGE_BUDGET_SECONDS)
+            fresh = uploader.ledger_load().get(sha) or entry
+            applied = uploader.apply_localizations(sha, fresh) if added else {"localized": []}
+            results.append({"video_id": entry.get("video_id"), "translated": sorted(added),
+                            "localized": applied.get("localized"), "still_missing": sorted(failed)})
+        except Exception as exc:  # noqa: BLE001 - one upload's trouble never stops the next one
+            results.append({"video_id": entry.get("video_id"), "error": f"{type(exc).__name__}: {str(exc)[:160]}"})
+    return results
+
+
+def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
+    """Finish Sonia's private YouTube draft after LYRA returns its package to HELIOS."""
+    payload = _json_task(job)
+    if payload.get("brand") == "planexium":
+        if payload.get("stage") != "private_upload":
+            raise ValueError("PLANEXIUM distribution requires explicit private-upload stage")
+        from openjarvis.one_agents.planexium import stage_private
+        return {"agent": "ECHO", "brand": "planexium", "published": False, **stage_private(payload)}
+    if payload.get("brand") == "sonia_travel_vlogs" and payload.get("stage") == "vista_short_publish":
+        package = Path(str(payload.get("package") or ""))
+        slot = str(payload.get("slot") or "")
+        if not package.is_file() or slot not in {"0900", "1300", "1800"}:
+            raise RuntimeError("ECHO received an incomplete VISTA distribution package")
+        if not _job_fired_by_trigger(f"daily-vista-short-{slot}", str(payload.get("origin_job") or "")):
+            raise RuntimeError("VISTA upload has no authentic scheduler fire receipt")
+        stages.worker_confirms_receipt("echo", "Received VISTA's QC-passed Short package")
+        try:
+            from openjarvis.one_agents import youtube_publish
+            pkg = json.loads(package.read_text(encoding="utf-8"))
+            blockers = youtube_publish.media_metadata_blockers(pkg)
+            if blockers:
+                raise RuntimeError("VISTA private upload blocked: " + " | ".join(blockers))
+            master = Path(str(pkg.get("master") or ""))
+            thumbnail = Path(str(pkg.get("thumbnail") or ""))
+            caption = Path(str(pkg.get("caption") or ""))
+            if not master.is_file() or not thumbnail.is_file() or not caption.is_file():
+                raise RuntimeError("VISTA master, thumbnail or manual subtitle file is missing")
+            stages.set_stage("echo", stages.EXECUTING, "Uploading VISTA's private Short with manual subtitles")
+            uploader = youtube_publish._load("youtube_api_upload")
+            report = uploader.run(package, video=master, thumbnail=thumbnail, synthetic="yes", execute=True,
+                                  caption=caption, caption_language="hi")
+            return {"agent": "ECHO", "stage": "vista_short_publish", "status": "uploaded_private",
+                    "video_id": report.get("video_id"), "studio_url": report.get("studio_url"),
+                    "master": str(master), "thumbnail": str(thumbnail), "subtitles": str(caption),
+                    "content": f"VISTA Short uploaded privately: {report.get('studio_url') or report.get('video_id')}"}
+        finally:
+            stages.clear_stage("echo")
+    if payload.get("brand") == "sonia_travel_vlogs" and payload.get("stage") == "pending_comments":
+        # The channel comment waits for the video to go public (comments are off while it is private).
+        stages.worker_confirms_receipt("echo", "Received the owed channel comments from HELIOS")
+        try:
+            from openjarvis.one_agents import youtube_publish
+            stages.set_stage("echo", stages.EXECUTING, "Posting channel comments on videos that are now public")
+            uploader = youtube_publish._load("youtube_api_upload")
+            posted = uploader.post_pending_comments() if payload.get("videos", True) else []
+            languages = _echo_missing_languages(uploader) if payload.get("languages") else []
+            return {"agent": "ECHO", "stage": "pending_comments", "results": posted, "languages": languages,
+                    "content": f"{sum(1 for r in posted if r.get('posted'))} comment(s) posted; "
+                               f"{sum(1 for r in posted if r.get('waiting'))} video(s) still private. "
+                               f"Languages added on {sum(1 for r in languages if r.get('localized'))} upload(s). "
+                               "Pin each posted comment in Studio."}
+        finally:
+            stages.clear_stage("echo")
+            stages.worker_finished("helios", str(job.get("id") or ""))
+    if payload.get("brand") == "sonia_travel_vlogs" and payload.get("stage") == "community_poll":
+        stages.worker_confirms_receipt("echo", "Received today's community poll brief from HELIOS")
+        try:
+            from openjarvis.one_agents import sonia_community
+            stages.set_stage("echo", stages.EXECUTING, "Writing, illustrating and posting Sonia's community poll")
+            brief = payload["brief"]
+            if not brief.get("publish_authorized"):
+                out = sonia_community.load().run(brief, dry_run=True)
+                return {"agent": "ECHO", "stage": "community_poll", "status": out.get("status"),
+                        "requires_olympus": True, "screenshot": out.get("screenshot"),
+                        "question": (out.get("record") or {}).get("question"),
+                        "content": "Community poll prepared as a dry run only: this job has no fire receipt from "
+                                   "the daily schedule, so posting it needs OLYMPUS."}
+            out = sonia_community.load().run(brief)
+            if out.get("status") not in ("posted", "already_posted"):
+                raise RuntimeError(f"community poll not posted: {out.get('reason') or out.get('status')}")
+            record = out.get("record") or {}
+            return {"agent": "ECHO", "stage": "community_poll", "status": out["status"], "post_id": out.get("post_id"),
+                    "question": record.get("question") or out.get("question"),
+                    "options": [o.get("caption") for o in record.get("options", [])],
+                    "content": (f"Community poll {out['status'].replace('_', ' ')}: "
+                                f"{record.get('question') or out.get('question')}")}
+        finally:
+            stages.clear_stage("echo")
+            stages.worker_finished("helios", str(job.get("id") or ""))
+    package = Path(str(payload.get("package") or payload.get("output") or ""))
+    if payload.get("brand") != "sonia_travel_vlogs" or not package.is_file():
+        return _local_plan(job)
+    stages.worker_confirms_receipt("echo", "Received LYRA package from HELIOS for subtitles and distribution completion")
+    try:
+        from openjarvis.one_agents import youtube_distribution, youtube_publish
+        stages.set_stage("echo", stages.EXECUTING, "Uploading the governed private draft")
+        gate = youtube_publish.autopilot_upload(package)
+        if gate.get("status") not in ("uploaded_private", "already_uploaded"):
+            raise RuntimeError("private upload gate did not complete: " + str(gate.get("status")))
+        stages.set_stage("echo", stages.EXECUTING,
+                         "Adding subtitles, requested languages and the channel comment")
+        result = youtube_distribution.complete(package)
+        # The last step of Sonia's video, so the residue goes here: whether this pass uploaded the cut or found it
+        # already on YouTube. Until 2026-10-08 cleanup ran only inside a fresh upload, so a re-checked video
+        # (status already_uploaded) kept its ~2 GB of intermediates forever.
+        stages.set_stage("echo", stages.EXECUTING, "Clearing intermediates the finished video no longer needs")
+        storage = youtube_publish.cleanup_after_upload(gate) if gate.get("master") else {}
+        stages.set_stage("echo", stages.CARRYING_TO_HEAD, "Taking the completed private draft back to HELIOS")
+        _require_active_job(job, "report distribution completion to HELIOS")
+        report = enqueue_job("helios", json.dumps({**payload, "stage": "distribution_complete",
+            "format": "youtube_private_draft", "worker": "echo", "distribution": result,
+            "storage_cleanup": storage, "published": False, "output": str(package)}), mode="report", tier="fast",
+            dedupe_key=f"travel:{payload.get('lao_job')}:distribution-report")
+        return {"agent": "ECHO", **result, "storage_cleanup": storage,
+                "handed_to": {"agent": "IRIS", "job_id": report["id"]}}
+    finally:
+        stages.clear_stage("echo")
+
+
+def _run_vista(job: dict[str, Any]) -> dict[str, Any]:
+    """Run one IRIS-researched, slot-bound Short and hand its package to ECHO."""
+    payload = _json_task(job)
+    if payload.get("brand") != "sonia_travel_vlogs" or payload.get("content_format") != "youtube_short":
+        raise RuntimeError("VISTA only accepts Sonia Travel Vlogs youtube_short briefs from HELIOS")
+    slot = str(payload.get("slot") or "")
+    if slot not in {"0900", "1300", "1800"}:
+        raise RuntimeError("VISTA brief has no valid 0900, 1300 or 1800 slot")
+    evidence = Path(str(payload.get("evidence_path") or ""))
+    if not evidence.is_file() or int(payload.get("evidence_count") or 0) < 1:
+        raise RuntimeError("VISTA requires HELIOS's non-empty Sanjeevani evidence receipt")
+    origin = str(payload.get("origin_job") or "")
+    trigger_id = f"daily-vista-short-{slot}"
+    publish_authorized = _job_fired_by_trigger(trigger_id, origin)
+    if not publish_authorized:
+        raise RuntimeError(f"VISTA slot {slot} has no authentic {trigger_id} fire receipt")
+
+    stages.worker_confirms_receipt("vista", f"Received HELIOS's researched {slot} Short brief")
+    try:
+        stages.set_stage("vista", stages.EXECUTING, "Producing the slot-bound vertical Short and QC package")
+        runner_path = Path(os.environ.get("VISTA_RUNNER", r"C:\Users\pc\Documents\LAO\vista\production.py"))
+        if not runner_path.is_file():
+            raise RuntimeError(f"VISTA production runner is missing: {runner_path}")
+        spec = importlib.util.spec_from_file_location("vista_production", runner_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Cannot load VISTA production runner: {runner_path}")
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        stages.set_stage("vista", stages.EXECUTING, "Researching and writing the Short with LAO's ChatGPT")
+        from openjarvis.one_agents import resource_lanes
+        stages.set_stage("vista", stages.EXECUTING,
+                         "Waiting for Floor 12's exclusive Envato download lane")
+        with resource_lanes.claim(
+            "floor12:envato",
+            heartbeat=lambda: job_recovery.heartbeat(_connect, str(job["id"])),
+            cancelled=lambda: not _job_is_active(str(job["id"])),
+        ):
+            stages.set_stage("vista", stages.EXECUTING,
+                             "Producing with VISTA's isolated browser and Envato lane")
+            result = runner.run({**payload, "publish_authorized": True, "trigger_id": trigger_id,
+                                 "_writer": _vista_chatgpt})
+        package = Path(str(result.get("package") or ""))
+        if result.get("status") != "qc_passed" or not package.is_file():
+            raise RuntimeError("VISTA did not produce a QC-passed distribution package")
+        stages.set_stage("vista", stages.CARRYING_TO_HEAD, "Taking the finished Short package to ECHO")
+        # One upload per fire, except a deliberate rebuild of the cut (2026-10-13 Nha Trang music): its new master
+        # gets its own handoff. The upload ledger is keyed by the master's hash, so one cut never uploads twice.
+        handoff = f"vista:{origin}:{slot}:publish"
+        if payload.get("rebuild_run_dir"):
+            import hashlib
+            master = Path(str(result.get("master") or ""))
+            handoff += ":" + hashlib.sha256(master.read_bytes()).hexdigest()[:16]
+        _require_active_job(job, "hand the Short to ECHO")
+        echo_job = enqueue_job(
+            "echo", json.dumps({**payload, "stage": "vista_short_publish", "package": str(package),
+                                 "publish_authorized": True, "trigger_id": trigger_id,
+                                 "vista_job": job.get("id")}),
+            mode="execute", tier="fast", dedupe_key=handoff)
+        return {"agent": "VISTA", **result, "handed_to": {"agent": "ECHO", "job_id": echo_job["id"]}}
+    finally:
+        stages.clear_stage("vista")
+
+
+def _vista_chatgpt(prompt: str) -> tuple[str, str]:
+    """VISTA's script writer: LAO's logged-in ChatGPT session (the one YATRA, KAIROS and PEITHO already use).
+
+    A worker may write with it; the floor head IRIS stays local. ChatGPT can open the story's article and the
+    official page, which a model given only the headline cannot."""
+    output, error = _run_peitho_lao_draft([prompt], expected_markers=["BEGIN_VISTA_JSON", "END_VISTA_JSON"],
+                                          timeout_ms=420000)
+    return str(output.get("angle_1") or ""), error
+
+
+def _vista_spec_from_brief(brief: str, slot: str, lane: str, hook: str) -> dict[str, Any]:
+    """IRIS's typed hand-off to VISTA: the verified story and the slot's contract - never a script.
+
+    2026-10-13: the previous adapter cut IRIS's own brief into sentences and used them as the Short's spoken lines,
+    title, thumbnail headline and Envato queries. IRIS's brief is reasoning about the pick, so VISTA voiced "The total
+    viral score is 15.25." in Sonia's voice (16 ElevenLabs segments on two runs), titled the Short "The hook is
+    derived directly from the headline...", and searched Envato for that sentence. The script is now VISTA's
+    writer's job (a worker, allowed to use LAO's ChatGPT, which can open the article and the official source);
+    IRIS only passes what it actually established: the chosen headline, place, sources, search terms and the
+    slot's contract. VISTA refuses to voice anything until its writer's script passes validation.
+    """
+    text = str(brief or "").strip()
+    if not text:
+        raise RuntimeError("IRIS cannot build a VISTA production_spec from an empty brief")
+
+    def section(name: str) -> str:
+        match = re.search(rf"(?ims)^###\s*{re.escape(name)}\s*$\s*(.+?)(?=^###\s|^##\s|\Z)", text)
+        return match.group(1).strip() if match else ""
+
+    chosen = re.search(r"Chosen from today's scored travel news:\s*(.+?)\s*\(score", text)
+    quoted_hook = re.search(r'\*\*"([^"]{12,200})"\*\*', section("Strongest Truthful Hook"))
+    headline = (chosen.group(1) if chosen else quoted_hook.group(1) if quoted_hook else "").strip()
+    if not headline:
+        raise RuntimeError("IRIS brief names no chosen story headline; VISTA cannot be briefed on a guess")
+    place = re.search(r"(?im)^\**Destination/Topic:?\**:?\s*(.+)$", text)
+    destination = re.sub(r"\s*\(.*$", "", place.group(1)).strip(" *.") if place else ""
+    if not destination:
+        destination = re.sub(r"\s+", " ", section("Destination/Topic")).split(".")[0].strip(" *-")
+    search_terms = [t.strip() for t in re.findall(r'"([^"\n]{3,80})"', section("Viral Search Terms"))][:8]
+    urls = []
+    for url in re.findall(r"https?://[^\s)>\]]+", text):
+        url = url.rstrip(".,;")
+        if url not in urls and "youtube.com/watch" not in url:
+            urls.append(url)
+    contract = re.search(r"(?s)# VISTA SLOT CONTRACT\n(.+?)\n\n", text)
+    slug_seed = re.sub(r"[^a-z0-9]+", "-", headline.lower()).strip("-")[:58]
+    # Portrait identity stays fixed, but the performance direction rotates by
+    # slot so a day's Shorts do not all show the same raised-finger pose.
+    performance = {
+        "0900": {
+            "expression": "genuinely surprised, raised brows and alert eyes; identity unchanged",
+            "gesture": "one hand lightly covering the mouth in surprise; the other hand relaxed and visible",
+            "posture": "front-facing close portrait with a slight lean toward the hook",
+            "outfit_colour": "emerald green",
+        },
+        "1300": {
+            "expression": "concerned warning expression, focused eyes; identity unchanged",
+            "gesture": "open-palm STOP gesture beside the headline; no pointing finger",
+            "posture": "upright three-quarter portrait on the right, shoulders and full hand visible",
+            "outfit_colour": "royal blue",
+        },
+        "1800": {
+            "expression": "excited reveal, wide eyes and confident smile; identity unchanged",
+            "gesture": "both palms open in a presenting reveal toward the destination; no pointing finger",
+            "posture": "energetic three-quarter portrait on the right with both hands inside frame",
+            "outfit_colour": "bright red",
+        },
+    }.get(slot, {
+        "expression": "curious and skeptical, one eyebrow raised; identity unchanged",
+        "gesture": "one hand at the chin in a thinking pose; no pointing finger",
+        "posture": "upright three-quarter portrait on the right, shoulders visible",
+        "outfit_colour": "bright red",
+    })
+    return {"slug": f"{slug_seed or 'travel-update'}-{slot}", "slot": slot,
+            "angle": lane, "hook": hook, "slot_contract": contract.group(1).strip() if contract else "",
+            "story": {"headline": headline, "destination": destination[:80], "search_terms": search_terms,
+                      "source_urls": urls[:12]},
+            "script_source": "vista_writer_required",
+            "sources": urls[:12],
+            # The headline is written by VISTA's writer with the script; everything else about the look is IRIS's.
+            "thumbnail_brief": {"headline": "", **performance,
+                                "background": f"high-contrast destination context for {destination[:80]}, uncluttered"},
+            "footage_contract": {"provider": "Envato", "orientation": "Vertical",
+                                 "resolution": "1080 x 1920", "unique_clips": 8,
+                                 "fresh_for_each_short": True}}
 
 
 def _run_alfa(job: dict[str, Any]) -> dict[str, Any]:
@@ -3961,6 +6512,122 @@ def _run_titan(job: dict[str, Any]) -> dict[str, Any]:
     return _local_plan(job)
 
 
+SONIA_COMMENT_SWEEP = "[sonia-comment-sweep]"
+
+
+def _youtube_sonia_brand() -> dict[str, Any]:
+    """Stable channel contract used by HELIOS without Floor 4's brand router."""
+    return {
+        "slug": "sonia_travel_vlogs",
+        "display_name": "Sonia Travel Vlogs",
+        "worker_agent_id": "fabula",
+        "vault_floor_name": "YouTube Studio (Sonia Travel Vlogs)",
+        "social_channel_slug": "sonicsonia",
+        "status": "live",
+    }
+
+
+def _iris_comment_sweep(job: dict[str, Any], *, head_id: str = "ia",
+                        head_name: str = "IRIS") -> dict[str, Any]:
+    """Hourly: when a Sonia video still owes its channel comment, brief ECHO to post it once the video is public.
+
+    Uploads are private and YouTube disables comments on a private video, so the comment can only go up after a
+    person makes the video public in Studio. Nothing did that until 2026-10-09: Air France went public with no
+    comment. IRIS reads the upload ledger first (local, instant) and only walks to ECHO when something is owed."""
+    from openjarvis.one_agents import youtube_publish
+    try:
+        ledger = youtube_publish._load("youtube_api_upload").ledger_load()
+    except Exception as exc:  # noqa: BLE001
+        return {"agent": head_name, "mode": "comment_sweep", "content": f"Upload ledger unreadable: {exc}"[:300]}
+    uploader = youtube_publish._load("youtube_api_upload")
+    owed = [entry.get("video_id") for _, entry in uploader.pending_comment_entries(ledger)]
+    # The same sweep finishes metadata languages a Short's upload ran out of time for (2026-10-13): nothing added
+    # them afterwards, so a video could stay with 8 of its 14 languages for good.
+    languages = [entry.get("video_id") for _, entry, _ in uploader.pending_localization_entries(ledger)]
+    if not owed and not languages:
+        return {"agent": head_name, "mode": "comment_sweep",
+                "content": "No Sonia video owes a channel comment or a metadata language."}
+    follow = stages.head_briefs_worker(
+        head_id, "echo", carrying_detail="Taking the owed channel comments and languages to ECHO",
+        briefing_detail=(f"ECHO, post the channel comment on any of {len(owed)} video(s) now public, and add the "
+                         f"missing languages on {len(languages)} upload(s)."),
+        awaiting_detail="Waiting on ECHO for channel comments and languages",
+        enqueue=lambda: enqueue_job("echo", json.dumps({"brand": "sonia_travel_vlogs", "stage": "pending_comments",
+                                                         "videos": owed, "languages": languages}),
+                                    mode="execute", tier="fast", dedupe_key=f"sonia:comments:{job['id']}"))
+    return {"agent": head_name, "mode": "comment_sweep", "owed": owed, "languages": languages,
+            "handed_to": {"agent": "ECHO", "job_id": follow["id"]},
+            "content": (f"{len(owed)} video(s) owe a channel comment; {len(languages)} upload(s) owe languages. "
+                        "ECHO posts each comment once the video is public and adds the languages.")}
+
+
+def _iris_community_poll(job: dict[str, Any], *, head_id: str = "ia",
+                         head_name: str = "IRIS") -> dict[str, Any]:
+    """Daily: brief ECHO on today's image poll for Sonia's YouTube Community tab.
+
+    The Chairman approved one public poll a day with no per-post approval (2026-10-09). IRIS stays local: the brief
+    is the weekday's format, the latest Sanjeevani story ranking (fresh discovery only when none is under three
+    days old), the next festival and the places used lately. ECHO writes, illustrates and posts it."""
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from openjarvis.one_agents import sonia_community
+    today = _dt.now(_tz(_td(hours=5, minutes=30))).date()
+
+    def discover() -> list[dict[str, Any]]:
+        travel, reusable = _sanjeevani_travel(), _sanjeevani_research()
+        if travel is None or reusable is None:
+            return []
+        return travel.discover(reusable, top_n=12)["candidates"]
+
+    stages.set_stage(head_id, stages.EXECUTING, "Choosing today's community poll for Sonia's channel")
+    try:
+        brief = sonia_community.brief_for(today, _home() / "agent_outputs", discover=discover)
+    except Exception as exc:  # noqa: BLE001
+        stages.clear_stage(head_id)
+        return {"agent": head_name, "mode": "community_poll", "_blocked": True,
+                "content": f"Community poll brief failed: {exc}"[:300]}
+    # The standing approval is for the daily schedule only, proven by the scheduler's own fire receipt (as for
+    # KAIROS's carousel). Any other run - typed by hand, retried, dispatched from the building - is a dry run:
+    # ECHO fills the composer and cancels, and posting it still needs OLYMPUS.
+    brief["publish_authorized"] = _job_fired_by_trigger("daily-sonia-community-poll", str(job.get("id") or ""))
+    follow = stages.head_briefs_worker(
+        head_id, "echo", carrying_detail="Taking today's community poll to ECHO",
+        briefing_detail=f"ECHO, post today's {brief['format'].replace('_', ' ')} image poll on Sonia's channel.",
+        awaiting_detail="Waiting on ECHO to post the community poll",
+        enqueue=lambda: enqueue_job("echo", json.dumps({"brand": "sonia_travel_vlogs", "stage": "community_poll",
+                                                         "brief": brief}, ensure_ascii=False),
+                                    mode="execute", tier="fast", dedupe_key=f"sonia:community:{brief['today']}"))
+    return {"agent": head_name, "mode": "community_poll", "brief": brief,
+            "handed_to": {"agent": "ECHO", "job_id": follow["id"]},
+            "content": f"Today's poll is a {brief['format'].replace('_', ' ')} poll; ECHO writes, illustrates and posts it."}
+
+
+def _run_helios(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 12 head for all YouTube channel flows."""
+    task = str(job.get("task") or "")
+    mode = str(job.get("mode") or "plan").strip().lower()
+    payload = _json_task(job)
+    if payload.get("brand") == "planexium" or (not payload and "planexium" in task.casefold()):
+        from openjarvis.one_agents.planexium import head_job
+        return head_job(job, enqueue=enqueue_job)
+    brand = _youtube_sonia_brand()
+    # Stage is authoritative. A malformed handoff once sent seo_complete as
+    # execute, which fell through into fresh discovery and commissioned a
+    # second FABULA/YATRA chain. Downstream receipts can only be reconciled;
+    # they can never start research again regardless of their mode field.
+    report_stages = {"seo_complete", "distribution_complete", "production_complete"}
+    if mode == "report" or str(payload.get("stage") or "") in report_stages:
+        return _iris_report_brand(
+            job, brand, head_id="helios", head_name="HELIOS", floor_id="12",
+        )
+    if SONIA_COMMENT_SWEEP in task:
+        return _iris_comment_sweep(job, head_id="helios", head_name="HELIOS")
+    if "[sonia-community-poll]" in task:
+        return _iris_community_poll(job, head_id="helios", head_name="HELIOS")
+    return _iris_dispatch_brand(
+        job, brand, head_id="helios", head_name="HELIOS", floor_id="12",
+    )
+
+
 def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 4 head - decides the next reel, then hands it to MUSE.
 
@@ -3977,6 +6644,27 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     """
     task = str(job.get("task") or "")
     mode = str(job.get("mode") or "plan").strip().lower()
+
+    # A channel Floor 4 no longer owns is declined with a pointer. Without
+    # this, text the brand router cannot place falls through to the
+    # ImagineIndia reel path below. LinkedIn Authority moved to ARES
+    # (Floor 3) on 2026-10-13; the registry in floor_04_media/brands.json
+    # names where each moved channel went.
+    _moved_router = floors_bridge.load("floor_04_media", "brand_router")
+    if _moved_router is not None and hasattr(_moved_router, "moved_channel"):
+        try:
+            _payload = json.loads(task)
+        except json.JSONDecodeError:
+            _payload = {}
+        _explicit = _payload.get("brand") if isinstance(_payload, dict) else None
+        _moved = _moved_router.moved_channel(task, explicit=_explicit)
+        if _moved:
+            stages.clear_stage("ia")
+            _to = str(_moved.get("to_head_agent_id") or "").upper()
+            return {"agent": "IRIS", "mode": "blocked", "_blocked": True,
+                    "content": (f"{_moved['slug']} is no longer a Floor 4 channel; it moved to Floor "
+                                f"{_moved.get('to_floor_id')} ({_to}) on {_moved.get('moved_on')}. Nothing dispatched."),
+                    "blocked_reason": f"channel moved to {_to}", "handed_to": None}
 
     if mode == "report":
         # A revenue review is not a post: it gets its own report, whichever
@@ -4007,6 +6695,11 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     if (revenue_router is not None and hasattr(revenue_router, "revenue_intent")
             and revenue_router.revenue_intent(task)):
         return _iris_dispatch_revenue(job, revenue_router.revenue_brand(task))
+
+    if SONIA_COMMENT_SWEEP in task:
+        return _iris_comment_sweep(job)
+    if "[sonia-community-poll]" in task:
+        return _iris_community_poll(job)
 
     brand, question = floors_bridge.route_media(task, job)
     if question:
@@ -4471,6 +7164,7 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
     # this can't just be a bare set_stage/sleep/enqueue sequence per floor.
     if content_type == "news_hook" and incident_place:
         _news_hook_ledger_record(incident_place, incident_summary, str(job.get("id") or ""))
+    _require_active_job(job, f"commission {worker_id.upper()}")
     worker = stages.head_briefs_worker(
         "ia", "muse",
         carrying_detail=f"Taking the {content_label} brief to MUSE: {(priority or angle)[:60]}",
@@ -4565,7 +7259,9 @@ def _iris_report(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str, Any]:
+def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any], *,
+                       head_id: str = "ia", head_name: str = "IRIS",
+                       floor_id: str = "4") -> dict[str, Any]:
     """Third leg for a Floor 4 brand that is not ImagineIndia.
 
     Same shape as _iris_report, but every brand-specific detail comes from the
@@ -4581,11 +7277,43 @@ def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str, 
     display = brand.get("display_name", brand["slug"])
     worker = str(payload.get("worker") or brand["worker_agent_id"]).upper()
 
+    if (brand.get("slug") == "sonia_travel_vlogs"
+            and payload.get("format") == "travel_video_production"
+            and payload.get("stage") != "seo_complete"):
+        stages.set_stage(head_id, stages.CARRYING_TO_WORKER,
+                         "Taking YATRA's verified master to LYRA for YouTube packaging",
+                         worker="lyra")
+        follow = enqueue_job("lyra", json.dumps({**payload, "stage": "seo"}),
+                             mode="execute", tier="fast",
+                             dedupe_key=f"travel:{payload.get('lao_job')}:seo")
+        stages.set_stage(head_id, stages.AWAITING_WORKER,
+                         "Waiting for LYRA SEO and private-upload package", worker="lyra")
+        return {"agent": head_name, "mode": "handoff", "brand": brand["slug"],
+                "production_complete": True, "published": False,
+                "handed_to": {"agent": "LYRA", "job_id": follow["id"]},
+                "content": f"YATRA production passed QC; {head_name} handed the verified master to LYRA."}
+
+    if (brand.get("slug") == "sonia_travel_vlogs"
+            and payload.get("stage") == "seo_complete"
+            and not payload.get("distribution_complete")):
+        seo_payload = payload.get("seo") if isinstance(payload.get("seo"), dict) else {}
+        package = str(seo_payload.get("path") or payload.get("output") or "")
+        stages.set_stage(head_id, stages.CARRYING_TO_WORKER,
+                         "Taking LYRA package to ECHO for subtitles, languages and comment", worker="echo")
+        follow = enqueue_job("echo", json.dumps({**payload, "package": package}),
+                             mode="execute", tier="fast",
+                             dedupe_key=f"travel:{payload.get('lao_job')}:distribution")
+        stages.set_stage(head_id, stages.AWAITING_WORKER,
+                         "Waiting for ECHO to complete the private YouTube draft", worker="echo")
+        return {"agent": head_name, "mode": "handoff", "brand": brand["slug"],
+                "published": False, "handed_to": {"agent": "ECHO", "job_id": follow["id"]},
+                "content": f"LYRA packaging received; {head_name} handed subtitles, languages and comment to ECHO."}
+
     if str(payload.get("status") or "") == "stopped":
         # The worker ended without anything to deliver. Reported as that, not
         # as "ready", and kept out of the brand's ANGLE history: a post that
         # was never made must not stop tomorrow's run from making it.
-        stages.set_stage("ia", stages.REPORTING, f"Reporting why today's {display} post was not made")
+        stages.set_stage(head_id, stages.REPORTING, f"Reporting why today's {display} post was not made")
         fmt = payload.get("format") or "post"
         reason = str(payload.get("note") or payload.get("error") or "no reason was given")
         message = (f"Sir, today's {display} {fmt} was not produced. {worker} stopped before making it.\n\n"
@@ -4593,19 +7321,19 @@ def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str, 
         output_dir = _home() / "agent_outputs"
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{job['id']}.md"
-        output_path.write_text(f"# IRIS - Stopped ({display})\n\n{message}\n", encoding="utf-8")
+        output_path.write_text(f"# {head_name} - Stopped ({display})\n\n{message}\n", encoding="utf-8")
         remembered = memory.remember(
-            agent="IRIS", floor_id="4", floor_name=brand["vault_floor_name"],
+            agent=head_name, floor_id=floor_id, floor_name=brand["vault_floor_name"],
             kind="Stopped Report", body=message,
             tags=[brand["slug"], "media", str(fmt).lower(), "stopped"],
         )
         time.sleep(2.0)
-        stages.clear_stage("ia")
-        return {"agent": "IRIS", "mode": "report", "brand": brand["slug"], "content": message,
+        stages.clear_stage(head_id)
+        return {"agent": head_name, "mode": "report", "brand": brand["slug"], "content": message,
                 "status": "stopped", "error": payload.get("error"), "published": False,
                 "output": str(output_path), "vault_note": remembered.get("path")}
 
-    stages.set_stage("ia", stages.REPORTING, f"Reporting the finished {display} post")
+    stages.set_stage(head_id, stages.REPORTING, f"Reporting the finished {display} post")
     title = payload.get("title") or "(details in the plan)"
     fmt = payload.get("format") or "post"
     output = payload.get("output") or "(not reported)"
@@ -4614,12 +7342,32 @@ def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str, 
 
     learned = str(payload.get("learning_summary") or "").strip()
     proposals = [str(name) for name in payload.get("layout_proposals") or [] if str(name).strip()]
+    gate_note = ""
+    seo_payload = payload.get("seo") if isinstance(payload.get("seo"), dict) else {}
+    gate = seo_payload.get("upload_gate")
+    if gate:
+        from openjarvis.one_agents import youtube_publish
+        if gate.get("status") == "awaiting_approval" and gate.get("package"):
+            stages.set_stage(head_id, stages.EXECUTING, "Uploading the private YouTube draft under the standing policy")
+            try:
+                gate = youtube_publish.autopilot_upload(Path(gate["package"]))
+            except Exception as exc:  # noqa: BLE001 - report it; the gate stays retryable
+                gate = {**gate, "status": "upload_failed", "error": f"{type(exc).__name__}: {str(exc)[:240]}"}
+            stages.set_stage(head_id, stages.REPORTING, f"Reporting the finished {display} post")
+        gate_note = "\n\n" + youtube_publish.summarize(gate)
+        if isinstance(payload.get("storage_cleanup"), dict) and gate.get("status") != "uploaded_private":
+            gate_note += youtube_publish.storage_note(payload["storage_cleanup"])
+        receipt = seo_payload.get("thumbnail_receipt") or {}
+        if receipt and not receipt.get("ok"):
+            gate_note += (f"\nThumbnail: automatic generation did not finish ({receipt.get('stage')}: "
+                          f"{str(receipt.get('error', ''))[:160]}).")
     message = (
         f"Sir, the {display} {fmt} is ready. {worker} has handed it over.\n\n"
         f"Angle: {title}\n"
         f"Plan: {output}\n\n"
         + ("It has been published." if published else
            f"It is not published. {blocked}".strip())
+        + gate_note
         + (f"\n\nWhat {worker} has learned so far: {learned}" if learned else "")
         + (f"\nNew carousel formats creators are using, waiting for your pick: {', '.join(proposals)}"
            if proposals else "")
@@ -4628,19 +7376,19 @@ def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str, 
     output_dir = _home() / "agent_outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{job['id']}.md"
-    output_path.write_text(f"# IRIS — Delivery Report ({display})\n\n{message}\n", encoding="utf-8")
+    output_path.write_text(f"# {head_name} — Delivery Report ({display})\n\n{message}\n", encoding="utf-8")
 
     remembered = memory.remember(
-        agent="IRIS", floor_id="4", floor_name=brand["vault_floor_name"],
+        agent=head_name, floor_id=floor_id, floor_name=brand["vault_floor_name"],
         kind="Delivery Report",
         body=f"{message}\n\nANGLE: {title}\n",
         tags=[brand["slug"], "media", str(fmt).lower(), "delivered"],
     )
 
     time.sleep(2.0)
-    stages.clear_stage("ia")
+    stages.clear_stage(head_id)
     return {
-        "agent": "IRIS",
+        "agent": head_name,
         "mode": "report",
         "brand": brand["slug"],
         "content": message,
@@ -5095,61 +7843,52 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# LinkedIn Authority runs off a fixed weekly content calendar, not a freely
-# chosen topic -- see C:\Users\pc\Documents\LAO\LinkedIn-Content-Bible.md.
-# Only Saturday's own rule says a topic must be "grounded in a LIVE Google
-# News fetch, not invented"; every other day already has ChatGPT pick a
-# topic within that day's pillar, which worked long before any Sanjeevani
-# step existed here. A single blended query ("AI leadership workplace
-# automation India LinkedIn authority current trends") also ignored the
-# Bible's own scope guard -- Tuesday/Wednesday/Friday must NOT be framed
-# through an AI lens, which that always-AI-flavoured query was pushing into
-# every day regardless. Keyed on Python's Monday=0 weekday(), matching the
-# Bible's own day list order.
-_LINKEDIN_PILLAR_BY_WEEKDAY = {
-    0: ("AI", "agentic AI enterprise adoption trends"),
-    1: ("Cloud", "cloud infrastructure cost optimization"),
-    2: ("Infrastructure", "data center infrastructure engineering"),
-    3: ("RPA + Automation / Agentic AI", "robotic process automation agentic workflows"),
-    4: ("Networking", "professional networking career growth"),
-    5: ("Viral Tech Stack", "trending technology news today"),
-    6: ("For Freshers", "entry level tech career advice"),
-}
+# LinkedIn Authority's weekly pillars moved to Floor 3 with the channel:
+# one-company/floors/floor_03_growth/lib/linkedin_authority.py (2026-10-13).
 
 
-def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str, Any]:
+def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
+                         head_id: str = "ia", head_name: str = "IRIS",
+                         floor_id: str = "4") -> dict[str, Any]:
     """Hand a non-ImagineIndia Floor 4 brand to that brand's own worker.
 
     Deliberately a separate path from the ImagineIndia flow in _run_iris: that
     flow is live and produces real reels, so it is left exactly as it was.
 
-    IRIS coordinates here rather than producing. For the scheduled LinkedIn
-    Authority lane, the head first creates a grounded Sanjeevani evidence brief;
-    HERALD then executes that brief and never decides its own channel or topic.
+    IRIS coordinates here rather than producing. (The scheduled LinkedIn
+    Authority lane moved to ARES on Floor 3 on 2026-10-13 and no longer comes
+    through here.)
     """
     task = str(job.get("task") or "")
     mode = str(job.get("mode") or "plan").strip().lower()
-    worker_id = brand["worker_agent_id"]
+    is_vista_short = bool(re.search(r"\[vista-short\s+slot=(0900|1300|1800)\s+lane=([a-z_]+)\]", task, re.I))
+    vista_production_spec: dict[str, Any] | None = None
+    vista_match = re.search(r"\[vista-short\s+slot=(0900|1300|1800)\s+lane=([a-z_]+)\]", task, re.I)
+    worker_id = "vista" if is_vista_short else brand["worker_agent_id"]
     display = brand.get("display_name", brand["slug"])
     # Standing authority is intentionally narrower than "brand is KAIROS".
     # Only ONE's canonical scheduled carousel fire may publish without a new
     # OLYMPUS click. Manual/ad-hoc aibyvineet jobs still arrive unapproved.
     # The envelope check here is text; the scheduler's receipt is checked just
     # before the worker is briefed.
-    router = floors_bridge.load("floor_04_media", "brand_router")
+    router = floors_bridge.load("floor_04_media", "brand_router") if head_id == "ia" else None
+    routine_trigger_id = str(brand.get("routine_trigger_id") or "")
     routine_publish_authorized = bool(
         router is not None
         and router.routine_publish_allowed(brand.get("slug", ""), task)
     )
+    if is_vista_short and vista_match:
+        routine_trigger_id = f"daily-vista-short-{vista_match.group(1)}"
+        routine_publish_authorized = True
 
     # stages.set_stage() keeps one record per agent_id, so a second concurrent
     # flow would overwrite this head's own worker_job pointer and make the
     # first flow invisible in the building. Decline with a reason instead.
-    busy = floors_bridge.media_head_busy("ia")
+    busy = floors_bridge.media_head_busy(head_id) if head_id == "ia" else None
     if busy:
         detail = str(busy.get("detail") or "").strip()
         return {
-            "agent": "IRIS", "mode": mode, "handed_to": None,
+            "agent": head_name, "mode": mode, "handed_to": None,
             "content": (
                 f"I'm already mid-flow on the other brand ({busy.get('stage')}"
                 + (f" - {detail}" if detail else "")
@@ -5159,76 +7898,262 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
             "note": "Declined to start a second Floor 4 flow.",
         }
 
-    stages.set_stage("ia", stages.RESEARCHING,
+    stages.set_stage(head_id, stages.RESEARCHING,
                      task.strip()[:180] or f"Choosing the next {display} post")
 
     # Per-brand history, never the floor's. Reading ImagineIndia's titles here
     # would make IRIS refuse an angle this channel has never published.
-    prior = memory.prior_titles("4", brand["vault_floor_name"])
+    prior = memory.prior_titles(floor_id, brand["vault_floor_name"])
+    policy = _sonia_content_policy() if brand.get("slug") == "sonia_travel_vlogs" else {}
+    duplicate_days = float(policy.get("duplicate_window_days") or 30)
+    if brand.get("slug") == "sonia_travel_vlogs":
+        # A Short must see the other Shorts, and must see them by date rather
+        # than by position in a list. VISTA publishes three a day, so counting
+        # titles is counting hours.
+        # Two windows, because the policy names two rules. The destination gate
+        # is same_day_destination_reuse and lasts a day: stretching it to the
+        # 30-day duplicate window left Japan, Singapore, Thailand, Vietnam and
+        # the UAE all "covered" and nothing could be commissioned. The story
+        # gate is duplicate_window_days and is applied to the headline itself,
+        # in _sonia_story_pick.
+        prior = _sonia_recent_topics(
+            prior, limit=60 if is_vista_short else 25,
+            include_shorts=bool(is_vista_short),
+            within_days=1.0 if is_vista_short else None)
+        recent_stories = _sonia_recent_topics(
+            [], limit=120, include_shorts=True,
+            within_days=duplicate_days) if is_vista_short else []
+    vista_commissions = _vista_same_day_commissions() if is_vista_short else []
+    if vista_commissions:
+        # travel_discovery rejects destination aliases found in prior titles.
+        # Feed it the durable same-day queue before asking it to choose.
+        prior = [
+            " - ".join(filter(None, (row["headline"], row["destination"])))
+            for row in vista_commissions
+        ] + prior
 
     grounded_angle = task.strip()
     evidence_path = ""
     evidence_count = 0
-    if brand.get("slug") == "linkedin_authority":
-        from zoneinfo import ZoneInfo
-        weekday = datetime.now(ZoneInfo("Asia/Kolkata")).weekday()
-        pillar, pillar_query = _LINKEDIN_PILLAR_BY_WEEKDAY[weekday]
-        requires_grounding = weekday == 5  # Saturday: the Bible's own "not invented" day
-
+    video_language = ""
+    if brand.get("slug") == "sonia_travel_vlogs":
         reusable = _sanjeevani_research()
-        grounded_brief = ""
-        ground_error = ""
         if reusable is None:
-            ground_error = "Sanjeevani research library unavailable"
-        else:
-            try:
-                snapshot = reusable.collect(pillar_query, markets=["IN", "US", "GB"])
-                eligible = list(snapshot.get("eligible") or [])
-                evidence_count = len(eligible)
-                if not eligible:
-                    ground_error = "zero eligible current evidence"
-                else:
-                    brief, note = _research_synthesis(
-                        f"You are IRIS. Today's fixed LinkedIn Authority pillar is '{pillar}'. Create "
-                        "one concise LinkedIn authority-post brief from ONLY the supplied evidence, "
-                        "staying inside that pillar. Do not invent facts. Return TITLE:, ANGLE:, "
-                        "PROOF:, CTA: and cite evidence_id. "
-                        f"Avoid these prior titles: {json.dumps(prior[:15], ensure_ascii=False)}",
-                        evidence=snapshot,
+            stages.clear_stage(head_id)
+            return {"agent": head_name, "mode": "blocked", "_blocked": True,
+                    "content": "Sonia Travel Vlogs stopped: Sanjeevani is unavailable.",
+                    "blocked_reason": "Sanjeevani unavailable", "handed_to": None}
+        try:
+            # Scored, news-led discovery first (Sanjeevani travel_discovery, 2026-10-05): the latest travel news from
+            # ANY country is pooled live, clustered, scored for how likely it is to go viral for Indian viewers,
+            # age-verified and corroborated by fresh YouTube velocity; code picks the winner, the model only writes
+            # it up. The old single-query dump (which produced a brief about thirteen countries) is the fallback
+            # for when that module cannot run at all.
+            story = _sonia_story_pick(reusable, prior, job["id"],
+                                      check_all_prior=bool(is_vista_short),
+                                      recent_stories=recent_stories)
+            no_news_reason = story.get("reason", "") if story["status"] == "none" else ""
+            travel_query = "Indian travellers international trip visa flight hotel"
+            if story["status"] == "picked":
+                eligible = story["evidence"]
+                synthesis_prompt = story["prompt"]
+                synthesis_evidence = story["synthesis_evidence"]
+                snapshot = {}
+            else:
+                snapshot = reusable.collect_travel_video_signals(
+                    travel_query, markets=["IN"], youtube_maximum=12,
+                )
+                eligible = list(snapshot.get("primary_signals") or []) + list(snapshot.get("context_signals") or [])
+                synthesis_prompt = (
+                    f"You are {head_name}, YouTube Studio floor head. Commission ONE travel-video idea for "
+                    "Sonia Travel Vlogs from ONLY the evidence supplied. Produce a structured "
+                    "TrendBrief containing: discovery date; target viewer; destination/topic; "
+                    "viral search terms; why-now signal; evidence IDs and URLs; strongest truthful "
+                    "hook; locations/scenes; practical flight/hotel/visa questions; volatile facts "
+                    "requiring same-day verification; and explicit exclusions. Never invent a trend "
+                    "or imply Sonia personally visited. End with COMMISSION: YES or NO. "
+                    "The line 'Destination/Topic: <one country or city>' is mandatory. "
+                    f"Avoid prior topics: {json.dumps(prior[:15], ensure_ascii=False)}")
+                synthesis_evidence = {"eligible": eligible, "catalog_evidence": [],
+                                      "signal_policy": "Google Trends and YouTube public-search metadata are "
+                                                       "primary discovery. News is context only. YouTube views are "
+                                                       "a comparison signal, not proof of virality. If the fresh-news "
+                                                       "gate found no unique story, commission a useful evergreen "
+                                                       "travel decision only when current search/video evidence supports "
+                                                       "it; never present it as breaking news.",
+                                      "news_gate_reason": no_news_reason}
+            evidence_count = len(eligible)
+            if not eligible:
+                output_dir = _home() / "agent_outputs"
+                output_dir.mkdir(parents=True, exist_ok=True)
+                diagnostic_file = output_dir / f"{job['id']}-yatra-research-diagnostic.json"
+                diagnostic_file.write_text(json.dumps({
+                    "request": task, "travel_query": travel_query,
+                    "weights": snapshot.get("weights"),
+                    "source_health": snapshot.get("source_health"),
+                    "errors": snapshot.get("errors"),
+                    "reason": "No current, usable Google Trends or YouTube metadata signals.",
+                }, ensure_ascii=False, indent=2), encoding="utf-8")
+                stages.clear_stage(head_id)
+                return {"agent": head_name, "mode": "blocked", "_blocked": True,
+                        "content": "Sonia Travel Vlogs stopped: no usable current search-demand signals.",
+                        "blocked_reason": "No usable Google Trends/news or YouTube metadata signals",
+                        "evidence_count": 0, "research_diagnostic_path": str(diagnostic_file),
+                        "handed_to": None}
+            brief, note = _research_synthesis(synthesis_prompt, evidence=synthesis_evidence)
+            if story["status"] != "picked" and brief and "COMMISSION: NO" not in brief.upper():
+                repeat = _sonia_brief_repeat(brief, prior)
+                if repeat:
+                    stages.clear_stage(head_id)
+                    reason = ("evergreen fallback failed the no-repeat gate: " + repeat)
+                    return {"agent": head_name, "mode": "blocked", "_blocked": True,
+                            "content": f"Sonia Travel Vlogs stopped: {reason}",
+                            "blocked_reason": reason, "evidence_count": evidence_count,
+                            "story_ranking_path": story.get("ranking_path"), "handed_to": None}
+            # A rejected proposal is useful operational evidence, not an
+            # execution exception.  Preserve what Sanjeevani and IRIS saw so
+            # the dashboard can explain *why* YATRA was not briefed.  Before
+            # this, the only visible outcome was the generic string "IRIS did
+            # not commission the candidate", which made a correct stop look
+            # like a broken run.
+            if not brief or "COMMISSION: NO" in brief.upper():
+                rejection_reason = (
+                    _marker(brief, "REJECTION_REASON")
+                    or _marker(brief, "COMMISSION_REASON")
+                    or _marker(brief, "REASON")
+                    or note
+                    or (f"{head_name} returned COMMISSION: NO based on the supplied "
+                        "current evidence." if brief else
+                        "Sanjeevani's local synthesis returned no commissionable "
+                        "TrendBrief.")
+                )
+                output_dir = _home() / "agent_outputs"
+                output_dir.mkdir(parents=True, exist_ok=True)
+                rejection_file = output_dir / f"{job['id']}-yatra-rejected-brief.md"
+                evidence_index = [
+                    {key: row.get(key) for key in
+                     ("id", "evidence_id", "title", "url", "source", "published_at", "score", "viral_score")
+                     if row.get(key) is not None}
+                    for row in eligible[:20]
+                ]
+                rejection_file.write_text(
+                    f"# {head_name} — Sonia Travel Vlogs Rejected Candidate\n\n"
+                    f"Request: {task}\n\n"
+                    f"Eligible current evidence: {evidence_count}\n\n"
+                    f"Rejection reason: {rejection_reason}\n\n"
+                    f"## {head_name} local synthesis\n\n"
+                    f"{brief or '(No TrendBrief returned by the local model.)'}\n\n"
+                    "## Evidence index\n\n```json\n"
+                    f"{json.dumps(evidence_index, ensure_ascii=False, indent=2)}\n```\n",
+                    encoding="utf-8",
+                )
+                memory.remember(
+                    agent=head_name, floor_id=floor_id, floor_name=brand["vault_floor_name"],
+                    kind="YATRA Rejected TrendBrief",
+                    body=f"Reason: {rejection_reason}\n\n{brief}", task=task,
+                    tags=["sonia-travel-vlogs", "yatra", "sanjeevani", "rejected"],
+                )
+                stages.clear_stage(head_id)
+                return {
+                    "agent": head_name, "mode": "blocked", "_blocked": True,
+                    "content": f"Sonia Travel Vlogs stopped: {rejection_reason}",
+                    "blocked_reason": rejection_reason,
+                    "evidence_count": evidence_count,
+                    "rejected_brief_path": str(rejection_file),
+                    "handed_to": None,
+                }
+            if story["status"] == "picked":
+                # The model never saw the (very long) news URLs; attach the real ones and the scoring receipt so
+                # the brief that travels on to the script writer carries its own proof.
+                pick = story["pick"]
+                video_language = sonia_video_language(pick)
+                source_lines ="\n".join(f"- {t} - {u}" for t, u in zip(pick["headlines"][:6], (pick.get("urls") or []) + [""] * 6)
+                                         if u)
+                demand = (pick.get("demand") or {}).get("fastest") or {}
+                brief = (brief.rstrip() + "\n\n## SANJEEVANI SELECTION RECEIPT\n"
+                         f"Chosen from today's scored travel news: {pick['title']} (score {pick['score']}, "
+                         f"{pick['n_sources']} outlets, latest report {pick.get('latest_age_hours')} h ago, first report "
+                         f"{(pick.get('first_report') or {}).get('age_hours')} h ago).\n"
+                         + (f"Fastest fresh YouTube video: {demand.get('title')} - {demand.get('views_per_hour')} views/h "
+                            f"({demand.get('url')}).\n" if demand else "")
+                         + (f"Source URLs:\n{source_lines}\n" if source_lines else "")
+                         + f"Ranking file: {story['ranking_path']}\n"
+                         + f"Video language: {SONIA_LANGUAGES[video_language]['label']} "
+                           f"({'the story concerns India or Indian travellers' if video_language == 'hinglish' else 'the story is about travel outside India'}).\n")
+            if is_vista_short and vista_match:
+                slot, lane = vista_match.group(1), vista_match.group(2)
+                weekday = datetime.now(ZoneInfo("Asia/Kolkata")).weekday()
+                hooks = {
+                    0: ("mistake_warning", "problem -> consequence -> correction -> save checklist"),
+                    1: ("hidden_gem", "familiar destination -> unexpected alternative -> three reasons -> reveal"),
+                    2: ("price_budget", "budget challenge -> cost components -> hidden cost -> final total"),
+                    3: ("myth_reversal", "assumption -> contradiction -> evidence -> practical takeaway"),
+                    4: ("destination_comparison", "A vs B -> three rounds -> winner by traveller type"),
+                    5: ("countdown_curiosity", "open loop -> escalating discoveries -> strongest reveal -> replay ending"),
+                }
+                if weekday not in hooks:
+                    stages.clear_stage(head_id)
+                    return {"agent": head_name, "mode": "skipped", "content": "Sunday is VISTA analytics and research refresh; no Short is commissioned.", "handed_to": None}
+                hook, structure = hooks[weekday]
+                grounded_angle = (
+                    f"# VISTA SLOT CONTRACT\nSlot: {slot}\nLane: {lane}\nHook family: {hook}\n"
+                    f"Required structure: {structure}\nDuration: 25-40 seconds. Every beat adds information within 4 seconds. "
+                    "The first 0-3 seconds must stop the swipe. Use a save/share/comment CTA appropriate to the hook. "
+                    "Do not reuse a destination or information angle used by another slot today.\n\n"
+                    + brief
+                )
+                vista_production_spec = _vista_spec_from_brief(
+                    grounded_angle, slot, lane, hook
+                )
+                repeated = _vista_repeat_story(
+                    vista_production_spec.get("story") or {}, vista_commissions
+                )
+                if repeated:
+                    raise RuntimeError(
+                        "VISTA same-day story blocked before production: "
+                        f"{vista_production_spec['story'].get('headline') or vista_production_spec['story'].get('destination')} "
+                        f"already belongs to {repeated['job_id']}"
                     )
-                    if not brief:
-                        ground_error = note or "local synthesis returned no brief"
-                    else:
-                        grounded_brief = brief
-            except Exception as exc:
-                ground_error = f"{type(exc).__name__}: {exc}"
-
-        if grounded_brief:
-            grounded_angle = grounded_brief
+            else:
+                grounded_angle = brief
             output_dir = _home() / "agent_outputs"
             output_dir.mkdir(parents=True, exist_ok=True)
-            evidence_file = output_dir / f"{job['id']}-linkedin-brief.md"
+            evidence_file = output_dir / f"{job['id']}-{'vista-slot' if is_vista_short else 'yatra-trend'}-brief.md"
             evidence_file.write_text(
-                f"# IRIS — LinkedIn Authority Brief\n\nPillar: {pillar}\nRequest: {task}\n\n"
-                f"Researched by: Sanjeevani\n\n{grounded_brief}\n", encoding="utf-8")
+                f"# {head_name} -> {'VISTA SlotBrief' if is_vista_short else 'YATRA TrendBrief'}\n\nRequest: {task}\n\n"
+                f"Researched by: Sanjeevani\n\n{grounded_angle}\n", encoding="utf-8")
             evidence_path = str(evidence_file)
-            memory.remember(agent="IRIS", floor_id="4", floor_name=brand["vault_floor_name"],
-                            kind="LinkedIn Authority Brief", body=grounded_brief, task=task,
-                            tags=["linkedin", "authority", "sanjeevani", pillar.lower()])
-        elif requires_grounding:
-            # Saturday alone must actually stop rather than let ChatGPT
-            # invent a "trending" story the Bible says has to be real.
-            stages.clear_stage("ia")
-            return {"agent":"IRIS", "mode":"blocked", "_blocked":True,
-                    "content":f"LinkedIn Authority stopped: {ground_error}.",
-                    "blocked_reason":ground_error, "handed_to":None}
-        else:
-            # Every other day of the Bible already lets ChatGPT pick a topic
-            # within that day's own pillar without needing Sanjeevani
-            # grounding -- that mechanism worked long before this step
-            # existed. A research miss enriches nothing today, but must not
-            # stop a day the calendar never asked it to gate.
-            grounded_angle = f"{task.strip()} Today's fixed pillar is '{pillar}' — stay within it."
+            memory_body = grounded_angle
+            if story.get("status") == "picked":
+                memory_body = f"ANGLE: {story['pick']['title']}\n\n{grounded_angle}"
+            if is_vista_short and vista_production_spec:
+                story_record = vista_production_spec.get("story") or {}
+                memory_body += (
+                    "\n\nANGLE: "
+                    + " - ".join(filter(None, (
+                        str(story_record.get("headline") or "").strip(),
+                        str(story_record.get("destination") or "").strip(),
+                    )))
+                )
+            memory.remember(agent=head_name, floor_id=floor_id, floor_name=brand["vault_floor_name"],
+                            kind="VISTA Slot Brief" if is_vista_short else "YATRA TrendBrief",
+                            body=memory_body, task=task,
+                            tags=["sonia-travel-vlogs", "vista" if is_vista_short else "yatra", "sanjeevani", "commissioned"])
+        except Exception as exc:
+            stages.clear_stage(head_id)
+            reason = f"{type(exc).__name__}: {exc}"[:500]
+            return {"agent": head_name, "mode": "blocked", "_blocked": True,
+                    "content": f"Sonia Travel Vlogs stopped: {reason}.",
+                    "blocked_reason": reason, "handed_to": None}
+
+    if brand.get("slug") == "aibyvineet":
+        grounded_angle, evidence_path, evidence_count = _kairos_grounded_angle(
+            task, str(job.get("id") or ""), prior)
+        if evidence_count:
+            memory.remember(
+                agent=head_name, floor_id=floor_id, floor_name=brand["vault_floor_name"],
+                kind="aibyvineet Verified Sources", body=grounded_angle, task=task,
+                tags=["aibyvineet", "postforge", "sanjeevani", "verified"])
 
     # ``worker`` names who this handover is actually for. Without it the
     # building can only guess, and a head briefing its second worker walks to
@@ -5242,24 +8167,30 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
     # set_stage/sleep/enqueue sequence per floor.
     if routine_publish_authorized:
         routine_publish_authorized = _job_fired_by_trigger(
-            str(brand.get("routine_trigger_id") or ""), str(job.get("id") or ""))
+            routine_trigger_id, str(job.get("id") or ""))
         if not routine_publish_authorized:
             print(f"[one-agents] {job.get('id')} names the {display} schedule but has no fire receipt; "
                   "the worker is briefed without publish authority", flush=True)
     worker = stages.head_briefs_worker(
-        "ia", worker_id,
+        head_id, worker_id,
         carrying_detail=f"Taking the {display} brief to {worker_id.upper()}",
         briefing_detail=f"{worker_id.upper()}, next {display} post: {task.strip()[:110]}",
         awaiting_detail=f"Waiting on {worker_id.upper()} to produce the {display} post",
         enqueue=lambda: enqueue_job(
             worker_id,
             json.dumps({"brand": brand["slug"], "angle": grounded_angle,
+                        "trendBrief": grounded_angle if brand["slug"] == "sonia_travel_vlogs" else "",
                         "priority": "", "prior_angles": prior[:15],
+                        **({"language": video_language} if video_language else {}),
                         "origin_job": job["id"], "evidence_path": evidence_path,
                         "evidence_count": evidence_count,
+                        **({"content_format": "youtube_short", "slot": vista_match.group(1),
+                            "lane": vista_match.group(2),
+                            "production_spec": vista_production_spec}
+                           if is_vista_short and vista_match else {}),
                         "publish_authorized": routine_publish_authorized,
                         "publish_authority": (
-                            "standing_owner_policy:daily-aibyvineet-carousel"
+                            f"standing_owner_policy:{routine_trigger_id}"
                             if routine_publish_authorized else "none"
                         )}),
             mode="execute",
@@ -5268,7 +8199,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any]) -> dict[str
     )
 
     return {
-        "agent": "IRIS",
+        "agent": head_name,
         "mode": mode,
         "brand": brand["slug"],
         "content": f"Briefed {worker_id.upper()} on the next {display} post.",
@@ -5347,6 +8278,111 @@ def _kairos_collect(query: str) -> dict[str, Any]:
     if reusable is None:
         raise RuntimeError("Sanjeevani research library is unavailable")
     return reusable.collect(query, markets=["IN", "US"])
+
+
+def _kairos_verified_feed(pillar: str = "news", *,
+                          force: bool = False) -> dict[str, Any]:
+    """KAIROS's source port: PostForge's verified last-24-hours feed.
+
+    The same call the cockpit tab makes, so the carousel job and the operator
+    are looking at one list. Deliberately additive to `collect`, not a
+    replacement: `collect` answers an open question, this answers "what is
+    publishable in this pillar right now", and only items whose own source page
+    proved their date and claim come back.
+    """
+    from openjarvis.postforge import feed
+
+    return feed.refresh(pillar, force=force)
+
+
+def _ports_accepts(ports_type: Any, name: str) -> bool:
+    """Whether the floors-side Ports declares `name`.
+
+    Ports is defined in one-company/floors, which is not part of this
+    repository and is versioned separately, so a checkout can be older than
+    this file. An unknown keyword would TypeError every KAIROS job -- carousel
+    and revenue both -- so a new port is offered, never assumed.
+    """
+    import inspect
+
+    try:
+        return name in inspect.signature(ports_type).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _kairos_grounded_angle(task: str, job_id: str,
+                           prior: list[str]) -> tuple[str, str, int]:
+    """Ground the aibyvineet carousel brief in PostForge's verified feed.
+
+    Deliberately the same shape as the LinkedIn Authority grounding in
+    _iris_dispatch_brand: the head researches, the brief carries the evidence,
+    and the worker executes a brief it did not invent. It needs nothing from
+    the floors tree -- `angle`, `evidence_path` and `evidence_count` are
+    existing fields of the handover JSON that this file already builds.
+
+    The facts are copied from the feed verbatim rather than summarised by a
+    model: every item has already been re-opened at its own URL and proved its
+    date and claim, so a synthesis step here could only add drift.
+
+    On any miss -- feed off, Sanjeevani absent, nothing verified today -- this
+    returns the operator's own task untouched. That lane can publish under a
+    standing authority, so a research failure has to leave today's behaviour
+    exactly as it was rather than post something thinner.
+    """
+    switch = os.environ.get("ONE_KAIROS_VERIFIED_FEED", "1").strip().lower()
+    if switch in ("0", "false", "no"):
+        return task, "", 0
+
+    pillar = (os.environ.get("ONE_KAIROS_PILLAR")
+              or os.environ.get("TITAN_DEFAULT_PILLAR") or "news").strip()
+    try:
+        payload = _kairos_verified_feed(pillar)
+    except Exception as exc:  # noqa: BLE001 - a research miss must not stop the lane
+        print(f"[one-agents] {job_id} verified feed unavailable "
+              f"({type(exc).__name__}: {exc}); briefing KAIROS with "
+              "the operator's own angle", flush=True)
+        return task, "", 0
+
+    items = list(payload.get("items") or [])
+    if not items:
+        print(f"[one-agents] {job_id} verified feed returned nothing inside "
+              f"{payload.get('freshnessHours')}h ({payload.get('rejected')} rejected); "
+              "briefing KAIROS with the operator's own angle", flush=True)
+        return task, "", 0
+
+    lines = [
+        f"{index}. {item.get('headline', '')}"
+        f"\n   Source: {item.get('source', '')}"
+        f" | Published: {item.get('publishedAt', '')}"
+        f"\n   URL: {item.get('url', '')}"
+        f"\n   Summary: {item.get('summary', '')}"
+        for index, item in enumerate(items, start=1)
+    ]
+    body = "\n".join(lines)
+    angle = (
+        f"{task.strip()}\n\n"
+        "Use ONLY these source-verified items from the last "
+        f"{payload.get('freshnessHours')} hours. Each one was re-opened at its "
+        "own URL and kept only because the page proved its date and supported "
+        "its headline. Do not introduce any other claim, product name, number "
+        "or date.\n\n"
+        f"{body}"
+    )
+    if prior:
+        seen = json.dumps(prior[:15], ensure_ascii=False)
+        angle += f"\n\nAvoid repeating these prior angles: {seen}"
+
+    output_dir = _home() / "agent_outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    evidence_file = output_dir / f"{job_id}-aibyvineet-sources.md"
+    evidence_file.write_text(
+        f"# IRIS - aibyvineet verified sources\n\nPillar: {pillar}\nRequest: {task}\n"
+        f"Window: {payload.get('freshnessHours')}h"
+        f" | Rejected: {payload.get('rejected')}\n\n"
+        f"Researched by: Sanjeevani, verified by PostForge\n\n{body}\n",
+        encoding="utf-8")
+    return angle, str(evidence_file), len(items)
 
 
 def _kairos_chatgpt(prompt: str) -> tuple[str, str]:
@@ -5571,8 +8607,10 @@ def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 4 worker for aibyvineet: PostForge's carousel job, rebuilt on ONE.
 
     Its logic lives in one-company/floors. This wrapper only injects the ports:
-    Sanjeevani for evidence and local copy, LAO for ChatGPT copy and visuals,
-    and the one-media host for public URLs. The Instagram publisher goes
+    Sanjeevani for evidence and local copy, PostForge's verified feed for
+    publishable sources, LAO for ChatGPT copy and visuals, and the one-media
+    host for public URLs. ``verified_feed`` is offered only when the floors-side
+    Ports declares it, so an older floors checkout keeps working untouched. The Instagram publisher goes
     through social_accounts' cross-post guard, and KAIROS itself refuses to
     call it while the brand is not marked postable. If the floors tree is
     unavailable this degrades to the local planner rather than failing the job.
@@ -5624,38 +8662,125 @@ def _run_kairos(job: dict[str, Any]) -> dict[str, Any]:
             raise RuntimeError("the company revenue ledger is unavailable")
         return ledger.declare_source(floor_id, name, connected=connected, blocked_on=blocked_on)
 
-    return kairos.run(
-        job,
-        kairos.Ports(
-            research=_research_synthesis,
-            remember=memory.remember,
-            set_stage=stages.set_stage,
-            clear_stage=stages.clear_stage,
-            enqueue=enqueue_job,
-            output_dir=_home() / "agent_outputs",
-            collect=_kairos_collect if _sanjeevani_research() is not None else None,
-            chatgpt=_kairos_chatgpt,
-            generate_images=lambda prompts, target: _kairos_lao_images(prompts, target, job_id=job_id),
-            upload=upload if host is not None else None,
-            publish=publish if media is not None else None,
-            confirm_receipt=stages.worker_confirms_receipt,
-            insights=insights if media is not None and hasattr(media, "graph_reader") else None,
-            video_search=_kairos_video_search if _sanjeevani_reel() is not None else None,
-            web_search=_kairos_web_search if _sanjeevani_research() is not None else None,
-            read_page=_kairos_read_page if _sanjeevani_research() is not None else None,
-            graph_for=graph_for if media is not None and hasattr(media, "graph_reader") else None,
-            declare_revenue_source=declare_revenue_source,
-        ),
+    ports: dict[str, Any] = dict(
+        research=_research_synthesis,
+        remember=memory.remember,
+        set_stage=stages.set_stage,
+        clear_stage=stages.clear_stage,
+        enqueue=enqueue_job,
+        output_dir=_home() / "agent_outputs",
+        collect=_kairos_collect if _sanjeevani_research() is not None else None,
+        chatgpt=_kairos_chatgpt,
+        generate_images=lambda prompts, target: _kairos_lao_images(prompts, target, job_id=job_id),
+        upload=upload if host is not None else None,
+        publish=publish if media is not None else None,
+        confirm_receipt=stages.worker_confirms_receipt,
+        insights=insights if media is not None and hasattr(media, "graph_reader") else None,
+        video_search=_kairos_video_search if _sanjeevani_reel() is not None else None,
+        web_search=_kairos_web_search if _sanjeevani_research() is not None else None,
+        read_page=_kairos_read_page if _sanjeevani_research() is not None else None,
+        graph_for=graph_for if media is not None and hasattr(media, "graph_reader") else None,
+        declare_revenue_source=declare_revenue_source,
     )
+    if _ports_accepts(kairos.Ports, "verified_feed"):
+        ports["verified_feed"] = _kairos_verified_feed
+    return kairos.run(job, kairos.Ports(**ports))
+
+
+def _herald_v2(job: dict[str, Any], payload: dict[str, Any], v2p: dict[str, Any],
+               resume_id: str) -> dict[str, Any] | None:
+    """LinkedIn v2: write -> gate -> render -> publish. Returns None ONLY when it
+    fell back before anything was published (the v1 post then runs)."""
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+
+    tool = LaoOrchestratorTool()
+    home, roots = _home(), _YATRA_ROBOT_ARTIFACTS
+    poll = float(os.environ.get("ONE_LAO_POLL_SECONDS", "15"))
+    heartbeat = lambda: job_recovery.heartbeat(_connect, job["id"])  # noqa: E731
+    attach = lambda lao_job: job_recovery.attach(_connect, job["id"], lao_job)  # noqa: E731
+
+    if resume_id:  # ONE restarted while the publish run was in flight: only finish tracking it
+        done = linkedin_growth.finish_publish(lao_job=resume_id, tool=tool, heartbeat=heartbeat, roots=roots, poll=poll)
+        draft = {}
+        made = {"draft": draft, "verdict": {"warnings": []}}
+        return _herald_v2_deliver(job, payload, v2p, made, done)
+
+    made = linkedin_growth.produce(v2_payload=v2p, job_id=str(job["id"]), tool=tool, home=home, roots=roots, poll=poll)
+    if made["status"] != "ready":
+        print(f"[one-agents] LinkedIn v2 fell back to the v1 post: {made.get('reason')}", flush=True)
+        stages.clear_stage("herald")
+        return None
+
+    authorized = bool(payload.get("publish_authorized"))
+    mode = str(v2p.get("publish_mode") or "auto")
+    if not authorized or mode != "auto":
+        text = linkedin_growth.digest(v2_payload=v2p, draft=made["draft"], verdict=made["verdict"], published=False,
+                                      fallback="held for review" if authorized else "no standing publish authority")
+        (Path(made["out_dir"]) / "digest.txt").write_text(text, encoding="utf-8")
+        stages.clear_stage("herald"); stages.clear_stage("ares")
+        return {"agent": "HERALD", "mode": "held", "published": False, "v2": True, "content": text,
+                "draft_dir": made["out_dir"], "handed_to": None}
+
+    stages.set_stage("herald", stages.EXECUTING, f"Publishing the LinkedIn {v2p['format']}",
+                     lao_process=linkedin_growth.PUBLISH_PROCESS)
+    done = linkedin_growth.publish(ready=made, v2_payload=v2p, tool=tool, attach=attach, heartbeat=heartbeat,
+                                   roots=roots, poll=poll)
+    if done["status"] == "not_started" or (done["status"] == "failed" and done.get("unknown_action")):
+        # Nothing reached LinkedIn: the publish run never started, or LAO's robot does not yet know the
+        # document action. Safe to let the v1 post fill the slot.
+        print(f"[one-agents] LinkedIn v2 publish did not start ({done}); v1 post follows", flush=True)
+        stages.clear_stage("herald")
+        return None
+    return _herald_v2_deliver(job, payload, v2p, made, done)
+
+
+def _herald_v2_deliver(job: dict[str, Any], payload: dict[str, Any], v2p: dict[str, Any],
+                       made: dict[str, Any], done: dict[str, Any]) -> dict[str, Any]:
+    if done["status"] != "published":
+        stages.clear_stage("herald"); stages.clear_stage("ares")
+        # The run started, so it may have posted: never retry and never fall back to v1 (a double post).
+        raise RuntimeError(f"LinkedIn v2 publish ended as {done.get('lao_status')}; not retried because it may have posted")
+    draft = made.get("draft") or {}
+    story = v2p["story"]
+    text = linkedin_growth.digest(v2_payload=v2p, draft=draft, verdict=made.get("verdict") or {"warnings": []},
+                                  published=True, receipt=f"LAO job {done['lao_job']}") if draft else ""
+    linkedin_growth.record(home=_home(), v2_payload=v2p, draft=draft or {"caption": "", "format": v2p.get("format")},
+                           published=True, lao_job=done["lao_job"])
+    stages.set_stage("herald", stages.CARRYING_TO_HEAD, "Taking the verified LinkedIn receipt back to ARES")
+    report = enqueue_job("ares", json.dumps({
+        "brand": "linkedin_authority", "worker": "herald", "title": story.get("title") or "LinkedIn Authority post",
+        "format": f"LinkedIn {v2p.get('format')}", "published": True, "output": f"LAO job {done['lao_job']}",
+        "origin_job": payload.get("origin_job"), "v2_digest": text}), mode="report", tier="fast")
+    stages.set_stage("herald", stages.DELIVERING, "Delivered the LinkedIn publish receipt to ARES")
+    time.sleep(1); stages.clear_stage("herald")
+    return {"agent": "HERALD", "mode": "publish", "published": True, "v2": True, "lao_job": done["lao_job"],
+            "handed_to": {"agent": "ARES", "job_id": report["id"]}}
 
 
 def _run_herald(job: dict[str, Any]) -> dict[str, Any]:
-    """Dedicated LinkedIn worker: LAO executes; HERALD tracks and reports to IRIS."""
+    """Floor 3 LinkedIn worker: LAO executes; HERALD tracks and reports to ARES."""
     from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
     payload = _json_task(job)
     if str(payload.get("brand") or "") != "linkedin_authority":
         raise RuntimeError("HERALD refuses work outside linkedin_authority")
-    stages.worker_confirms_receipt("herald", "Received the LinkedIn Authority brief from IRIS")
+    stages.worker_confirms_receipt("herald", "Received the LinkedIn Authority brief from ARES")
+    v2_payload = payload.get("v2") if isinstance(payload.get("v2"), dict) else None
+    if v2_payload:
+        outcome = _herald_v2(job, payload, v2_payload, job_recovery.resume_target(job))
+        if outcome is not None:
+            return outcome
+        # None: v2 fell back before anything was published, so the v1 post below fills the slot.
+    # Standing authority is the daily trigger's alone (floor_03_growth/channels.json):
+    # ARES sets publish_authorized only when the scheduler's own fire receipt
+    # exists. Anything else (a hand-typed dispatch) is not a post.
+    # A job resuming after a restart is already tracking a started LAO run, so
+    # the gate applies only to starting one.
+    if not payload.get("publish_authorized") and not job_recovery.resume_target(job):
+        stages.clear_stage("herald"); stages.clear_stage("ares")
+        reason = ("No standing publish authority on this job: only the daily-linkedin-authority "
+                  "trigger's own fire may post without a fresh approval.")
+        return {"agent": "HERALD", "mode": "blocked", "_blocked": True, "published": False,
+                "content": reason, "blocked_reason": reason, "handed_to": None}
     tool = LaoOrchestratorTool()
     process_name = "Daily LinkedIn Authority Post"
     resume_id = job_recovery.resume_target(job)
@@ -5685,19 +8810,1138 @@ def _run_herald(job: dict[str, Any]) -> dict[str, Any]:
             continue
         last = probe.metadata or {}
         status = str((last.get("job") or {}).get("status") or status)
+        # LAO marks a failed parent Retried and creates a newer child job.
+        # Follow that child so HERALD reports the actual publish result rather
+        # than waiting forever on the bookkeeping parent.
+        if status == "Retried":
+            latest_probe = tool.execute(action="status", process_name=process_name, scope="production")
+            child = (latest_probe.metadata or {}).get("job") if latest_probe.success else None
+            if child and child.get("id") and child.get("id") != lao_job_id:
+                lao_job_id = str(child["id"])
+                status = str(child.get("status") or "Pending")
+                stages.set_stage("herald", stages.EXECUTING, f"Following LAO retry child · {status}",
+                                 lao_job=lao_job_id, lao_process=process_name)
+                continue
         if status in terminal:
             break
     if status != "Successful":
-        stages.clear_stage("herald"); stages.clear_stage("ia")
+        stages.clear_stage("herald"); stages.clear_stage("ares")
         raise RuntimeError(f"LinkedIn Authority workflow ended as {status}")
-    stages.set_stage("herald", stages.CARRYING_TO_HEAD, "Taking the verified LinkedIn receipt back to IRIS")
-    report = enqueue_job("ia", json.dumps({"brand":"linkedin_authority", "worker":"herald",
+    stages.set_stage("herald", stages.CARRYING_TO_HEAD, "Taking the verified LinkedIn receipt back to ARES")
+    report = enqueue_job("ares", json.dumps({"brand":"linkedin_authority", "worker":"herald",
         "title":"Daily LinkedIn Authority Post", "format":"LinkedIn post", "published":True,
         "output":f"LAO job {lao_job_id}", "origin_job":payload.get("origin_job")}), mode="report", tier="fast")
-    stages.set_stage("herald", stages.DELIVERING, "Delivered the LinkedIn publish receipt to IRIS")
+    stages.set_stage("herald", stages.DELIVERING, "Delivered the LinkedIn publish receipt to ARES")
     time.sleep(1); stages.clear_stage("herald")
     return {"agent":"HERALD", "mode":"publish", "published":True, "lao_job":lao_job_id,
-            "handed_to":{"agent":"IRIS", "job_id":report["id"]}}
+            "handed_to":{"agent":"ARES", "job_id":report["id"]}}
+
+
+_YATRA_TOOLS = Path(r"C:\Users\pc\Documents\LAO")
+# LAO's API lists artifacts by their path inside the backend container and
+# offers no route to download one, but the robot that ran the job also wrote
+# them to its own folder on this machine -- which robot took the job is not
+# known in advance, so all three are searched.
+_YATRA_ROBOT_ARTIFACTS = (
+    Path(r"C:\Users\pc\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude"
+         r"\local-agent-mode-sessions\cb3dc5b9-a76c-45ff-bbcf-b330fe30c84a"
+         r"\21738b93-8e02-4c20-a83c-0abb35d85c72\local_374e1c90-a56c-4744-840b-8f0118a3547a"
+         r"\outputs\lao-platform\robot-worker"),
+)
+_YATRA_NARRATION_PROCESS = "Sonia YATRA - Narration"
+# Where a video's own footage, narration and manifests live. This has to stay
+# equal to ASSET_ROOT in yatra-acquisition/acquire_scenes.py: the tool writes
+# acquisition-manifest.json there, and when the two drifted apart the agent
+# read an absent manifest and reported footage with no per-scene coverage at
+# all, which is the one thing that receipt exists to show.
+_YATRA_ASSET_ROOT = Path(r"C:\Users\pc\Downloads\YATRA")
+_YATRA_EDIT_TOOLS = _YATRA_TOOLS / "yatra-edit"
+_YATRA_UPLOAD_PROCESS = "Sonia YATRA - Upload"
+_YATRA_EXPECTED_SCENES = 20
+# Sonia's channel, compared against the signed-in one before an upload starts.
+# The robot's Chrome has been found signed into a different channel, and a
+# YouTube upload cannot be moved between channels afterwards.
+_SONIA_CHANNEL = "Sonia Travel Vlogs"
+
+
+_YATRA_SLUG_FILLER = {
+    "a", "an", "and", "are", "for", "from", "in", "is", "of", "on", "or", "the",
+    "to", "you", "your", "need", "know", "this", "that", "with", "what", "why",
+}
+
+
+def _yatra_slug(text: str) -> str:
+    """A stable folder name per video, so a re-run reuses footage already bought."""
+    words = [w for w in re.findall(r"[a-z0-9]+", str(text).lower())
+             if w not in _YATRA_SLUG_FILLER]
+    return "-".join(words[:6]) or "untitled-video"
+
+
+def _yatra_preproduction_file(lao_job_id: str) -> Path:
+    for root in _YATRA_ROBOT_ARTIFACTS:
+        for folder in ("artifacts", "artifacts-02", "artifacts-studio"):
+            candidate = root / folder / lao_job_id / "yatra_preproduction.json"
+            if candidate.exists():
+                return candidate
+    raise RuntimeError(
+        f"LAO job {lao_job_id} reported success but left no yatra_preproduction.json "
+        "on this machine, so there is no scene plan to acquire footage against."
+    )
+
+
+def _validate_yatra_contract(record: dict[str, Any], expected_scenes: int | None = None) -> dict[str, Any]:
+    """Validate the writer-to-voice-to-acquisition contract before voice spend."""
+    expected_scenes = int(expected_scenes or record.get("expected_scene_count") or _YATRA_EXPECTED_SCENES)
+    script = str(record.get("full_script") or "")
+    cue_count = len(re.findall(r"(?m)^\[\d{1,2}:\d{2}(?:\s*[-–—]\s*\d{1,2}:\d{2})?\]", script))
+    parser_path = _YATRA_TOOLS / "yatra-acquisition" / "acquire_scenes.py"
+    spec = importlib.util.spec_from_file_location("yatra_contract_parser", parser_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot load YATRA scene parser: {parser_path}")
+    module = importlib.util.module_from_spec(spec)
+    # acquire_scenes imports its small sibling helpers (progress,
+    # robot_chrome) by module name because it normally runs with this folder
+    # as cwd.  Preserve that import context when reusing its parser in ONE.
+    sys.path.insert(0, str(parser_path.parent))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.pop(0)
+    scenes = list(module.parse_scenes(str(record.get("scene_plan") or "")))
+    ids = [str(scene.get("id") or "") for scene in scenes]
+    missing_queries = [sid for sid, scene in zip(ids, scenes)
+                       if not str(scene.get("query") or "").strip()]
+    bad_times = [sid for sid, scene in zip(ids, scenes)
+                 if float(scene.get("seconds") or 0) <= 0]
+    expected_ids = [str(i) for i in range(1, expected_scenes + 1)]
+    problems = []
+    if cue_count != expected_scenes:
+        problems.append(f"narration has {cue_count}/{expected_scenes} timed cues")
+    if ids != expected_ids:
+        problems.append(f"visual plan IDs are {ids or 'none'}, expected 1..{expected_scenes}")
+    if missing_queries:
+        problems.append("missing scene-specific stock query: " + ", ".join(missing_queries))
+    if bad_times:
+        problems.append("unreadable/zero time span: " + ", ".join(bad_times))
+    # Validate the same saved plan against every downstream reader before
+    # FABULA spends credits. Previously acquisition understood YAML-list scenes
+    # while graphics/edit/OBS silently returned empty plans hours later.
+    for name, path, parser, value in (
+        ("graphics", _YATRA_TOOLS / "yatra-edit" / "plan_to_specs.py", "parse_blocks", str(record.get("scene_plan") or "")),
+        ("edit", _YATRA_TOOLS / "yatra-edit" / "assemble.py", "parse_scenes", str(record.get("scene_plan") or "")),
+        ("OBS", _YATRA_TOOLS / "yatra-capture" / "plan_captures.py", "parse_capture_plan", str(record.get("browser_capture_plan") or "")),
+    ):
+        if name == "OBS" and not value.strip():
+            continue
+        parser_spec = importlib.util.spec_from_file_location(f"yatra_contract_{name}", path)
+        if parser_spec is None or parser_spec.loader is None:
+            problems.append(f"{name} parser unavailable: {path}")
+            continue
+        parser_module = importlib.util.module_from_spec(parser_spec)
+        sys.path.insert(0, str(path.parent))
+        try:
+            parser_spec.loader.exec_module(parser_module)
+            parsed = getattr(parser_module, parser)(value)
+        except Exception as exc:
+            problems.append(f"{name} parser failed: {exc}")
+            continue
+        finally:
+            sys.path.pop(0)
+        if name == "graphics":
+            actual = [str(item[0]) for item in parsed]
+        elif name == "edit":
+            actual = [str(item.get("id") or "") for item in parsed]
+            if any(float(item.get("seconds") or 0) <= 0 for item in parsed):
+                problems.append("edit parser has zero-duration scenes")
+        else:
+            actual = parsed
+        if name != "OBS" and actual != expected_ids:
+            problems.append(f"{name} parser IDs are {actual or 'none'}, expected 1..{expected_scenes}")
+        if name == "OBS" and not actual:
+            problems.append("OBS capture plan has no parseable source blocks")
+    if problems:
+        raise RuntimeError("YATRA preproduction contract is incomplete; narration was not started and no voice "
+                           "credits were spent. " + "; ".join(problems))
+    return {"scene_count": len(scenes), "cue_count": cue_count,
+            "query_count": len(scenes) - len(missing_queries)}
+
+
+def _yatra_editorial_hold(record: dict[str, Any]) -> bool:
+    """Do not buy voice for a structurally valid draft the writer rejected."""
+    gate = str(record.get("quality_gate") or "")
+    return bool(re.search(r"(?im)^\s*final_verdict\s*:\s*REWRITE\s*$", gate))
+
+
+def _yatra_motion_manifest(asset_root: Path) -> Path:
+    """Prepare cached H.264 proxies for ProRes 10-bit inputs before Motion V3.
+
+    FFmpeg 8.1.1 on this workstation errors in swscale when compositing some
+    Envato ProRes yuv422p10le MOVs. Normalize those sources once with PyAV and
+    render from a derived manifest, preserving the acquisition manifest and
+    original downloads for provenance and recovery.
+    """
+    manifest_path = asset_root / "director-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    cache = asset_root / ".motion-proxies"
+    changed = False
+    try:
+        import av
+    except ImportError as exc:
+        raise RuntimeError("Motion V3 needs PyAV to normalize ProRes 10-bit Envato clips; install the YATRA media runtime") from exc
+
+    for scene in manifest.get("scenes") or []:
+        for beat in scene.get("beats") or []:
+            source_value = beat.get("media")
+            if not source_value:
+                continue
+            source = Path(str(source_value))
+            if not source.is_file():
+                continue
+            try:
+                container = av.open(str(source))
+                stream = next((item for item in container.streams if item.type == "video"), None)
+                codec = str(stream.codec_context.name or "").lower() if stream else ""
+                pixel_format = str(getattr(stream.codec_context.format, "name", "") or "").lower() if stream else ""
+                container.close()
+            except Exception:
+                continue
+            if codec != "prores" or "10le" not in pixel_format:
+                continue
+            cache.mkdir(parents=True, exist_ok=True)
+            fingerprint = hashlib.sha1(
+                f"yatra-proxy-v3|{source.resolve()}|{source.stat().st_size}|{source.stat().st_mtime_ns}".encode("utf-8")
+            ).hexdigest()[:16]
+            proxy = cache / f"{source.stem}-{fingerprint}.mp4"
+            if not proxy.is_file() or proxy.stat().st_size < 10000:
+                rotation = 0
+                try:
+                    probe = subprocess.run(
+                        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                         "stream_side_data=rotation", "-of", "json", str(source)],
+                        capture_output=True, text=True, timeout=30, check=False,
+                    )
+                    side_data = json.loads(probe.stdout or "{}").get("streams", [{}])[0].get("side_data_list", [])
+                    rotation = int(round(float(next((item["rotation"] for item in side_data if "rotation" in item), 0))))
+                except (ValueError, KeyError, IndexError, TypeError, subprocess.SubprocessError):
+                    rotation = 0
+                partial = proxy.with_suffix(".partial.mp4")
+                src = av.open(str(source))
+                video = next(item for item in src.streams if item.type == "video")
+                dst = av.open(str(partial), mode="w")
+                rate = Fraction(video.average_rate or 30)
+                output = dst.add_stream("libx264", rate=rate)
+                width, height = int(video.width), int(video.height)
+                if rotation % 180:
+                    width, height = height, width
+                output.width, output.height, output.pix_fmt = width, height, "yuv420p"
+                output.options = {"crf": "18", "preset": "medium"}
+                for index, frame in enumerate(src.decode(video)):
+                    if rotation:
+                        frame = av.VideoFrame.from_image(frame.to_image().rotate(rotation, expand=True))
+                    frame = frame.reformat(width=width, height=height, format="yuv420p")
+                    frame.pts = index
+                    frame.time_base = Fraction(rate.denominator, rate.numerator)
+                    for packet in output.encode(frame):
+                        dst.mux(packet)
+                for packet in output.encode():
+                    dst.mux(packet)
+                dst.close()
+                src.close()
+                partial.replace(proxy)
+            beat["media"] = str(proxy)
+            changed = True
+    if not changed:
+        return manifest_path
+    derived = asset_root / "director-manifest.motion-v3.json"
+    derived.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    return derived
+
+
+def _yatra_run_tool(script: Path, args: list[str], minutes: int) -> dict[str, Any]:
+    """Run one of YATRA's own tools and summarise how it went.
+
+    The coverage, de-duplication and rejection rules live in those scripts and
+    are not duplicated here; this only reports what they did."""
+    import subprocess
+
+    # The tools print UTF-8 ("·", Hindi titles). Decoding with the Windows
+    # default (cp1252) crashed the reader thread and lost the whole output, so a
+    # failing motion_v2 render left no trace of why (2026-10-06).
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    try:
+        finished = subprocess.run(
+            [sys.executable, str(script), *args],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=minutes * 60, cwd=str(script.parent), env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "detail": f"{script.name} did not finish within {minutes} minutes"}
+    tail = (finished.stdout or "").strip().splitlines()[-25:]
+    if finished.returncode != 0:
+        # The traceback is on stderr; without it a failure only shows progress lines.
+        tail += (finished.stderr or "").strip().splitlines()[-25:]
+    elif not tail:
+        tail = (finished.stderr or "").strip().splitlines()[-25:]
+    return {"ok": finished.returncode == 0, "detail": "\n".join(tail)}
+
+
+def _yatra_acquire_footage(plan_file: Path, asset_folder: str,
+                           narration_manifest: str = "") -> dict[str, Any]:
+    script = _YATRA_TOOLS / "yatra-acquisition" / "acquire_scenes.py"
+    # How many seconds a scene owes is decided by how long the narration
+    # actually runs, not by the timecodes guessed before the voice existed --
+    # the guess ran short, and footage bought against it leaves every scene
+    # under-covered.
+    args = [str(plan_file), asset_folder]
+    if narration_manifest:
+        args.append(f"--narration={narration_manifest}")
+    result = _yatra_run_tool(script, args, minutes=720)
+    manifest = _YATRA_ASSET_ROOT / asset_folder / "acquisition-manifest.json"
+    if manifest.exists():
+        scenes = json.loads(manifest.read_text(encoding="utf-8"))
+        result["scenes"] = [
+            {"scene": s["scene_id"], "required": s["required_seconds"],
+             "required_unique_shots": s.get("required_unique_shots"),
+             "acquired": s["acquired_seconds"], "covered": s["covered"],
+             "clips": len(s["clips"])}
+            for s in scenes
+        ]
+        # A partial manifest must never satisfy a complete production.
+        plan = json.loads(plan_file.read_text(encoding='utf-8'))[0]
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('yatra_acquire_validation', script)
+        import sys
+        if str(script.parent) not in sys.path:
+            sys.path.insert(0, str(script.parent))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        expected = {str(s['id']) for s in module.parse_scenes(plan['scene_plan'])}
+        result["all_covered"] = bool(expected) and expected == {str(s['scene_id']) for s in scenes} and all(s['covered'] for s in scenes)
+        positive = [s for s in scenes if int(s.get("required_unique_shots") or 0) > 0]
+        real_clips = [clip for s in scenes for clip in (s.get("clips") or [])]
+        if not positive or not real_clips:
+            result["all_covered"] = False
+            result["ok"] = False
+            result["detail"] = (result.get("detail", "") +
+                "\nREFUSED: the plan produced zero required stock shots / zero Envato clips. "
+                "A YATRA travel video cannot pass as graphics-only.").strip()
+    return result
+
+
+def _yatra_render_opening_map(plan_file: Path, asset_folder: str) -> dict[str, Any]:
+    """Turn ChatGPT's checked map brief into two reusable 1080p opening shots."""
+    script = _YATRA_TOOLS / "yatra-map" / "render_opening_map.py"
+    result = _yatra_run_tool(script, [str(plan_file), asset_folder], minutes=10)
+    receipt = (_YATRA_ASSET_ROOT / asset_folder / "graphics" / "maps" /
+               "scene-1" / "map-receipt.json")
+    if result["ok"] and receipt.is_file():
+        result["receipt"] = json.loads(receipt.read_text(encoding="utf-8"))
+    else:
+        result["ok"] = False
+        result["detail"] = result.get("detail") or "Opening map receipt or clips are missing"
+    return result
+
+
+def _yatra_acquire_music(tool: Any, plan_record: dict[str, Any],
+                         asset_folder: str) -> dict[str, Any]:
+    """Acquire the one quiet Envato music bed before editing the master."""
+    import urllib.parse
+    process_name = "Sonia YATRA - Envato Ambient Music"
+    folder = _YATRA_ASSET_ROOT / asset_folder / "music"
+    # A resumed run reuses the track it already licensed (unpacked or still in
+    # its archive) instead of buying another.
+    _yatra_unpack_music(folder)
+    existing = _yatra_pick_music_track(folder)
+    if existing:
+        return {"ok": True, "reused": True, "track": str(existing), "query": "", "status": "Reused"}
+    query = str(plan_record.get("envato_music_query") or
+                "light ambient travel documentary instrumental background music no vocals")
+    started = tool.execute(
+        action="start", mode="publish", process_name=process_name,
+        scope="production", confirm_publish=True,
+        input_args={"envatoQuery": query, "envatoQueryUrl": urllib.parse.quote_plus(query),
+                    "assetFolder": asset_folder, "resultIndex": "1", "enablePaidDownload": True},
+    )
+    if not started.success:
+        return {"ok": False, "detail": f"LAO refused YATRA ambient music acquisition: {started.content}"}
+    job_id = str(((started.metadata or {}).get("job") or {}).get("id") or "")
+    if not job_id:
+        return {"ok": False, "detail": "LAO started ambient music acquisition without a job id"}
+    terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
+    deadline = time.time() + float(os.environ.get("ONE_YATRA_MUSIC_WAIT_SECONDS", "3600"))
+    status = "Pending"
+    while time.time() < deadline:
+        time.sleep(float(os.environ.get("ONE_LAO_POLL_SECONDS", "30")))
+        probe = tool.execute(action="status", process_name=process_name,
+                             scope="production", job_id=job_id)
+        if not probe.success:
+            continue
+        status = str(((probe.metadata or {}).get("job") or {}).get("status") or status)
+        if status in terminal:
+            break
+    _yatra_unpack_music(folder)
+    track = _yatra_pick_music_track(folder)
+    return {"ok": status == "Successful" and track is not None, "lao_job": job_id,
+            "status": status, "query": query, "track": str(track) if track else None}
+
+
+def _yatra_unpack_music(folder: Path) -> None:
+    """Unpack each Envato music archive into a folder of its own name.
+
+    Envato delivers music as one archive: the main mix and a main instrumental
+    at the top, plus stems/, loops/ and shorts/ (verified 2026-10-06, 17 WAVs).
+    The structure is kept so the picker can tell the main track from a drum
+    stem or a 63-second short."""
+    import zipfile
+    for archive in (folder.glob("*.zip") if folder.exists() else []):
+        target = folder / archive.stem
+        if target.exists():
+            continue
+        partial = folder / (archive.stem + ".unpacking")
+        try:
+            with zipfile.ZipFile(archive) as bundle:
+                for member in bundle.infolist():
+                    name = Path(member.filename)
+                    if (member.is_dir() or name.suffix.lower() not in {".mp3", ".wav"}
+                            or name.name.startswith(".") or "__MACOSX" in name.parts or ".." in name.parts):
+                        continue
+                    out = partial / name
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    out.write_bytes(bundle.read(member))
+            partial.rename(target)  # only a complete unpack counts as present
+        except zipfile.BadZipFile:
+            continue
+
+
+_MUSIC_PART_DIRS = {"stems", "stem", "loops", "loop", "shorts", "short", "cutdowns", "alternates"}
+
+
+def _yatra_pick_music_track(folder: Path) -> Path | None:
+    """The one full-length music bed in a YATRA music folder, or None.
+
+    Prefers the main instrumental (no vocals) over the main mix, never a stem,
+    loop or short; otherwise the largest remaining track."""
+    if not folder.exists():
+        return None
+    candidates = [p for p in folder.rglob("*") if p.is_file()
+                  and p.suffix.lower() in {".mp3", ".wav", ".m4a", ".aac", ".ogg"}
+                  and not ({part.lower() for part in p.relative_to(folder).parts[:-1]} & _MUSIC_PART_DIRS)
+                  and not re.search(r"(?:^|[_-])(stem|loop|short)[_-]?\d", p.stem, re.I)]
+    if not candidates:
+        return None
+
+    def rank(p: Path) -> tuple[int, int]:
+        name = p.stem.lower()
+        preference = 0 if "main-instrumental" in name or "main_instrumental" in name else (
+            1 if "instrumental" in name else 2 if "main" in name else 3)
+        return preference, -p.stat().st_size
+
+    return min(candidates, key=rank)
+
+
+def _yatra_record_captures(payload: dict[str, Any], video_title: str) -> dict[str, Any]:
+    """Film the browser demos, when a verified recipe exists for the destination.
+
+    Recipes are per-destination on purpose: a brief asks for "the official entry
+    rules", and pointing that at the wrong country's immigration site would put
+    confident, wrong evidence on screen."""
+    recipes_file = _YATRA_TOOLS / "yatra-capture" / "recipes.json"
+    if not recipes_file.exists():
+        return {"ok": True, "skipped": True, "detail": "No capture recipes are installed."}
+    known = list(json.loads(recipes_file.read_text(encoding="utf-8")).keys())
+
+    # Match the destination against the recipes that exist rather than trusting
+    # a guessed country: a recipe is only usable where its source URLs were
+    # verified, and filming the wrong country's immigration site would put
+    # confident, wrong evidence on screen.
+    # This video's own plan-derived recipe, keyed by its title, and nothing else.
+    # Falling back to a destination word found in the brief is how the Qatar
+    # video came to be filmed with Thailand's recordings on 2026-10-17: the
+    # brief's own sentence was "no runner-ups: do not discuss singapore ...,
+    # thailand (visa-free lists), china ...", and the word that matched was
+    # inside the instruction NOT to cover it. A brief names other countries to
+    # compare them or rule them out; none of that makes their immigration
+    # pages evidence for this one. With no recipe of its own the demo scenes
+    # become cards, which is the honest outcome.
+    destination = video_title.lower().strip() if video_title.lower().strip() in known else ""
+    if not destination:
+        return {"ok": True, "skipped": True,
+                "detail": f"No capture recipe matches this brief. Recipes exist for: "
+                          f"{', '.join(known) or 'none'}. Add one before this video's "
+                          "browser-demo scenes can be filmed."}
+    script = _YATRA_TOOLS / "yatra-capture" / "record_briefs.py"
+    outcome = _yatra_run_tool(script, [destination, video_title, str(payload.get('assetFolder') or '')], minutes=90)
+    outcome["destination"] = destination
+    return outcome
+
+
+def _yatra_narrate(tool: Any, plan_record: dict[str, Any], asset_folder: str,
+                   video_title: str) -> dict[str, Any]:
+    """Speak the approved script in Sonia's own cloned voice.
+
+    Narration runs in LAO rather than here because the ElevenLabs key lives in
+    LAO's vault and only a robot token can resolve it -- the admin API returns
+    has_secret and never the value.
+
+    There is no fallback voice on purpose. Every other backend can produce
+    speech, but a cloned voice exists only inside the account that owns it, so
+    a substitute would put a stranger on Sonia's channel. If this fails the
+    video waits; it does not get somebody else's voice.
+    """
+    full_script = str(plan_record.get("full_script") or "").strip()
+    if not full_script:
+        return {"ok": False, "detail": "The approved package carried no full_script to speak."}
+
+    folder = _YATRA_ASSET_ROOT / asset_folder / "narration"
+    folder.mkdir(parents=True, exist_ok=True)
+    script_file = folder / "script.txt"
+    manifest_file = folder / "narration.segments.json"
+    # An acquisition retry must never silently spend another full voice budget.
+    # Reuse only a matching script with real, non-empty segment files.
+    if manifest_file.exists():
+        try:
+            existing = json.loads(manifest_file.read_text(encoding="utf-8"))
+            segments = existing.get("segments") or []
+            matching = script_file.exists() and script_file.read_text(encoding="utf-8").strip() == full_script
+            valid = segments and all(
+                Path(s.get("path") or "").is_file()
+                and Path(s["path"]).stat().st_size > 0
+                and float(s.get("seconds") or 0) > 0 for s in segments)
+            if matching and valid:
+                return {"ok": True, "status": "Reused", "reused": True,
+                        "script_file": str(script_file), "manifest": str(manifest_file),
+                        "minutes": existing.get("total_minutes"), "cues": len(segments),
+                        "timeline": [{k: s.get(k) for k in ("cue", "start", "end", "seconds")}
+                                     for s in segments]}
+            return {"ok": False, "detail": "Existing narration does not match the script or has missing segments. Preserve it; approve a targeted voice repair instead of regenerating the full track."}
+        except (ValueError, OSError, TypeError, KeyError) as exc:
+            return {"ok": False, "detail": f"Existing narration checkpoint needs repair; no credits spent: {exc}"}
+    # ElevenLabs takes at most 10,000 characters per request; the robot stays under it by speaking each
+    # bracketed cue on its own. A long script with no cues would be refused after LAO had already started.
+    if len(re.findall(r"(?m)^\[\d{1,2}:\d{2}", full_script)) < 2 and len(full_script) > 9500:
+        return {"ok": False, "detail": (f"the script is {len(full_script)} characters with no [m:ss-m:ss] cue lines; "
+                                        "ElevenLabs refuses more than 10,000 in one request. No credits were spent.")}
+    script_file.write_text(full_script, encoding="utf-8")
+
+    # The Hinglish lexicon respells Hindi words in Devanagari; an English script has none to respell.
+    lexicon = (_YATRA_TOOLS / "yatra-narration" / "pronunciation-hinglish.json"
+               if sonia_language_profile(plan_record)["lexicon"] else Path(""))
+    started = tool.execute(
+        action="start", mode="publish", process_name=_YATRA_NARRATION_PROCESS,
+        scope="production", confirm_publish=True,
+        input_args={
+            "scriptFile": str(script_file), "videoTitle": video_title,
+            "destDir": str(folder), "filename": "narration.mp3",
+            # Hinglish spelled in Latin letters does not encode vowel length,
+            # so the voice reads it with English phonics and says "shayaad"
+            # for shayad. The lexicon respells those words in Devanagari.
+            "pronunciationFile": str(lexicon) if lexicon.is_file() else "",
+        },
+    )
+    if not started.success:
+        return {"ok": False, "detail": f"LAO refused narration: {started.content}"}
+    narration_job = str(((started.metadata or {}).get("job") or {}).get("id") or "")
+    if not narration_job:
+        return {"ok": False, "detail": "LAO started narration without returning a job id"}
+
+    terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
+    deadline = time.time() + float(os.environ.get("ONE_YATRA_NARRATION_WAIT_SECONDS", "3600"))
+    status = "Pending"
+    last_job: dict[str, Any] = {}
+    while time.time() < deadline:
+        time.sleep(float(os.environ.get("ONE_LAO_POLL_SECONDS", "30")))
+        probe = tool.execute(action="status", process_name=_YATRA_NARRATION_PROCESS,
+                             scope="production", job_id=narration_job)
+        if not probe.success:
+            continue
+        last_job = (probe.metadata or {}).get("job") or {}
+        status = str(last_job.get("status") or status)
+        if status in terminal:
+            break
+    result = {"ok": status == "Successful", "lao_job": narration_job, "status": status,
+              "script_file": str(script_file)}
+    if status != "Successful":
+        # Carry LAO's own reason; "requires repair: None" told nobody that ElevenLabs had refused the text.
+        result["detail"] = (f"LAO narration {narration_job} ended {status}: "
+                            f"{str(last_job.get('error_message') or 'no error message')[:400]}")
+
+    manifest = folder / "narration.segments.json"
+    if manifest.exists():
+        result["manifest"] = str(manifest)
+        record = json.loads(manifest.read_text(encoding="utf-8"))
+        # The cue times in the script were an estimate written before the voice
+        # existed. The measured timeline is what the edit is cut against, and
+        # it is what says how many seconds of footage each scene owes.
+        result["minutes"] = record.get("total_minutes")
+        result["cues"] = len(record.get("segments") or [])
+        result["timeline"] = [
+            {"cue": s.get("cue"), "start": s.get("start"),
+             "end": s.get("end"), "seconds": s.get("seconds")}
+            for s in record.get("segments") or []
+        ]
+    return result
+
+
+def _yatra_render_director(asset_root: Path, run=None) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Draw scenes with a reversible Motion V3 -> V2 -> Remotion chain."""
+    run = run or _yatra_run_tool
+    legacy = _YATRA_EDIT_TOOLS / "render_director.py"
+    v2 = _YATRA_EDIT_TOOLS / "motion_v2" / "render_director_v2.py"
+    v3 = _YATRA_EDIT_TOOLS / "motion_v3" / "render_director_v3.py"
+    engine = os.environ.get("ONE_YATRA_ENGINE", "motion_v3")
+    if engine == "remotion":
+        outcome = run(legacy, [str(asset_root)], minutes=180)
+        outcome["engine"] = "remotion"
+        return outcome, None
+    v3_failure = None
+    if engine == "motion_v3" and v3.is_file():
+        history = _YATRA_EDIT_TOOLS / "motion_v3" / "direction-history"
+        try:
+            render_manifest = _yatra_motion_manifest(asset_root)
+        except Exception as exc:
+            return {"ok": False, "detail": f"Motion V3 media normalization failed: {exc}", "engine": "motion_v3"}, None
+        outcome = run(v3, [str(asset_root), "--manifest", str(render_manifest), "--history", str(history)], minutes=240)
+        outcome["engine"] = "motion_v3"
+        if outcome["ok"]:
+            return outcome, None
+        v3_failure = outcome
+        for stamp in (asset_root / "efficient-pilot" / "director").glob("scene-*.v3.json"):
+            stamp.with_suffix("").with_suffix(".mp4").unlink(missing_ok=True)
+            stamp.unlink(missing_ok=True)
+    if not v2.is_file():
+        outcome = run(legacy, [str(asset_root)], minutes=180)
+        outcome["engine"] = "remotion (fallback; motion_v2 unavailable)"
+        return outcome, v3_failure
+    outcome = run(v2, [str(asset_root)], minutes=240)
+    outcome["engine"] = "motion_v2"
+    if outcome["ok"]:
+        return outcome, v3_failure
+    for stamp in (asset_root / "efficient-pilot" / "director").glob("scene-*.v2.json"):
+        stamp.with_suffix("").with_suffix(".mp4").unlink(missing_ok=True)
+        stamp.unlink(missing_ok=True)
+    fallback = run(legacy, [str(asset_root)], minutes=180)
+    fallback["engine"] = "remotion (fallback after motion_v2 failed)"
+    return fallback, v3_failure or outcome
+
+
+def _yatra_cut_video(plan_file: Path, asset_folder: str, run=None) -> dict[str, Any]:
+    """Draw the cards, cut the picture to the voice, then check the result.
+
+    Half a YATRA video has no footage behind it -- the plan marks those scenes
+    `graphic/map`, or `original_optional` for shots that would need a camera
+    nobody is holding. Those are drawn from the plan's own words. Everything is
+    then laid out in plan order under one narration track and checked, because
+    the failures worth catching here are silent ones: picture drifting off the
+    voice, a card that renders as a black screen, a mix too quiet to hear.
+    """
+    asset_root = _YATRA_ASSET_ROOT / asset_folder
+    runner = run or _yatra_run_tool
+    efficient = asset_root / "efficient-pilot"
+    # route_visuals, compile_director and render_director_v2 read the plan from
+    # <video folder>/production-plan.json. Nothing put it there, so every video
+    # after Thailand (whose copy was placed by hand) failed its first cut step.
+    # The copy is byte-identical, so _travel_checkpoint's "reviewed plan" check
+    # (same narration) still holds; an existing reviewed plan is never replaced.
+    local_plan = asset_root / "production-plan.json"
+    if not local_plan.exists() and Path(plan_file).is_file():
+        asset_root.mkdir(parents=True, exist_ok=True)
+        local_plan.write_bytes(Path(plan_file).read_bytes())
+    steps = [
+        ("routes", _YATRA_EDIT_TOOLS / "route_visuals.py", [str(asset_root)], 10),
+        ("render", _YATRA_EDIT_TOOLS / "render_graphics.py",
+         [str(efficient / "graphic-specs.json"), str(efficient / "graphics")], 10),
+        # A readable card is not automatically an engaging moving picture.
+        # Expand every information-heavy scene into a sequence of distinct
+        # local motion beats before assembly; this costs no render credits and
+        # prevents long, near-black holds in the middle of the video.
+        ("kinetic", _YATRA_EDIT_TOOLS / "render_kinetic.py", [str(asset_root)], 30),
+        # Compile verified receipts into an exact edit decision list, then
+        # render typography, maps, icons, masks, parallax, particles, stock
+        # micro-shots and official proof as one narration-timed scene file.
+        # One point per ~6 s of narration, so cards in a scene say different things instead of repeating one
+        # title. Optional: without it (no hosted model) the composer shows the scene title once, then footage.
+        ("scene_points", _YATRA_EDIT_TOOLS / "scene_points.py", [str(asset_root)], 40),
+        ("director_manifest", _YATRA_EDIT_TOOLS / "compile_director.py", [str(asset_root)], 10),
+        ("director_render", None, [str(asset_root)], 0),  # drawn by _yatra_render_director below
+        ("assemble", _YATRA_EDIT_TOOLS / "assemble.py", [str(plan_file), asset_folder], 90),
+        ("qc", _YATRA_EDIT_TOOLS / "qc.py", [asset_folder], 30),
+    ]
+    result: dict[str, Any] = {"ok": True}
+    for name, script, args, minutes in steps:
+        if name == "director_render":
+            outcome, earlier = _yatra_render_director(asset_root, run=runner)
+            if earlier:
+                result[f"director_render_{earlier.get('engine', 'fallback')}"] = earlier
+        else:
+            outcome = runner(script, args, minutes=minutes)
+        result[name] = outcome
+        if name == "routes" and outcome.get("ok"):
+            integrity = _yatra_validate_capture_integrity(asset_root)
+            result["capture_integrity"] = integrity
+            if not integrity.get("ok"):
+                result.update({"ok": False, "failed_at": "capture_integrity"})
+                return result
+        if name == "scene_points" and not outcome["ok"]:
+            continue  # optional step: the composer falls back to title-then-footage
+        if not outcome["ok"]:
+            # QC failing is not a tool crash; it is the answer. Either way the
+            # cut is not fit to upload, so the run stops before the gate.
+            result["ok"] = False
+            result["failed_at"] = name
+            return result
+    report = _YATRA_ASSET_ROOT / asset_folder / "edit" / "qc-report.json"
+    if report.exists():
+        result["qc_report"] = json.loads(report.read_text(encoding="utf-8"))
+    result["master"] = str(_YATRA_ASSET_ROOT / asset_folder / "edit" / "master.mp4")
+    return result
+
+
+def _yatra_validate_capture_integrity(asset_root: Path) -> dict[str, Any]:
+    """Fail a cut if any routed OBS source is missing, non-HD, or mostly black.
+
+    Checking only the final composite misses a broken source range when motion
+    cards or overlays cover it. The raw source must pass before we assemble it.
+    """
+    routes_path = asset_root / "visual-routes.json"
+    if not routes_path.is_file():
+        return {"ok": False, "detail": "visual-routes.json is missing; OBS sources cannot be audited"}
+    try:
+        routes = json.loads(routes_path.read_text(encoding="utf-8")).get("scenes") or {}
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "detail": f"visual-routes.json is unreadable: {exc}"}
+    capture_ids = sorted({str(row.get("capture_id") or "") for row in routes.values()
+                          if row.get("route") == "obs" and row.get("capture_id")})
+    capture_dir = asset_root / "captures"
+    issues: list[str] = []
+    for capture_id in capture_ids:
+        candidates = [path for path in capture_dir.glob(f"{capture_id}-capture.*")
+                      if path.suffix.lower() in {".mkv", ".mp4", ".mov"} and path.is_file()]
+        if len(candidates) != 1:
+            issues.append(f"{capture_id}: expected one active recording, found {len(candidates)}")
+            continue
+        path = candidates[0]
+        try:
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries",
+                 "stream=width,height:format=duration", "-of", "json", str(path)],
+                capture_output=True, text=True, timeout=60,
+            )
+            if probe.returncode:
+                issues.append(f"{capture_id}: ffprobe failed: {probe.stderr[-300:]}")
+                continue
+            media = json.loads(probe.stdout)
+            streams = media.get("streams") or []
+            video = next((stream for stream in streams if "width" in stream and "height" in stream), {})
+            duration = float((media.get("format") or {}).get("duration") or 0)
+            if (int(video.get("width") or 0), int(video.get("height") or 0)) != (1920, 1080) or duration < 8:
+                issues.append(f"{capture_id}: invalid format/duration ({video.get('width')}x{video.get('height')}, {duration:.1f}s)")
+                continue
+            scan = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-i", str(path), "-vf",
+                 "blackdetect=d=2:pix_th=0.10:pic_th=0.98", "-an", "-f", "null", "NUL"],
+                capture_output=True, text=True, timeout=180,
+            )
+            if scan.returncode:
+                issues.append(f"{capture_id}: black-frame scan failed: {scan.stderr[-300:]}")
+                continue
+            spans = [float(value) for value in re.findall(r"black_duration:([0-9.]+)", scan.stderr)]
+            if any(seconds >= 2.0 for seconds in spans):
+                issues.append(f"{capture_id}: {max(spans):.2f}s full-frame black interval")
+        except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            issues.append(f"{capture_id}: capture validation error: {exc}")
+    return {"ok": not issues, "captures": len(capture_ids),
+            "detail": (f"all {len(capture_ids)} routed OBS capture(s) passed integrity checks"
+                       if not issues else "; ".join(issues))}
+
+
+def _yatra_upload(tool: Any, asset_folder: str, video_title: str,
+                  description: str, cut: dict[str, Any]) -> dict[str, Any]:
+    """Put the finished cut on the channel as a private draft.
+
+    Only ever private. Nothing in this pipeline is in a position to decide that
+    a video is ready for an audience -- a person decides that in Studio, after
+    watching it. The workflow also refuses to upload unless the signed-in
+    channel is Sonia's, because an upload cannot be moved afterwards.
+    """
+    if not cut.get("ok"):
+        return {"ok": False, "skipped": True,
+                "detail": f"QC did not pass ({cut.get('failed_at')}), so nothing was uploaded."}
+    master = Path(str(cut.get("master") or ""))
+    if not master.exists():
+        return {"ok": False, "skipped": True, "detail": "No master cut to upload."}
+
+    started = tool.execute(
+        action="start", mode="publish", process_name=_YATRA_UPLOAD_PROCESS,
+        scope="production", confirm_publish=True,
+        input_args={"masterFile": str(master), "videoTitle": video_title,
+                    "videoDescription": description, "expectedChannel": _SONIA_CHANNEL},
+    )
+    if not started.success:
+        return {"ok": False, "detail": f"LAO refused the upload: {started.content}"}
+    upload_job = str(((started.metadata or {}).get("job") or {}).get("id") or "")
+    terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
+    deadline = time.time() + float(os.environ.get("ONE_YATRA_UPLOAD_WAIT_SECONDS", "5400"))
+    status = "Pending"
+    while time.time() < deadline:
+        time.sleep(float(os.environ.get("ONE_LAO_POLL_SECONDS", "30")))
+        probe = tool.execute(action="status", process_name=_YATRA_UPLOAD_PROCESS,
+                             scope="production", job_id=upload_job)
+        if not probe.success:
+            continue
+        status = str(((probe.metadata or {}).get("job") or {}).get("status") or status)
+        if status in terminal:
+            break
+    return {"ok": status == "Successful", "lao_job": upload_job, "status": status,
+            "visibility": "private draft", "channel": _SONIA_CHANNEL}
+
+
+def _travel_checkpoint(payload: dict[str, Any]) -> tuple[Path, dict[str, Any], str, str]:
+    """Only resume a known LAO checkpoint, never an arbitrary external file."""
+    if payload.get("brand") != "sonia_travel_vlogs":
+        raise RuntimeError("Travel production handoff requires sonia_travel_vlogs")
+    checkpoint = str(payload.get("preproduction_job") or "")
+    if not re.fullmatch(r"[a-f0-9-]{36}", checkpoint):
+        raise RuntimeError("Missing valid preproduction checkpoint id")
+    source = _yatra_preproduction_file(checkpoint)
+    record = json.loads(source.read_text(encoding="utf-8"))[0]
+    folder = f"{_yatra_slug(record.get('video_title') or '')}-{checkpoint[:8]}"
+    asset_root = _YATRA_ASSET_ROOT / folder
+    repair_file = asset_root / "targeted-repair.json"
+    if repair_file.is_file():
+        from openjarvis.one_agents.yatra_repair import apply_targeted_repair
+        repaired = apply_targeted_repair(source, repair_file)
+        if repaired["editorial_repair"]["status"] != "approved_for_voice":
+            raise RuntimeError("Targeted YATRA repair is structurally ready but not approved for Sonia voice credits")
+        _validate_yatra_contract(repaired, _YATRA_EXPECTED_SCENES)
+        reviewed_path = asset_root / "production-plan.json"
+        existing = json.loads(reviewed_path.read_text(encoding="utf-8"))[0] if reviewed_path.is_file() else None
+        narration_dir = asset_root / "narration"
+        if (narration_dir / "narration.segments.json").exists() and (
+                existing is None or existing.get("full_script") != repaired.get("full_script")):
+            raise RuntimeError("Cannot revise a YATRA script after narration exists")
+        if existing is not None and existing not in (record, repaired):
+            before, after = dict(existing), dict(repaired)
+            before.pop("opening_map_spec", None)
+            after.pop("opening_map_spec", None)
+            before.pop("browser_capture_plan", None)
+            after.pop("browser_capture_plan", None)
+            if before != after:
+                raise RuntimeError("Existing reviewed YATRA plan differs beyond approved visual repairs")
+        if existing != repaired:
+            reviewed_path.write_text(json.dumps([repaired], ensure_ascii=False, indent=2), encoding="utf-8")
+        return reviewed_path, repaired, folder, checkpoint
+    # A locally reviewed plan may augment stock slots without altering voice.
+    reviewed = _YATRA_ASSET_ROOT / folder / "production-plan.json"
+    if reviewed.is_file():
+        revised = json.loads(reviewed.read_text(encoding="utf-8"))[0]
+        if revised.get("full_script") != record.get("full_script"):
+            raise RuntimeError("Reviewed visual plan changed narration; explicit voice revision required")
+        source, record = reviewed, revised
+    return source, record, folder, checkpoint
+
+
+def _run_fabula(job: dict[str, Any]) -> dict[str, Any]:
+    """Own narration separately; deliver a durable visual-stage handoff."""
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+    payload = _json_task(job)
+    if payload.get("brand") == "sonia_travel_vlogs" and not payload.get("preproduction_job"):
+        return _run_yatra_prepare(job, owner="fabula")
+    if payload.get("stage") != "narration":
+        raise RuntimeError("FABULA runtime accepts approved travel narration handoffs only")
+    _, record, folder, checkpoint = _travel_checkpoint(payload)
+    stages.worker_confirms_receipt("fabula", "Received approved narration checkpoint")
+    try:
+        stages.set_stage("fabula", stages.EXECUTING, "Validating or producing approved narration and measured scene timings")
+        narration = _yatra_narrate(LaoOrchestratorTool(), record, folder, record["video_title"])
+        if not narration.get("ok"):
+            raise RuntimeError(f"FABULA narration requires repair: {narration.get('detail')}")
+        receipt = _YATRA_ASSET_ROOT / folder / "narration" / "fabula-receipt.json"
+        receipt.write_text(json.dumps({"agent": "FABULA", "job": job["id"],
+                                      "checkpoint": checkpoint, "narration": narration}, indent=2), encoding="utf-8")
+        _require_active_job(job, "hand narration to YATRA")
+        follow = stages.head_briefs_worker(
+            "fabula", "yatra", carrying_detail="Taking approved voice and measured scene timings to YATRA",
+            briefing_detail="YATRA, use these voice timings for Envato, OBS and the edit. Do not regenerate narration.",
+            awaiting_detail="Narration delivered; waiting for YATRA's video QC",
+            enqueue=lambda: enqueue_job("yatra", json.dumps({**payload, "stage": "visuals",
+                             "narration_job": job["id"], "narration_receipt": str(receipt)}),
+                             mode="execute", dedupe_key=f"travel:{checkpoint}:visuals"))
+        return {"agent": "FABULA", "stage": "narration", "narration": narration,
+                "handed_to": {"agent": "YATRA", "job_id": follow["id"]}, "production_complete": False}
+    finally:
+        stages.clear_stage("fabula")
+
+
+def _run_planexium(job: dict[str, Any]) -> dict[str, Any]:
+    from openjarvis.one_agents.planexium import run_job, enqueue_deferred_commission
+    stages.set_stage("planexium", stages.EXECUTING, "Producing The Planexium local science review bundle")
+    try:
+        result = run_job(job)
+        if result.get("production_complete") and not result.get("uploaded"):
+            report = enqueue_job("lyra", json.dumps({"brand": "planexium", "stage": "package", "mission_id": result["mission_id"]}),
+                                 mode="execute", dedupe_key=f"planexium:{result['mission_id']}:packaging")
+            result["handed_to"] = {"agent": "LYRA", "job_id": report["id"]}
+            deferred = enqueue_deferred_commission(result, enqueue=enqueue_job)
+            if deferred:result["next_daily_job"] = deferred["id"]
+        return result
+    finally:
+        stages.clear_stage("planexium")
+
+
+def _run_yatra(job: dict[str, Any]) -> dict[str, Any]:
+    payload = _json_task(job)
+    if payload.get("stage") == "visuals":
+        return _run_yatra_visuals(job)
+    if payload.get("preproduction_job"):
+        _, _, _, checkpoint = _travel_checkpoint(payload)
+        follow = enqueue_job("fabula", json.dumps({**payload, "stage": "narration"}),
+                             mode="execute", dedupe_key=f"travel:{checkpoint}:narration")
+        return {"agent": "YATRA", "production_complete": False,
+                "handed_to": {"agent": "FABULA", "job_id": follow["id"]}}
+    # A new video starts by freeing what earlier, finished videos left behind: their Envato clips age out of
+    # retention days after upload, and nothing else revisits those folders once their own run has ended.
+    stages.set_stage("yatra", stages.EXECUTING, "Clearing storage left by earlier finished videos")
+    from openjarvis.one_agents import youtube_publish
+    storage = youtube_publish.sweep_finished_videos()
+    follow = stages.head_briefs_worker(
+        "yatra", "fabula", carrying_detail="Taking narration work to FABULA",
+        briefing_detail="FABULA, prepare the approved script and voice; return measured timings for the visual edit.",
+        awaiting_detail="Waiting for FABULA narration",
+        enqueue=lambda: enqueue_job("fabula", json.dumps(payload), mode="execute",
+                                    dedupe_key=f"travel:{job['id']}:prepare"))
+    return {"agent": "YATRA", "production_complete": False, "storage_cleanup": storage,
+            "handed_to": {"agent": "FABULA", "job_id": follow["id"]}}
+
+
+def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, Any]:
+    """Run Sonia Travel Vlogs preproduction in LAO and return its receipt to HELIOS."""
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+    payload = _json_task(job)
+    if str(payload.get("brand") or "") != "sonia_travel_vlogs":
+        raise RuntimeError("YATRA refuses work outside sonia_travel_vlogs")
+    trend_brief = str(payload.get("trendBrief") or payload.get("angle") or "").strip()
+    if not trend_brief or trend_brief == str(job.get("task") or "").strip():
+        raise RuntimeError("YATRA requires HELIOS's non-empty Sanjeevani-grounded TrendBrief")
+
+    # LAO's Windows worker currently routes prompt text through a legacy
+    # code-page boundary. Keep the canonical, Unicode research brief in ONE's
+    # artifact/memory record, but hand LAO a portable prompt representation so
+    # a malformed publisher byte or typographic glyph cannot abort production
+    # before the browser even opens.
+    lao_trend_brief = unicodedata.normalize("NFKD", trend_brief).encode(
+        "ascii", "ignore"
+    ).decode("ascii")
+    lao_trend_brief = re.sub(r"[^\x09\x0A\x0D\x20-\x7E]", "", lao_trend_brief).strip()
+    if not lao_trend_brief:
+        raise RuntimeError("YATRA TrendBrief contains no LAO-safe prompt text")
+
+    stages.worker_confirms_receipt(owner, "Received HELIOS's travel TrendBrief")
+    # ChatGPT runs in the robots' Chrome, which the robots never launch themselves; bring it up if it is down
+    # (both were closed on 2026-10-08). Best effort: if it cannot start, LAO's own step says why.
+    stages.set_stage(owner, stages.EXECUTING, "Checking the robot Chrome windows are open")
+    _yatra_run_tool(_YATRA_TOOLS / "yatra-acquisition" / "robot_chrome.py", [], minutes=2)
+    tool = LaoOrchestratorTool()
+    process_name = "Sonia YATRA - Preproduction"
+    resume_id = job_recovery.resume_target(job)
+    if resume_id:
+        lao_job_id = resume_id
+    else:
+        language = sonia_language_profile(payload)
+        started = tool.execute(
+            action="start", mode="publish", process_name=process_name,
+            scope="production", confirm_publish=True,
+            input_args={
+                "trendBrief": lao_trend_brief,
+                "channelName": "Sonia Travel Vlogs",
+                "channelHandle": "@sonicsonia",
+                "targetLanguage": language["targetLanguage"],
+                "expectedSceneCount": _YATRA_EXPECTED_SCENES,
+                # Empty keeps the package's Devanagari rule (Hinglish); English replaces it outright, since the
+                # two rules contradict each other.
+                **({"scriptRule": language["scriptRule"]} if language["scriptRule"] else {}),
+                "enablePaidDownload": True,
+            },
+        )
+        if not started.success:
+            raise RuntimeError(f"LAO refused YATRA production: {started.content}")
+        lao_job_id = str(((started.metadata or {}).get("job") or {}).get("id") or "")
+        if not lao_job_id:
+            raise RuntimeError("LAO started YATRA without returning a job id")
+        job_recovery.attach(_connect, job["id"], lao_job_id)
+
+    terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
+    deadline = time.time() + float(os.environ.get("ONE_YATRA_MAX_WAIT_SECONDS", "5400"))
+    status = "Pending"
+    last: dict[str, Any] = {}
+    while time.time() < deadline:
+        stages.set_stage(owner, stages.EXECUTING,
+                         f"Building Sonia Travel Vlogs package · LAO {status}",
+                         lao_job=lao_job_id, lao_process=process_name)
+        time.sleep(float(os.environ.get("ONE_LAO_POLL_SECONDS", "30")))
+        job_recovery.heartbeat(_connect, job["id"])
+        probe = tool.execute(action="status", process_name=process_name,
+                             scope="production", job_id=lao_job_id, include_logs=True)
+        if not probe.success:
+            continue
+        last = probe.metadata or {}
+        status = str((last.get("job") or {}).get("status") or status)
+        if status in terminal:
+            break
+    if status != "Successful":
+        stages.clear_stage(owner); stages.clear_stage("helios")
+        raise RuntimeError(f"YATRA workflow ended as {status}")
+
+    # A script with no footage is not a deliverable, so the same run goes on to
+    # fetch the stock every scene needs and to film the official-source demos.
+    plan_file = _yatra_preproduction_file(lao_job_id)
+    plan_records = json.loads(plan_file.read_text(encoding="utf-8")) or [{}]
+    plan_record = plan_records[0]
+    # Stamp the video's language on the plan itself: every later stage (voice, SEO, subtitles) reads this file or a
+    # copy of it, so the language travels with the video rather than with whichever job payload happens to carry it.
+    # The cue lines are normalised here too, before any copy of the plan exists.
+    normalized = normalize_script_cues(plan_record.get("full_script") or "")
+    if (plan_record.get("language") != sonia_language_profile(payload)["key"]
+            or normalized != (plan_record.get("full_script") or "")):
+        plan_record["language"] = sonia_language_profile(payload)["key"]
+        plan_record["full_script"] = normalized
+        plan_file.write_text(json.dumps(plan_records, ensure_ascii=False, indent=2), encoding="utf-8")
+    contract = _validate_yatra_contract(plan_record, _YATRA_EXPECTED_SCENES)
+    video_title = str(plan_record.get("video_title") or "").strip()
+    # Keep each LAO production checkpoint in a clean, retry-stable folder.
+    # A title-only path made a fresh revision silently inherit stale 4K or
+    # duplicate downloads from the prior cut; the LAO job id scopes retries to
+    # the same folder while giving a genuinely new run its own assets.
+    asset_folder = f"{_yatra_slug(video_title or trend_brief)}-{lao_job_id[:8]}"
+    if _yatra_editorial_hold(plan_record):
+        stages.clear_stage(owner)
+        return {"agent": owner.upper(), "stage": "editorial_hold", "production_complete": False,
+                "lao_job": lao_job_id, "asset_folder": asset_folder, "contract": contract,
+                "reason": "Saved ChatGPT draft has final_verdict: REWRITE; repair this checkpoint before Sonia voice credits"}
+    _require_active_job(job, "commission FABULA narration")
+    follow = enqueue_job("fabula", json.dumps({**payload, "stage": "narration",
+                         "preproduction_job": lao_job_id}), mode="execute",
+                         dedupe_key=f"travel:{lao_job_id}:narration")
+    stages.clear_stage(owner)
+    return {"agent": owner.upper(), "stage": "preproduction", "production_complete": False,
+            "lao_job": lao_job_id, "asset_folder": asset_folder,
+            "contract": contract,
+            "handed_to": {"agent": "FABULA", "job_id": follow["id"]}}
+
+
+def _run_yatra_visuals(job: dict[str, Any]) -> dict[str, Any]:
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+    payload = _json_task(job)
+    plan_file, plan_record, asset_folder, lao_job_id = _travel_checkpoint(payload)
+    video_title = str(plan_record["video_title"])
+    tool = LaoOrchestratorTool()
+    receipt = _YATRA_ASSET_ROOT / asset_folder / "narration" / "fabula-receipt.json"
+    if not receipt.is_file():
+        raise RuntimeError("YATRA needs FABULA's narration receipt before acquiring timed visuals")
+    envelope = json.loads(receipt.read_text(encoding="utf-8"))
+    if envelope.get("checkpoint") != lao_job_id:
+        raise RuntimeError("FABULA narration receipt belongs to a different production")
+    narration = envelope["narration"]
+    last = {"checkpoint": lao_job_id}
+    stages.set_stage("yatra", stages.EXECUTING,
+                     "Rendering the opening geography map from YATRA's visual brief")
+    opening_map = _yatra_render_opening_map(plan_file, asset_folder)
+    if not opening_map.get("ok"):
+        raise RuntimeError(f"YATRA opening map failed before acquisition: {opening_map}")
+    # Narration comes first because it is what decides how much footage to buy.
+    # The scene plan's timecodes are a guess at pace made before the voice
+    # existed, and Sonia's clone reads slower than the guess, so buying against
+    # the guess leaves every scene short.
+    if not narration.get("ok"):
+        raise RuntimeError(f"YATRA narration checkpoint is not ready: {narration.get('detail')}")
+    stages.set_stage("yatra", stages.EXECUTING,
+                     "Acquiring stock footage for every approved scene")
+    asset_root = _YATRA_ASSET_ROOT / asset_folder
+    # Route the scenes before buying for them. acquire_scenes sizes each scene's
+    # purchase from visual-routes.json (a stock scene is ~75% footage in the
+    # composer), and without it guesses from the plan's footage beats; the
+    # routes used to be written only during the cut, after acquisition, so a
+    # first run bought 35 clips where the cut needed 47 (Vietnam, 2026-10-06).
+    local_plan = asset_root / "production-plan.json"
+    if not local_plan.exists() and Path(plan_file).is_file():
+        asset_root.mkdir(parents=True, exist_ok=True)
+        local_plan.write_bytes(Path(plan_file).read_bytes())
+    # Official-page recordings come from this video's own plan. Until 2026-10-08 they needed a hand-written recipe
+    # per destination, so every video outside Malaysia, Thailand and Timor-Leste filmed nothing. plan_captures
+    # keeps only government sites and the brand's own domain, films them read-only, and maps them to the scenes
+    # with obs beats. A failure here costs the recordings, never the video.
+    stages.set_stage("yatra", stages.EXECUTING, "Choosing the official pages to film for this video")
+    obs_plan = _yatra_run_tool(_YATRA_TOOLS / "yatra-capture" / "plan_captures.py", [str(asset_root)], minutes=5)
+    routes = _yatra_run_tool(_YATRA_EDIT_TOOLS / "route_visuals.py", [str(asset_root)], minutes=10)
+    if not routes.get("ok"):
+        raise RuntimeError(f"YATRA could not route the scenes before acquisition: {routes.get('detail')}")
+    # The acquisition manifest owns scene coverage. A raw global file-count
+    # shortcut used to declare the footage complete at 36 files even when
+    # durable scene slots were still empty (H-1B, 2026-10-18: 38/46 files but
+    # seven scenes incomplete), allowing OBS/editing to start prematurely.
+    # acquire_scenes is resumable and hashes every accepted file, so calling it
+    # on every visual resume preserves accepted downloads and fills only the
+    # missing slots. Its all_covered result is the only footage completion gate.
+    from openjarvis.one_agents import resource_lanes
+    stages.set_stage("yatra", stages.EXECUTING,
+                     "Waiting for Floor 12's exclusive Envato download lane")
+    with resource_lanes.claim(
+        "floor12:envato",
+        heartbeat=lambda: job_recovery.heartbeat(_connect, str(job["id"])),
+        cancelled=lambda: not _job_is_active(str(job["id"])),
+    ):
+        stages.set_stage("yatra", stages.EXECUTING,
+                         "Acquiring stock footage for every approved scene")
+        footage = _yatra_acquire_footage(plan_file, asset_folder,
+                                         str(narration.get("manifest") or ""))
+        if not footage.get("ok") or not footage.get("all_covered"):
+            raise RuntimeError("YATRA could not acquire the complete unique-shot 1080p plan; "
+                               "refusing to cut with repeated or missing footage\n"
+                               f"acquire_scenes said:\n{footage.get('detail', '')}")
+        stages.set_stage("yatra", stages.EXECUTING,
+                         "Acquiring a quiet licensed Envato ambient music bed")
+        music = _yatra_acquire_music(tool, plan_record, asset_folder)
+        if not music.get("ok"):
+            raise RuntimeError(f"YATRA ambient music acquisition failed: {music}")
+    stages.set_stage("yatra", stages.EXECUTING,
+                     "Recording official-source browser demos")
+    captures = _yatra_record_captures({**payload, 'assetFolder': asset_folder}, video_title or asset_folder)
+    if not captures.get("ok"):
+        raise RuntimeError(f"YATRA browser capture failed: {captures}")
+    stages.set_stage("yatra", stages.EXECUTING,
+                     "Drawing the cards, cutting the picture to the voice, checking the result")
+    cut = _yatra_cut_video(plan_file, asset_folder)
+    if not cut.get("ok"):
+        # A cut that failed (or failed QC) is not a deliverable. Handing it on
+        # sent ARES to build SEO for a master that did not exist (2026-10-06).
+        step = cut.get("failed_at") or "cut"
+        detail = str((cut.get(step) or {}).get("detail") or "")[-1500:]
+        earlier = cut.get("director_render_motion_v3") or cut.get("director_render_motion_v2")
+        if earlier:
+            # Preserve the primary renderer error when the fallback also fails.
+            detail = f"{earlier.get('engine')} failed first:\n{str(earlier.get('detail') or '')[-1500:]}\n--- then:\n{detail}"
+        raise RuntimeError(f"YATRA cut failed at {step}; nothing was handed to HELIOS/LYRA.\n{detail}")
+    stages.set_stage("yatra", stages.CARRYING_TO_HEAD,
+                     "Taking the verified master and production receipt back to HELIOS")
+    _require_active_job(job, "deliver the verified master to HELIOS")
+    report = enqueue_job("helios", json.dumps({
+        "brand": "sonia_travel_vlogs", "worker": "yatra",
+        "title": video_title, "format": "travel_video_production",
+        "published": False, "output": f"LAO job {lao_job_id}",
+        "lao_job": lao_job_id, "lao_receipt": last,
+        "asset_folder": asset_folder, "opening_map": opening_map,
+        "footage": footage, "captures": captures, "obs_plan": (obs_plan.get("detail") or "")[-600:],
+        "narration": narration, "music": music, "cut": cut,
+        "origin_job": payload.get("origin_job"),
+    }), mode="report", tier="fast")
+    stages.set_stage("yatra", stages.DELIVERING, "Delivered YATRA artifacts to HELIOS")
+    time.sleep(1); stages.clear_stage("yatra")
+    return {"agent": "YATRA", "mode": "preproduction", "published": False,
+            "lao_job": lao_job_id, "asset_folder": asset_folder,
+            "opening_map": opening_map, "footage": footage,
+            "captures": captures, "narration": narration,
+            "music": music,
+            "cut": cut,
+            "handed_to": {"agent": "IRIS", "job_id": report["id"]}}
 
 
 # The capability check asks whether an agent holds *any* capability, not
@@ -5800,12 +10044,18 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
     # capability cannot watch either, which is the honest answer rather than a
     # quiet exemption for our own machinery.
     if str(job.get("mode") or "").strip().lower() == "watch":
-        return floor_watch.watch_floor(_connect, job["agent_id"])
+        head_id = str(job["agent_id"])
+        stages.set_stage(head_id, stages.EXECUTING, "Checking this floor for failed or stuck work")
+        try:
+            return floor_watch.watch_floor(_connect, head_id)
+        finally:
+            stages.clear_stage(head_id)
 
     publishing_payload = _json_task(job)
     correlation_id = str(publishing_payload.get("mission_id") or
                          publishing_payload.get("origin_job") or job.get("id", ""))
     handlers = {
+        "helios": _run_helios,
         "zeus": _run_zeus,
         "athena": _run_athena,
         "jobhunt": _run_daedalus,
@@ -5824,6 +10074,12 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         "muse": _run_muse,
         "kairos": _run_kairos,
         "herald": _run_herald,
+        "planexium": _run_planexium,
+        "yatra": _run_yatra,
+        "fabula": _run_fabula,
+        "echo": _run_echo,
+        "vista": _run_vista,
+        "lyra": _run_lyra,
         "ares": _run_ares,
         "alfa": _run_alfa,
         "poseidon": _run_poseidon,
@@ -5880,6 +10136,12 @@ def _job_watchdog_seconds(job: dict[str, Any] | None = None) -> float:
     except ValueError:
         default = 2700.0
 
+    if job and job.get("agent_id") == "planexium":
+        return max(default, 16 * 3600.0)
+    if job and job.get('agent_id') == 'yatra':
+        # Sequential full-video acquisition has its own bounded per-clip waits.
+        # Outer watchdog must outlive 12h acquisition + capture/edit stages.
+        return max(default, 16 * 3600.0)
     if job and job.get("agent_id") == "scribe":
         try:
             lao_wait = float(os.environ.get("ONE_LAO_MAX_WAIT_SECONDS", "10800"))
@@ -5889,21 +10151,31 @@ def _job_watchdog_seconds(job: dict[str, Any] | None = None) -> float:
     return default
 
 
+# Job ids the watchdog has given up on, which is the only way to tell an
+# abandoned thread from a job that is simply still working: a thread named
+# "job-<id>" looks identical either way. Reading threading.enumerate() alone
+# counted healthy jobs as abandoned, which made the periodic log line claim a
+# leak whenever anything was running at all (seen 2026-10-14 against a HERMES
+# research job 13 minutes into a 19-minute run), and - worse - let two healthy
+# jobs plus one real abandonment reach the limit below and take the worker
+# process down with them.
+_ABANDONED_JOB_IDS: set[str] = set()
+
+
 def abandoned_job_threads() -> list["threading.Thread"]:
     """Every job-execution thread still alive past its own watchdog timeout.
 
-    Reads threading.enumerate() directly rather than maintaining a separate
-    list, keyed on the "job-<id>" name run_worker() already gives each
-    thread - so this can never drift out of sync with which threads are
-    actually still running the way a hand-updated counter could. Python has
-    no supported way to forcibly terminate a thread from the outside, so
-    this only makes the leak visible; it cannot reclaim the memory those
-    threads are holding. See run_worker()'s watchdog branch for where this
-    is logged.
+    Keyed on the "job-<id>" name run_worker() already gives each thread, and
+    narrowed to the ids the watchdog actually abandoned, so a job that is
+    merely slow is not counted as a leak. Python has no supported way to
+    forcibly terminate a thread from the outside, so this only makes the leak
+    visible; it cannot reclaim the memory those threads are holding. See
+    run_worker()'s watchdog branch for where this is logged.
     """
     import threading
     return [t for t in threading.enumerate()
-            if t.name.startswith("job-") and t.is_alive()]
+            if t.name.startswith("job-") and t.is_alive()
+            and t.name[len("job-"):] in _ABANDONED_JOB_IDS]
 
 
 def _finish_active_job(job: dict[str, Any], outcome: dict[str, Any]) -> None:
@@ -5914,8 +10186,21 @@ def _finish_active_job(job: dict[str, Any], outcome: dict[str, Any]) -> None:
     stopped blocking on a single thread.join() per iteration -- see
     run_worker's own docstring for why that blocking was there and why it
     had to go."""
+    # cancel_job/watchdog may release the queue row while Python code that
+    # cannot be force-killed is still unwinding. That stale thread no longer
+    # owns the result and must not overwrite failed/cancelled with completed.
+    if not _job_is_active(str(job.get("id") or "")):
+        return
     if "error" in outcome:
         trace = str(outcome.get("traceback") or "").strip()
+        agent_id = str(job.get("agent_id") or "").lower()
+        if agent_id in {"hermes", "biblos", "scribe", "imprimatur", "mercury", "leda", "metron", "peitho"}:
+            _publishing_event(
+                job, agent=agent_id.upper(), event_type="execution_failed",
+                stage="worker", summary=f"{agent_id.upper()} execution failed",
+                details={"error": str(outcome.get("error") or "")[:1000]},
+                status="failed",
+            )
         fail_job(job["id"], RuntimeError(
             f"{outcome['error']}\n\n{trace}" if trace else str(outcome["error"])
         ))
@@ -5979,6 +10264,7 @@ def _abandon_active_job(job: dict[str, Any]) -> None:
     # directly rather than keeping a separate list, so the count can
     # never drift from reality the way a hand-maintained counter
     # could.
+    _ABANDONED_JOB_IDS.add(str(job["id"]))
     still_abandoned = abandoned_job_threads()
     watchdog_seconds = _job_watchdog_seconds(job)
     print(
@@ -6003,7 +10289,8 @@ def _abandon_active_job(job: dict[str, Any]) -> None:
         _publishing_event(
             job, agent="HERMES", event_type="research_timeout",
             stage="watchdog", summary="Research stopped by the job watchdog",
-            details={"timeout_seconds": watchdog_seconds}, status="blocked",
+            details={"timeout_seconds": watchdog_seconds,
+                     "background_result_policy": "discarded"}, status="failed",
         )
 
     # Observability alone (the log line above) does not stop the
@@ -6065,6 +10352,45 @@ def run_worker(poll_seconds: float = 2.0) -> None:
     """
     import threading
 
+    # IMPRIMATUR's ordinary 30-minute retry uses a lightweight daemon timer,
+    # but a Windows restart/power loss destroys that timer. The durable state
+    # file is the recovery source: reconstruct one poll job per pending title
+    # before normal queue claiming starts.
+    try:
+        output_root = Path.home() / "Documents" / "LAO" / "kdp-book-factory" / "output"
+        with _connect() as db:
+            active_imprimatur = [
+                json.loads(row["task"])
+                for row in db.execute(
+                    "SELECT task FROM jobs WHERE agent_id = 'imprimatur' "
+                    "AND status IN ('queued', 'running')"
+                ).fetchall()
+                if row["task"].lstrip().startswith("{")
+            ]
+        active_dirs = {str(item.get("run_dir") or "") for item in active_imprimatur}
+        resumed_polls = 0
+        for state_file in output_root.glob("*/kdp_publish_state.json"):
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            run_dir = str(state_file.parent)
+            if state.get("stage") != "AWAITING_ASIN" or run_dir in active_dirs:
+                continue
+            scribe_job_id = str(state.get("scribe_job_id") or "")
+            if not scribe_job_id:
+                continue
+            enqueue_job("imprimatur", json.dumps({
+                "phase": "poll",
+                "run_dir": run_dir,
+                "scribe_job_id": scribe_job_id,
+                "approval_id": str(state.get("approval_id") or ""),
+                "poll_attempt": int(state.get("poll_attempt") or 0),
+                "recovered_after_restart": True,
+            }), mode="execute", tier="fast")
+            resumed_polls += 1
+        if resumed_polls:
+            print(f"[one-agents] resumed {resumed_polls} pending KDP ASIN poll(s)", flush=True)
+    except Exception as exc:  # noqa: BLE001 - recovery must never stop the worker
+        print(f"[one-agents] KDP poll recovery skipped: {exc}", flush=True)
+
     # A worker that dies mid-poll leaves its job in 'running' forever, because
     # claim_job() only ever selects 'queued'. That is how every MUSE run and
     # most SCRIBE runs were lost: the LAO job carried on and finished into a
@@ -6091,7 +10417,24 @@ def run_worker(poll_seconds: float = 2.0) -> None:
     active: dict[str, dict[str, Any]] = {}  # job_id -> {thread, job, outcome, deadline}
     last_schedule_check = 0.0
     last_leak_check = 0.0
+    last_recovery_check = 0.0
     while True:
+        if time.time() - last_recovery_check >= 60:
+            # Startup can skip a freshly orphaned row. Revisit after its lease
+            # expires; protect local threads and heartbeat all live owners,
+            # including long local renders that do not have a LAO poll loop.
+            for owned_id in active:
+                job_recovery.heartbeat(_connect, owned_id)
+            try:
+                recovered = job_recovery.sweep(_connect, active_ids=active)
+                for entry in recovered["resumed"] + recovered["failed"]:
+                    stages.clear_stage(entry["agent_id"])
+                line = job_recovery.describe(recovered)
+                if line:
+                    print(f"[one-agents] periodic recovery -- {line}", flush=True)
+            except Exception as exc:
+                print(f"[one-agents] periodic recovery skipped: {type(exc).__name__}", flush=True)
+            last_recovery_check = time.time()
         if time.time() - last_schedule_check >= 30:
             _enqueue_due_recurring_jobs()
             last_schedule_check = time.time()

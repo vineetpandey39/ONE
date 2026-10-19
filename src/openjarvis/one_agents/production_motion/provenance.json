@@ -1,0 +1,23 @@
+{
+  "origin": "Installed LAO Motion V3",
+  "migration": "Additive snapshot; original tools unchanged",
+  "local_changes": {
+    "cards.html": [
+      "parameterized brand",
+      "removed travel default note",
+      "neutral document title"
+    ]
+  },
+  "upstream_sha256": {
+    "vendor/fonts.css": "430bc27edf53de8eaaaf78dfa1c0fdf0a687a7356ce261b25cc00432c2da2967",
+    "vendor/gsap.min.js": "9d6dd3499d49b3f3bc9ddf1754535134354bf787fcd6029beabaf630bf69be44",
+    "vendor/fonts/BricolageGrotesque-normal-500.woff2": "a79fdb52d4a5c76552452f69202add96e287401fff03d3e8c0e38b4dcb5a99cd",
+    "vendor/fonts/BricolageGrotesque-normal-800.woff2": "a79fdb52d4a5c76552452f69202add96e287401fff03d3e8c0e38b4dcb5a99cd",
+    "vendor/fonts/DMMono-normal-500.woff2": "9964608a849396bd00c4bfd7034afe03486469dcf20b4f6b8cbdfdd310369951",
+    "vendor/fonts/InstrumentSerif-italic-400.woff2": "5a51946dfffa82972bc98745359c46761515641fda557c25116459a9f83da4a7",
+    "vendor/fonts/InstrumentSerif-normal-400.woff2": "5eb09b5ac0e28b67c2f041c8ba6d244604ca0c0980d65912ab2d47fed84ddc31",
+    "card_renderer.py": "eac4b9f46bcb61b142b26c4919f8e5adc1897986300f9883147e4adb2ec6b53c",
+    "layout_grammar.py": "89d89f46256b392a52879a15c92d7836545a5e02198d0b5c7354e0604530fa06",
+    "cards.html": "5a066fd86dfebf586d2d087a25e3eb51ff72b549d1560be55f9f15cd13282622"
+  }
+}

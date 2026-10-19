@@ -235,6 +235,7 @@ runtime = [
     "google-genai>=1.0",                 # inference-google
     "deepgram-sdk>=7.0",                 # speech-deepgram (primary STT)
     "faster-whisper>=1.0",               # speech (local STT fallback)
+    "av>=14.0",                          # YATRA Motion V3 ProRes 10-bit proxy normalization
     "playwright>=1.40",                  # browser — Leonardo/ChatGPT, jobhunt
     "tavily-python>=0.3",                # tools-search
     "ddgs>=9.11.4",                      # tools-search

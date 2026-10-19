@@ -1,0 +1,346 @@
+"""Bounded self-healing for Floor 12 (YouTube Studio).
+
+HELIOS is allowed to repair its own implementation, but it is not allowed to
+turn a production retry into a second production.  This module therefore keeps
+the two decisions separate:
+
+* resume only checkpoint-safe workers (YATRA visuals, LYRA, VISTA and ECHO);
+* edit code only in a clean, allow-listed Git repository, run the repository's
+  Floor 12 tests, then create a local commit (never push).
+
+Claude Code is preferred. Codex and Qwen are fallbacks.  A model failure is a
+diagnostic failure, not permission to bypass the gates below.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sqlite3
+import subprocess
+import sys
+import uuid
+from contextlib import closing
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+
+Connect = Callable[[], sqlite3.Connection]
+SAFE_RETRY_AGENTS = {"lyra", "vista", "echo"}
+FLOOR12_AGENTS = {"helios", "fabula", "yatra", "lyra", "vista", "echo", "planexium", "chandan"}
+REPO_ROOT = Path(__file__).resolve().parents[3]
+ALLOWED_REPOS = (REPO_ROOT, Path(r"C:\Users\pc\Documents\LAO\vista"))
+PENDING_PREFIX = "pending self-heal: "
+# These files are the independent checker/maker and self-heal control plane.
+# A production failure may be repaired by that control plane, but a model CLI
+# must never rewrite the rules that supervise or authorize its own repair.
+# Human-reviewed commits can still change them; this boundary applies only to
+# autonomous HELIOS patches and is deliberately unrelated to the restart gate.
+PROTECTED_CONTROL_PLANE_PATHS = {
+    "src/openjarvis/one_agents/floor_watch.py",
+    "src/openjarvis/one_agents/helios_self_heal.py",
+}
+
+
+def _audit_attempt(payload: dict[str, Any]) -> None:
+    """Persist the reason each CLI advanced or failed without storing prompts."""
+    try:
+        path = Path(os.environ.get("OPENJARVIS_HOME", Path.home() / ".openjarvis")) / "helios_self_heal_log.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"at": _now(), **payload}, ensure_ascii=True) + "\n")
+    except OSError:
+        pass
+
+
+def _attempt_reason(attempts: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for attempt in attempts:
+        name = str(attempt.get("cli") or "cli")
+        if attempt.get("error"):
+            detail = str(attempt["error"])
+        else:
+            detail = f"exit {attempt.get('returncode')}"
+            tail = " ".join(str(attempt.get("output") or "").split())[-240:]
+            if tail:
+                detail += f": {tail}"
+        parts.append(f"{name} {detail}")
+    return " | ".join(parts)[:1200]
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _row(connect: Connect, job_id: str) -> dict[str, Any] | None:
+    with closing(connect()) as db:
+        item = db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        return dict(item) if item else None
+
+
+def _active_for_agent(connect: Connect, agent_id: str, excluding: str) -> str:
+    with closing(connect()) as db:
+        row = db.execute(
+            "SELECT id FROM jobs WHERE agent_id = ? AND id != ? "
+            "AND status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 1",
+            (agent_id, excluding),
+        ).fetchone()
+    return str(row["id"]) if row else ""
+
+
+def _queue_copy(connect: Connect, previous: dict[str, Any], *, task: str | None = None) -> str:
+    agent = str(previous.get("agent_id") or "").lower()
+    new_id = f"{agent}-{uuid.uuid4().hex[:12]}"
+    with closing(connect()) as db, db:
+        db.execute(
+            "INSERT INTO jobs (id, agent_id, task, mode, status, created_at, updated_at, "
+            "tier, external_job, external_kind) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)",
+            (new_id, agent, task if task is not None else previous.get("task") or "",
+             previous.get("mode") or "execute", _now(), _now(), previous.get("tier") or "fast",
+             previous.get("external_job") or "", previous.get("external_kind") or ""),
+        )
+    return new_id
+
+
+def _downstream_for(connect: Connect, origin_job: str) -> str:
+    """Return a child that proves this head already commissioned its worker."""
+    with closing(connect()) as db:
+        rows = db.execute(
+            "SELECT id, task FROM jobs WHERE agent_id IN ('fabula','yatra','vista','lyra','echo') "
+            "AND status IN ('queued','running','completed','awaiting_upload') "
+            "ORDER BY created_at DESC LIMIT 100"
+        ).fetchall()
+    for row in rows:
+        try:
+            payload = json.loads(str(row["task"] or "{}"))
+        except (TypeError, ValueError):
+            continue
+        if str(payload.get("origin_job") or "") == origin_job:
+            return str(row["id"])
+    return ""
+
+
+def resume_checkpoint(connect: Connect, job_id: str) -> str:
+    """Queue one checkpoint-safe retry of a failed Floor 12 job."""
+    previous = _row(connect, job_id)
+    if not previous or previous.get("status") != "failed":
+        return ""
+    agent = str(previous.get("agent_id") or "").lower()
+    if agent not in FLOOR12_AGENTS:
+        return ""
+    active = _active_for_agent(connect, agent, job_id)
+    if active:
+        return f"resume deferred; {agent} already has active job {active}"
+
+    if agent == "yatra":
+        try:
+            payload = json.loads(str(previous.get("task") or "{}"))
+        except (TypeError, ValueError):
+            return ""
+        if payload.get("stage") != "visuals":
+            return ""  # never repeat discovery/script/paid voice work
+        from openjarvis.one_agents import runtime
+        queued = runtime.resume_yatra_visual_job(job_id)
+        return f"queued checkpoint-safe YATRA visual resume {queued['id']}"
+
+    if agent == "helios":
+        child = _downstream_for(connect, job_id)
+        if child:
+            return f"HELIOS retry not needed; downstream checkpoint {child} already exists"
+        new_id = _queue_copy(connect, previous)
+        return f"queued HELIOS resume {new_id} before any duplicate worker handoff"
+
+    if agent == "fabula":
+        # A finished receipt means voice credits were already spent and the
+        # only missing action is the YATRA handoff. Never call FABULA again.
+        try:
+            yatra_active = _active_for_agent(connect, "yatra", job_id)
+            if yatra_active:
+                return f"FABULA receipt handoff deferred; YATRA already has active job {yatra_active}"
+            payload = json.loads(str(previous.get("task") or "{}"))
+            from openjarvis.one_agents import runtime
+            _, _, folder, checkpoint = runtime._travel_checkpoint(payload)
+            receipt = runtime._YATRA_ASSET_ROOT / folder / "narration" / "fabula-receipt.json"
+            envelope = json.loads(receipt.read_text(encoding="utf-8"))
+            narration = envelope.get("narration") or {}
+            if (str(envelope.get("checkpoint") or "") != checkpoint
+                    or narration.get("ok") is not True):
+                return ""
+            task = json.dumps({**payload, "stage": "visuals", "narration_job": job_id,
+                               "narration_receipt": str(receipt)})
+            synthetic = {**previous, "agent_id": "yatra", "mode": "execute"}
+            new_id = _queue_copy(connect, synthetic, task=task)
+            return f"reused paid FABULA receipt and queued YATRA visual checkpoint {new_id}"
+        except Exception:  # no complete receipt means no safe paid retry
+            return ""
+
+    if agent not in SAFE_RETRY_AGENTS:
+        return ""  # HELIOS discovery and FABULA voice are not blind-retry safe
+
+    new_id = _queue_copy(connect, previous)
+    return f"queued checkpoint retry {new_id}"
+
+
+def _git(repo: Path, *args: str, timeout: int = 120) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, timeout=timeout)
+
+
+def _repo_for(evidence: dict[str, Any]) -> Path | None:
+    def values(value: Any) -> list[str]:
+        if isinstance(value, dict):
+            return [part for item in value.values() for part in values(item)]
+        if isinstance(value, (list, tuple, set)):
+            return [part for item in value for part in values(item)]
+        return [str(value)]
+
+    # Do not search json.dumps(): JSON doubles Windows backslashes, so a real
+    # `C:\path` could never match its repository path and every worker failure
+    # silently fell back to ONE-Suite.
+    text = "\n".join(values(evidence)).casefold().replace("/", "\\")
+    # A traceback normally starts in ONE's runtime wrapper and ends in the
+    # worker repository that actually raised.  Returning the first match made
+    # every VISTA failure look like an ONE-Suite failure.  The final/deepest
+    # matching repository owns the repair.
+    matches = [repo for repo in ALLOWED_REPOS
+               if repo.is_dir() and str(repo).casefold() in text]
+    if matches:
+        return max(matches, key=lambda repo: text.rfind(str(repo).casefold()))
+    # Runtime/queue failures belong to ONE-Suite even when the traceback was
+    # shortened before it reached the watcher.
+    return REPO_ROOT if REPO_ROOT.is_dir() else None
+
+
+def _cli_commands(prompt: str, repo: Path) -> list[tuple[str, list[str]]]:
+    commands: list[tuple[str, list[str]]] = []
+    claude = shutil.which("claude")
+    if claude:
+        commands.append(("claude", [claude, "-p", "--permission-mode", "acceptEdits",
+                                     "--allowedTools", "Read,Glob,Grep,Edit,Write,Bash",
+                                     prompt]))
+    codex = shutil.which("codex")
+    if codex:
+        commands.append(("codex", [codex, "exec", "--ephemeral", "--approve-for-me",
+                                    "--sandbox", "workspace-write", "--cd", str(repo), prompt]))
+    qwen = shutil.which("qwen")
+    if qwen:
+        commands.append(("qwen", [qwen, "--sandbox", "-p", prompt]))
+    return commands
+
+
+def _allowed_patch_path(repo: Path, path: str) -> bool:
+    """Keep a CLI repair inside the selected Floor 12 codebase."""
+    normalized = path.replace("\\", "/")
+    lowered = normalized.casefold()
+    if any(token in lowered for token in ("credential", "secret", "vault", ".env")):
+        return False
+    if repo.resolve() == REPO_ROOT.resolve():
+        if normalized in PROTECTED_CONTROL_PLANE_PATHS:
+            return False
+        return normalized.startswith(("src/openjarvis/one_agents/", "tests/one_agents/"))
+    if repo.resolve() == ALLOWED_REPOS[1].resolve():
+        return normalized.endswith(".py") and not normalized.startswith(("runs/", "direction-history/"))
+    return False
+
+
+def _repair_test_command(repo: Path) -> list[str]:
+    python = os.environ.get("ONE_HELIOS_PYTHON", sys.executable)
+    if repo.resolve() == REPO_ROOT.resolve():
+        return [python, "-m", "pytest", "tests/one_agents", "-q", "--maxfail=1"]
+    return [python, "-m", "pytest", "-q", "--maxfail=1"]
+
+
+def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str, Any]:
+    """Ask the first available model CLI to make one bounded local repair.
+
+    Refuses dirty repositories so unrelated human/agent work can never be
+    swept into HELIOS's commit. The model may edit; HELIOS owns verification
+    and the commit.
+    """
+    if os.environ.get("ONE_HELIOS_AUTO_REPAIR", "true").lower() not in {"1", "true", "yes", "on"}:
+        return {"ok": False, "reason": "HELIOS auto repair disabled"}
+    repo = _repo_for(evidence)
+    if repo is None:
+        return {"ok": False, "reason": "failure is outside HELIOS's allow-listed repositories"}
+    status = _git(repo, "status", "--porcelain")
+    if status.returncode or status.stdout.strip():
+        _audit_attempt({"job_id": evidence.get("job_id"), "event": "repository_not_clean",
+                        "repo": str(repo), "returncode": status.returncode,
+                        "status": str(getattr(status, "stdout", ""))[-1200:],
+                        "stderr": str(getattr(status, "stderr", ""))[-1200:]})
+        return {"ok": False, "reason": "repository is not clean; protected concurrent changes"}
+
+    prompt = (
+        "You are HELIOS's bounded Floor 12 repair worker. Diagnose the supplied latest failed job, "
+        "make the smallest durable code fix in this repository, and add/update focused tests. "
+        "Do not run production, browsers, uploads, downloads, voice generation, credential commands, "
+        "network publishing, git commit, git push, reset, checkout, clean, or delete. Preserve API and "
+        "checkpoint compatibility. If evidence is insufficient, make no changes and say so.\n\n"
+        f"Failure evidence:\n{json.dumps(evidence, ensure_ascii=True)[:7000]}"
+    )
+    attempts: list[dict[str, Any]] = []
+    for name, command in _cli_commands(prompt, repo):
+        from openjarvis.one_agents import stages
+        stages.set_stage("helios", stages.EXECUTING,
+                         f"Diagnosing {str(evidence.get('agent') or 'Floor 12').upper()} failure with {name} CLI")
+        try:
+            done = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=timeout)
+            attempts.append({"cli": name, "returncode": done.returncode,
+                             "output": (done.stdout or done.stderr or "")[-1200:]})
+        except Exception as exc:  # noqa: BLE001 - fallback is the point
+            attempts.append({"cli": name, "error": f"{type(exc).__name__}: {exc}"})
+            _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
+            continue
+        _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
+        changed = _git(repo, "status", "--porcelain")
+        if done.returncode == 0 and changed.stdout.strip():
+            break
+    else:
+        return {"ok": False, "reason": "no model CLI produced a patch: " + _attempt_reason(attempts),
+                "attempts": attempts}
+
+    # Block changes outside Floor 12 runtime/tests. This also prevents a model
+    # from changing credentials, floor governance, or another business line.
+    names = _git(repo, "diff", "--name-only").stdout.splitlines()
+    allowed = all(_allowed_patch_path(repo, path) for path in names)
+    if not names or not allowed:
+        _git(repo, "restore", "--worktree", "--", *names)
+        return {"ok": False, "reason": "CLI patch escaped HELIOS's file boundary", "attempts": attempts}
+
+    stages.set_stage("helios", stages.EXECUTING,
+                     f"Testing {attempts[-1].get('cli', 'CLI')} repair before retry")
+    check = subprocess.run(
+        _repair_test_command(repo),
+        cwd=repo, capture_output=True, text=True, timeout=1200,
+    )
+    if check.returncode:
+        _git(repo, "restore", "--worktree", "--", *names)
+        return {"ok": False, "reason": "Floor 12 regression tests failed",
+                "tests": (check.stdout + check.stderr)[-2000:], "attempts": attempts}
+
+    _git(repo, "add", "--", *names)
+    stages.set_stage("helios", stages.EXECUTING, "Committing the verified Floor 12 repair")
+    commit = _git(repo, "commit", "-m", "HELIOS self-heal Floor 12 failure")
+    if commit.returncode:
+        return {"ok": False, "reason": "verified patch could not be committed",
+                "commit_error": commit.stderr[-1200:], "attempts": attempts}
+    sha = _git(repo, "rev-parse", "--short", "HEAD").stdout.strip()
+    return {"ok": True, "cli": attempts[-1].get("cli"), "commit": sha,
+            "files": names, "attempts": attempts}
+
+
+def heal_failure(connect: Connect, finding: Any) -> str:
+    """Repair first; resume only after HELIOS produced a verified commit."""
+    evidence = {"agent": finding.agent_id, "job_id": finding.job_id,
+                "summary": finding.summary, **dict(finding.evidence or {})}
+    repair = repair_with_cli(evidence)
+    if not repair.get("ok"):
+        # A retry without a diagnosis and verified repair is not self-healing;
+        # it merely repeats the same failure.  The watcher recognizes this
+        # prefix as retryable/pending and deliberately does not ledger the
+        # failed job as handled, so the next pass can try again.
+        return f"{PENDING_PREFIX}{repair.get('reason') or 'no verified repair'}"
+    action = resume_checkpoint(connect, finding.job_id)
+    prefix = f"{repair['cli']} repaired and committed {repair['commit']}"
+    return f"{prefix}; {action}" if action else prefix

@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "weekdays": {
+    "Monday": "travel-dossier",
+    "Tuesday": "cinematic-clean",
+    "Wednesday": "editorial-punch",
+    "Thursday": "kinetic-type",
+    "Friday": "motion-lab"
+  },
+  "weekend": "cinematic-clean",
+  "formats": {
+    "travel-dossier": {
+      "header": true,
+      "footer": true,
+      "aesthetic": "premium evidence dossier",
+      "motion_language": "measured masks, document grids and proof stamps"
+    },
+    "cinematic-clean": {
+      "header": false,
+      "footer": true,
+      "aesthetic": "cinematic negative space",
+      "motion_language": "slow focus pulls, restrained titles and image-led pacing"
+    },
+    "editorial-punch": {
+      "header": true,
+      "footer": false,
+      "aesthetic": "travel magazine cover",
+      "motion_language": "asymmetric columns, serif contrast and editorial wipes"
+    },
+    "kinetic-type": {
+      "header": false,
+      "footer": false,
+      "aesthetic": "viral kinetic typography",
+      "motion_language": "oversized words, snap scale, bands and rhythmic type collisions"
+    },
+    "motion-lab": {
+      "header": false,
+      "footer": false,
+      "aesthetic": "bespoke motion graphics",
+      "motion_language": "routes, nodes, parallax geometry, particles and animated masks"
+    }
+  }
+}

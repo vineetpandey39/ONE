@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shared production motion</title>
+<link rel="stylesheet" href="vendor/fonts.css">
+<style>
+  :root {
+    --ink: #071A1E;       /* deep Andaman night */
+    --ink-2: #0D2A30;
+    --salt: #EEF2EC;      /* sea-salt white */
+    --mute: #86A5A2;
+    --gold: #FFB320;      /* marigold: the one accent of this video */
+    --line: rgba(238, 242, 236, .16);
+    --display: 'Bricolage Grotesque', 'Segoe UI', sans-serif;
+    --serif: 'Instrument Serif', Georgia, serif;
+    --mono: 'DM Mono', Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--ink); }
+  #stage { position: absolute; inset: 0; width: 1920px; height: 1080px; background: var(--ink); color: var(--salt);
+           font-family: var(--display); overflow: hidden; }
+  #stage.light { background: var(--gold); color: var(--ink); }
+  #grain { position: absolute; inset: 0; opacity: .07; mix-blend-mode: overlay; pointer-events: none;
+           background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+  .wash { position: absolute; inset: 0; background:
+            radial-gradient(1100px 700px at 88% 8%, rgba(255,179,32,.10), transparent 60%),
+            radial-gradient(900px 700px at 6% 100%, rgba(40,120,130,.22), transparent 62%); }
+  #stage.light .wash { background: radial-gradient(1000px 700px at 10% 100%, rgba(255,255,255,.22), transparent 60%); }
+
+  .bar { z-index: 5; position: absolute; left: 96px; right: 96px; display: flex; justify-content: space-between;
+         font: 500 22px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--mute); }
+  #stage.light .bar { color: rgba(7,26,30,.62); }
+  .bar.top { top: 64px; } .bar.bot { bottom: 56px; }
+  .bar b { color: var(--gold); font-weight: 500; } #stage.light .bar b { color: var(--ink); }
+  .prog { position: absolute; left: 96px; right: 96px; bottom: 100px; height: 2px; background: var(--line); }
+  .prog i { display: block; height: 100%; width: 100%; background: var(--gold); transform-origin: 0 50%; transform: scaleX(0); }
+  #stage.light .prog { background: rgba(7,26,30,.2); } #stage.light .prog i { background: var(--ink); }
+
+  .ln { overflow: hidden; padding-bottom: .14em; margin-bottom: -.14em; }
+  .ln > span { display: block; will-change: transform; }
+  em { font: italic 400 1.14em/.9 var(--serif); color: var(--gold); letter-spacing: -.01em; padding-right: .04em; }
+  #stage.light em { color: var(--ink); }
+  .h { font-weight: 800; letter-spacing: -.028em; line-height: .92; }
+  .sub { font: 500 40px/1.25 var(--display); color: var(--mute); letter-spacing: -.005em; }
+  #stage.light .sub { color: rgba(7,26,30,.7); }
+  .kick { font: 500 26px/1 var(--mono); letter-spacing: .2em; text-transform: uppercase; color: var(--gold); }
+  #stage.light .kick { color: var(--ink); }
+  .abs { position: absolute; }
+  /* overlay mode: transparent page, so the frames can sit on top of stock footage */
+  html.ov, html.ov body, html.ov #stage { background: transparent !important; }
+  html.ov .wash, html.ov #grain { display: none; }
+  #motif { position:absolute; inset:-8%; pointer-events:none; opacity:.24; }
+  #motif.contour { background:repeating-radial-gradient(ellipse at 78% 48%,transparent 0 70px,var(--accent-soft) 72px 74px); }
+  #motif.orbit { background:radial-gradient(circle at 78% 38%,transparent 0 150px,var(--accent-soft) 152px 155px,transparent 157px 260px,var(--accent-soft) 263px 266px,transparent 268px); }
+  #motif.document-grid { background-image:linear-gradient(var(--accent-soft) 1px,transparent 1px),linear-gradient(90deg,var(--accent-soft) 1px,transparent 1px);background-size:90px 90px;mask-image:linear-gradient(100deg,transparent 20%,#000); }
+  #motif.route-lines { background:linear-gradient(132deg,transparent 46%,var(--accent-soft) 46.2% 46.5%,transparent 46.7%),linear-gradient(24deg,transparent 68%,var(--accent-soft) 68.2% 68.5%,transparent 68.7%); }
+  #motif.soft-particles { background-image:radial-gradient(circle,var(--accent-soft) 0 3px,transparent 4px);background-size:110px 110px; }
+  #motif.architectural-bars { background:repeating-linear-gradient(112deg,transparent 0 105px,var(--accent-soft) 106px 109px,transparent 110px 180px); }
+  #stage.comp-editorial-right #hero { left:850px!important; right:90px!important; text-align:right; }
+  #stage.comp-center-monument #hero { left:240px!important; right:240px!important; text-align:center; }
+  #stage.comp-diagonal-stage #hero { left:160px!important; right:520px!important; transform:rotate(-2deg); }
+  #stage.comp-frame-within-frame #hero { left:170px!important; right:170px!important; top:180px!important; padding:68px; border:2px solid var(--accent); background:rgba(7,26,30,.52); }
+  #stage.comp-giant-right #hero { left:760px!important; text-align:right; }
+  #stage.comp-number-window #hero { left:180px!important; right:180px!important; padding:42px 70px; border-left:12px solid var(--accent); background:rgba(255,255,255,.055); }
+  #stage.comp-radial-counter #hero { left:420px!important; right:420px!important; text-align:center; }
+  #stage.comp-diagonal-split #panelR { clip-path:polygon(30% 0,100% 0,100% 100%,0 100%); width:58%!important; }
+  #stage.comp-stacked-verdict #L { top:210px!important;width:1450px!important; } #stage.comp-stacked-verdict #R { left:620px!important;top:570px!important;width:1200px!important; }
+  #stage.comp-vertical-countdown #trk { transform:rotate(90deg) translate(360px,-760px); transform-origin:left top; }
+  #stage.comp-passport-timeline #hero { border:3px solid var(--accent); padding:44px; background:rgba(255,255,255,.04); }
+  #stage.comp-radial-window #hero { left:360px!important;right:360px!important;text-align:center; }
+  #stage.comp-boarding-stack #rows { transform:rotate(-2deg); } #stage.comp-radial-checks #rows { border:3px solid var(--accent);border-radius:50%;padding:80px;top:190px!important; }
+  #stage.comp-progressive-folder #hero { padding:55px;border-left:14px solid var(--accent);background:rgba(255,255,255,.055); }
+  #stage.comp-left-glass #plate { left:70px!important;bottom:170px!important;padding:38px 44px;background:rgba(7,26,30,.72);backdrop-filter:blur(18px);border-left:8px solid var(--accent); }
+  #stage.comp-top-editorial #plate { top:90px!important;bottom:auto!important; }
+  #stage.comp-floating-caption #plate { left:50%!important;bottom:90px!important;transform:translateX(-50%);padding:30px 46px;background:rgba(7,26,30,.76);border-radius:24px;text-align:center; }
+  #stage.comp-browser-stage #frame { border-radius:26px;box-shadow:0 45px 120px rgba(0,0,0,.7)!important; }
+  #stage.comp-source-wall #frame { transform:perspective(1300px) rotateY(-7deg);transform-origin:left center; }
+  #stage.comp-magnified-clause #frame { clip-path:polygon(0 5%,90% 0,100% 92%,8% 100%); }
+
+  /* Five weekly show formats.  Compositions still vary inside each format;
+     these rules deliberately change the persistent chrome and motion voice. */
+  #formatFx { display:none; position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+  #formatFx .fx-band { position:absolute; left:-12%; top:46%; width:124%; height:150px; background:var(--accent); transform:rotate(-7deg); opacity:.92; }
+  #formatFx .fx-rule { position:absolute; left:70px; top:128px; width:12px; height:760px; background:var(--accent); }
+  #formatFx .fx-orb { position:absolute; right:-170px; top:120px; width:620px; height:620px; border:3px solid var(--accent); border-radius:50%; box-shadow:0 0 0 70px var(--accent-soft),0 0 0 145px rgba(255,255,255,.035); }
+  #formatFx .fx-node { position:absolute; width:24px; height:24px; border-radius:50%; background:var(--accent); box-shadow:0 0 42px var(--accent); }
+  #formatFx .fx-node.n1 { left:18%; top:30%; } #formatFx .fx-node.n2 { left:72%; top:68%; } #formatFx .fx-node.n3 { left:48%; top:19%; }
+  #formatFx .fx-path { position:absolute; left:18%; top:20%; width:57%; height:51%; border:2px dashed var(--accent); border-left-color:transparent; border-radius:50%; transform:rotate(13deg); opacity:.55; }
+  #stage.fmt-cinematic-clean .bar.top { display:none; }
+  #stage.fmt-cinematic-clean .bar.bot { left:120px; right:120px; color:rgba(255,255,255,.72); }
+  #stage.fmt-cinematic-clean .wash { background:linear-gradient(110deg,rgba(0,0,0,.58),transparent 64%),radial-gradient(900px 620px at 78% 18%,var(--accent-soft),transparent 70%); }
+  #stage.fmt-cinematic-clean #grain { opacity:.035; }
+  #stage.fmt-editorial-punch .bar.bot, #stage.fmt-editorial-punch .prog { display:none; }
+  #stage.fmt-editorial-punch .bar.top { top:38px; padding:18px 24px; background:var(--salt); color:var(--ink); }
+  #stage.fmt-editorial-punch #formatFx { display:block; }
+  #stage.fmt-editorial-punch .fx-rule { display:block; } #stage.fmt-editorial-punch .fx-band, #stage.fmt-editorial-punch .fx-orb, #stage.fmt-editorial-punch .fx-node, #stage.fmt-editorial-punch .fx-path { display:none; }
+  #stage.fmt-editorial-punch .h { letter-spacing:-.045em; } #stage.fmt-editorial-punch em { font-size:1.25em; }
+  #stage.fmt-kinetic-type .bar, #stage.fmt-kinetic-type .prog { display:none; }
+  #stage.fmt-kinetic-type #formatFx { display:block; mix-blend-mode:multiply; }
+  #stage.fmt-kinetic-type .fx-band { display:block; } #stage.fmt-kinetic-type .fx-rule, #stage.fmt-kinetic-type .fx-orb, #stage.fmt-kinetic-type .fx-node, #stage.fmt-kinetic-type .fx-path { display:none; }
+  #stage.fmt-kinetic-type .h { text-transform:uppercase; letter-spacing:-.075em; text-shadow:8px 10px 0 rgba(0,0,0,.3); }
+  #stage.fmt-kinetic-type .kick { display:inline-block; padding:12px 18px; background:var(--salt); color:var(--ink); transform:rotate(-2deg); }
+  #stage.fmt-motion-lab .bar, #stage.fmt-motion-lab .prog { display:none; }
+  #stage.fmt-motion-lab #formatFx { display:block; }
+  #stage.fmt-motion-lab .fx-band, #stage.fmt-motion-lab .fx-rule { display:none; }
+  #stage.fmt-motion-lab #motif { opacity:.11; }
+  #stage.fmt-motion-lab .h { text-shadow:0 0 38px rgba(0,0,0,.65); }
+  html.ov #formatFx { display:none!important; }
+</style>
+</head>
+<body>
+<div id="stage"><div class="wash"></div><div id="grain"></div><div id="root"></div></div>
+<script src="vendor/gsap.min.js"></script>
+<script>
+const $ = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstChild; };
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+// *word* marks the emphasis word: set in italic serif, in the accent colour.
+const rich = (s) => esc(s).replace(/\*(.+?)\*/g, '<em>$1</em>');
+const lines = (arr, cls = '') => arr.map(l => `<div class="ln ${cls}"><span>${rich(l)}</span></div>`).join('');
+const E = { out: 'power4.out', in: 'power3.in', expo: 'expo.out' };
+
+let tl = null, DUR = 4.4;
+
+function chrome(spec, light) {
+  const stage = document.getElementById('stage');
+  const dir = spec.direction || {}, pal = spec.palette_values || {};
+  Object.entries({ink:pal.ink, 'ink-2':pal.ink2, salt:pal.salt, mute:pal.mute, gold:pal.accent}).forEach(([k,v]) => { if(v) stage.style.setProperty(`--${k}`,v); });
+  stage.style.setProperty('--accent', pal.accent || '#FFB320');
+  stage.style.setProperty('--accent-soft', `${pal.accent || '#FFB320'}33`);
+  const family = dir.format_family || 'travel-dossier';
+  stage.className = `${light ? 'light ' : ''}comp-${dir.composition || 'editorial-left'} fmt-${family}`;
+  stage.dataset.format = family;
+  stage.dataset.camera = dir.camera || 'locked'; stage.dataset.entrance = dir.entrance || 'mask-rise';
+  stage.classList.toggle('light', !!light);
+  const root = document.getElementById('root');
+  root.innerHTML = '';
+  root.append($(`<div id="motif" class="${esc(dir.motif || 'contour')}"></div>`));
+  root.append($(`<div id="formatFx"><div class="fx-band"></div><div class="fx-rule"></div><div class="fx-orb"></div><div class="fx-path"></div><i class="fx-node n1"></i><i class="fx-node n2"></i><i class="fx-node n3"></i></div>`));
+  root.append($(`<div class="bar top"><span><b>${esc(spec.tag || '')}</b></span><span>${spec.brand === false ? '' : esc(spec.brand || '')}</span></div>`));
+  root.append($(`<div class="bar bot"><span>${esc(spec.note || '')}</span><span>${esc(spec.idx || '')}</span></div>`));
+  root.append($(`<div class="prog"><i></i></div>`));
+  return root;
+}
+function baseTimeline(d) {
+  tl = gsap.timeline({ paused: true });
+  tl.to('.prog i', { scaleX: 1, duration: d, ease: 'none' }, 0);
+  tl.from('.bar', { opacity: 0, y: 8, duration: .6, ease: E.out }, 0.05);
+  const stage = document.getElementById('stage'), camera = stage.dataset.camera, entrance = stage.dataset.entrance;
+  if (camera === 'dolly-left') tl.fromTo('#motif',{x:45},{x:-35,duration:d,ease:'none'},0);
+  if (camera === 'dolly-right') tl.fromTo('#motif',{x:-45},{x:35,duration:d,ease:'none'},0);
+  if (camera === 'slow-push') tl.fromTo('#motif',{scale:1},{scale:1.12,duration:d,ease:'none'},0);
+  if (camera === 'parallax-drift') tl.fromTo('#motif',{x:-35,y:20,scale:1.08},{x:35,y:-20,scale:1,duration:d,ease:'none'},0);
+  if (entrance === 'focus-pull') tl.from('#root > *:not(.bar):not(.prog)',{filter:'blur(18px)',opacity:.2,duration:.9,ease:E.out},0);
+  if (entrance === 'scale-resolve') tl.from('#root > *:not(.bar):not(.prog)',{scale:1.12,opacity:0,duration:.9,ease:E.expo},0);
+  if (stage.dataset.format === 'editorial-punch') tl.from('.fx-rule',{scaleY:0,transformOrigin:'50% 0',duration:.8,ease:E.expo},0);
+  if (stage.dataset.format === 'kinetic-type') tl.fromTo('.fx-band',{xPercent:-110,rotation:-7},{xPercent:110,rotation:-2,duration:d,ease:'power2.inOut'},0);
+  if (stage.dataset.format === 'motion-lab') {
+    tl.fromTo('.fx-orb',{scale:.35,rotation:-40,opacity:0},{scale:1.2,rotation:80,opacity:.8,duration:d,ease:'none'},0);
+    tl.fromTo('.fx-path',{strokeDashoffset:900},{strokeDashoffset:0,duration:d,ease:'none'},0);
+    tl.from('.fx-node',{scale:0,opacity:0,duration:.7,stagger:.22,ease:'back.out(2)'},.15);
+  }
+  return tl;
+}
+function exit(d) { tl.to('#root > *:not(.bar):not(.prog)', { opacity: 0, y: -18, duration: .32, ease: E.in }, d - .36); }
+
+/* ---------- templates ---------- */
+const T = {};
+
+// Big statement: kicker, stacked mask-revealed lines, one emphasis word, sub line.
+T.statement = (s, d) => {
+  const root = chrome(s, s.light);
+  root.append($(`<div class="abs" id="hero" style="left:96px;top:215px;right:140px">
+      <div class="kick" id="k">${esc(s.kicker || '')}</div>
+      <div class="h" style="font-size:${s.size || (s.lines.length > 2 ? 180 : 214)}px;margin-top:40px">${lines(s.lines)}</div>
+      <div class="sub" id="sub" style="margin-top:56px;max-width:1300px">${rich(s.sub || '')}</div></div>`));
+  baseTimeline(d);
+  tl.from('#k', { opacity: 0, x: -24, duration: .7, ease: E.out }, .1);
+  tl.from('.h .ln > span', { yPercent: 118, duration: 1.0, ease: E.expo, stagger: .12 }, .25);
+  tl.from('#sub', { opacity: 0, y: 26, duration: .9, ease: E.out }, 1.0);
+  exit(d);
+};
+
+// One giant number that counts up, with a serif unit and two supporting lines.
+T.stat = (s, d) => {
+  const root = chrome(s, s.light);
+  root.append($(`<div class="abs" id="hero" style="left:96px;top:200px;right:96px">
+      <div class="kick" id="k">${esc(s.kicker || '')}</div>
+      <div style="display:flex;align-items:baseline;gap:36px;margin-top:20px">
+        <div class="h" id="num" style="font-size:640px;line-height:.82;letter-spacing:-.06em;font-variant-numeric:tabular-nums">0</div>
+        <div id="unit" style="font:italic 400 230px/1 var(--serif);color:var(--gold)">${esc(s.unit || '')}</div>
+      </div>
+      <div style="display:flex;gap:64px;margin-top:34px;align-items:flex-start">
+        <div class="sub" id="lead" style="max-width:820px;color:var(--salt)">${rich(s.lead || '')}</div>
+        <div class="sub" id="foot" style="max-width:700px">${rich(s.foot || '')}</div>
+      </div></div>`));
+  baseTimeline(d);
+  const o = { v: 0 };
+  tl.from('#k', { opacity: 0, x: -24, duration: .7, ease: E.out }, .1);
+  tl.to(o, { v: s.value, duration: 1.5, ease: 'power3.out', onUpdate: () => { document.getElementById('num').textContent = Math.round(o.v); } }, .25);
+  tl.from('#num', { y: 60, opacity: 0, duration: 1, ease: E.expo }, .25);
+  tl.from('#unit', { x: -40, opacity: 0, duration: .9, ease: E.out }, .95);
+  tl.from('#lead', { opacity: 0, y: 24, duration: .8, ease: E.out }, 1.3);
+  tl.from('#foot', { opacity: 0, y: 24, duration: .8, ease: E.out }, 1.5);
+  exit(d);
+};
+
+// A rule that does not fit in a sentence: two ideas, one big sign between them.
+T.versus = (s, d) => {
+  const root = chrome(s, false);
+  root.append($(`<div class="abs" style="left:0;right:0;top:0;bottom:0">
+      <div id="panelR" class="abs" style="right:0;top:0;bottom:0;width:50%;background:var(--gold)"></div>
+      <div class="abs" id="L" style="left:96px;top:270px;width:720px">
+        <div class="kick" style="color:var(--mute)">${esc(s.left.k)}</div>
+        <div class="h" style="font-size:150px;margin-top:30px">${lines(s.left.t)}</div></div>
+      <div class="abs" id="R" style="left:1104px;top:270px;width:720px;color:var(--ink)">
+        <div class="kick" style="color:var(--ink)">${esc(s.right.k)}</div>
+        <div class="h" style="font-size:150px;margin-top:30px">${lines(s.right.t)}</div></div>
+      <div class="abs" id="mid" style="left:50%;top:430px;transform:translateX(-50%);width:200px;height:200px;border-radius:50%;background:var(--ink);display:flex;align-items:center;justify-content:center;border:2px solid var(--gold)">
+        <span style="font:italic 400 150px/1 var(--serif);color:var(--gold);margin-top:-14px">${esc(s.mid || '≠')}</span></div>
+      <div class="sub abs" id="cap" style="left:96px;width:760px;top:790px;color:var(--salt)">${rich(s.sub || '')}</div></div>`));
+  baseTimeline(d);
+  // the bars sit over a half-gold panel: keep their text legible on both halves
+  document.querySelector('.bar.top span:last-child').style.color = 'rgba(7,26,30,.7)';
+  document.querySelector('.bar.bot span:last-child').style.color = 'rgba(7,26,30,.7)';
+  tl.from('#panelR', { xPercent: 100, duration: .9, ease: E.expo }, 0);
+  tl.from('#L .ln > span', { yPercent: 118, duration: .95, ease: E.expo, stagger: .1 }, .25);
+  tl.from('#R .ln > span', { yPercent: 118, duration: .95, ease: E.expo, stagger: .1 }, .45);
+  tl.from('#L .kick, #R .kick', { opacity: 0, duration: .6 }, .3);
+  tl.from('#mid', { scale: 0, rotation: -140, duration: .9, ease: 'back.out(1.6)' }, .9);
+  tl.from('#cap', { opacity: 0, y: 24, duration: .8, ease: E.out }, 1.5);
+  exit(d);
+};
+
+// A time window drawn as a track: earlier days are muted, the open window fills in gold.
+T.window = (s, d) => {
+  const root = chrome(s, false);
+  const days = s.days; // total ticks, last one is arrival
+  const x0 = 96, x1 = 1824, step = (x1 - x0) / (days.length - 1);
+  const ticks = days.map((t, i) => {
+    const x = x0 + step * i, on = i >= days.length - 1 - s.open;
+    return `<div class="abs tk" style="left:${x - 1}px;top:740px;width:2px;height:${on ? 74 : 38}px;background:${on ? 'var(--gold)' : 'var(--line)'}"></div>
+            <div class="abs tl" style="left:${x - 90}px;top:830px;width:180px;text-align:center;font:500 24px var(--mono);letter-spacing:.12em;color:${on ? 'var(--salt)' : 'var(--mute)'}">${esc(t)}</div>`;
+  }).join('');
+  const bx = x0 + step * (days.length - 1 - s.open);
+  root.append($(`<div class="abs" id="hero" style="left:96px;top:190px;right:96px">
+      <div class="kick" id="k">${esc(s.kicker || '')}</div>
+      <div class="h" style="font-size:176px;margin-top:36px">${lines(s.lines)}</div>
+      <div class="sub" id="sub" style="margin-top:34px;max-width:1500px">${rich(s.sub || '')}</div></div>`));
+  root.append($(`<div class="abs" style="left:0;top:0;width:1920px;height:1080px">
+      <div class="abs" id="trk" style="left:${x0}px;top:775px;width:${x1 - x0}px;height:4px;background:var(--line)"></div>
+      <div class="abs" id="band" style="left:${bx}px;top:752px;width:${x1 - bx}px;height:50px;background:var(--gold);transform-origin:0 50%;border-radius:2px"></div>
+      <div class="abs" id="bl" style="left:${bx + 24}px;top:758px;font:500 25px/38px var(--mono);letter-spacing:.14em;color:var(--ink)">${esc(s.bandLabel)}</div>
+      ${ticks}
+      <div class="abs" id="arr" style="left:${x1 - 300}px;top:672px;width:300px;text-align:right;font:italic 400 52px var(--serif);color:var(--gold)">${esc(s.arrive || 'arrival')}</div></div>`));
+  baseTimeline(d);
+  tl.from('#k', { opacity: 0, x: -24, duration: .7, ease: E.out }, .1);
+  tl.from('.h .ln > span', { yPercent: 118, duration: 1, ease: E.expo, stagger: .12 }, .25);
+  tl.from('#trk', { scaleX: 0, transformOrigin: '0 50%', duration: 1, ease: E.expo }, .5);
+  tl.from('.tk', { scaleY: 0, transformOrigin: '50% 100%', duration: .5, ease: E.out, stagger: .06 }, .7);
+  tl.from('.tl', { opacity: 0, y: 10, duration: .5, stagger: .06 }, .8);
+  tl.from('#band', { scaleX: 0, duration: .9, ease: 'power3.inOut' }, 1.3);
+  tl.from('#bl', { opacity: 0, duration: .5 }, 1.9);
+  tl.from('#arr', { opacity: 0, y: 18, duration: .7, ease: E.out }, 2.0);
+  tl.from('#sub', { opacity: 0, y: 22, duration: .8, ease: E.out }, 1.6);
+  exit(d);
+};
+
+// A checklist where each line is ticked off as it lands.
+T.checklist = (s, d) => {
+  const root = chrome(s, false);
+  const rows = s.items.map((it, i) => `<div class="row abs" style="left:0;top:${i * 150}px;width:1000px;display:flex;align-items:center;gap:40px">
+      <svg width="80" height="80" viewBox="0 0 64 64"><circle cx="32" cy="32" r="29" fill="none" stroke="var(--gold)" stroke-width="3"/>
+        <path class="ck" d="M18 33 l10 10 l19 -22" fill="none" stroke="var(--gold)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div style="font:800 96px/1 var(--display);letter-spacing:-.03em">${rich(it)}</div></div>`).join('');
+  root.append($(`<div class="abs" id="hero" style="left:96px;top:250px;width:760px">
+      <div class="kick" id="k">${esc(s.kicker || '')}</div>
+      <div class="h" style="font-size:164px;margin-top:40px">${lines(s.lines)}</div>
+      <div class="sub" id="sub" style="margin-top:40px">${rich(s.sub || '')}</div></div>`));
+  root.append($(`<div class="abs" id="rows" style="left:900px;top:290px;width:960px;height:640px">${rows}</div>`));
+  baseTimeline(d);
+  tl.from('#k', { opacity: 0, x: -24, duration: .7, ease: E.out }, .1);
+  tl.from('.h .ln > span', { yPercent: 118, duration: 1, ease: E.expo, stagger: .1 }, .2);
+  tl.from('#sub', { opacity: 0, y: 22, duration: .8, ease: E.out }, .9);
+  s.items.forEach((_, i) => {
+    const at = .7 + i * .38, sel = `.row:nth-child(${i + 1})`;
+    tl.from(`#rows ${sel}`, { opacity: 0, x: 70, duration: .7, ease: E.out }, at);
+    tl.from(`#rows ${sel} .ck`, { strokeDasharray: 60, strokeDashoffset: 60, duration: .45, ease: 'power2.out' }, at + .35);
+  });
+  exit(d);
+};
+
+// A stylised west coast with pins dropping in south to north. Not to scale: it orders places, it does not measure them.
+T.coast = (s, d) => {
+  const root = chrome(s, false);
+  const pins = s.pins.map((p, i) => `<g class="pin" transform="translate(${p.x} ${p.y})">
+      <circle r="26" fill="var(--gold)" opacity=".18" class="halo"/><circle r="11" fill="var(--gold)"/><circle r="4" fill="var(--ink)"/>
+      <text x="48" y="12" fill="var(--salt)" style="font:800 56px var(--display);letter-spacing:-.03em">${esc(p.name)}</text>
+      <text x="48" y="48" fill="var(--mute)" style="font:500 22px var(--mono);letter-spacing:.14em">${esc(p.tag || '').toUpperCase()}</text></g>`).join('');
+  root.append($(`<div class="abs" style="left:96px;top:215px;width:820px">
+      <div class="kick" id="k">${esc(s.kicker || '')}</div>
+      <div class="h" style="font-size:156px;margin-top:40px">${lines(s.lines)}</div>
+      <div class="sub" id="sub" style="margin-top:40px">${rich(s.sub || '')}</div></div>`));
+  root.append($(`<svg class="abs" viewBox="0 0 1000 1080" style="left:920px;top:0;width:1000px;height:1080px">
+      <path id="land" d="M1000 0 L660 0 L640 120 C610 220 690 300 650 400 C610 500 520 540 560 650 C600 760 520 840 600 940 L640 1000 L660 1080 L1000 1080 Z" fill="var(--ink-2)"/>
+      <path id="shore" d="M660 0 L640 120 C610 220 690 300 650 400 C610 500 520 540 560 650 C600 760 520 840 600 940 L640 1000 L660 1080" fill="none" stroke="var(--gold)" stroke-width="4" stroke-linecap="round"/>
+      <text x="40" y="560" fill="var(--mute)" style="font:italic 400 44px var(--serif)" id="sea">Andaman Sea</text>
+      ${pins}</svg>`));
+  baseTimeline(d);
+  tl.from('#k', { opacity: 0, x: -24, duration: .7, ease: E.out }, .1);
+  tl.from('.h .ln > span', { yPercent: 118, duration: 1, ease: E.expo, stagger: .1 }, .2);
+  tl.from('#sub', { opacity: 0, y: 22, duration: .8, ease: E.out }, 1.0);
+  tl.from('#land', { opacity: 0, duration: .8 }, .3);
+  const len = document.getElementById('shore').getTotalLength();
+  tl.fromTo('#shore', { strokeDasharray: len, strokeDashoffset: len }, { strokeDashoffset: 0, duration: 1.8, ease: 'power2.inOut' }, .4);
+  tl.from('#sea', { opacity: 0, duration: .8 }, 1.2);
+  tl.from('.pin', { opacity: 0, y: -50, scale: .4, transformOrigin: 'center', duration: .6, ease: 'back.out(2)', stagger: .42 }, 1.15);
+  tl.fromTo('.halo', { scale: .4, opacity: .5 }, { scale: 1.8, opacity: 0, duration: 1.2, ease: 'power1.out', stagger: .42 }, 1.3);
+  exit(d);
+};
+
+// Footage lower-third: a transparent plate over stock or map footage, with a scrim so it reads on any shot.
+T.lower = (s, d) => {
+  const root = chrome({ ...s, tag: '', note: '', idx: '' }, false);
+  root.querySelectorAll('.bar, .prog').forEach(n => n.remove());
+  root.append($(`<div class="abs" id="scrim" style="left:0;right:0;bottom:0;height:520px;background:linear-gradient(0deg,rgba(7,26,30,.92),rgba(7,26,30,.55) 55%,transparent)"></div>`));
+  root.append($(`<div class="abs" id="plate" style="left:96px;bottom:84px;max-width:1500px">
+      <div class="kick" id="k">${esc(s.kicker || '')}</div>
+      <div class="h" style="font-size:${s.size || 96}px;margin-top:18px">${lines(s.lines || [s.title || ''])}</div>
+      <div id="rule" style="width:180px;height:4px;background:var(--gold);margin-top:26px;transform-origin:0 50%"></div>
+      ${s.sub ? `<div class="sub" id="sub" style="margin-top:20px;color:var(--salt);font-size:34px">${rich(s.sub)}</div>` : ''}</div>`));
+  tl = gsap.timeline({ paused: true });
+  tl.from('#scrim', { opacity: 0, duration: .8, ease: E.out }, 0);
+  tl.from('#k', { opacity: 0, x: -20, duration: .6, ease: E.out }, .25);
+  tl.from('.h .ln > span', { yPercent: 118, duration: .9, ease: E.expo, stagger: .1 }, .35);
+  tl.from('#rule', { scaleX: 0, duration: .8, ease: E.expo }, .8);
+  if (s.sub) tl.from('#sub', { opacity: 0, y: 18, duration: .7, ease: E.out }, 1.0);
+  tl.to('#scrim, #plate', { opacity: 0, duration: .32, ease: E.in }, d - .36);
+};
+
+// Official-source screen proof: a gold-edged frame leaves a window the capture is composited into by ffmpeg.
+const PROOF = { x: 96, y: 250, w: 1728, h: 690 };
+T.proof = (s, d) => {
+  const root = chrome(s, false);
+  root.append($(`<div class="abs" id="hero" style="left:96px;top:96px;right:96px">
+      <div class="kick" id="k">${esc(s.kicker || 'Official source · screen proof')}</div>
+      <div class="h" style="font-size:72px;margin-top:20px">${lines(s.lines)}</div></div>`));
+  root.append($(`<div class="abs" id="frame" style="left:${PROOF.x - 3}px;top:${PROOF.y - 3}px;width:${PROOF.w + 6}px;height:${PROOF.h + 6}px;border:3px solid var(--gold);box-shadow:0 40px 90px rgba(0,0,0,.55)"></div>`));
+  baseTimeline(d);
+  tl.from('#k', { opacity: 0, x: -24, duration: .6, ease: E.out }, .1);
+  tl.from('.h .ln > span', { yPercent: 118, duration: .9, ease: E.expo, stagger: .1 }, .2);
+  tl.from('#frame', { opacity: 0, y: 60, duration: .9, ease: E.expo }, .35);
+  exit(d);
+};
+
+window.build = (spec) => {
+  document.documentElement.classList.toggle('ov', !!spec.overlay);
+  DUR = spec.duration || 4.4;
+  // short beats still play the whole entrance, only faster
+  TL_DUR = Math.max(DUR, 3.4);
+  T[spec.template](spec, TL_DUR);
+  return DUR;
+};
+let TL_DUR = 4.4;
+window.seek = (t) => { tl.time(Math.min(Math.max(t * TL_DUR / DUR, 0), TL_DUR), false); };
+document.fonts.ready.then(() => { window.fontsReady = true; });
+</script>
+</body>
+</html>

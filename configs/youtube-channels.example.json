@@ -1,0 +1,56 @@
+{
+  "schema": "one.youtube-channels/v1",
+  "channels": {
+    "sonia_travel_vlogs": {
+      "display_name": "Sonia Travel Vlogs",
+      "topic": "travel",
+      "audience": "Indian viewers",
+      "subscribe_url": "https://www.youtube.com/@sonicsonia?sub_confirmation=1",
+      "playlist_id": "PLPm-TxXg4ePwIUz51mRpLd-L53ht54fBC",
+      "playlist_heading": "WATCH MORE TRAVEL STORIES",
+      "category_id": "19",
+      "metadata_language": "en-US",
+      "default_audio_language": "hi",
+      "locales": [
+        "hi",
+        "bn",
+        "ta",
+        "te",
+        "mr",
+        "gu",
+        "pa",
+        "ur",
+        "es",
+        "pt-BR",
+        "id",
+        "th",
+        "vi",
+        "ar"
+      ],
+      "thumbnail_mode": "portrait",
+      "narration_backend": "elevenlabs",
+      "voice_name": "",
+      "source_note": "Travel rules, prices, schedules and breaking-news details can change.",
+      "share_note": "Save this video and share it with the person travelling with you.",
+      "comment": "Which part would you like us to explain next?"
+    },
+    "planexium": {
+      "display_name": "The Planexium",
+      "topic": "space and astronomy",
+      "audience": "viewers interested in planets, astronauts, space missions and cosmic discoveries",
+      "subscribe_url": "https://www.youtube.com/channel/UCuPYr5_YFDy7f_nt-iT6vDQ?sub_confirmation=1",
+      "playlist_id": "",
+      "playlist_heading": "WATCH MORE",
+      "category_id": "27",
+      "metadata_language": "en-US",
+      "default_audio_language": "en",
+      "locales": [],
+      "thumbnail_mode": "original",
+      "narration_backend": "windows_sapi",
+      "voice_name": "Microsoft David Desktop",
+      "source_note": "Mission schedules and scientific interpretations can change. Distinguish observations, simulations and artist concepts; check the linked primary sources.",
+      "share_note": "Share this video with someone curious about the topic.",
+      "comment": "Which part would you like us to explain next?"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "daily-planexium-science",
+  "name": "The Planexium - Daily science production 11:00 IST",
+  "agent_id": "helios",
+  "task": "{\"brand\":\"planexium\",\"stage\":\"commission\",\"daily\":true}",
+  "mode": "execute",
+  "cron_expression": "0 11 * * *",
+  "timezone": "Asia/Kolkata",
+  "priority": 50,
+  "catch_up_seconds": 86400,
+  "max_concurrent_jobs": 1,
+  "enabled": false
+}

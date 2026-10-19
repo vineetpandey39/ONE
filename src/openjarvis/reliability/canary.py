@@ -30,9 +30,10 @@ def canary_router() -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         return _result("router", False, f"could not import router: {exc}")
 
-    should_answer = _one_agent_command("list agents") or ""
-    # An ordinary question must fall through (None) to the Ghost Agent/LLM.
-    should_defer = _one_agent_command("what's the weather in Noida right now")
+    should_answer = _one_agent_command("list agents", use_intent_model=False) or ""
+    # An ordinary question must fall through (None) to the Ghost Agent/LLM. Only the keyword fast path is under
+    # test here: no model call, no job, however often the dashboard polls.
+    should_defer = _one_agent_command("what's the weather in Noida right now", use_intent_model=False)
 
     ok_answer = bool(should_answer) and "TITAN" in should_answer.upper()
     ok_defer = should_defer is None

@@ -1,0 +1,17 @@
+--- a/robot-worker/agent.py
++++ b/robot-worker/agent.py
+@@ -170,12 +170,9 @@
+             process_name = str(manifest.get("name") or "")
+             browser_binding = resolve_browser_binding(process_name, job.get("input_args", {}))
+             if browser_binding is not None:
+-                log_cb(
+-                    "INFO",
+-                    f"Browser owner locked: {browser_binding.key} "
+-                    f"({browser_binding.cdp_url}, {browser_binding.profile_dir})",
+-                )
++                log_cb("INFO", f"Waiting for browser owner: {browser_binding.key}")
+                 browser_lease = BrowserSessionLease(browser_binding).acquire(cancel_event)
++                log_cb("INFO", f"Browser owner locked: {browser_binding.key} ({browser_binding.cdp_url})")
+             entrypoint = manifest.get("entrypoint", "workflow.yaml")
+             workflow_path = package_dir / entrypoint
+ 

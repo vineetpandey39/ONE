@@ -154,6 +154,7 @@ def sweep(
     stale_after: float = DEFAULT_STALE_AFTER,
     max_resumes: int = DEFAULT_MAX_RESUMES,
     now: float | None = None,
+    active_ids: Iterable[str] = (),
 ) -> dict[str, list[dict[str, Any]]]:
     """Deal with every job left 'running' by a dead worker.
 
@@ -164,6 +165,7 @@ def sweep(
     resumed: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
     left: list[dict[str, Any]] = []
+    owned = set(active_ids)
 
     with closing(connect()) as db, db:
         ensure_columns(db)
@@ -175,17 +177,19 @@ def sweep(
                 "external_job": str(row["external_job"] or ""),
                 "resume_count": int(row["resume_count"] or 0),
             }
-            if _age_seconds(str(row["heartbeat_at"] or ""), now) < stale_after:
+            if row["id"] in owned or _age_seconds(str(row["heartbeat_at"] or ""), now) < stale_after:
                 left.append(entry)
                 continue
 
             if entry["external_job"] and entry["resume_count"] < max_resumes:
-                db.execute(
+                changed = db.execute(
                     "UPDATE jobs SET status = 'queued', progress = 0, "
                     "resume_count = resume_count + 1, heartbeat_at = '', updated_at = ? "
-                    "WHERE id = ? AND status = 'running'",
-                    (_now(), row["id"]),
-                )
+                    "WHERE id = ? AND status = 'running' AND COALESCE(heartbeat_at, '') = ?",
+                    (_now(), row["id"], str(row["heartbeat_at"] or "")),
+                ).rowcount
+                if not changed:
+                    continue
                 entry["resume_count"] += 1
                 resumed.append(entry)
                 continue
@@ -203,11 +207,13 @@ def sweep(
                     "on purpose: re-running it could start a second copy of work that may "
                     "already be underway."
                 )
-            db.execute(
+            changed = db.execute(
                 "UPDATE jobs SET status = 'failed', error = ?, updated_at = ? "
-                "WHERE id = ? AND status = 'running'",
-                (reason, _now(), row["id"]),
-            )
+                "WHERE id = ? AND status = 'running' AND COALESCE(heartbeat_at, '') = ?",
+                (reason, _now(), row["id"], str(row["heartbeat_at"] or "")),
+            ).rowcount
+            if not changed:
+                continue
             entry["reason"] = reason
             failed.append(entry)
 

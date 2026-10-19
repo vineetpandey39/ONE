@@ -111,9 +111,49 @@ $runtimeDrive = Split-Path -Qualifier $runtimeHome
 $runtimePath = $runtimeHome.Substring($runtimeDrive.Length)
 $env:HOMEDRIVE = $runtimeDrive
 $env:HOMEPATH = $runtimePath
+# Git also follows the isolated HOME. A NUL-filled .gitconfig here made every
+# HELIOS repair report a clean worker repository as "dirty" because `git
+# status` actually exited 128 before Claude/Codex could run. Validate it on
+# every launch; quarantine only an invalid config and replace it with a valid
+# minimal file. Repository-local identity remains authoritative.
+$ONE_RuntimeGitConfig = Join-Path $runtimeHome ".gitconfig"
+if (Test-Path -LiteralPath $ONE_RuntimeGitConfig) {
+    & git config --global --list *> $null
+    if ($LASTEXITCODE -ne 0) {
+        $ONE_GitConfigBackup = "$ONE_RuntimeGitConfig.corrupt-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
+        Move-Item -LiteralPath $ONE_RuntimeGitConfig -Destination $ONE_GitConfigBackup
+        Set-Content -LiteralPath $ONE_RuntimeGitConfig -Encoding UTF8 -Value @(
+            "# ONE isolated runtime Git configuration."
+            "# Repository-local identity and policy remain authoritative."
+        )
+    }
+}
 # Keep one canonical Ollama inventory. Without this, Windows' desktop Ollama
 # and ONE can resolve different HOME directories and show different fleets.
 $env:OLLAMA_MODELS = Join-Path $runtimeHome ".ollama\models"
+# Ollama runs on the CPU only (2026-10-05). The 8 GB RTX 3070 Ti also drives the monitor and has ~200 MB to spare:
+# a 9B model loaded onto it took the whole machine down on 2026-10-02, and qwen3.5:9b was still sitting 84% on the GPU
+# afterwards. OLLAMA_LLM_LIBRARY=cpu is Ollama-specific, so ComfyUI/Wan and other CUDA tools keep the GPU. To give the
+# GPU back, remove this line AND the persisted user variable of the same name, then restart Ollama.
+$env:OLLAMA_LLM_LIBRARY = "cpu"
+# Same class of problem as OLLAMA_MODELS above, found 2026-09-24. The KDP
+# publisher resolves its browser profile from Path.home(), which the HOME
+# rewrite above points at E:. So the owner signed in to the profile under his
+# real Windows profile while the worker kept opening an empty one on E:, was
+# redirected to Amazon's sign-in page, and reported "needs its one-time login"
+# after the login had already been done. Pin it to the profile that actually
+# holds the session instead of letting it follow HOME.
+if (-not $env:LAO_KDP_BROWSER_PROFILE) {
+    $env:LAO_KDP_BROWSER_PROFILE = Join-Path $env:ONE_OWNER_PROFILE 'Documents\LAO\browser-profiles\kdp-publisher'
+}
+# A print edition cannot be published without an ISBN, and the Chairman's own
+# are 2-4 weeks away from India's national agency. Until they arrive, take
+# Amazon's free one so the pipeline keeps scaling - but understand the price:
+# a KDP ISBN binds that edition to Amazon for good and cannot be moved to
+# another printer. The publisher always prefers an owned ISBN from the company
+# register when one is on the shelf, so this setting stops mattering by itself
+# the day the first batch lands.
+if (-not $env:ONE_KDP_ASSIGN_FREE_ISBN) { $env:ONE_KDP_ASSIGN_FREE_ISBN = 'true' }
 if (-not $env:PADDLE_PDX_CACHE_HOME) { $env:PADDLE_PDX_CACHE_HOME = Join-Path $modelCacheRoot "paddlex" }
 if (-not $env:HF_HOME) { $env:HF_HOME = Join-Path $modelCacheRoot "huggingface" }
 if (-not $env:TORCH_HOME) { $env:TORCH_HOME = Join-Path $modelCacheRoot "torch" }
@@ -138,7 +178,11 @@ if (-not $env:SANJEEVANI_DATA_DIR) {
     $env:SANJEEVANI_DATA_DIR = Join-Path $oneRoot "data\sanjeevani"
 }
 if (-not $env:SANJEEVANI_SEARXNG_URL) {
-    $env:SANJEEVANI_SEARXNG_URL = "http://127.0.0.1:59011"
+    # 59011 landed inside a Windows/Hyper-V dynamic TCP port-exclusion range
+    # at some point after this was first picked (confirmed 2026-09-26 via
+    # `netsh interface ipv4 show excludedportrange protocol=tcp`), so Docker
+    # refused to bind it. Moved to 38500, below Windows' dynamic port range (49152+) where Hyper-V/WSL reserve blocks that rotate on every restart; 59010, 59011, 59500 and 59501 each fell into one.
+    $env:SANJEEVANI_SEARXNG_URL = "http://127.0.0.1:38500"
 }
 
 # Sanjeevani is ONE's local research/continuity service, not an operator-opened
@@ -149,7 +193,7 @@ $sanjeevaniServer = Join-Path $sanjeevaniRoot "server.py"
 $sanjeevaniCompose = Join-Path $sanjeevaniRoot "research_stack\compose.yaml"
 if (Test-Path $sanjeevaniCompose) {
     try {
-        $searxListener = Get-NetTCPConnection -LocalPort 59011 -State Listen -ErrorAction SilentlyContinue |
+        $searxListener = Get-NetTCPConnection -LocalPort 38500 -State Listen -ErrorAction SilentlyContinue |
             Select-Object -First 1
         if (-not $searxListener -and (Get-Command docker -ErrorAction SilentlyContinue)) {
             & docker compose -f $sanjeevaniCompose up -d | Out-Null
@@ -161,7 +205,12 @@ if (Test-Path $sanjeevaniCompose) {
 if (Test-Path $sanjeevaniServer) {
     try {
         $sanjeevaniRunning = $false
-        $foundSanjeevaniPid = Test-ProcessAlreadyRunning -CommandLineMatch "*sanjeevani*server.py*" -ListenPort 59010
+        # 59010 landed inside the same Windows/Hyper-V dynamic TCP port-
+        # exclusion range as SearXNG's old 59011 (confirmed 2026-09-26 via
+        # `netsh interface ipv4 show excludedportrange protocol=tcp`) -
+        # Sanjeevani's own server.py started failing to bind with the same
+        # "forbidden by its access permissions" error on a fresh restart.
+        $foundSanjeevaniPid = Test-ProcessAlreadyRunning -CommandLineMatch "*sanjeevani*server.py*" -ListenPort 38501
         if ($foundSanjeevaniPid -gt 0) {
             $sanjeevaniRunning = $true
             Set-Content -Path $sanjeevaniPidFile -Value $foundSanjeevaniPid
@@ -170,7 +219,7 @@ if (Test-Path $sanjeevaniServer) {
         }
         if (-not $sanjeevaniRunning) {
             $sanjeevaniProcess = Start-Process -FilePath $pythonExe `
-                -ArgumentList @($sanjeevaniServer, "--host", "127.0.0.1", "--port", "59010", "--no-browser") `
+                -ArgumentList @($sanjeevaniServer, "--host", "127.0.0.1", "--port", "38501", "--no-browser") `
                 -WorkingDirectory $sanjeevaniRoot `
                 -RedirectStandardOutput $sanjeevaniLogFile `
                 -RedirectStandardError $sanjeevaniErrorLogFile `
@@ -322,11 +371,17 @@ if ($foundWorkerPid -gt 0) {
         # more cycle rather than cut it off; the next tick five minutes later
         # picks up the swap once the job has cleared.
         $agentQueueDb = Join-Path $dataRoot "agent_queue.db"
+        $companyTriggerDb = Join-Path $dataRoot "company_triggers.db"
         $jobRunningChecker = Join-Path $sourceRoot "scripts\check_worker_jobs_running.py"
         $jobRunning = $false
         if ((Test-Path $agentQueueDb) -and (Test-Path $jobRunningChecker)) {
-            & $pythonExe $jobRunningChecker $agentQueueDb
+            & $pythonExe $jobRunningChecker $agentQueueDb $companyTriggerDb 600
             $jobRunning = ($LASTEXITCODE -eq 1)
+            if (-not $jobRunning) {
+                Start-Sleep -Seconds 5
+                & $pythonExe $jobRunningChecker $agentQueueDb $companyTriggerDb 600
+                $jobRunning = ($LASTEXITCODE -eq 1)
+            }
         }
         if ($jobRunning) {
             $workerRunning = $true
@@ -433,8 +488,8 @@ for ($attempt = 0; $attempt -lt 30; $attempt++) {
         }
         Write-Host "ONE is online at http://127.0.0.1:8000" -ForegroundColor Cyan
         try {
-            Invoke-RestMethod -Uri "http://127.0.0.1:59010/api/health" -TimeoutSec 2 | Out-Null
-            Write-Host "Sanjeevani is online at http://127.0.0.1:59010" -ForegroundColor Green
+            Invoke-RestMethod -Uri "http://127.0.0.1:38501/api/health" -TimeoutSec 2 | Out-Null
+            Write-Host "Sanjeevani is online at http://127.0.0.1:38501" -ForegroundColor Green
         } catch {
             Write-Host "Sanjeevani API is degraded; ONE remains available." -ForegroundColor DarkYellow
         }

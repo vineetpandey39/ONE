@@ -14,7 +14,7 @@ if (Test-Path $sanjeevaniPidFile) {
     if ($sanjeevani) { Stop-Process -Id $savedSanjeevaniPid -Force -ErrorAction SilentlyContinue }
     Remove-Item $sanjeevaniPidFile -Force
 }
-Get-NetTCPConnection -LocalPort 59010 -State Listen -ErrorAction SilentlyContinue |
+Get-NetTCPConnection -LocalPort 38501 -State Listen -ErrorAction SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 
 # Stop the company building first, and by port as well as by pid: Windows

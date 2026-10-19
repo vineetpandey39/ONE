@@ -1,0 +1,73 @@
+"""Episode-specific packaging, separate from unvalidated audience predictions."""
+
+
+def check_thumbnail_diversity(paths):
+    """Catch duplicated or nearly identical layouts, including color-only changes."""
+    from PIL import Image, ImageOps
+    fingerprints = []
+    for path in paths:
+        with Image.open(path) as image:
+            pixels = list(ImageOps.grayscale(image).resize((33, 32)).tobytes())
+        bits = [pixels[y*33+x] > pixels[y*33+x+1] for y in range(32) for x in range(32)]
+        if any(sum(a != b for a, b in zip(bits, previous)) <= 30 for previous in fingerprints):
+            raise ValueError('Thumbnail images have near-identical layouts; revise the visual concepts')
+        fingerprints.append(bits)
+    return {'candidates': len(paths), 'near_duplicate_layouts': 0, 'method': 'grayscale difference hash; not semantic or CTR validation'}
+
+
+def validate_packaging(value, science):
+    if not isinstance(value, dict):
+        raise ValueError('Episode packaging strategy is required')
+    claims = {c['id'] for c in science['claims']}
+    if not value.get('claim_ids') or not set(value['claim_ids']).issubset(claims):
+        raise ValueError('Packaging hook must reference supported science claims')
+    scene = value.get('focus_scene')
+    if type(scene) is not int or not 1 <= scene <= len(science['scenes']):
+        raise ValueError('Packaging must identify its strongest episode visual')
+    if not str(value.get('viewer_question', '')).strip():
+        raise ValueError('Packaging needs a concrete viewer question')
+    if not str(value.get('description_opening','')).strip():
+        raise ValueError('Packaging needs an episode-specific description opening')
+    titles = value.get('titles', [])
+    concepts = value.get('concepts', [])
+    if len(titles) != 3 or any(not isinstance(t, str) or not 15 <= len(t.strip()) <= 100 for t in titles):
+        raise ValueError('Provide three concise episode-specific title candidates')
+    if len(set(t.casefold().strip() for t in titles)) != 3:
+        raise ValueError('Title candidates must differ')
+    if len(concepts) != 3:
+        raise ValueError('Provide three distinct thumbnail concepts')
+    for concept in concepts:
+        if not 1 <= len(str(concept.get('text', '')).split()) <= 4:
+            raise ValueError('Thumbnail text must contain one to four words')
+        for field in ['name', 'visual_direction', 'composition', 'left_usp']:
+            if not isinstance(concept.get(field), str) or not concept[field].strip():
+                raise ValueError('Thumbnail concepts need a subject, composition and visual direction')
+    for field in ['name', 'composition', 'visual_direction', 'text']:
+        if len({c[field].casefold().strip() for c in concepts}) != 3:
+            raise ValueError('Color/style-only thumbnail variants are insufficient')
+    return value
+
+
+def apply_packaging(package, strategy, science):
+    strategy = validate_packaging(strategy, science)
+    package['recommended_title'] = strategy['titles'][0]
+    package['title_variants'] = strategy['titles']
+    description=package.get('description','')
+    chapters=description.find('CHAPTERS')
+    package['description']=strategy['description_opening'].strip()+'\n\n'+(description[chapters:] if chapters>=0 else description)
+    base = package['thumbnail']['variants'][0]
+    package['thumbnail']['variants'] = [{**base, **c} for c in strategy['concepts']]
+    package['thumbnail_strategy'] = {
+        **strategy, 'mode': 'episode_specific_concepts',
+        'selection': 'editorial first choice, provisional until audience testing',
+        'internal_score_role': 'design_readiness_only',
+        'audience_winner': None,
+        'measurement_plan': {
+            'preferred': 'YouTube native concurrent title/thumbnail test when available',
+            'success_metric': 'watch time with CTR and retention context',
+            'required_context': ['impressions', 'traffic_sources', 'first_30_seconds_retention', 'average_view_duration'],
+            'small_sample_policy': 'No verdict or causal claim from sparse impressions; no guaranteed CTR target',
+            'manual_rotation': 'Do not treat sequential title/thumbnail changes as a controlled experiment',
+        },
+    }
+    return package

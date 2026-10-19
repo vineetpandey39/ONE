@@ -753,4 +753,11 @@ def serve(
 
     import uvicorn
 
-    uvicorn.run(app, host=bind_host, port=bind_port, log_level="info")
+    # On Windows uvicorn defaults to the Proactor loop, whose accept loop
+    # *closes the listening socket* after one failed accept (WinError 64 when a
+    # client drops mid-handshake). The process stayed alive but port 8000
+    # refused everything, so the building showed no agents (2026-10-06). The
+    # Selector loop logs that error and keeps accepting. This API spawns no
+    # asyncio subprocesses, which is the only thing Selector cannot do here.
+    loop = "asyncio:SelectorEventLoop" if sys.platform == "win32" else "auto"
+    uvicorn.run(app, host=bind_host, port=bind_port, log_level="info", loop=loop)

@@ -16,6 +16,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from openjarvis.core.paths import get_config_dir
 from openjarvis.core.types import Message, Role, ToolCall
@@ -101,8 +102,16 @@ def _one_model_status(model: str | None = None) -> dict[str, Any]:
 
 @router.get("/v1/one/status")
 async def one_status():
+    # These routes are polled every few seconds by the dashboard and the building, and their work is blocking
+    # (Ollama, SQLite, disk). Run inline, one slow Ollama answer froze the whole server: on 2026-10-13 /v1/one/jobs
+    # took 4-12 s while a model was busy, and a 4-second adapter test failed every other run. A worker thread keeps
+    # the event loop free.
+    return await run_in_threadpool(_one_status_sync)
+
+
+def _one_status_sync() -> dict[str, Any]:
     from openjarvis.one_agents.obsidian import obsidian_status, recent_memories
-    from openjarvis.one_agents.runtime import AGENTS, list_jobs
+    from openjarvis.one_agents.runtime import AGENTS, latest_jobs_by_agent, list_jobs
     from openjarvis.one_agents.stages import get_stages
 
     model_status = _one_model_status()
@@ -119,6 +128,10 @@ async def one_status():
             for key, value in AGENTS.items()
         ],
         "jobs": list_jobs(12),
+        # The 12 above are a system-wide window and drop an agent the
+        # moment anything busier happens. Panels that track a mission
+        # across a floor read this instead.
+        "latest_by_agent": latest_jobs_by_agent(),
         "obsidian": obsidian_status(),
         "memories": recent_memories(12),
     }
@@ -130,7 +143,7 @@ async def one_health(request: Request):
     remediation hints. Reliability mechanism #3 (health). Never raises."""
     from openjarvis.reliability.health import system_health
 
-    return system_health(request.app)
+    return await run_in_threadpool(system_health, request.app)
 
 
 @router.get("/v1/one/canary")
@@ -150,7 +163,7 @@ async def one_self_diagnosis(request: Request):
     Reliability mechanism ★ (self-diagnosis). Never raises."""
     from openjarvis.reliability.diagnose import self_diagnose
 
-    return self_diagnose(request.app)
+    return await run_in_threadpool(self_diagnose, request.app)
 
 
 def _voice_bridge_config() -> dict[str, Any]:
@@ -314,6 +327,19 @@ async def one_jobs():
     return {"jobs": list_jobs(30)}
 
 
+@router.post("/v1/one/jobs/{job_id}/resume")
+async def one_resume_job(job_id: str):
+    """Resume only a failed YATRA visual job with its saved paid-work checkpoints."""
+    from openjarvis.one_agents.runtime import resume_yatra_visual_job
+
+    try:
+        job = resume_yatra_visual_job(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"accepted": True, "job": job,
+            "note": "Resuming saved YATRA visuals; approved narration and accepted assets are reused."}
+
+
 @router.get("/v1/one/triggers")
 async def one_triggers():
     registry = _company_triggers()
@@ -452,8 +478,14 @@ async def one_remember(request: Request):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def _one_agent_command(text: str) -> str | None:
-    """Route explicit ONE agent commands without spending an LLM call."""
+def _one_agent_command(text: str, *, use_intent_model: bool = True) -> str | None:
+    """Route explicit ONE agent commands without spending an LLM call.
+
+    ``use_intent_model=False`` stops at the keyword fast path: when it is unsure the message is simply deferred
+    (None), with no intent-model call and no job. The self-diagnosis router canary uses it; it is polled by the
+    dashboard about once a minute, and each poll used to run qwen3.5:9b on the CPU for ~6 s (2026-10-09: ~70
+    calls an hour kept the 6.6 GB model resident and the PC slow) - and could have queued a real job had the
+    model ever read its test question as work."""
     clean = " ".join(text.strip().split())
     lowered = clean.lower()
     if not clean:
@@ -785,6 +817,8 @@ def _one_agent_command(text: str) -> str | None:
         )
     )
     intent_task = ""
+    if (not selected or not has_dispatch_verb) and not use_intent_model:
+        return None
     if not selected or not has_dispatch_verb:
         # The keyword path is unsure. Rather than dropping to the paid cloud
         # path (which can't queue a job at all), ask Claude what was actually

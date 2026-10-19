@@ -4711,6 +4711,7 @@ dev = [
 ]
 runtime = [
     { name = "anthropic" },
+    { name = "av" },
     { name = "croniter" },
     { name = "ddgs" },
     { name = "deepgram-sdk" },
@@ -4849,6 +4850,7 @@ provides-extras = ["browser", "channel-discord", "channel-gmail", "channel-line"
 dev = [{ name = "maturin", specifier = ">=1.12.6" }]
 runtime = [
     { name = "anthropic", specifier = ">=0.30" },
+    { name = "av", specifier = ">=14.0" },
     { name = "croniter", specifier = ">=2.0" },
     { name = "ddgs", specifier = ">=9.11.4" },
     { name = "deepgram-sdk", specifier = ">=7.0" },

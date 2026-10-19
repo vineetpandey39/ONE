@@ -1,0 +1,598 @@
+"""PLANEXIUM bindings to existing LAO actions; no installs or provider calls on import."""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import sqlite3
+import time
+from contextlib import nullcontext
+from contextlib import contextmanager
+from pathlib import Path
+
+from openjarvis.one_agents.youtube_production import resource_lease
+
+BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+def fingerprint(value) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def stock_search(description: str) -> tuple[str, str, list[str]]:
+    """Translate an authored visual brief into literal catalog search terms."""
+    positive = re.split(r",|\bno\b", description, maxsplit=1, flags=re.I)[0]
+    stop = {"generic", "empty", "a", "an", "the", "on", "of", "with", "before", "after", "in"}
+    words = [w.casefold() for w in re.findall(r"[A-Za-z]+", positive) if w.casefold() not in stop]
+    if not words:
+        raise ValueError("Stock brief has no positive search subject")
+    query = " ".join(words[:6])
+    subject = next((w for w in ("sunrise", "astronaut", "rocket", "planet", "galaxy", "moon", "mars", "earth", "sky", "horizon") if w in words), words[0])
+    negatives = []
+    # Generic sky matches previously admitted a seagull/beach wildlife shot.
+    # Astronomy establishing briefs must reject wildlife-led stock results.
+    if subject in {"sky", "horizon", "sunrise"}:
+        negatives.extend(["seagull", "bird", "wildlife", "animal"])
+    for phrase in re.findall(r"\bno\s+([^,;.]+)", description, re.I):
+        negatives.extend(w.casefold() for w in re.findall(r"[A-Za-z]+", phrase)
+                         if w.casefold() in {"rocket", "spacecraft", "launch", "astronaut", "people", "person", "text"})
+    return query, subject, sorted(set(negatives))
+
+
+class LaoDraft:
+    """Resumable one-off use of existing actions. Never creates a production package."""
+    def __init__(self, tool, folder_id: str, artifact_roots: tuple[Path, ...]):
+        self.tool, self.folder_id, self.artifact_roots = tool, folder_id, artifact_roots
+
+    def run(self, name: str, steps: list[dict], inputs: dict, receipt: Path, *, timeout=3600, sleep=time.sleep) -> tuple[dict, str]:
+        request_hash = fingerprint({"steps": steps, "inputs": inputs})
+        prior = json.loads(receipt.read_text(encoding="utf-8")) if receipt.exists() else {}
+        if prior and prior.get("request_hash") != request_hash:
+            raise ValueError("Provider checkpoint differs; targeted repair required")
+        job_id = prior.get("job_id")
+        if not job_id:
+            started = self.tool.execute(action="run_draft", draft_name=name, steps=steps,
+                                        input_args=inputs, folder_id=self.folder_id,
+                                        preserve_workflow=name.startswith("planexium-"))
+            if not started.success:
+                raise RuntimeError("LAO refused the channel-scoped draft; inspect its redacted operational log")
+            payload = started.metadata or json.loads(started.content)
+            job_id = (payload.get("job") or {}).get("id")
+            if not job_id:
+                raise RuntimeError("LAO returned no durable job receipt")
+            receipt.parent.mkdir(parents=True, exist_ok=True)
+            receipt.write_text(json.dumps({"job_id": job_id, "request_hash": request_hash}), encoding="utf-8")
+        deadline = time.monotonic() + timeout
+        last_status = None
+        while time.monotonic() < deadline:
+            probe = self.tool.execute(action="status", job_id=job_id, process_name="")
+            if not probe.success:
+                sleep(3)
+                continue
+            payload = probe.metadata or json.loads(probe.content)
+            job = payload.get("job") or {}
+            status = job.get("status")
+            if status != last_status:
+                callback = getattr(self, "on_wait" if status in {"Pending","Queued","Claimed"} else "on_progress", None)
+                if callback:callback(f"{name}: provider {status}; job {str(job_id)[:8]}")
+                last_status = status
+            if status == "Successful":
+                return job.get("output_result") or {}, job_id
+            if status in {"Failed", "Stopped", "Cancelled", "Faulted", "Retried"}:
+                raise RuntimeError(f"LAO draft ended {status}; checkpoint preserved, no automatic duplicate")
+            sleep(3)
+        raise TimeoutError("LAO draft remains in flight; retry resumes its saved job instead of starting another")
+
+    def subject_rejected(self, receipt: Path) -> bool:
+        """Only a confirmed pre-download title mismatch may advance a candidate."""
+        if not receipt.is_file():
+            return False
+        saved = json.loads(receipt.read_text(encoding="utf-8"))
+        response = self.tool.execute(action="status", job_id=saved["job_id"], process_name="")
+        if not response.success:
+            return False
+        payload = response.metadata or json.loads(response.content)
+        job = payload.get("job") or {}
+        error = str(job.get("error_message") or "")
+        return (job.get("status") == "Failed" and (
+            ("Timed out waiting for selectors" in error and "idp-title" in error and ":has-text(" in error)
+            or "Rejected asset: forbidden visual keyword(s)" in error))
+
+    def artifact(self, outputs: dict, job_id: str, filename: str) -> Path:
+        # Reuse the same artifact lookup as current Sonia production. Never
+        # inspect unrelated browser profiles or credential files.
+        from openjarvis.one_agents.ares_thumbnail import _find_artifact
+
+        direct = outputs.get("image_path") or outputs.get("downloaded_asset") or outputs.get("capture_video")
+        if isinstance(direct, str):
+            p = Path(direct)
+            if p.is_file() and any(p.resolve().is_relative_to(root.resolve()) for root in self.artifact_roots):
+                return p
+        found = _find_artifact(self.artifact_roots, job_id, filename)
+        if not found:
+            raise FileNotFoundError("Robot artifact is not available locally; retain the provider checkpoint")
+        return Path(found)
+
+
+def production_home() -> Path:
+    # The shared worker deliberately overrides HOME for isolation. Windows'
+    # operator profile remains USERPROFILE; persistent browsers live there.
+    return Path(os.environ.get("USERPROFILE") or Path.home())
+
+
+def provider_browser(context, lane="chatgpt", *, profile_root=None) -> dict:
+    # Fixed per-channel identities match LAO's existing browser ownership registry.
+    ports = {"chatgpt": 9340, "envato": 9341, "capture": 9342}
+    urls = {"chatgpt": "https://chatgpt.com/", "envato": "https://app.envato.com/", "capture": "about:blank"}
+    if context.channel.brand != "planexium" or lane not in ports:
+        raise ValueError("Unknown channel browser identity")
+    return {"profile_dir": ((Path(profile_root) if profile_root else production_home() / ".lao" / "browser-sessions") / f"planexium-{lane}").as_posix(),
+            "cdp_url": f"http://127.0.0.1:{ports[lane]}", "start_url": urls[lane]}
+
+
+def _login_steps(asset: str, context, profile_root=None) -> list[dict]:
+    return [{"action": "open_browser", "args": provider_browser(context, profile_root=profile_root)},
+            {"action": "navigate", "args": {"url": "https://chatgpt.com/"}},
+            {"action": "wait_for_any_selector", "args": {
+                "selectors": ["#prompt-textarea", "[contenteditable='true']", "textarea"],
+                "timeout_ms": 60000, "as": "chatgpt_ready"}}]
+
+
+class ChatGPTAdapter:
+    def __init__(self, draft: LaoDraft, context, *, asset="chatgptLogin", queue=None, provider_lock=None, profile_root=None):
+        self.draft, self.context, self.asset = draft, context, asset
+        self.queue, self.provider_lock, self.profile_root = queue, provider_lock, profile_root
+
+    def lease(self):
+        return envato_lease(self.provider_lock, self.queue, self.context.mission_id) if self.provider_lock else nullcontext()
+
+    def write(self, prompt: str) -> dict:
+        steps = _login_steps(self.asset, self.context, self.profile_root) + [{"action": "ask_chatgpt", "args": {
+            "prompt": prompt, "expected_markers": ["BEGIN_PLANEXIUM_JSON", "END_PLANEXIUM_JSON"],
+            "timeout_ms": 240000, "as": "science_script"}}]
+        with self.lease():
+            out, _ = self.draft.run("planexium-science-script", steps, {}, self.context.artifact("receipts/writer.json"))
+        text = str(out.get("science_script") or "")
+        if "BEGIN_PLANEXIUM_JSON" in text:
+            text = text.split("BEGIN_PLANEXIUM_JSON", 1)[1].split("END_PLANEXIUM_JSON", 1)[0]
+        return json.loads(text.strip().strip("`"))
+
+    def direct(self, science, voice):
+        from openjarvis.one_agents.planexium_direction import motion_prompt
+        steps = _login_steps(self.asset, self.context, self.profile_root) + [{"action": "ask_chatgpt", "args": {
+            "prompt": motion_prompt(science, voice), "expected_markers": ["BEGIN_PLANEXIUM_MOTION_JSON", "END_PLANEXIUM_MOTION_JSON"],
+            "timeout_ms": 360000, "as": "motion_copy"}}]
+        out, _ = self.draft.run("planexium-science-script-motion", steps, {},
+                               self.context.artifact("receipts/motion-director.json"))
+        text = str(out.get("motion_copy") or "")
+        if "BEGIN_PLANEXIUM_MOTION_JSON" in text:
+            text = text.split("BEGIN_PLANEXIUM_MOTION_JSON", 1)[1].split("END_PLANEXIUM_MOTION_JSON", 1)[0]
+        return json.loads(text.strip().strip("`"))
+
+    def editorial(self, science):
+        prompt=('Act as a factual space documentary editor. Return JSON between BEGIN_PLANEXIUM_EDIT and END_PLANEXIUM_EDIT. '
+            'Schema: {"music_query":"cinematic instrumental no vocals ...","stock_requests":[{"query":"2-5 catalog search words",'
+            '"subject":"one literal word that must appear in a relevant asset title","title":"episode title","blocked_keywords":["cartoon","wildlife"]}]}. '
+            'Give 6-8 diverse, topic-relevant Envato footage/animation briefs. Prefer concrete visual subjects: astronaut, rover, '
+            'planet, observatory, mission hardware, actual environments. No abstract typography or text cards. '
+            'Stock will be labeled illustrative; never imply that a generic launch is the documented mission. '
+            'Also include scene_assets: an object mapping EVERY 1-based scene number string to 0-2 relevant ZERO-based stock_requests indexes; use an empty list when archive imagery is more appropriate. Each stock index belongs to at most one scene. '
+            'Also include scene_visuals mapping EVERY scene number to 3-5 DIFFERENT concise NASA archive image search queries, each directly relevant to that scene narration. Avoid multiple near-identical views. These are archival context, not evidence of the current event. '
+            'Do not reuse stock indexes across scenes: choose the most relevant scene for each clip. '
+            'Also include packaging: {claim_ids:[supported claim IDs],focus_scene:1-based scene number,viewer_question:string,description_opening:two source-grounded sentences that explain the hook,titles:[three titles],concepts:[three objects with name,text,left_usp,composition,visual_direction]}. '
+            'Choose the strongest unusual visual or scientific question in THIS episode, not a generic ISS/planet illustration. '
+            'Titles and thumbnail text must complement rather than repeat each other; create specific curiosity that the narration actually resolves. '
+            'Thumbnail text 1-4 words. Author three genuinely different subjects/compositions: phenomenon close-up, contextual relationship, and a distinct explanation question. '
+            'Color, crop and styling alone are not different concepts. Do not invent events, findings, scale, urgency or audience CTR predictions. '
+            'Order concepts and titles by editorial preference, provisional until audience testing. '
+            'Music must suit the subject and have no vocals. Use the script, not unrelated space filler. SCRIPT: '+json.dumps(science))
+        feedback=self.context.media_root.parent/'packaging-feedback.json'
+        if feedback.exists():
+            data=json.loads(feedback.read_text(encoding='utf-8'))
+            prompt+='\nUSER-REPORTED PACKAGING OBSERVATIONS (small samples are not causal evidence): '+json.dumps(data)
+        steps=_login_steps(self.asset,self.context,self.profile_root)+[{'action':'ask_chatgpt','args':{
+            'prompt':prompt,'expected_markers':['BEGIN_PLANEXIUM_EDIT','END_PLANEXIUM_EDIT'],
+            'timeout_ms':360000,'as':'editorial_plan'}}]
+        out,_=self.draft.run('planexium-science-script-editorial',steps,{},self.context.artifact('receipts/editorial.json'))
+        text=str(out.get('editorial_plan') or '')
+        text=text.split('BEGIN_PLANEXIUM_EDIT',1)[-1].split('END_PLANEXIUM_EDIT',1)[0]
+        result=json.loads(text.strip().strip('`'))
+        if not isinstance(result.get('music_query'),str) or not 6<=len(result.get('stock_requests',[]))<=8:
+            raise ValueError('Editorial plan needs music and 6-8 relevant footage briefs')
+        for request in result['stock_requests']:
+            if not all(isinstance(request.get(k),str) and request[k].strip() for k in ['query','subject']):
+                raise ValueError('Editorial footage brief missing query/subject')
+            request['title']=science['video_title']
+            request['blocked_keywords']=list(set(request.get('blocked_keywords',[])+['seagull','wildlife','cartoon']))
+        result['revision']='unique-footage-v2'
+        mapping=result.get('scene_assets',{})
+        if set(mapping)!={str(i) for i in range(1,len(science['scenes'])+1)} or any(
+            not isinstance(v,list) or len(v)>2 or any(type(i) is not int or not 0<=i<len(result['stock_requests']) for i in v)
+            for v in mapping.values()):raise ValueError('Editorial plan lacks a valid per-scene footage mapping')
+        assigned=[i for indexes in mapping.values() for i in indexes]
+        if len(assigned)!=len(set(assigned)):
+            raise ValueError('An illustrative stock clip cannot be assigned to multiple scenes')
+        from openjarvis.one_agents.planexium_packaging import validate_packaging
+        validate_packaging(result.get('packaging'),science)
+        visuals=result.get('scene_visuals',{})
+        if set(visuals)!=set(mapping) or any(not isinstance(v,list) or not 3<=len(v)<=5 or any(not isinstance(q,str) or not q.strip() for q in v) for v in visuals.values()):
+            raise ValueError('Editorial plan requires distinct per-scene archive queries')
+        return result
+
+    def image(self, *, prompt: str, output: Path, brand: str) -> dict:
+        if brand != "planexium":
+            raise ValueError("Wrong channel for this image adapter")
+        filename = f"planexium-{self.context.mission_id}-{output.parent.name}.png"
+        steps = _login_steps(self.asset, self.context, self.profile_root) + [{"action": "generate_and_download_chatgpt_image", "args": {
+            "prompt": prompt, "filename": filename, "max_attempts": 2, "as": "image_path"}}]
+        with self.lease():
+            out, job = self.draft.run("planexium-original-thumbnail", steps, {}, output.parent / "provider.json")
+        source = self.draft.artifact(out, job, filename)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, output)
+        return {"ok": True, "path": str(output), "job_id": job, "portrait_used": False}
+
+
+def busy_floor(queue: Path) -> bool:
+    if not queue.is_file():
+        raise FileNotFoundError("Shared queue unavailable; browser occupancy cannot be established")
+    with sqlite3.connect(queue.as_uri() + "?mode=ro", uri=True) as db:
+        return bool(db.execute(
+            "SELECT 1 FROM jobs WHERE agent_id IN ('yatra','vista','fabula','lyra','muse','kairos','herald','scribe') "
+            "AND mode != 'watch' AND status IN ('running','queued') LIMIT 1").fetchone())
+
+
+@contextmanager
+def envato_lease(path: Path, queue: Path, mission: str, *, wait_seconds=0, on_wait=None):
+    """Honor the existing VISTA/YATRA provider lock format, without stale deletion."""
+    owner = f"PLANEXIUM {os.getpid()} {mission}"
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        resumed = path.exists() and path.read_text(encoding="utf-8") == owner
+        if resumed:break
+        if busy_floor(queue) or path.exists():
+            if not wait_seconds:
+                raise RuntimeError("Shared production busy or provider leased; defer Envato")
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Shared provider wait exceeded its bound; checkpoints retained")
+            if on_wait:on_wait("Waiting for shared footage provider; other agents retain ownership")
+            time.sleep(3)
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with path.open("x", encoding="utf-8") as handle:handle.write(owner)
+            break
+        except FileExistsError:
+            if not wait_seconds:raise RuntimeError("Envato provider is leased; defer this stage") from None
+    release = True
+    try:
+        yield
+    except TimeoutError:
+        # The remote robot can still be acting. Preserve ownership until the
+        # saved job is resumed and reaches a terminal status; never overlap it.
+        release = False
+        raise
+    finally:
+        if release and path.exists() and path.read_text(encoding="utf-8") == owner:
+            path.unlink()
+
+
+def probe_stock(path: Path) -> dict:
+    import subprocess
+    result = subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)],
+                            capture_output=True, text=True, check=True, timeout=60)
+    data = json.loads(result.stdout)
+    video = next((s for s in data["streams"] if s.get("codec_type") == "video"), {})
+    seconds = float(data.get("format", {}).get("duration") or 0)
+    if (video.get("width"), video.get("height")) != (1920, 1080) or seconds <= 0:
+        raise ValueError("Acquired stock must be measured 1920x1080 with positive duration")
+    return {"seconds": seconds, "width": 1920, "height": 1080}
+
+
+class EnvatoAdapter:
+    def __init__(self, draft: LaoDraft, workflow: Path, context, queue: Path, provider_lock: Path, *, wait_seconds=0, profile_root=None):
+        self.draft, self.workflow, self.context = draft, workflow, context
+        self.queue, self.provider_lock, self.wait_seconds, self.profile_root = queue, provider_lock, wait_seconds, profile_root
+
+    def accepted(self, index, request):
+        saved = self.context.artifact(f"acquired/stock-{index}.json")
+        signature = fingerprint(request)
+        if saved.is_file():
+            value = json.loads(saved.read_text(encoding="utf-8"))
+            if value["request_hash"] != signature:
+                raise ValueError("Accepted stock brief changed; targeted repair required")
+            row = value["asset"]
+            path = Path(row["path"]).resolve()
+            if (not path.is_relative_to(self.context.root.resolve()) or not path.is_file()
+                    or hashlib.sha256(path.read_bytes()).hexdigest() != row["sha256"]):
+                raise ValueError("Accepted stock checkpoint changed")
+            return row, value["candidate"]
+        # Migrate only a real successful download from this mission's old
+        # receipts. Verify job inputs, title, file identity and measured format.
+        if not hasattr(self.draft, "tool"):
+            return None
+        for receipt in sorted(self.context.artifact("receipts").glob(f"envato-{index}*.json")):
+            old = json.loads(receipt.read_text(encoding="utf-8"))
+            if not old.get("job_id"):continue
+            response = self.draft.tool.execute(action="status", job_id=old["job_id"], process_name="")
+            if not response.success:continue
+            payload = response.metadata or json.loads(response.content)
+            job = payload.get("job") or {}; args = job.get("input_args") or {}; out = job.get("output_result") or {}
+            title = str(out.get("selected_asset_title") or "")
+            blocked = ["fantasy", "surreal", "alien", *request.get("blocked_keywords", [])]
+            if (job.get("status") != "Successful" or args.get("envatoQuery") != request["query"]
+                    or str(args.get("sceneId")) != str(index) or request["subject"].casefold() not in title.casefold()
+                    or any(word.casefold() in title.casefold() for word in blocked)):
+                continue
+            path = self.context.root / f"scene-{index}" / f"planexium-scene-{index}.mp4"
+            if not path.is_file():continue
+            row = {"provider": "Envato", "path": str(path), "job_id": old["job_id"], "query": request["query"],
+                "title": title, "illustrative": True, "rights_review_required": True,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), **probe_stock(path)}
+            candidate = int(args["resultIndex"])
+            saved.parent.mkdir(parents=True, exist_ok=True)
+            saved.write_text(json.dumps({"request_hash": signature, "asset": row, "candidate": candidate}, indent=2), encoding="utf-8")
+            return row, candidate
+        return None
+
+    def __call__(self, *, brand, mission_id, output_root, requests) -> dict:
+        import yaml
+
+        if brand != "planexium" or Path(output_root) != self.context.root:
+            raise ValueError("Envato channel output identity mismatch")
+        workflow = yaml.safe_load(self.workflow.read_text(encoding="utf-8"))
+        # Use the latest accepted selectors/actions, not a stale copied workflow.
+        steps = workflow["steps"]
+        for step in steps:
+            if step.get("action") == "open_browser":
+                step.setdefault("args", {}).update(provider_browser(self.context, "envato", profile_root=self.profile_root))
+            if step.get("action") == "download_file":
+                step["args"]["dest_dir"] = "{{input.outputRoot}}/scene-{{input.sceneId}}"
+                step["args"]["filename"] = "planexium-scene-{{input.sceneId}}.mp4"
+                step["args"]["keep_original_name"] = False
+        receipts, hashes, query_positions, titles = [], set(), {}, []
+        with envato_lease(self.provider_lock, self.queue, mission_id, wait_seconds=self.wait_seconds, on_wait=getattr(self.draft,"on_wait",None)):
+            for index, request in enumerate(requests, 1):
+                query = str(request["query"])
+                accepted = self.accepted(index, request)
+                if accepted:
+                    row, candidate = accepted
+                    if row["sha256"] in hashes:raise ValueError("Accepted stock would duplicate an existing source")
+                    hashes.add(row["sha256"]);titles.append(row["title"]);receipts.append(row)
+                    query_positions[query] = max(query_positions.get(query, 0), candidate)
+                    continue
+                first_candidate = query_positions.get(query, 0) + 1
+                from urllib.parse import quote_plus
+
+                inputs = {"sceneId": str(index), "envatoQuery": query, "envatoQueryUrl": quote_plus(query),
+                          "fallbackQuery": query, "videoTitle": request["title"], "downloadFormat": "1080P",
+                          "assetFolder": mission_id, "resultIndex": str(first_candidate), "requiredTitleKeyword": request["subject"],
+                          "alternateTitleKeyword": request["subject"], "locationMatch": False, "subjectMatch": True,
+                          "regionalContext": False, "regionalContextLabel": "", "orientation": "Horizontal",
+                          "requiredResolution": "1920 x 1080", "previouslyDownloadedTitles": list(titles),
+                          "blockedTitleKeywords": ["fantasy", "surreal", "alien", *request.get("blocked_keywords", [])], "enablePaidDownload": True,
+                          "outputRoot": str(output_root)}
+                import copy
+                asset_steps = copy.deepcopy(steps)
+                for step in asset_steps:
+                    if step.get("action") == "assert_text_absent":
+                        key = str(step.get("args", {}).get("forbidden", ""))
+                        if key == "{{input.blockedTitleKeywords}}":step["args"]["forbidden"] = inputs["blockedTitleKeywords"]
+                        if key == "{{input.previouslyDownloadedTitles}}":step["args"]["forbidden"] = inputs["previouslyDownloadedTitles"]
+                for candidate in range(first_candidate, first_candidate + 6):
+                    fallback = candidate >= first_candidate + 3
+                    catalog_query = str(request["subject"]) if fallback else query
+                    inputs["envatoQuery"] = catalog_query
+                    inputs["envatoQueryUrl"] = quote_plus(catalog_query)
+                    inputs["resultIndex"] = str(candidate - first_candidate - 2 if fallback else candidate)
+                    receipt = self.context.artifact(f"receipts/envato-v2-{index}.json" if candidate == first_candidate
+                        else f"receipts/envato-v2-{index}-candidate-{candidate}.json")
+                    try:
+                        out, job = self.draft.run("planexium-envato", asset_steps, inputs, receipt, timeout=10800)
+                        query_positions[query] = candidate
+                        break
+                    except RuntimeError:
+                        if not self.draft.subject_rejected(receipt):
+                            raise
+                        if candidate == first_candidate + 5:
+                            raise RuntimeError("Six Envato candidates across two queries failed quality gates; revise the brief") from None
+                        # The failed candidate ended before any paid/download step.
+                        # Keep its receipt; the next distinct result gets its own job.
+
+                path = Path(output_root) / f"scene-{index}" / f"planexium-scene-{index}.mp4"
+                if not path.is_file():
+                    source = self.draft.artifact(out, job, path.name)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, path)
+                sha = hashlib.sha256(path.read_bytes()).hexdigest()
+                if sha in hashes:
+                    raise ValueError("Envato returned a duplicate source; preserve receipts for targeted repair")
+                hashes.add(sha)
+                title = str(out.get("selected_asset_title") or "").strip()
+                if not title or request["subject"].casefold() not in title.casefold():
+                    raise ValueError("Provider success lacks a verified selected-asset subject title")
+                if any(str(word).casefold() in title.casefold() for word in inputs["blockedTitleKeywords"]):
+                    raise ValueError("Selected asset contains a forbidden visual keyword")
+                titles.append(title)
+                row = {"provider": "Envato", "path": str(path), "job_id": job, "query": query,
+                       "title": str(out.get("selected_asset_title") or ""), "catalog_query": catalog_query, "illustrative": True,
+                       "rights_review_required": True, "sha256": sha, **probe_stock(path)}
+                saved = self.context.artifact(f"acquired/stock-{index}.json")
+                saved.parent.mkdir(parents=True, exist_ok=True)
+                saved.write_text(json.dumps({"request_hash": fingerprint(request), "asset": row,
+                                             "candidate": candidate}, indent=2), encoding="utf-8")
+                receipts.append(row)
+        return {"ok": True, "assets": receipts}
+
+
+class OBSAdapter:
+    def __init__(self, draft: LaoDraft, workflow: Path, context, queue: Path, leases: Path, *, prepare_video=False, wait_seconds=0, profile_root=None):
+        self.draft, self.workflow, self.context = draft, workflow, context
+        self.queue, self.leases, self.prepare_video, self.wait_seconds, self.profile_root = queue, leases, prepare_video, wait_seconds, profile_root
+
+    def ensure_source(self):
+        """Idempotent channel-owned scene setup through the installed OBS API helper."""
+        obs = self.connect_obs()
+        try:
+            self.setup_owned_scene(obs)
+        finally:
+            obs.close()
+
+    def connect_obs(self):
+        import importlib.util
+        import subprocess
+
+        path = next((root / "obs_ws.py" for root in self.draft.artifact_roots if (root / "obs_ws.py").is_file()), None)
+        if path is None:
+            raise RuntimeError("Installed OBS websocket helper is unavailable")
+        spec = importlib.util.spec_from_file_location("planexium_obs_transport", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        try:
+            obs = module.connect_default()
+        except OSError:
+            executable = Path("C:/Program Files/obs-studio/bin/64bit/obs64.exe")
+            if not executable.is_file():
+                raise RuntimeError("Existing OBS installation is unavailable")
+            subprocess.Popen([str(executable), "--disable-shutdown-check", "--minimize-to-tray"],
+                cwd=executable.parent, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW)
+            deadline = time.monotonic() + 90
+            while True:
+                try:
+                    obs = module.connect_default()
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("OBS did not become available")
+                    time.sleep(3)
+        return obs
+
+    @staticmethod
+    def setup_owned_scene(obs):
+        scene, source = "PLANEXIUM Capture", "PLANEXIUM Capture Chrome"
+        if obs.request("GetRecordStatus").get("outputActive"):
+            raise RuntimeError("OBS is recording; defer setup instead of changing its program")
+        scenes = obs.request("GetSceneList")["scenes"]
+        if not any(row["sceneName"] == scene for row in scenes):
+            obs.request("CreateScene", {"sceneName": scene})
+        inputs = obs.request("GetInputList")["inputs"]
+        if not any(row["inputName"] == source for row in inputs):
+            obs.request("CreateInput", {"sceneName": scene, "inputName": source,
+                "inputKind": "window_capture", "inputSettings": {"capture_method": 2, "client_area": False},
+                "sceneItemEnabled": True})
+        else:
+            items = obs.request("GetSceneItemList", {"sceneName": scene})["sceneItems"]
+            if not any(row["sourceName"] == source for row in items):
+                raise RuntimeError("PLANEXIUM input exists outside its owned scene; inspect before modifying")
+
+    def __call__(self, *, brand, mission_id, output_root, scenes) -> dict:
+        import yaml
+
+        if brand != "planexium":raise RuntimeError("Wrong channel for OBS")
+        deadline=time.monotonic()+self.wait_seconds
+        while busy_floor(self.queue):
+            if not self.wait_seconds:raise RuntimeError("Shared production busy; defer OBS")
+            if time.monotonic()>=deadline:raise TimeoutError("Shared OBS wait exceeded its bound")
+            if getattr(self.draft,"on_wait",None):self.draft.on_wait("Waiting for shared OBS capture; other agents retain ownership")
+            time.sleep(3)
+        workflow = yaml.safe_load(self.workflow.read_text(encoding="utf-8"))
+        steps = workflow["steps"]
+        source_name = "PLANEXIUM Capture Chrome"
+        marker = f"PLANEXIUM-CAPTURE-{mission_id}"
+        for step in steps:
+            args = step.get("args", {})
+            if step.get("action") == "open_browser":
+                args.update(provider_browser(self.context, "capture", profile_root=self.profile_root))
+            if step.get("action") == "obs_bind_window":
+                args["source"] = source_name
+                args["scene"] = "PLANEXIUM Capture"
+                args["window_marker"] = marker
+            if step.get("action") == "navigate" and str(args.get("url", "")).startswith("data:"):
+                args["url"] = f"data:text/html,<title>{marker}</title><body></body>"
+            if step.get("action") == "obs_record_sequence":
+                args["source"] = source_name
+        results = []
+        with resource_lease(self.leases, "obs"):
+            for i, scene in enumerate(scenes, 1):
+                video = None
+                if self.prepare_video:
+                    from openjarvis.one_agents.space_research import embedded_video
+                    video = embedded_video(scene["url"])
+                preparation = ([{"click": ".hds-video-container .vjs-big-play-button", "settle": 0.4},
+                                {"click": ".hds-video-container .vjs-fullscreen-control", "settle": 0.4}]
+                               if video else [])
+                capture_seconds = 24.0 if video else scene.get("seconds", 12)
+                capture_key = fingerprint({"url": scene["url"], "seconds": capture_seconds,
+                                           "moves": scene.get("moves", []), "preparation": preparation, "version": 3})
+                cached = self.context.artifact(f"captures/source-{capture_key}.json")
+                if cached.exists():
+                    saved = json.loads(cached.read_text(encoding="utf-8"))
+                    path = Path(saved["capture"]["path"]).resolve()
+                    if (not path.is_relative_to(self.context.root.resolve()) or not path.is_file()
+                            or hashlib.sha256(path.read_bytes()).hexdigest() != saved["sha256"]):
+                        raise ValueError("Cached OBS evidence changed; targeted repair required")
+                    results.append({**saved["capture"], "reused_capture": True})
+                    continue
+                if video:
+                    from openjarvis.one_agents.planexium_obs import capture_video
+                    scene_id = str(scene.get("id") or i)
+                    if not scene_id.isdigit():
+                        raise ValueError("Capture scene ID must be numeric")
+                    target = Path(output_root) / f"planexium-{mission_id}-{scene_id}-native-v3.mkv"
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    obs = self.connect_obs()
+                    try:
+                        row = capture_video(obs, video, target, capture_seconds, probe=probe_stock)
+                    finally:
+                        obs.close()
+                    cached.parent.mkdir(parents=True, exist_ok=True)
+                    cached.write_text(json.dumps({"capture": row, "sha256": hashlib.sha256(target.read_bytes()).hexdigest()}, indent=2), encoding="utf-8")
+                    results.append(row)
+                    continue
+                self.ensure_source()
+                scene_id = str(scene.get("id") or i)
+                if not scene_id.isdigit():
+                    raise ValueError("Capture scene ID must be numeric")
+                capture = f"planexium-{mission_id}-{scene_id}" + ("-player-v2" if video else "")
+                inputs = {"captureId": capture, "topic": scene["title"], "sourceUrl": scene["url"],
+                          "targetSeconds": str(capture_seconds), "prepareMoves": "[]",
+                          "recordMoves": json.dumps(scene.get("moves", [])), "videoTitle": scene["title"]}
+                # Draft substitution interpolates inputs as strings. Movement actions
+                # require native arrays; bind these per capture before submitting.
+                import copy
+                capture_steps = copy.deepcopy(steps)
+                for step in capture_steps:
+                    if step.get("action") in {"run_moves", "obs_record_sequence"}:
+                        step.setdefault("args", {})["moves"] = (scene.get("moves", [])
+                            if step["action"] == "obs_record_sequence" else preparation)
+                # Overlays were cleared before player preparation. A second
+                # overlay pass after playback would consume the whole timelapse.
+                prepared_index = next((n for n,s in enumerate(capture_steps) if s.get("action")=="run_moves"), -1)
+                if video and prepared_index >= 0:
+                    capture_steps = [s for n,s in enumerate(capture_steps)
+                                     if not (n > prepared_index and s.get("action")=="dismiss_overlays")]
+                receipt_name = f"obs-{scene_id}-player-v2.json" if video else f"obs-{scene_id}.json"
+                out, job = self.draft.run("planexium-official-capture", capture_steps, inputs,
+                                          self.context.artifact("receipts/" + receipt_name))
+                recorded = out.get("capture_video")
+                reported_path = recorded.get("path") if isinstance(recorded, dict) else recorded
+                # Installed OBS writes outside robot artifacts. Admit only this
+                # exact channel/mission filename within its known capture root.
+                expected = (self.workflow.parent.parent / "yatra-captures" / (capture + "-capture.mkv")).resolve()
+                if reported_path and Path(reported_path).resolve() == expected and expected.is_file():
+                    source = expected
+                else:
+                    source = self.draft.artifact(out, job, capture + "-capture.mkv")
+                target = Path(output_root) / source.name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
+                row = {"path": str(target), "source_url": scene["url"], "job_id": job,
+                       "framing": "full-screen primary-source video" if video else "source document", "seconds": capture_seconds,
+                       "source_video": video, "rights_review_required": True}
+                cached.parent.mkdir(parents=True, exist_ok=True)
+                cached.write_text(json.dumps({"capture": row, "sha256": hashlib.sha256(target.read_bytes()).hexdigest()}, indent=2), encoding="utf-8")
+                results.append(row)
+        return {"ok": True, "captures": results}

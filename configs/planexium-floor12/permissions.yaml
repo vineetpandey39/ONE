@@ -1,0 +1,7 @@
+agent_id: planexium
+allowed: [research, draft, internal_analysis, generate_media_asset, assemble_deliverable, render_private]
+requires_olympus: [lao_integration_wire, access_credentials, publish_routine_update, publish_sensitive_material, spend_outside_budget]
+note: >
+  Internal production only. No inherited Sonia standing authority. The runtime
+  produces local review bundles; uploads require a separate explicit channel
+  binding and approval. Public publishing remains a human Studio action.

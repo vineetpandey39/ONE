@@ -1,0 +1,18 @@
+agent_id: planexium
+display_name: PLANEXIUM
+floor_id: "12"
+floor_code: F12
+agent_urn: ONE-F12-PLANEXIUM-01
+agent_type: intern
+seat: worker
+reports_to: helios
+version: 1.0.0
+status: live
+wired_into_runtime: true
+brand: planexium
+role: Produces evidence-backed space documentaries with local Windows narration and shared production services.
+description: >
+  The Planexium production worker. Reuses installed production components without
+  assigning work to YATRA. Maintains isolated evidence, media and checkpoints.
+  No cloud TTS, Sonia portrait, public publication or automatic schedule activation.
+live_implementation: src/src/openjarvis/one_agents/planexium.py

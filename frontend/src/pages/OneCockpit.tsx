@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import {
   BarChart3,
+  BookOpen,
   BrainCircuit,
   CalendarClock,
   ChevronUp,
@@ -13,16 +14,20 @@ import {
   ExternalLink,
   HardDrive,
   Mail,
+  Megaphone,
   Palette,
+  PenTool,
   RefreshCw,
   Search,
   Send,
   Settings2,
   Share2,
+  ShieldCheck,
   Sparkles,
   Square,
   Target,
   Users,
+  UploadCloud,
   Volume2,
   VolumeX,
   Wallet,
@@ -30,6 +35,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { getBase } from '../lib/api';
+import { PostForgeBoard } from '../components/PostForgeBoard';
 import { JarvisCore } from './JarvisCore';
 import type { CoreState } from './JarvisCore';
 import './one-cockpit.css';
@@ -136,6 +142,10 @@ type OneStatus = {
   model_status?: ModelStatus;
   agents: Agent[];
   jobs: Job[];
+  // The newest real job per agent, straight from the queue. `jobs` above is a
+  // system-wide window of 12 and drops an agent as soon as anything busier
+  // runs, so anything tracking a mission across a floor reads this instead.
+  latest_by_agent?: Record<string, Job>;
   obsidian: { connected: boolean; path: string; notes: number };
   memories: Memory[];
 };
@@ -178,6 +188,23 @@ type CompanyTrigger = {
   last_fire_epoch: number | null;
   last_job_id: string | null;
 };
+
+const PUBLISHING_FLOW: Array<{
+  id: string;
+  name: string;
+  label: string;
+  icon: LucideIcon;
+}> = [
+  { id: 'hermes', name: 'HERMES', label: 'Portfolio head', icon: BookOpen },
+  { id: 'biblos', name: 'BIBLOS', label: 'Demand proof', icon: Search },
+  { id: 'scribe', name: 'SCRIBE', label: 'Manuscript factory', icon: PenTool },
+  { id: 'mercury', name: 'MERCURY', label: 'Rights & route', icon: Share2 },
+  { id: 'imprimatur', name: 'IMPRIMATUR', label: 'KDP & ASIN', icon: UploadCloud },
+  { id: 'olympus', name: 'OLYMPUS', label: 'Publish approval', icon: ShieldCheck },
+  { id: 'peitho', name: 'PEITHO', label: 'Launch creative', icon: Megaphone },
+  { id: 'leda', name: 'LEDA', label: 'Consented audience', icon: Users },
+  { id: 'metron', name: 'METRON', label: 'Attribution', icon: BarChart3 },
+];
 type TriggerFire = {
   id: number;
   trigger_id: string;
@@ -1364,6 +1391,53 @@ export function OneCockpit() {
     agent,
     jobs: status.jobs.filter((job) => job.agent_id === agent.id).slice(0, 3),
   })).filter((section) => section.jobs.length), [status.agents, status.jobs]);
+  const publishingFlow = useMemo(() => {
+    // Ask the queue for this agent's newest job, and only fall back to the
+    // 12-job window when the server is older than this field. The window was
+    // why the whole strip read "Awaiting mission" on the day Floor 5 published
+    // a book: HERMES through IMPRIMATUR had finished hours earlier and other
+    // floors had long since pushed them out of it.
+    const latestFor = (agentId: string): Job | undefined =>
+      status.latest_by_agent?.[agentId] ?? status.jobs.find((job) => job.agent_id === agentId);
+    const resultPhase = (job?: Job) => {
+      if (!job?.result) return '';
+      try {
+        const parsed = JSON.parse(job.result);
+        return String(parsed.phase || parsed.mode || '').toLowerCase();
+      } catch {
+        return '';
+      }
+    };
+    const imprimaturJob = latestFor('imprimatur');
+    const imprimaturPhase = resultPhase(imprimaturJob);
+    const peithoJob = latestFor('peitho');
+    const launchReleased = peithoJob?.status === 'completed' || peithoJob?.status === 'successful';
+
+    return PUBLISHING_FLOW.map((step) => {
+      if (step.id === 'olympus') {
+        const cleared = launchReleased || ['submitted', 'complete', 'awaiting_asin'].includes(imprimaturPhase);
+        const waiting = imprimaturPhase === 'approval';
+        return {
+          ...step,
+          state: cleared ? 'complete' : waiting ? 'gate' : 'idle',
+          detail: cleared ? 'Approved and released' : waiting ? 'Decision required' : 'No title at gate',
+        };
+      }
+      const job = latestFor(step.id);
+      const upstreamReleased = launchReleased && ['hermes', 'biblos', 'scribe', 'mercury', 'imprimatur'].includes(step.id);
+      const active = job?.status === 'running' || job?.status === 'queued';
+      const failed = job?.status === 'failed';
+      const gated = job?.status === 'awaiting_upload';
+      const complete = job?.status === 'completed' || job?.status === 'successful';
+      return {
+        ...step,
+        state: upstreamReleased ? 'complete' : failed ? 'failed' : gated ? 'gate' : active ? 'active' : complete ? 'complete' : 'idle',
+        detail: upstreamReleased
+          ? 'Handoff confirmed downstream'
+          : job ? `${job.status.replace(/_/g, ' ')} · ${job.id.slice(0, 12)}` : 'Awaiting mission',
+      };
+    });
+  }, [status.jobs]);
   // When a job started and where it stands: queued/started time from
   // created_at, and for a finished job the time it ended (updated_at) and how
   // long it took. Timestamps arrive as ISO strings straight from the queue db.
@@ -2015,6 +2089,41 @@ export function OneCockpit() {
         </div>
       </section>
 
+      <section className="one-operations one-publishing-floor">
+        <div className="one-operations-head">
+          <div>
+            <div className="one-panel-label">FLOOR 05 · PUBLISHING</div>
+            <strong>BOOK-TO-MARKET FLOW</strong>
+          </div>
+          <span className="one-publishing-policy"><ShieldCheck size={15} /> OLYMPUS controls external release</span>
+        </div>
+        <div className="one-publishing-flow" aria-label="Publishing floor execution flow">
+          {publishingFlow.map((step, index) => {
+            const Icon = step.icon;
+            return (
+              <div className="one-publishing-step-wrap" key={step.id}>
+                <article className={`one-publishing-step ${step.state}`}>
+                  <div className="one-publishing-step-icon"><Icon size={18} /></div>
+                  <div>
+                    <span>{step.label}</span>
+                    <strong>{step.name}</strong>
+                    <small>{step.detail}</small>
+                  </div>
+                  <i aria-label={step.state} title={step.state} />
+                </article>
+                {index < publishingFlow.length - 1 && <div className="one-publishing-link" aria-hidden="true"><b /></div>}
+              </div>
+            );
+          })}
+        </div>
+        <div className="one-publishing-legend">
+          <span><i className="active" /> executing</span>
+          <span><i className="gate" /> approval / owner input</span>
+          <span><i className="complete" /> handed forward</span>
+          <span><i className="failed" /> needs attention</span>
+        </div>
+      </section>
+
       <section className="one-operations one-trigger-board">
         <div className="one-operations-head">
           <div>
@@ -2064,6 +2173,8 @@ export function OneCockpit() {
           })}
         </div>
       </section>
+
+      <PostForgeBoard />
 
       <section className="one-operations one-jobhunt-board">
         <div className="one-operations-head">

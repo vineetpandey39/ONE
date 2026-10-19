@@ -17,6 +17,7 @@ DEFAULT_LAO_BASE_URL = "http://127.0.0.1:18000/api/v1"
 DEFAULT_DRY_RUN_PROCESS = "Daily LinkedIn Authority Post - Dry Run"
 DEFAULT_PUBLISH_PROCESS = "Daily LinkedIn Authority Post"
 ACTIVE_JOB_STATUSES = {"Pending", "Assigned", "Running"}
+RETRY_PARENT_STATUS = "Retried"
 
 
 def _json_result(payload: dict[str, Any], *, success: bool = True) -> ToolResult:
@@ -124,6 +125,24 @@ class _LaoClient:
             jobs = [job for job in jobs if job.get("status") in ACTIVE_JOB_STATUSES]
         return jobs[0] if jobs else None
 
+    def resolve_retry_child(self, scope: str, process_id: str, parent: dict[str, Any]) -> dict[str, Any] | None:
+        """Follow LAO's automatic retry chain when a parent becomes Retried.
+
+        LAO creates a fresh Pending job and marks the failed parent Retried,
+        but does not expose a parent_job_id in the job payload.  The child is
+        therefore identified as the newest job for the same process created
+        after the parent.  This keeps callers (notably HERALD) attached to the
+        real execution instead of polling a terminal bookkeeping record.
+        """
+        jobs = self.list_jobs(scope, process_id)
+        parent_created = str(parent.get("created_at") or "")
+        candidates = [
+            job for job in jobs
+            if job.get("id") != parent.get("id")
+            and str(job.get("created_at") or "") > parent_created
+        ]
+        return candidates[0] if candidates else None
+
 
 @ToolRegistry.register("lao_orchestrator")
 class LaoOrchestratorTool(BaseTool):
@@ -215,7 +234,11 @@ class LaoOrchestratorTool(BaseTool):
                 folder_id = params.get("folder_id")
                 if folder_id:
                     draft_payload["folder_id"] = folder_id
-                draft = client.post("/studio/run-draft", draft_payload)
+                if params.get("preserve_workflow"):
+                    from openjarvis.one_agents.planexium_lao import run_preserved_workflow
+                    draft = run_preserved_workflow(client, draft_payload)
+                else:
+                    draft = client.post("/studio/run-draft", draft_payload)
                 return _json_result({"action": action, "draft": draft, "job": draft.get("job")})
 
             process: dict[str, Any] | None = None

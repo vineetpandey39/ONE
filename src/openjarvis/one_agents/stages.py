@@ -39,6 +39,54 @@ AWAITING_UPLOAD = "awaiting_upload"  # work is done; blocked on a human's real-w
 
 _TERMINAL = {IDLE}
 
+# Stages that outlive the process that set them, on purpose. AWAITING_UPLOAD
+# means "the agent is finished and a human now owes a real-world action" (the
+# KDP upload), so it has to survive restarts -- that bubble is the reminder.
+# Everything else describes work in flight and cannot outlive its process.
+_DURABLE = {AWAITING_UPLOAD}
+
+# How long an entry written before stages carried owner information is trusted.
+# Anything volatile and older than this from the pre-owner format is a leftover.
+_LEGACY_GRACE_SECONDS = 900
+
+
+def _owner() -> dict[str, Any]:
+    """Identify the process writing a stage, so a reader can tell whether that
+    process is still alive. The boot time guards against PID reuse."""
+    try:
+        import psutil
+
+        return {"pid": os.getpid(), "boot": psutil.Process().create_time()}
+    except Exception:  # noqa: BLE001 - never block a stage write
+        return {"pid": os.getpid()}
+
+
+def _owner_alive(owner: Any) -> bool:
+    """True unless the writing process is provably gone. Errs towards keeping
+    the stage: a wrong "alive" shows a stale bubble for a while, a wrong "dead"
+    erases an agent that is actually working."""
+    if not isinstance(owner, dict) or not owner.get("pid"):
+        return True
+    try:
+        import psutil
+
+        process = psutil.Process(int(owner["pid"]))
+        boot = owner.get("boot")
+        if boot is None:
+            return True
+        # Same PID, different start time: the original process died and the OS
+        # handed its number to something else.
+        return abs(process.create_time() - float(boot)) < 1.0
+    except Exception as exc:  # noqa: BLE001
+        try:
+            import psutil
+
+            if isinstance(exc, psutil.NoSuchProcess):
+                return False
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
 
 def _home() -> Path:
     return Path(os.environ.get("OPENJARVIS_HOME", Path.home() / ".openjarvis"))
@@ -52,11 +100,41 @@ def _path() -> Path:
 
 def get_stages() -> dict[str, dict[str, Any]]:
     """Every agent's current stage. Never raises — a missing or corrupt file
-    just means 'nobody is mid-flow', which is the correct default."""
+    just means 'nobody is mid-flow', which is the correct default.
+
+    Stages whose writing process is gone are dropped here. A stage used to be
+    a write-only latch: the only thing that cleared it was the same process
+    reaching its own ``clear_stage``, so any crash, restart or external kill
+    stranded that bubble on the building permanently. Confirmed live
+    2026-10-02 -- FABULA sat in EXECUTING with no job of its own anywhere in
+    the queue, because whatever set it was killed before its ``finally`` ran,
+    and the worker had since restarted. Filtering on read means every consumer
+    (the HTTP route, floor watch, the handoff checks) is fixed at once, and
+    the file self-heals on the next write.
+    """
     try:
-        return json.loads(_path().read_text(encoding="utf-8"))
+        stages = json.loads(_path().read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {}
+    if not isinstance(stages, dict):
+        return {}
+    now = time.time()
+    live: dict[str, dict[str, Any]] = {}
+    for agent_id, entry in stages.items():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("stage") in _DURABLE:
+            live[agent_id] = entry
+            continue
+        owner = entry.get("owner")
+        if owner is None:
+            # Pre-owner format: trust it briefly, then treat it as abandoned.
+            if now - float(entry.get("since") or 0) < _LEGACY_GRACE_SECONDS:
+                live[agent_id] = entry
+            continue
+        if _owner_alive(owner):
+            live[agent_id] = entry
+    return live
 
 
 def set_stage(agent_id: str, stage: str, detail: str = "", **extra: Any) -> None:
@@ -64,6 +142,16 @@ def set_stage(agent_id: str, stage: str, detail: str = "", **extra: Any) -> None
     down the job that is actually doing the work."""
     try:
         stages = get_stages()
+        if agent_id == 'yatra' and stage not in _TERMINAL:
+            try:
+                progress = json.loads((_home() / 'yatra_progress.json').read_text(encoding='utf-8'))
+                counters = (f"Envato sources {progress.get('envato_done', 0)}/{progress.get('envato_total', '?')} | "
+                            f"OBS {progress.get('obs_done', 0)}/{progress.get('obs_total', '?')} | "
+                            f"Edit {progress.get('edit_done', 0)}/{progress.get('edit_total', '?')}")
+                detail = counters + ' — ' + detail
+                extra['progress'] = progress
+            except (OSError, ValueError):
+                pass
         if stage in _TERMINAL:
             stages.pop(agent_id, None)
         else:
@@ -71,6 +159,9 @@ def set_stage(agent_id: str, stage: str, detail: str = "", **extra: Any) -> None
                 "stage": stage,
                 "detail": detail,
                 "since": time.time(),
+                # Who to ask about this stage later. Without it a reader cannot
+                # tell a long-running job from a process that died mid-flow.
+                "owner": _owner(),
                 **extra,
             }
         path = _path()
@@ -164,3 +255,20 @@ def worker_confirms_receipt(worker_id: str, detail: str) -> None:
     centrally, rather than relying on a comment at every call site.
     """
     set_stage(worker_id, RECEIVING, detail)
+
+
+def worker_finished(head_id: str, worker_job_id: str) -> bool:
+    """Release a head that is still AWAITING_WORKER on this exact worker job.
+
+    For one-shot errands that never send a report leg back to the head (ECHO's
+    hourly comment sweep, the daily community poll). Without it the head's
+    "Waiting on ECHO ..." bubble outlived the finished job for good, because
+    the stage's owner (the worker process) is still alive (seen live
+    2026-10-09 after the first community poll was posted). A head that has
+    since moved on to other work is left alone.
+    """
+    entry = get_stages().get(head_id) or {}
+    if entry.get("stage") == AWAITING_WORKER and entry.get("worker_job") == worker_job_id:
+        clear_stage(head_id)
+        return True
+    return False
