@@ -269,19 +269,12 @@ def _cli_commands(prompt: str, repo: Path) -> list[tuple[str, list[str]]]:
         commands.append(("codex", [codex, "exec", "--model", codex_model,
                                     "--ephemeral", "--approve-for-me",
                                     "--cd", str(repo), prompt]))
-    qwen = _which_cli("qwen")
-    # Qwen Code has no implicit local backend. _run_cli supplies an isolated
-    # profile pinned to Ollama, avoiding cloud-auth prompts.
+    # Use the same direct Ollama model as Sanjeevani. Qwen Code added a second
+    # Docker hop around that identical model, inherited unrelated desktop
+    # credentials, and doubled the timeout without adding another fallback.
     local_model = os.environ.get("ONE_HELIOS_LOCAL_MODEL", "qwen3.5:9b").strip()
     if local_model:
-        # Headless Qwen Code otherwise emits a tool-call request and exits
-        # without applying it. Auto-approve only inside its disposable Docker
-        # sandbox; host-side diff/path/test/commit gates remain authoritative.
-        if qwen:
-            commands.append(("qwen-local", [qwen, "--sandbox", "--approval-mode", "yolo",
-                                              "-m", local_model, "-p", prompt]))
-        # This path needs no Qwen Code executable. Keep it present even when
-        # the scheduled worker has a short PATH and cannot resolve qwen.cmd.
+        # This path needs no Qwen Code executable or cloud credential.
         commands.append(("qwen-local-tools", ["ollama-native", "-m", local_model, "-p", prompt]))
     # Direct OpenAI-compatible tool calling avoids depending on Qwen Code's
     # executable/profile for the final paid fallback. Credentials are resolved
@@ -579,6 +572,17 @@ def _run_cli(name: str, command: list[str], *, repo: Path, timeout: int) -> subp
         qwen_dir = profile_path / ".qwen"
         qwen_dir.mkdir()
         env = os.environ.copy()
+        if name == "qwen-local":
+            # This route is deliberately private/local. Qwen Code launches a
+            # Docker child and forwards inherited variables, so leaving a
+            # desktop cloud key in the environment both leaks it into the
+            # child command line and can silently route away from Ollama.
+            for key in (
+                "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "NVIDIA_API_KEY",
+                "GEMINI_API_KEY", "GOOGLE_API_KEY", "DASHSCOPE_API_KEY",
+            ):
+                env.pop(key, None)
+            env["OLLAMA_API_KEY"] = "ollama"
         if name == "nemotron":
             # The secret enters only this child process, never settings.json,
             # audit events, or the long-lived worker environment.
@@ -652,7 +656,7 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
                          f"Diagnosing {str(evidence.get('agent') or 'Floor 12').upper()} failure with {name} CLI")
         try:
             cli_timeout = timeout
-            if name == "qwen-local-tools":
+            if name in {"qwen-local", "qwen-local-tools"}:
                 cli_timeout = min(timeout, max(60, int(os.environ.get("ONE_HELIOS_LOCAL_TIMEOUT_SECONDS", "300"))))
             done = _run_cli(name, command, repo=repo, timeout=cli_timeout)
             attempts.append({"cli": name, "returncode": done.returncode,
