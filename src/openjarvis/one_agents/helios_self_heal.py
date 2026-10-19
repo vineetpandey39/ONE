@@ -248,7 +248,13 @@ def _cli_commands(prompt: str, repo: Path) -> list[tuple[str, list[str]]]:
     if codex:
         # Current Codex makes --approve-for-me and an explicit --sandbox
         # mutually exclusive; approve-for-me already selects workspace-write.
-        commands.append(("codex", [codex, "exec", "--ephemeral", "--approve-for-me",
+        # The owner's global config may select a ChatGPT app model that the
+        # CLI account does not expose. Pin HELIOS to a model in the installed
+        # Codex CLI catalog so one stale desktop preference cannot disable
+        # this fallback for every autonomous repair.
+        codex_model = os.environ.get("ONE_HELIOS_CODEX_MODEL", "gpt-6-luna").strip() or "gpt-6-luna"
+        commands.append(("codex", [codex, "exec", "--model", codex_model,
+                                    "--ephemeral", "--approve-for-me",
                                     "--cd", str(repo), prompt]))
     qwen = _which_cli("qwen")
     if qwen:
