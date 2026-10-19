@@ -84,8 +84,17 @@ def _now() -> str:
 def _which_cli(name: str) -> str | None:
     """Resolve CLIs even when ONE was started by a task with a short PATH."""
     found = shutil.which(name)
-    if found or name != "codex":
+    if found:
         return found
+    if name == "qwen":
+        owner = os.environ.get("ONE_OWNER_PROFILE") or os.environ.get("USERPROFILE", "")
+        appdata = os.environ.get("APPDATA", "")
+        candidates = [Path(appdata) / "npm" / "qwen.cmd"] if appdata else []
+        if owner:
+            candidates.append(Path(owner) / "AppData" / "Roaming" / "npm" / "qwen.cmd")
+        return next((str(path) for path in candidates if path.is_file()), None)
+    if name != "codex":
+        return None
     local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
     if not local_app_data:
         return None
@@ -269,9 +278,11 @@ def _cli_commands(prompt: str, repo: Path) -> list[tuple[str, list[str]]]:
             if qwen:
                 commands.append(("qwen-local", [qwen, "--sandbox", "--approval-mode", "yolo",
                                                   "-m", local_model, "-p", prompt]))
-            # Qwen Code can return pseudo-tool-call text with exit 0 under an
-            # OpenAI-compatible Ollama provider. Keep a native Ollama tool-call
-            # runner as the same local-model tier's verified fallback.
+            # This path needs no Qwen Code executable. Production's scheduled
+            # worker has a deliberately short PATH on some logon sessions, so
+            # the local-model recovery must remain available even when qwen.cmd
+            # cannot be resolved. Native Ollama tool calls are the verified
+            # fallback for pseudo-tool text and for an absent Qwen CLI.
             commands.append(("qwen-local-tools", ["ollama-native", "-m", local_model, "-p", prompt]))
         # Resolve credentials lazily from LAO only when this final fallback runs.
         nemotron_model = os.environ.get("NEMOTRON_MODEL", "").strip()

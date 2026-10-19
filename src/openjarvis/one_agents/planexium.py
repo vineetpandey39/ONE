@@ -503,8 +503,12 @@ def run_job(job: dict) -> dict:
         from openjarvis.one_agents import runtime
         register_checkpoint_owner(str(job["id"]), context, runtime._connect)
     from openjarvis.one_agents.planexium_adapters import BUILD_SHA as ADAPTER_BUILD
+    draft_path = context.artifact("script-draft.json")
+    # A draft may be created before its writer has finished. Treat an empty
+    # checkpoint as absent so the pipeline can use its normal writer path.
+    draft = json.loads(draft_path.read_text(encoding="utf-8")) if draft_path.is_file() and draft_path.stat().st_size else None
     result = bound_pipeline(context, {**config, "_agent_job_id": job.get("id"),
-        "_production_build": {"pipeline": BUILD_SHA, "adapters": ADAPTER_BUILD}}).produce(commission, plan=json.loads(context.artifact("script-draft.json").read_text(encoding="utf-8")) if context.artifact("script-draft.json").exists() else None)
+        "_production_build": {"pipeline": BUILD_SHA, "adapters": ADAPTER_BUILD}}).produce(commission, plan=draft)
     if result.get("production_complete") and requested_commission["mission_id"] != context.mission_id:
         result["deferred_commission"] = requested_commission
     return result
