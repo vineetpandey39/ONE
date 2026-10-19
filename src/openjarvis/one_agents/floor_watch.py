@@ -438,7 +438,9 @@ def scan(
                 # parser failure was silently omitted. Preserve a bounded but
                 # useful traceback and enough commission context for a model
                 # to reproduce the correct gate.
-                evidence={"error": error[-12000:], "task": str(row["task"] or "")[:4000]},
+                evidence={"error": error[-12000:], "task": str(row["task"] or "")[:4000],
+                          "external_job": external_job,
+                          "external_kind": str(row["external_kind"] or "")},
             ))
 
     # D3 -- a stage bubble with no live job behind it. This is the "HERMES is

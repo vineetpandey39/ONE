@@ -41,7 +41,9 @@ Connect = Callable[[], sqlite3.Connection]
 SAFE_RETRY_AGENTS = {"lyra", "vista", "echo", "planexium"}
 FLOOR12_AGENTS = {"helios", "fabula", "yatra", "lyra", "vista", "echo", "planexium", "chandan"}
 REPO_ROOT = Path(__file__).resolve().parents[3]
-ALLOWED_REPOS = (REPO_ROOT, Path(r"C:\Users\pc\Documents\LAO\vista"))
+VISTA_REPO = Path(r"C:\Users\pc\Documents\LAO\vista")
+YATRA_CAPTURE_REPO = Path(r"C:\Users\pc\Documents\LAO\yatra-capture")
+ALLOWED_REPOS = (REPO_ROOT, VISTA_REPO, YATRA_CAPTURE_REPO)
 PENDING_PREFIX = "pending self-heal: "
 # These files are the independent checker/maker and self-heal control plane.
 # A production failure may be repaired by that control plane, but a model CLI
@@ -253,6 +255,14 @@ def _repo_for(evidence: dict[str, Any]) -> Path | None:
     # `C:\path` could never match its repository path and every worker failure
     # silently fell back to ONE-Suite.
     text = "\n".join(values(evidence)).casefold().replace("/", "\\")
+    # The contract validator lives in ONE, but it dynamically loads the OBS
+    # parser from yatra-capture.  Its traceback therefore ends in runtime.py
+    # and used to send every model into the wrong repository with no parser or
+    # saved plan to inspect.
+    if (str(evidence.get("agent") or "").casefold() == "fabula"
+            and "obs capture plan" in text
+            and YATRA_CAPTURE_REPO.is_dir()):
+        return YATRA_CAPTURE_REPO
     # A traceback normally starts in ONE's runtime wrapper and ends in the
     # worker repository that actually raised.  Returning the first match made
     # every VISTA failure look like an ONE-Suite failure.  The final/deepest
@@ -677,7 +687,7 @@ def _allowed_patch_path(repo: Path, path: str) -> bool:
         if normalized in PROTECTED_CONTROL_PLANE_PATHS:
             return False
         return normalized.startswith(("src/openjarvis/one_agents/", "tests/one_agents/"))
-    if repo.resolve() == ALLOWED_REPOS[1].resolve():
+    if repo.resolve() in {VISTA_REPO.resolve(), YATRA_CAPTURE_REPO.resolve()}:
         return normalized.endswith(".py") and not normalized.startswith(("runs/", "direction-history/"))
     return False
 
@@ -686,7 +696,28 @@ def _repair_test_command(repo: Path) -> list[str]:
     python = os.environ.get("ONE_HELIOS_PYTHON", sys.executable)
     if repo.resolve() == REPO_ROOT.resolve():
         return [python, "-m", "pytest", "tests/one_agents", "-q", "--maxfail=1"]
+    if repo.resolve() == YATRA_CAPTURE_REPO.resolve():
+        return [python, "-m", "unittest", "-v", "test_plan_captures.py"]
     return [python, "-m", "pytest", "-q", "--maxfail=1"]
+
+
+def _with_checkpoint_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
+    """Give a YATRA parser repair the saved plan shape, not only ONE's wrapper traceback."""
+    enriched = dict(evidence)
+    if (str(enriched.get("agent") or "").casefold() != "fabula"
+            or not enriched.get("external_job")):
+        return enriched
+    try:
+        from openjarvis.one_agents import runtime
+        plan = runtime._yatra_preproduction_file(str(enriched["external_job"]))
+        record = json.loads(plan.read_text(encoding="utf-8"))[0]
+        enriched["checkpoint_file"] = str(plan)
+        enriched["browser_capture_plan_excerpt"] = str(
+            record.get("browser_capture_plan") or ""
+        )[:6000]
+    except Exception as exc:  # evidence enrichment must never hide the failure
+        enriched["checkpoint_evidence_error"] = f"{type(exc).__name__}: {exc}"
+    return enriched
 
 
 def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str, Any]:
@@ -698,6 +729,7 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
     """
     if os.environ.get("ONE_HELIOS_AUTO_REPAIR", "true").lower() not in {"1", "true", "yes", "on"}:
         return {"ok": False, "reason": "HELIOS auto repair disabled"}
+    evidence = _with_checkpoint_evidence(evidence)
     repo = _repo_for(evidence)
     if repo is None:
         return {"ok": False, "reason": "failure is outside HELIOS's allow-listed repositories"}
