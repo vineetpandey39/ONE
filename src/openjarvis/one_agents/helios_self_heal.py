@@ -44,6 +44,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 VISTA_REPO = Path(r"C:\Users\pc\Documents\LAO\vista")
 YATRA_CAPTURE_REPO = Path(r"C:\Users\pc\Documents\LAO\yatra-capture")
 ALLOWED_REPOS = (REPO_ROOT, VISTA_REPO, YATRA_CAPTURE_REPO)
+from openjarvis.one_agents.lao_checkpoint_recovery import ENGINE_REPO
+ALLOWED_REPOS = (*ALLOWED_REPOS, ENGINE_REPO)
 PENDING_PREFIX = "pending self-heal: "
 # These files are the independent checker/maker and self-heal control plane.
 # A production failure may be repaired by that control plane, but a model CLI
@@ -51,6 +53,7 @@ PENDING_PREFIX = "pending self-heal: "
 # Human-reviewed commits can still change them; this boundary applies only to
 # autonomous HELIOS patches and is deliberately unrelated to the restart gate.
 PROTECTED_CONTROL_PLANE_PATHS = {
+    "src/openjarvis/one_agents/lao_checkpoint_recovery.py",
     "src/openjarvis/one_agents/floor_watch.py",
     "src/openjarvis/one_agents/helios_self_heal.py",
 }
@@ -255,6 +258,11 @@ def _repo_for(evidence: dict[str, Any]) -> Path | None:
     # `C:\path` could never match its repository path and every worker failure
     # silently fell back to ONE-Suite.
     text = "\n".join(values(evidence)).casefold().replace("/", "\\")
+    if (str(evidence.get("agent") or "").casefold() == "fabula"
+            and evidence.get("external_job")
+            and any(message in str(evidence.get("lao_error") or "").casefold()
+                    for message in ("chatgpt", "composer", "conversation", "streaming"))):
+        return ENGINE_REPO
     # The contract validator lives in ONE, but it dynamically loads the OBS
     # parser from yatra-capture.  Its traceback therefore ends in runtime.py
     # and used to send every model into the wrong repository with no parser or
@@ -701,11 +709,15 @@ def _allowed_patch_path(repo: Path, path: str) -> bool:
         return normalized.startswith(("src/openjarvis/one_agents/", "tests/one_agents/"))
     if repo.resolve() in {VISTA_REPO.resolve(), YATRA_CAPTURE_REPO.resolve()}:
         return normalized.endswith(".py") and not normalized.startswith(("runs/", "direction-history/"))
+    if repo.resolve() == ENGINE_REPO.resolve():
+        return normalized == "workflow_engine.py" or ("/" not in normalized and normalized.startswith("test_") and normalized.endswith(".py"))
     return False
 
 
 def _repair_test_command(repo: Path) -> list[str]:
     python = os.environ.get("ONE_HELIOS_PYTHON", sys.executable)
+    if repo.resolve() == ENGINE_REPO.resolve():
+        return [python, "-m", "unittest", "discover", "-v"]
     if repo.resolve() == REPO_ROOT.resolve():
         return [python, "-m", "pytest", "tests/one_agents", "-q", "--maxfail=1"]
     if repo.resolve() == YATRA_CAPTURE_REPO.resolve():
@@ -719,6 +731,11 @@ def _with_checkpoint_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
     if (str(enriched.get("agent") or "").casefold() != "fabula"
             or not enriched.get("external_job")):
         return enriched
+    try:
+        from openjarvis.one_agents.lao_checkpoint_recovery import evidence_for
+        enriched.update(evidence_for(str(enriched["external_job"])))
+    except Exception as exc:
+        enriched["lao_evidence_error"] = type(exc).__name__
     try:
         from openjarvis.one_agents import runtime
         plan = runtime._yatra_preproduction_file(str(enriched["external_job"]))
@@ -826,13 +843,36 @@ def heal_failure(connect: Connect, finding: Any) -> str:
     """Repair first; resume only after HELIOS produced a verified commit."""
     evidence = {"agent": finding.agent_id, "job_id": finding.job_id,
                 "summary": finding.summary, **dict(finding.evidence or {})}
-    repair = repair_with_cli(evidence)
+    evidence = _with_checkpoint_evidence(evidence)
+    # A tested commit awaiting safe activation is still a valid repair. Do not
+    # ask another model to invent another patch merely to retry deployment.
+    receipt_dir = Path(os.environ.get("OPENJARVIS_HOME", Path.home() / ".openjarvis")) / "helios_verified_repairs"
+    receipt_dir.mkdir(parents=True, exist_ok=True)
+    receipt_path = receipt_dir / (str(uuid.uuid5(uuid.NAMESPACE_URL, str(finding.job_id))) + ".json")
+    repair = None
+    repo = _repo_for(evidence)
+    if receipt_path.exists() and repo:
+        saved = json.loads(receipt_path.read_text(encoding="utf-8"))
+        if saved.get("commit") == _git(repo, "rev-parse", "--short", "HEAD").stdout.strip():
+            repair = saved
+    if repair is None:
+        repair = repair_with_cli(evidence)
+        if repair.get("ok"):
+            receipt_path.write_text(json.dumps(repair), encoding="utf-8")
     if not repair.get("ok"):
         # A retry without a diagnosis and verified repair is not self-healing;
         # it merely repeats the same failure.  The watcher recognizes this
         # prefix as retryable/pending and deliberately does not ledger the
         # failed job as handled, so the next pass can try again.
         return f"{PENDING_PREFIX}{repair.get('reason') or 'no verified repair'}"
-    action = resume_checkpoint(connect, finding.job_id)
+    if _repo_for(evidence) == ENGINE_REPO:
+        try:
+            from openjarvis.one_agents.lao_checkpoint_recovery import activate_engine, resume_failed
+            activate_engine()
+            action = resume_failed(connect, _row(connect, finding.job_id))
+        except Exception as exc:
+            return f"{PENDING_PREFIX}verified engine repair; deployment/resume pending: {exc}"
+    else:
+        action = resume_checkpoint(connect, finding.job_id)
     prefix = f"{repair['cli']} repaired and committed {repair['commit']}"
     return f"{prefix}; {action}" if action else prefix
