@@ -29,7 +29,7 @@ def main():
         runtime.enqueue_job = enqueue_original_guard(runtime.enqueue_job, mission)
         job = enqueue("helios", json.dumps({"brand": "origin_to_ovation",
                       "mission_id": mission, "stage": "commission"}), mode="execute",
-                      dedupe_key="origin_to_ovation:sachin-first-video:runtime-commission-v1")
+                      dedupe_key="origin_to_ovation:sachin-first-video:runtime-commission-records-v2")
         while job:
             job = recover_failed(job, state, mission)
             validate_scope(job["task"], mission)

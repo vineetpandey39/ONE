@@ -326,6 +326,20 @@ def stock_context(request):
     return context
 
 
+def verified_stock_subject(title, subject, outputs):
+    if subject.casefold() in title.casefold():
+        return True
+    proof = outputs.get("asset_subject_verified") or {}
+    verdict = proof.get("preview_verdict") or {}
+    return bool(proof.get("policy") == "selected-metadata-preview-fast-v2"
+        and proof.get("accepted") is True and proof.get("title") == title
+        and str(proof.get("subject", "")).casefold() == subject.casefold()
+        and subject.casefold() in str(proof.get("description", "")).casefold()
+        and len(proof.get("preview_sha256", [])) >= 2
+        and verdict.get("subject_match") is True
+        and all(verdict.get(k) is False for k in ("unusable", "uncertain", "contradiction")))
+
+
 class EnvatoAdapter:
     def __init__(self, draft: LaoDraft, workflow: Path, context, queue: Path, provider_lock: Path, *, wait_seconds=0, profile_root=None):
         self.draft, self.workflow, self.context = draft, workflow, context
@@ -448,14 +462,15 @@ class EnvatoAdapter:
                     raise ValueError("Envato returned a duplicate source; preserve receipts for targeted repair")
                 hashes.add(sha)
                 title = str(out.get("selected_asset_title") or "").strip()
-                if not title or request["subject"].casefold() not in title.casefold():
+                if not title or not verified_stock_subject(title, request["subject"], out):
                     raise ValueError("Provider success lacks a verified selected-asset subject title")
                 if any(str(word).casefold() in title.casefold() for word in inputs["blockedTitleKeywords"]):
                     raise ValueError("Selected asset contains a forbidden visual keyword")
                 titles.append(title)
                 row = {"provider": "Envato", "path": str(path), "job_id": job, "query": query,
                        "title": str(out.get("selected_asset_title") or ""), "catalog_query": catalog_query, "illustrative": True,
-                       "rights_review_required": True, "sha256": sha, **probe_stock(path)}
+                       "rights_review_required": True, "subject_evidence": out.get("asset_subject_verified"),
+                       "sha256": sha, **probe_stock(path)}
                 saved = self.context.artifact(f"acquired/stock-{index}.json")
                 saved.parent.mkdir(parents=True, exist_ok=True)
                 saved.write_text(json.dumps({"request_hash": fingerprint(request), "asset": row,

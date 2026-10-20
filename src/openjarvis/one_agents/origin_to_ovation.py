@@ -45,11 +45,13 @@ def mission_path(payload):
 
 
 def transfer(job, path, target, stage, enqueue, evidence):
+    evidence_hashes = {str(p): digest(p) for p in evidence}
     packet = {"brand": BRAND, "mission_id": path.name, "stage": stage,
               "from_agent": job["agent_id"], "parent_job": job["id"],
-              "evidence": {str(p): digest(p) for p in evidence}}
+              "evidence": evidence_hashes}
+    revision = hashlib.sha256(json.dumps(evidence_hashes, sort_keys=True).encode()).hexdigest()[:12]
     receipt = enqueue(target, json.dumps(packet), mode="execute",
-                      dedupe_key=f"{BRAND}:{path.name}:{stage}")
+                      dedupe_key=f"{BRAND}:{path.name}:{stage}:{revision}")
     write(path / "runtime" / f"handoff-{job['agent_id']}-{target}.json",
           {**packet, "to_agent": target, "job_id": receipt["id"]})
     return {"status": "handed_off", "next_job": receipt["id"], "to_agent": target,
