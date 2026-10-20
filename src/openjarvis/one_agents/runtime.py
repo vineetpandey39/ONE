@@ -65,6 +65,7 @@ AGENTS: dict[str, dict[str, str]] = {
     # guessing wrong here means posting to the wrong account.
     "kairos": {"name": "KAIROS", "role": "aibyvineet carousel worker and Floor 4 revenue agent: turns @imagineindia.ai and @aibyvineet reach into income - money-funnel reviews, brand deals, media kits, affiliate and product plans (drafts only, sends nothing without the Chairman)", "floor_id": "4", "floor_name": "Media & Content", "division": "media", "seat": "worker", "reports_to": "ia"},
     "herald": {"name": "HERALD", "role": "LinkedIn authority-post production and publishing worker (Growth floor, reports to ARES)", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth", "seat": "worker", "reports_to": "ares"},
+    "chandan": {"name": "CHANDAN", "role": "Origin to Ovation biography production worker; reuses approved assets and hands completed masters to ARES", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
     "planexium": {"name": "PLANEXIUM", "role": "The Planexium science production worker using local Windows narration and shared services", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
     "yatra": {"name": "YATRA", "role": "Sonia Travel Vlogs Envato acquisition, OBS capture and video assembly worker", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
     "fabula": {"name": "FABULA", "role": "YouTube narration production and approved voice checkpoint worker", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
@@ -6119,9 +6120,20 @@ def _run_lyra(job: dict[str, Any]) -> dict[str, Any]:
         stages.clear_stage("lyra")
 
 
+def _run_chandan(job: dict[str, Any]) -> dict[str, Any]:
+    """Floor 12 production worker, restricted to its commissioned brand."""
+    if _json_task(job).get("brand") != "origin_to_ovation":
+        raise ValueError("CHANDAN only accepts explicit origin_to_ovation missions")
+    from openjarvis.one_agents.origin_to_ovation import run_stage
+    return run_stage(job, enqueue=enqueue_job)
+
+
 def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 3 - organic publishing distribution or the existing local plan."""
     payload = _json_task(job)
+    if payload.get("brand") == "origin_to_ovation":
+        from openjarvis.one_agents.origin_to_ovation import run_stage
+        return run_stage(job, enqueue=enqueue_job)
     # LinkedIn Authority: the one channel Floor 3 owns (Chairman, 2026-10-13).
     _task_text = str(job.get("task") or "")
     _li = floors_bridge.load("floor_03_growth", "linkedin_authority")
@@ -6242,6 +6254,9 @@ def _echo_missing_languages(uploader: Any) -> list[dict[str, Any]]:
 def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
     """Finish Sonia's private YouTube draft after LYRA returns its package to HELIOS."""
     payload = _json_task(job)
+    if payload.get("brand") == "origin_to_ovation":
+        from openjarvis.one_agents.origin_to_ovation import run_stage
+        return run_stage(job, enqueue=enqueue_job)
     if payload.get("brand") == "planexium":
         if payload.get("stage") != "private_upload":
             raise ValueError("PLANEXIUM distribution requires explicit private-upload stage")
@@ -6788,6 +6803,9 @@ def _run_helios(job: dict[str, Any]) -> dict[str, Any]:
     task = str(job.get("task") or "")
     mode = str(job.get("mode") or "plan").strip().lower()
     payload = _json_task(job)
+    if payload.get("brand") == "origin_to_ovation":
+        from openjarvis.one_agents.origin_to_ovation import run_stage
+        return run_stage(job, enqueue=enqueue_job)
     if payload.get("brand") == "planexium" or (not payload and "planexium" in task.casefold()):
         from openjarvis.one_agents.planexium import head_job
         return head_job(job, enqueue=enqueue_job)
@@ -10301,6 +10319,7 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         "muse": _run_muse,
         "kairos": _run_kairos,
         "herald": _run_herald,
+        "chandan": _run_chandan,
         "planexium": _run_planexium,
         "yatra": _run_yatra,
         "fabula": _run_fabula,
