@@ -89,7 +89,9 @@ def image_provider(path, shot):
         {"action": "open_browser", "args": {
             "profile_dir": browser["profile_dir"], "cdp_url": browser["cdp_url"],
             "start_url": "https://chatgpt.com/"}},
-        {"action": "navigate", "args": {"url": "https://chatgpt.com/"}},
+        # A fresh temporary chat clears stale Stop-generating state while the
+        # dedicated signed-in CHANDAN browser profile remains persistent.
+        {"action": "navigate", "args": {"url": "https://chatgpt.com/?temporary-chat=true"}},
         {"action": "wait_for_any_selector", "args": {
             "selectors": ["#prompt-textarea", "[contenteditable='true']", "textarea"],
             "timeout_ms": 60000, "as": "composer"}},
