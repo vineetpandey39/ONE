@@ -6075,6 +6075,59 @@ def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
         reason = "LinkedIn Authority stopped: Floor 3's linkedin_authority module could not be loaded."
         return {"agent": "ARES", "mode": "blocked", "_blocked": True, "content": reason,
                 "blocked_reason": reason, "handed_to": None}
+    if payload.get("brand") == "sonia_travel_vlogs" and payload.get("stage") == "vista_thumbnail_seo":
+        # VISTA deliberately stops before the expensive ChatGPT thumbnail/SEO leg. ARES owns that leg and resumes
+        # from VISTA's durable handoff; it must never call the full production entry point because doing so could
+        # buy footage or synthesize Sonia's narration again.
+        slot = str(payload.get("slot") or "")
+        origin = str(payload.get("origin_job") or "")
+        trigger_id = str(payload.get("trigger_id") or "")
+        handoff = payload.get("handoff")
+        if slot not in {"0900", "1300", "1800"} or not origin:
+            raise RuntimeError("ARES received an incomplete VISTA thumbnail/SEO handoff")
+        expected_trigger = f"daily-vista-short-{slot}"
+        if trigger_id != expected_trigger or not _job_fired_by_trigger(expected_trigger, origin):
+            raise RuntimeError("ARES VISTA handoff has no authentic scheduler fire receipt")
+        if not isinstance(handoff, (dict, str)) or not handoff:
+            raise RuntimeError("ARES received no durable VISTA thumbnail/SEO handoff")
+
+        stages.worker_confirms_receipt("ares", "Received VISTA's saved Short for thumbnail and SEO")
+        try:
+            stages.set_stage("ares", stages.EXECUTING,
+                             "Generating Sonia's thumbnail and completing the Short SEO package")
+            runner = _load_vista_runner()
+            resume = getattr(runner, "resume_thumbnail_seo", None)
+            if not callable(resume):
+                raise RuntimeError("VISTA runner has no resume_thumbnail_seo(handoff) checkpoint function")
+            result = resume(handoff)
+            package = Path(str(result.get("package") or "")) if isinstance(result, dict) else Path("")
+            if not isinstance(result, dict) or result.get("status") != "qc_passed" or not package.is_file():
+                raise RuntimeError("ARES did not receive a QC-passed VISTA distribution package")
+
+            stages.set_stage("ares", stages.CARRYING_TO_HEAD,
+                             "Taking the QC-passed Short package to ECHO for private upload")
+            handoff_key = f"vista:{origin}:{slot}:publish"
+            if payload.get("rebuild_run_dir"):
+                import hashlib
+                master = Path(str(result.get("master") or ""))
+                if not master.is_file():
+                    raise RuntimeError("Rebuilt VISTA package has no master for upload dedupe")
+                handoff_key += ":" + hashlib.sha256(master.read_bytes()).hexdigest()[:16]
+            _require_active_job(job, "hand the QC-passed Short to ECHO")
+            echo_payload = {
+                **payload,
+                "stage": "vista_short_publish",
+                "package": str(package),
+                "publish_authorized": True,
+                "trigger_id": trigger_id,
+                "ares_job": job.get("id"),
+            }
+            echo_job = enqueue_job("echo", json.dumps(echo_payload), mode="execute", tier="fast",
+                                   dedupe_key=handoff_key)
+            return {"agent": "ARES", **result,
+                    "handed_to": {"agent": "ECHO", "job_id": echo_job["id"]}}
+        finally:
+            stages.clear_stage("ares")
     if payload.get("brand") == "sonia_travel_vlogs" and payload.get("stage") == "seo":
         forwarded = enqueue_job(
             "lyra", json.dumps(payload), mode="execute", tier="fast",
@@ -6210,7 +6263,10 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
     package = Path(str(payload.get("package") or payload.get("output") or ""))
     if payload.get("brand") != "sonia_travel_vlogs" or not package.is_file():
         return _local_plan(job)
-    stages.worker_confirms_receipt("echo", "Received LYRA package from HELIOS for subtitles and distribution completion")
+    upstream = "ARES" if payload.get("stage") == "vista_short_publish" else "LYRA"
+    stages.worker_confirms_receipt(
+        "echo", f"Received {upstream}'s QC-passed package for subtitles and private distribution completion"
+    )
     try:
         from openjarvis.one_agents import youtube_distribution, youtube_publish
         stages.set_stage("echo", stages.EXECUTING, "Uploading the governed private draft")
@@ -6232,13 +6288,26 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
             "storage_cleanup": storage, "published": False, "output": str(package)}), mode="report", tier="fast",
             dedupe_key=f"travel:{payload.get('lao_job')}:distribution-report")
         return {"agent": "ECHO", **result, "storage_cleanup": storage,
-                "handed_to": {"agent": "IRIS", "job_id": report["id"]}}
+                "handed_to": {"agent": "HELIOS", "job_id": report["id"]}}
     finally:
         stages.clear_stage("echo")
 
 
+def _load_vista_runner() -> Any:
+    """Load VISTA's production module without importing its repository as a package."""
+    runner_path = Path(os.environ.get("VISTA_RUNNER", r"C:\Users\pc\Documents\LAO\vista\production.py"))
+    if not runner_path.is_file():
+        raise RuntimeError(f"VISTA production runner is missing: {runner_path}")
+    spec = importlib.util.spec_from_file_location("vista_production", runner_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot load VISTA production runner: {runner_path}")
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    return runner
+
+
 def _run_vista(job: dict[str, Any]) -> dict[str, Any]:
-    """Run one HELIOS-researched, slot-bound Short and hand its package to ECHO."""
+    """Run one HELIOS-researched Short through media, then hand its checkpoint to ARES."""
     payload = _json_task(job)
     if payload.get("brand") != "sonia_travel_vlogs" or payload.get("content_format") != "youtube_short":
         raise RuntimeError("VISTA only accepts Sonia Travel Vlogs youtube_short briefs from HELIOS")
@@ -6257,14 +6326,7 @@ def _run_vista(job: dict[str, Any]) -> dict[str, Any]:
     stages.worker_confirms_receipt("vista", f"Received HELIOS's researched {slot} Short brief")
     try:
         stages.set_stage("vista", stages.EXECUTING, "Producing the slot-bound vertical Short and QC package")
-        runner_path = Path(os.environ.get("VISTA_RUNNER", r"C:\Users\pc\Documents\LAO\vista\production.py"))
-        if not runner_path.is_file():
-            raise RuntimeError(f"VISTA production runner is missing: {runner_path}")
-        spec = importlib.util.spec_from_file_location("vista_production", runner_path)
-        if spec is None or spec.loader is None:
-            raise RuntimeError(f"Cannot load VISTA production runner: {runner_path}")
-        runner = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(runner)
+        runner = _load_vista_runner()
         stages.set_stage("vista", stages.EXECUTING, "Researching and writing the Short with LAO's ChatGPT")
         from openjarvis.one_agents import resource_lanes
         stages.set_stage("vista", stages.EXECUTING,
@@ -6278,24 +6340,20 @@ def _run_vista(job: dict[str, Any]) -> dict[str, Any]:
                              "Producing with VISTA's isolated browser and Envato lane")
             result = runner.run({**payload, "publish_authorized": True, "trigger_id": trigger_id,
                                  "_writer": _vista_chatgpt})
-        package = Path(str(result.get("package") or ""))
-        if result.get("status") != "qc_passed" or not package.is_file():
-            raise RuntimeError("VISTA did not produce a QC-passed distribution package")
-        stages.set_stage("vista", stages.CARRYING_TO_HEAD, "Taking the finished Short package to ECHO")
-        # One upload per fire, except a deliberate rebuild of the cut (2026-10-13 Nha Trang music): its new master
-        # gets its own handoff. The upload ledger is keyed by the master's hash, so one cut never uploads twice.
-        handoff = f"vista:{origin}:{slot}:publish"
-        if payload.get("rebuild_run_dir"):
-            import hashlib
-            master = Path(str(result.get("master") or ""))
-            handoff += ":" + hashlib.sha256(master.read_bytes()).hexdigest()[:16]
-        _require_active_job(job, "hand the Short to ECHO")
-        echo_job = enqueue_job(
-            "echo", json.dumps({**payload, "stage": "vista_short_publish", "package": str(package),
+        handoff = result.get("handoff") if isinstance(result, dict) else None
+        if (not isinstance(result, dict) or result.get("status") != "thumbnail_ready"
+                or not isinstance(handoff, (dict, str)) or not handoff):
+            raise RuntimeError("VISTA did not produce a durable thumbnail/SEO handoff")
+        stages.set_stage("vista", stages.CARRYING_TO_HEAD,
+                         "Taking the saved Short to ARES for thumbnail and SEO")
+        _require_active_job(job, "hand the saved Short to ARES")
+        ares_job = enqueue_job(
+            "ares", json.dumps({**payload, "stage": "vista_thumbnail_seo", "handoff": handoff,
                                  "publish_authorized": True, "trigger_id": trigger_id,
                                  "vista_job": job.get("id")}),
-            mode="execute", tier="fast", dedupe_key=handoff)
-        return {"agent": "VISTA", **result, "handed_to": {"agent": "ECHO", "job_id": echo_job["id"]}}
+            mode="execute", tier="fast", dedupe_key=f"vista:{origin}:{slot}:thumbnail-seo")
+        return {"agent": "VISTA", **result,
+                "handed_to": {"agent": "ARES", "job_id": ares_job["id"]}}
     finally:
         stages.clear_stage("vista")
 
