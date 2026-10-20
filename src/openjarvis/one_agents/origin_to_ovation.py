@@ -123,8 +123,22 @@ def run_stage(job, *, enqueue):
           {"agent": agent, "job_id": job["id"], "status": "running"})
     if agent == "helios":
         if payload.get("stage") == "reconcile":
+            if payload.get("from_agent") != "echo" or not payload.get("evidence"):
+                raise ValueError("HELIOS reconciliation requires ECHO evidence")
+            upload = read(path / "runtime" / "upload-receipt.json")
+            manifest = read(path / "mission.json")
+            if (not upload.get("video_id") or not upload.get("visibility_verified")
+                    or upload.get("master_sha256") != digest(master_dir / "master.mp4")
+                    or manifest["browser"].get("observed_route_requires_owner_confirmation", True)
+                    or upload.get("channel_id") != manifest["browser"].get("observed_studio_channel_id")):
+                raise ValueError("Upload receipt does not verify this master and intended channel")
+            sys.path.insert(0, str(ROOT))
+            from agent_runtime.content_calendar import ContentCalendar
+            calendar = ContentCalendar(ROOT)
+            calendar.complete(path.name, master_dir / "master.mp4", path / "runtime" / "editorial-qc.json")
+            calendar.export()
             return {"status": "reconciled", "mission_id": path.name,
-                    "upload": read(path / "runtime" / "upload-receipt.json")}
+                    "upload": upload}
         sys.path.insert(0, str(ROOT))
         from agent_runtime.content_calendar import ContentCalendar
         ContentCalendar(ROOT).reserve(path.name, "sachin-tendulkar", "Sachin Tendulkar")

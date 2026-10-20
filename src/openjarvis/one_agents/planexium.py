@@ -318,6 +318,19 @@ class Pipeline:
             _write(path, media)
             return media, files + [path]
         media = self.stage("media", {"science": science, "timing": voice["segments"]}, acquire)
+        # Pin the renderer for this mission. A configuration rollout must not
+        # retroactively invalidate an already sealed review master.
+        renderer_path = root / "render-backend.json"
+        if renderer_path.exists():
+            renderer_config = json.loads(renderer_path.read_text(encoding="utf-8"))
+        else:
+            renderer_config = ({"backend": "legacy"} if (root/"checkpoints/render.json").exists()
+                else {"backend": self.config.get("render_backend", "legacy"),
+                      "resolve": self.config.get("resolve")})
+            _write(renderer_path, renderer_config)
+        resolve_settings = renderer_config.get("resolve") if renderer_config["backend"] == "resolve_fusion" else None
+        if renderer_config["backend"] == "resolve_fusion" and not resolve_settings:
+            raise ValueError("Resolve/Fusion configuration missing; no legacy fallback")
         def cut():
             if self.renderer:
                 result = self.renderer(root)
@@ -326,6 +339,7 @@ class Pipeline:
                 from openjarvis.one_agents.planexium_render_job import run_render
                 from openjarvis.one_agents import stages
                 result = run_render(root, tools, motion_format=self.config.get("motion_format"),
+                    resolve_settings=resolve_settings,
                     on_progress=(lambda progress: stages.set_stage("planexium", stages.EXECUTING,
                         str(progress.get('detail') or
                             f"{progress.get('status','rendering').replace('_',' ')}: scene {progress.get('scene',0)} / {progress.get('total_scenes',0)}")))
@@ -342,11 +356,15 @@ class Pipeline:
         from openjarvis.one_agents.youtube_motion import library_hash
         from openjarvis.one_agents.planexium_shared_motion import fingerprint as shared_motion_hash
         tools = Path(self.config.get("edit_tools") or Path.home() / "Documents" / "LAO" / "yatra-edit")
-        master = self.stage("render", {"science": science, "media": media, "voice": voice,
+        render_request = {"science": science, "media": media, "voice": voice,
             "visual_repair": _hash(root / "visual-repair.json") if (root / "visual-repair.json").exists() else None,
             "cinematic_plan": _hash(root / "cinematic-plan.json") if (root / "cinematic-plan.json").exists() else None,
             "motion_library": library_hash(), "installed_motion_library": shared_motion_hash(tools) if self.config.get("editing_mode")=="footage_first" else None, "motion_format": self.config.get("motion_format"),
-            "motion_copy": _hash(root / "motion-copy.json") if (root / "motion-copy.json").exists() else None}, cut)
+            "motion_copy": _hash(root / "motion-copy.json") if (root / "motion-copy.json").exists() else None}
+        if resolve_settings:
+            from openjarvis.one_agents import planexium_resolve
+            render_request["resolve"] = {"settings": resolve_settings, "adapter": _hash(Path(planexium_resolve.__file__))}
+        master = self.stage("render", render_request, cut)
         return self.package(science, voice, evidence, master)
 
     def package(self, science, voice, evidence, master):
@@ -356,7 +374,7 @@ class Pipeline:
             files=[self.context.artifact(name) for name in ["production-plan.json",
                 "seo/youtube-seo-package.json","edit/subtitles.srt","review-gate.json","thumbnail/thumbnail-experiment.json"]]
             files += [Path(package["thumbnail_path"]), *[Path(v["path"]) for v in package["thumbnail_experiment"]["variants"]]]
-            for name in ['cinematic-plan.json','edit/cinematic-assets.json','edit/cinematic-edit-report.json','edit/music-bed.m4a','edit/resolved-editorial-plan.json','edit/timeline-uniqueness.json','edit/shared-director-plan.json']:
+            for name in ['cinematic-plan.json','edit/cinematic-assets.json','edit/cinematic-edit-report.json','edit/music-bed.m4a','edit/resolved-editorial-plan.json','edit/timeline-uniqueness.json','edit/shared-director-plan.json','edit/resolve-project.drp','edit/resolve.comp','edit/resolve-receipt.json']:
                 path=self.context.artifact(name)
                 if path.exists():files.append(path)
             audit=self.context.artifact('edit/cinematic-edit-report.json')
@@ -416,6 +434,9 @@ class Pipeline:
         package.update(master=master["master"], caption=str(caption), source_evidence=str(self.context.artifact("evidence.json")),
                        human_science_review_required=True, human_rights_review_required=True,
                        subtitle_word_timing="estimated within measured narration segments", public_publish_authorized=False)
+        if (root/'edit/resolve-receipt.json').exists():
+            package['resolve_project'] = str(root/'edit/resolve-project.drp')
+            package['resolve_render_receipt'] = str(root/'edit/resolve-receipt.json')
         if self.context.artifact('edit/cinematic-edit-report.json').exists():
             package['editorial_evidence']=str(self.context.artifact('edit/cinematic-edit-report.json'))
             package['music_and_stock_receipts']=str(self.context.artifact('edit/cinematic-assets.json'))

@@ -26,16 +26,13 @@ def main():
             lock.flush()
         lock.seek(0)
         msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
-        runtime.enqueue_job = enqueue_original_guard(runtime.enqueue_job)
+        runtime.enqueue_job = enqueue_original_guard(runtime.enqueue_job, mission)
         job = enqueue("helios", json.dumps({"brand": "origin_to_ovation",
                       "mission_id": mission, "stage": "commission"}), mode="execute",
                       dedupe_key="origin_to_ovation:sachin-first-video:runtime-commission-v1")
         while job:
-            if job["status"] == "failed":
-                old = job["id"]
-                job = enqueue(job["agent_id"], job["task"], mode=job["mode"],
-                              dedupe_key=f"origin_to_ovation:retry:{old}")
-                write(state / f"retry-{old}.json", {"previous": old, "retry": job["id"]})
+            job = recover_failed(job, state, mission)
+            validate_scope(job["task"], mission)
             if job["status"] == "completed":
                 result = json.loads(job.get("result") or "{}")
             elif job["status"] == "reserved":
@@ -67,11 +64,33 @@ def main():
             job = runtime.get_job(next_id) if next_id else None
 
 
-def enqueue_original_guard(original):
-    """Reserve only this runner's brand jobs, leaving shared workers untouched."""
+def validate_scope(task, mission):
+    payload = json.loads(task)
+    if payload.get("brand") != "origin_to_ovation" or payload.get("mission_id") != mission:
+        raise ValueError("Isolated driver may only execute its commissioned brand and mission")
+
+
+def recover_failed(job, state, mission, max_retries=20):
+    """Walk persisted failed retries without reexecuting their claimed job IDs."""
+    attempts = 0
+    seen = set()
+    while job["status"] == "failed":
+        validate_scope(job["task"], mission)
+        old = job["id"]
+        if attempts >= max_retries or old in seen:
+            raise RuntimeError("Failed retry chain exhausted; inspect before retry")
+        seen.add(old)
+        job = enqueue(job["agent_id"], job["task"], mode=job["mode"],
+                      dedupe_key=f"origin_to_ovation:retry:{old}")
+        write(state / f"retry-{old}.json", {"previous": old, "retry": job["id"]})
+        attempts += 1
+    return job
+
+
+def enqueue_original_guard(original, mission="sachin-first-video"):
+    """Reserve only this runner's mission jobs, leaving shared workers untouched."""
     def guarded(agent, task, **kwargs):
-        if json.loads(task).get("brand") != "origin_to_ovation":
-            raise ValueError("Isolated driver may not commission other brands")
+        validate_scope(task, mission)
         kwargs["reserved"] = True
         return original(agent, task, **kwargs)
     return guarded

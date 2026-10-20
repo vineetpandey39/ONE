@@ -149,7 +149,7 @@ def validate_unique_timeline(shots):
             'overlapping_source_ranges': 0, 'video_looping': False}
 
 
-def render(root, tools):
+def render(root, tools, *, resolve_settings=None):
     from openjarvis.one_agents.planexium_render import _load, _command
     from openjarvis.one_agents import space_research
     from openjarvis.one_agents.youtube_motion import assignment
@@ -233,7 +233,7 @@ def render(root, tools):
         for ordinal,shot in enumerate(shots,1):
             progress(root,'editing_footage',scene=shot['scene'],total_scenes=len(science['scenes']),shot=ordinal,total_shots=len(shots))
             target=directory/f'shot-{ordinal:03d}.mp4';receipt=target.with_suffix('.json')
-            signature=hashlib.sha256(json.dumps({'shot':shot,'editor':sha(Path(__file__)),'shared_spec':shared_specs.get(ordinal),'shared_library':shared.library_hash if ordinal in shared_specs else None},sort_keys=True).encode()).hexdigest()
+            signature=hashlib.sha256(json.dumps({'shot':shot,'editor':sha(Path(__file__)),'native_fusion':bool(resolve_settings),'shared_spec':shared_specs.get(ordinal),'shared_library':shared.library_hash if ordinal in shared_specs else None},sort_keys=True).encode()).hexdigest()
             prior=json.loads(receipt.read_text(encoding='utf-8')) if receipt.exists() else {}
             if not (target.exists() and prior.get('signature')==signature and prior.get('sha256')==sha(target)):
                 seconds=shot['frames']/30;duration=float(shot['asset']['seconds']);start=shot['asset'].get('usable_in',0)
@@ -249,7 +249,7 @@ def render(root, tools):
                     label_file=directory/f'credit-{ordinal}.txt';label_file.write_text(label,encoding='utf-8')
                     label_path=label_file.as_posix().replace(':','\\:')
                     filters+=f",drawtext=fontfile='{font}':textfile='{label_path}':fontsize=23:fontcolor=white@0.85:x=36:y=36:box=1:boxcolor=black@0.35:boxborderw=9"
-                if shot['callout'] and ordinal not in shared_specs:
+                if shot['callout'] and ordinal not in shared_specs and not resolve_settings:
                     text=directory/f'callout-{ordinal}.txt'
                     limit=callout_style(format_family)['max_chars'];caption=shot['callout']
                     if len(caption)>limit:caption=caption[:limit-1].rsplit(' ',1)[0]+'…'
@@ -261,7 +261,7 @@ def render(root, tools):
                     filters+=overlay
                 image_source=Path(shot['asset']['path']).suffix.lower() in {'.jpg','.jpeg','.png'}
                 source_args=['-loop','1'] if image_source else ['-ss',f'{offset:.3f}']
-                if ordinal in shared_specs:
+                if ordinal in shared_specs and not resolve_settings:
                     shared.render(shared_specs[ordinal],filters,[*source_args,'-i',shot['asset']['path']],target)
                 else:
                     _command(['ffmpeg','-y','-v','error',*source_args,'-i',shot['asset']['path'],
@@ -300,6 +300,9 @@ def render(root, tools):
         '-map','[out]','-t',str(total),'-c:a','aac','-b:a','192k',str(soundtrack)])
     master=work/'master.mp4';_command(['ffmpeg','-y','-v','error','-i',str(picture),'-i',str(soundtrack),
         '-map','0:v:0','-map','1:a:0','-c','copy','-t',str(total),'-movflags','+faststart',str(master)])
+    if resolve_settings:
+        from openjarvis.one_agents.planexium_resolve import finish
+        finish(root, resolve_settings, shots, format_family)
     progress(root,'technical_and_editorial_qc',scene=len(science['scenes']),total_scenes=len(science['scenes']))
     report=qc.Report();duration=qc.check_streams(master,report);qc.check_sync(master,voice_path,duration,report)
     qc.check_black(master,report);qc.check_silence(master,report);qc.check_loudness(master,report)
@@ -313,6 +316,8 @@ def render(root, tools):
     mean_db=float(measured[1]) if measured else float('-inf')
     report.add('PASS' if math.isfinite(mean_db) and mean_db>-45 else 'FAIL','music stem',f'Non-silent Envato instrumental bed: measured mean {mean_db:.1f} dBFS; voice-ducked in mix')
     rows=[{'level':level,'check':check,'detail':detail} for level,check,detail in report.rows]
+    if resolve_settings:
+        rows.append({'level':'PASS','check':'Resolve/Fusion render','detail':'Completed MCP job; exact frames, native Fusion beats and audio verified; project retained'})
     (work/'qc-report.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
     (work/'cinematic-edit-report.json').write_text(json.dumps({'shots':shots,'music':assets['music'],
         'music_bed_lufs_target':-23,'music_bed_measured_mean_dbfs':mean_db,'narration_mix_lufs_target':-16,'envato_screen_fraction':envato_frames/sum(scene_frames.values()),

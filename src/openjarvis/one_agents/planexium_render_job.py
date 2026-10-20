@@ -11,12 +11,15 @@ import psutil
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def render_signature(root,tools,motion_format):
+def render_signature(root,tools,motion_format,resolve_settings=None):
     from openjarvis.one_agents.youtube_motion import library_hash
     files=['science-plan.json','media-manifest.json','narration/narration.segments.json','motion-copy.json','visual-repair.json','cinematic-plan.json']
     values={name:digest(root/name) for name in files if (root/name).is_file()}
     values.update(library=library_hash(),renderer=digest(Path(__file__).with_name('planexium_render.py')),
                   tools=str(tools.resolve()),motion_format=motion_format)
+    if resolve_settings:
+        values['resolve'] = resolve_settings
+        values['resolve_adapter'] = digest(Path(__file__).with_name('planexium_resolve.py'))
     if (root/'cinematic-plan.json').exists():
         from openjarvis.one_agents.planexium_shared_motion import fingerprint
         values['installed_motion_v3']=fingerprint(tools)
@@ -45,10 +48,10 @@ def child_alive(state,root):
     except Exception:return True # uncertain identity must not permit a duplicate
 
 
-def run_render(root,tools,*,motion_format=None,on_progress=None,timeout=14400):
+def run_render(root,tools,*,motion_format=None,on_progress=None,timeout=14400,resolve_settings=None):
     root,tools=Path(root).resolve(),Path(tools).resolve()
     work=root/'edit';work.mkdir(parents=True,exist_ok=True)
-    signature=render_signature(root,tools,motion_format)
+    signature=render_signature(root,tools,motion_format,resolve_settings)
     path=work/'render-owner.json'
     state=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
     deadline=time.monotonic()+timeout
@@ -64,6 +67,11 @@ def run_render(root,tools,*,motion_format=None,on_progress=None,timeout=14400):
     if state and child_alive(state,root):wait()
     if completed(root,signature):return {'master':str(work/'master.mp4')}
     args=[sys.executable,'-m','openjarvis.one_agents.planexium_render',str(root),'--tools',str(tools),'--job-signature',signature]
+    if resolve_settings:
+        from openjarvis.one_agents.planexium_resolve import write
+        settings_path=work/'resolve-settings.json'
+        write(settings_path,resolve_settings)
+        args+=['--resolve-settings',str(settings_path)]
     if motion_format:args+=['--format',motion_format]
     with (work/'render.log').open('a',encoding='utf-8') as log:
         child=subprocess.Popen(args,stdout=log,stderr=subprocess.STDOUT)

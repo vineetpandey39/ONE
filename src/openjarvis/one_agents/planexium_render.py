@@ -67,10 +67,12 @@ def _layer(text: str, out: Path, *, y: int, size=48):
     image.save(out)
 
 
-def render(root: Path, tools: Path, *, motion_format: str | None = None) -> dict:
+def render(root: Path, tools: Path, *, motion_format: str | None = None, resolve_settings=None) -> dict:
     if (root / 'cinematic-plan.json').exists():
         from openjarvis.one_agents.planexium_cinematic import render as cinematic_render
-        return cinematic_render(root, tools)
+        return cinematic_render(root, tools, resolve_settings=resolve_settings)
+    if resolve_settings:
+        raise ValueError("Resolve/Fusion requires the finite cinematic storyboard")
     # Flat imports in the installed editor are isolated to this CLI process.
     sys.path.insert(0, str(tools))
     assembly = _load(tools / "assemble.py", "planexium_shared_assembly")
@@ -183,9 +185,11 @@ if __name__ == "__main__":
     parser.add_argument("--tools", type=Path, required=True)
     parser.add_argument("--format", choices=("travel-dossier", "cinematic-clean", "editorial-punch", "kinetic-type", "motion-lab"))
     parser.add_argument("--job-signature")
+    parser.add_argument("--resolve-settings", type=Path)
     args = parser.parse_args()
     try:
-        result = render(args.root.resolve(), args.tools.resolve(), motion_format=args.format)
+        result = render(args.root.resolve(), args.tools.resolve(), motion_format=args.format,
+            resolve_settings=json.loads(args.resolve_settings.read_text(encoding='utf-8')) if args.resolve_settings else None)
     except Exception:
         progress = args.root.resolve() / 'edit/render-progress.json'
         state = json.loads(progress.read_text(encoding='utf-8')) if progress.exists() else {}
