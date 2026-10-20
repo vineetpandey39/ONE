@@ -172,7 +172,21 @@ def _render(root: Path, *, expected_shots: int = 75, size: tuple[int,int] = (192
     # An original restrained tonal bed, with a short filtered-noise lift at chapter changes.
     # Sidechain compression lowers the already quiet bed whenever narration is present.
     bed=cache/'original-bed.wav'
-    _run(['ffmpeg','-hide_banner','-loglevel','error','-y','-f','lavfi','-i',f"aevalsrc=0.008*sin(2*PI*110*t)+0.004*sin(2*PI*164.8138*t)+0.002*sin(2*PI*220*t):s=48000:d={duration}",'-af',f'afade=t=in:d=3,afade=t=out:st={max(0,duration-4)}:d=4','-c:a','pcm_s16le',str(bed)])
+    # Audible original cinematic score: a slow Am-F-C-G harmonic cycle,
+    # warm bass pulse and restrained upper shimmer.  The previous 0.008
+    # drone sat around -42 dB before ducking and was effectively inaudible.
+    phase="mod(t,64)"
+    am=f"if(lt({phase},16),1,0)"; fmaj=f"if(between({phase},16,32),1,0)"
+    cmaj=f"if(between({phase},32,48),1,0)"; gmaj=f"if(gte({phase},48),1,0)"
+    score=(
+        f"0.026*({am})*(sin(2*PI*110*t)+0.55*sin(2*PI*130.8128*t)+0.42*sin(2*PI*164.8138*t))"
+        f"+0.026*({fmaj})*(sin(2*PI*87.3071*t)+0.55*sin(2*PI*110*t)+0.42*sin(2*PI*130.8128*t))"
+        f"+0.026*({cmaj})*(sin(2*PI*65.4064*t)+0.55*sin(2*PI*82.4069*t)+0.42*sin(2*PI*98*t))"
+        f"+0.026*({gmaj})*(sin(2*PI*97.9989*t)+0.55*sin(2*PI*123.4708*t)+0.42*sin(2*PI*146.8324*t))"
+        "+0.018*sin(2*PI*55*t)*exp(-5*mod(t,2))"
+        "+0.006*sin(2*PI*440*t)*exp(-3*mod(t,8))"
+    )
+    _run(['ffmpeg','-hide_banner','-loglevel','error','-y','-f','lavfi','-i',f"aevalsrc={score}:s=48000:d={duration}",'-af',f'lowpass=f=1800,highpass=f=45,afade=t=in:d=3,afade=t=out:st={max(0,duration-4)}:d=4','-c:a','pcm_s16le',str(bed)])
     chapter_starts=[float(s['start_seconds'])/tempo for i,s in enumerate(shots) if i and s['chapter']!=shots[i-1]['chapter']]
     windows='+'.join(f'if(between(t,{max(0,t-.20):.3f},{t+.24:.3f}),0.007*sin(PI*(t-{max(0,t-.20):.3f})/0.44)^2,0)' for t in chapter_starts) or '0'
     filters=f"[1:a]atempo={tempo},apad,atrim=duration={duration},asplit=2[voice][side];[2:a][side]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=400[bed];[3:a]highpass=f=700,lowpass=f=5500,volume='{windows}':eval=frame[sfx];[voice][bed][sfx]amix=inputs=3:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11,atrim=duration={duration}[audio]"
