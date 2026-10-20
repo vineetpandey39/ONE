@@ -340,10 +340,12 @@ class Pipeline:
                 raise ValueError("Technical QC failed or mandatory checks are missing")
             return result, [self.context.artifact("edit/master.mp4"), self.context.artifact("edit/qc-report.json")]
         from openjarvis.one_agents.youtube_motion import library_hash
+        from openjarvis.one_agents.planexium_shared_motion import fingerprint as shared_motion_hash
+        tools = Path(self.config.get("edit_tools") or Path.home() / "Documents" / "LAO" / "yatra-edit")
         master = self.stage("render", {"science": science, "media": media, "voice": voice,
             "visual_repair": _hash(root / "visual-repair.json") if (root / "visual-repair.json").exists() else None,
             "cinematic_plan": _hash(root / "cinematic-plan.json") if (root / "cinematic-plan.json").exists() else None,
-            "motion_library": library_hash(), "motion_format": self.config.get("motion_format"),
+            "motion_library": library_hash(), "installed_motion_library": shared_motion_hash(tools) if self.config.get("editing_mode")=="footage_first" else None, "motion_format": self.config.get("motion_format"),
             "motion_copy": _hash(root / "motion-copy.json") if (root / "motion-copy.json").exists() else None}, cut)
         return self.package(science, voice, evidence, master)
 
@@ -354,7 +356,7 @@ class Pipeline:
             files=[self.context.artifact(name) for name in ["production-plan.json",
                 "seo/youtube-seo-package.json","edit/subtitles.srt","review-gate.json","thumbnail/thumbnail-experiment.json"]]
             files += [Path(package["thumbnail_path"]), *[Path(v["path"]) for v in package["thumbnail_experiment"]["variants"]]]
-            for name in ['cinematic-plan.json','edit/cinematic-assets.json','edit/cinematic-edit-report.json','edit/music-bed.m4a','edit/resolved-editorial-plan.json','edit/timeline-uniqueness.json']:
+            for name in ['cinematic-plan.json','edit/cinematic-assets.json','edit/cinematic-edit-report.json','edit/music-bed.m4a','edit/resolved-editorial-plan.json','edit/timeline-uniqueness.json','edit/shared-director-plan.json']:
                 path=self.context.artifact(name)
                 if path.exists():files.append(path)
             audit=self.context.artifact('edit/cinematic-edit-report.json')

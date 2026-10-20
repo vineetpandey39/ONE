@@ -227,46 +227,52 @@ def render(root, tools):
     (work/'render-media-manifest.json').write_text(json.dumps(media_manifest(shots,assets['music']),indent=2),encoding='utf-8')
     directory=work/'cinematic';directory.mkdir(exist_ok=True)
     cuts=[];font='C\\:/Windows/Fonts/arial.ttf'
-    for ordinal,shot in enumerate(shots,1):
-        progress(root,'editing_footage',scene=shot['scene'],total_scenes=len(science['scenes']),shot=ordinal,total_shots=len(shots))
-        target=directory/f'shot-{ordinal:03d}.mp4';receipt=target.with_suffix('.json')
-        signature=hashlib.sha256(json.dumps({'shot':shot,'editor':sha(Path(__file__))},sort_keys=True).encode()).hexdigest()
-        prior=json.loads(receipt.read_text(encoding='utf-8')) if receipt.exists() else {}
-        if not (target.exists() and prior.get('signature')==signature and prior.get('sha256')==sha(target)):
-            seconds=shot['frames']/30;duration=float(shot['asset']['seconds']);start=shot['asset'].get('usable_in',0)
-            offset=start+shot['offset']
-            # Blur-fill preserves the original source framing and its creator credit.
-            filters=('[0:v]split=2[bg][fg];[bg]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,boxblur=28:2[blur];'
-                '[fg]scale=1920:1080:force_original_aspect_ratio=decrease[fit];[blur][fit]overlay=(W-w)/2:(H-h)/2,'
-                'fps=30,setsar=1,tpad=stop_mode=clone:stop_duration=1,setpts=N/(30*TB)')
-            if shot['kind']=='archive':
-                filters+=",zoompan=z='min(pzoom+0.00015,1.035)':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=1920x1080:fps=30"
-            label=source_credit(shot)
-            if label:
-                label_file=directory/f'credit-{ordinal}.txt';label_file.write_text(label,encoding='utf-8')
-                label_path=label_file.as_posix().replace(':','\\:')
-                filters+=f",drawtext=fontfile='{font}':textfile='{label_path}':fontsize=23:fontcolor=white@0.85:x=36:y=36:box=1:boxcolor=black@0.35:boxborderw=9"
-            if shot['callout']:
-                text=directory/f'callout-{ordinal}.txt'
-                limit=callout_style(format_family)['max_chars'];caption=shot['callout']
-                if len(caption)>limit:caption=caption[:limit-1].rsplit(' ',1)[0]+'…'
-                text.write_text(caption,encoding='utf-8')
-                filters+=callout_filter(text,format_family)
-            if shot.get('science_overlay'):
-                from openjarvis.one_agents.youtube_science_overlays import explanatory_filter
-                overlay,kind=explanatory_filter(directory,ordinal,science['scenes'][shot['scene']-1]['narration'],seconds)
-                filters+=overlay
-            image_source=Path(shot['asset']['path']).suffix.lower() in {'.jpg','.jpeg','.png'}
-            source_args=['-loop','1'] if image_source else ['-ss',f'{offset:.3f}']
-            _command(['ffmpeg','-y','-v','error',*source_args,'-i',shot['asset']['path'],
-                '-filter_complex',filters,'-frames:v',str(shot['frames']),'-an','-c:v','libx264','-preset','veryfast','-crf','19',
-                '-pix_fmt','yuv420p','-r','30','-fps_mode','cfr','-movflags','+faststart',str(target)])
-            probe=_command(['ffprobe','-v','error','-select_streams','v:0','-show_entries','stream=nb_frames,avg_frame_rate','-of','json',str(target)])
-            stream=json.loads(probe.stdout)['streams'][0]
-            if int(stream['nb_frames'])!=shot['frames'] or stream['avg_frame_rate']!='30/1':
-                raise RuntimeError('Rendered shot failed its measured frame budget')
-            receipt.write_text(json.dumps({'signature':signature,'sha256':sha(target),'measured_frames':int(stream['nb_frames'])}),encoding='utf-8')
-        cuts.append(target)
+    from openjarvis.one_agents.planexium_shared_motion import SharedMotion
+    with SharedMotion(root,tools,format_family) as shared:
+        shared_specs=shared.plan(shots)
+        for ordinal,shot in enumerate(shots,1):
+            progress(root,'editing_footage',scene=shot['scene'],total_scenes=len(science['scenes']),shot=ordinal,total_shots=len(shots))
+            target=directory/f'shot-{ordinal:03d}.mp4';receipt=target.with_suffix('.json')
+            signature=hashlib.sha256(json.dumps({'shot':shot,'editor':sha(Path(__file__)),'shared_spec':shared_specs.get(ordinal),'shared_library':shared.library_hash if ordinal in shared_specs else None},sort_keys=True).encode()).hexdigest()
+            prior=json.loads(receipt.read_text(encoding='utf-8')) if receipt.exists() else {}
+            if not (target.exists() and prior.get('signature')==signature and prior.get('sha256')==sha(target)):
+                seconds=shot['frames']/30;duration=float(shot['asset']['seconds']);start=shot['asset'].get('usable_in',0)
+                offset=start+shot['offset']
+                # Blur-fill preserves the original source framing and its creator credit.
+                filters=('[0:v]split=2[bg][fg];[bg]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,boxblur=28:2[blur];'
+                    '[fg]scale=1920:1080:force_original_aspect_ratio=decrease[fit];[blur][fit]overlay=(W-w)/2:(H-h)/2,'
+                    'fps=30,setsar=1,tpad=stop_mode=clone:stop_duration=1,setpts=N/(30*TB)')
+                if shot['kind']=='archive':
+                    filters+=",zoompan=z='min(pzoom+0.00015,1.035)':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=1920x1080:fps=30"
+                label=source_credit(shot)
+                if label:
+                    label_file=directory/f'credit-{ordinal}.txt';label_file.write_text(label,encoding='utf-8')
+                    label_path=label_file.as_posix().replace(':','\\:')
+                    filters+=f",drawtext=fontfile='{font}':textfile='{label_path}':fontsize=23:fontcolor=white@0.85:x=36:y=36:box=1:boxcolor=black@0.35:boxborderw=9"
+                if shot['callout'] and ordinal not in shared_specs:
+                    text=directory/f'callout-{ordinal}.txt'
+                    limit=callout_style(format_family)['max_chars'];caption=shot['callout']
+                    if len(caption)>limit:caption=caption[:limit-1].rsplit(' ',1)[0]+'…'
+                    text.write_text(caption,encoding='utf-8')
+                    filters+=callout_filter(text,format_family)
+                if shot.get('science_overlay'):
+                    from openjarvis.one_agents.youtube_science_overlays import explanatory_filter
+                    overlay,kind=explanatory_filter(directory,ordinal,science['scenes'][shot['scene']-1]['narration'],seconds)
+                    filters+=overlay
+                image_source=Path(shot['asset']['path']).suffix.lower() in {'.jpg','.jpeg','.png'}
+                source_args=['-loop','1'] if image_source else ['-ss',f'{offset:.3f}']
+                if ordinal in shared_specs:
+                    shared.render(shared_specs[ordinal],filters,[*source_args,'-i',shot['asset']['path']],target)
+                else:
+                    _command(['ffmpeg','-y','-v','error',*source_args,'-i',shot['asset']['path'],
+                        '-filter_complex',filters,'-frames:v',str(shot['frames']),'-an','-c:v','libx264','-preset','veryfast','-crf','19',
+                        '-pix_fmt','yuv420p','-r','30','-fps_mode','cfr','-movflags','+faststart',str(target)])
+                probe=_command(['ffprobe','-v','error','-select_streams','v:0','-show_entries','stream=nb_frames,avg_frame_rate','-of','json',str(target)])
+                stream=json.loads(probe.stdout)['streams'][0]
+                if int(stream['nb_frames'])!=shot['frames'] or stream['avg_frame_rate']!='30/1':
+                    raise RuntimeError('Rendered shot failed its measured frame budget')
+                receipt.write_text(json.dumps({'signature':signature,'sha256':sha(target),'measured_frames':int(stream['nb_frames'])}),encoding='utf-8')
+            cuts.append(target)
     listing=directory/'concat.txt';listing.write_text('\n'.join("file '"+p.as_posix().replace("'","'\\''")+"'" for p in cuts),encoding='utf-8')
     picture=work/'picture.mp4';_command(['ffmpeg','-y','-v','error','-f','concat','-safe','0','-i',str(listing),'-c','copy',str(picture)])
     progress(root,'mixing_music_and_voice',scene=len(science['scenes']),total_scenes=len(science['scenes']))
@@ -313,5 +319,6 @@ def render(root, tools):
         'full_screen_typography_fraction':0,'illustrative_stock_disclosed':True,'transition_sound_cues':len(effects),
         'weekday_format':format_family,'director_overlay_shots':sum(bool(s.get('director_authored')) for s in shots)},indent=2),encoding='utf-8')
     if report.failed:raise RuntimeError('Cinematic master failed technical/editorial QC')
+    shared.finish()
     progress(root,'qc_passed',scene=len(science['scenes']),total_scenes=len(science['scenes']))
     return {'master':str(master),'seconds':duration,'qc':rows}

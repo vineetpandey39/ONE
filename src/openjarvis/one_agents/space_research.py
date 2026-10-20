@@ -177,6 +177,25 @@ def discover_topic(recent: set[str], *, read=read_public) -> dict:
     raise ValueError("No unused space-science story in the official feed; require a researched commission")
 
 
+def nasa_subject_matches(query, metadata):
+    words=set(re.findall(r'[a-z0-9]{3,}',query.casefold()))
+    subject_text=' '.join([str(metadata.get('title','')), ' '.join(metadata.get('keywords') or [])]).casefold()
+    candidate=set(re.findall(r'[a-z0-9]{3,}',subject_text))
+    specific=words & {'phobos','deimos','mmx','europa','ganymede','titan','enceladus','triton','ceres','bennu','osiris','juno'}
+    if specific:return bool(specific & candidate)
+    generic={'nasa','jaxa','esa','image','imagery','photo','photograph','picture','archive','space','spacecraft',
+             'illustration','illustrative','dramatic','close','observation','view','official','surface','orbiting','from','the'}
+    terms=words-generic
+    return bool(terms and terms & candidate)
+
+
+def nasa_image_is_visible(path):
+    from PIL import Image,ImageOps
+    with Image.open(path) as image:
+        values=list(ImageOps.grayscale(image).resize((160,90)).tobytes())
+    return sum(v>=26 for v in values)/len(values) >= .03
+
+
 def nasa_image(query: str, directory: Path, *, read=read_public, exclude_sha256=()) -> dict:
     """Find and download a NASA catalog image with its original metadata/credit."""
     terms = set(re.findall(r"[a-z]{3,}", query.casefold()))
@@ -192,7 +211,7 @@ def nasa_image(query: str, directory: Path, *, read=read_public, exclude_sha256=
             data = (item.get("data") or [{}])[0]
             title = data.get("title", "")
             keywords = " ".join(data.get("keywords") or [])
-            if terms and not terms.intersection(re.findall(r"[a-z]{3,}", (title + " " + keywords).casefold())):
+            if not nasa_subject_matches(query,data):
                 continue
             link = next((x.get("href") for x in item.get("links", []) if x.get("render") == "image"), None)
             if not link:
@@ -208,6 +227,8 @@ def nasa_image(query: str, directory: Path, *, read=read_public, exclude_sha256=
 
             with Image.open(path) as image:
                 image.verify()
+            if not nasa_image_is_visible(path):
+                continue
             receipt = {"provider": "NASA", "path": str(path), "nasa_id": data.get("nasa_id"),
                        "source_url": item.get("href"), "download_url": link, "title": title,
                        "credit": data.get("photographer") or data.get("secondary_creator") or data.get("center") or "NASA",

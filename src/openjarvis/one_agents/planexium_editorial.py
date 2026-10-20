@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def build_scene_shots(root, science, voice, assets, original, media, editorial, *, image_search=None):
-    from openjarvis.one_agents.space_research import nasa_image
+    from openjarvis.one_agents.space_research import nasa_image,nasa_subject_matches,nasa_image_is_visible
     image_search = image_search or nasa_image
     root = Path(root)
     used = set()
@@ -47,7 +47,9 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
             directory = root / f'sources/editorial-{number}-{index}'
             receipt = directory / 'source-receipt.json'
             asset = json.loads(receipt.read_text(encoding='utf-8')) if receipt.exists() else None
-            if (not asset or asset.get('editorial_query') != query or asset['sha256'] in used
+            if (not asset or not Path(asset['path']).is_file() or (asset.get('provider')=='NASA' and
+                    (not nasa_subject_matches(query,asset.get('metadata',{})) or not nasa_image_is_visible(asset['path'])))
+                    or asset.get('editorial_query') != query or asset['sha256'] in used
                     or not Path(asset['path']).is_file()
                     or hashlib.sha256(Path(asset['path']).read_bytes()).hexdigest() != asset['sha256']):
                 try:
