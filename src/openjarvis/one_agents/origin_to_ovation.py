@@ -94,10 +94,10 @@ def image_provider(path, shot):
         # Image generation is unavailable in temporary chats.  Open a regular
         # chat, then explicitly select New chat so a stale generating thread
         # cannot poison the next shot while the dedicated profile persists.
-        {"action": "navigate", "args": {"url": "https://chatgpt.com/"}},
-        {"action": "click_first", "args": {
-            "selectors": ["[data-testid='create-new-chat-button']", "a[href='/']"],
-            "timeout_ms": 30000}},
+        # Continue the verified P50 conversation.  Its canonical reference is
+        # already attached, which preserves identity and avoids 25 uploads.
+        {"action": "navigate", "args": {
+            "url": "https://chatgpt.com/c/6ad78e84-5904-83ee-8711-fbc640db6c1b"}},
         {"action": "wait_for_any_selector", "args": {
             "selectors": ["#prompt-textarea", "[contenteditable='true']", "textarea"],
             "timeout_ms": 60000, "as": "composer"}},
@@ -158,6 +158,7 @@ def image_batch_provider(path, shots):
         {"action": "generate_chatgpt_image_batch", "args": {
             "plan_path": str(batch_plan),
             "reference_image_path": missing[0]["reference"],
+            "reference_already_attached": True,
             "output_root": str(output_root),
             "reference_settle_seconds": 12,
             "retry_backoff_seconds": 60, "poll_ms": 3000,
