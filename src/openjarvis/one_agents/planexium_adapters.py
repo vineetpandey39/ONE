@@ -331,6 +331,23 @@ def stock_context(request):
     return context
 
 
+def concrete_stock_brief(request):
+    """Turn known inferred-action searches into visible, non-costume subjects."""
+    request = {**request, "blocked_keywords": list(request.get("blocked_keywords", []))}
+    subject = request["subject"].casefold().strip()
+    query = request["query"].casefold()
+    if subject in {"email", "emailing"}:
+        request.update(query="hands typing laptop", subject="laptop")
+    elif subject == "exercise" and "astronaut" in query:
+        request.update(query="woman treadmill exercise", subject="treadmill")
+        request["blocked_keywords"] += ["astronaut", "spacesuit", "costume", "comedy", "humor"]
+    elif subject == "spacesuit":
+        request.update(query="astronaut suit display", subject="suit")
+    if "astronaut" in request["query"].casefold():
+        request["blocked_keywords"] += ["costume", "comedy", "humor", "urban", "city", "sneakers"]
+    return request
+
+
 def verified_stock_subject(title, subject, outputs):
     if subject.casefold() in title.casefold():
         return True
@@ -409,7 +426,8 @@ class EnvatoAdapter:
                 step["args"]["keep_original_name"] = False
         receipts, hashes, query_positions, titles = [], set(), {}, []
         with envato_lease(self.provider_lock, self.queue, mission_id, wait_seconds=self.wait_seconds, on_wait=getattr(self.draft,"on_wait",None)):
-            for index, request in enumerate(requests, 1):
+            for index, original_request in enumerate(requests, 1):
+                request = original_request
                 query = str(request["query"])
                 accepted = self.accepted(index, request)
                 if accepted:
@@ -418,6 +436,8 @@ class EnvatoAdapter:
                     hashes.add(row["sha256"]);titles.append(row["title"]);receipts.append(row)
                     query_positions[query] = max(query_positions.get(query, 0), candidate)
                     continue
+                request = concrete_stock_brief(original_request)
+                query = request["query"]
                 first_candidate = query_positions.get(query, 0) + 1
                 from urllib.parse import quote_plus
 
@@ -478,7 +498,8 @@ class EnvatoAdapter:
                        "sha256": sha, **probe_stock(path)}
                 saved = self.context.artifact(f"acquired/stock-{index}.json")
                 saved.parent.mkdir(parents=True, exist_ok=True)
-                saved.write_text(json.dumps({"request_hash": fingerprint(request), "asset": row,
+                saved.write_text(json.dumps({"request_hash": fingerprint(original_request), "asset": row,
+                                             "effective_brief": request,
                                              "candidate": candidate}, indent=2), encoding="utf-8")
                 receipts.append(row)
         return {"ok": True, "assets": receipts}

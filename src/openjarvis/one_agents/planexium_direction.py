@@ -16,6 +16,8 @@ def motion_prompt(science, voice):
             "introduce no claims, numbers, quotations or promises. No Sonia, travel branding or portraits. "
             "Vary phrasing across beats; do not simply alternate scene title and subtitle. "
             "Preserve uncertainty and avoid implying illustrative graphics are actual observations. "
+            "For Earth-based Mars simulations or CHAPEA, every standalone Mars-location headline must "
+            "explicitly say simulated Mars; never use an unqualified 'on Mars' hook. "
             "Keep the original narration unchanged.\n" + json.dumps(scenes, ensure_ascii=False))
 
 
@@ -58,6 +60,15 @@ def validate_motion(result, science, voice):
     expected = {str(i) for i in range(1, len(science["scenes"]) + 1)}
     if not isinstance(copy, dict) or set(copy) != expected:
         raise ValueError("Motion director must cover every narration scene")
+    episode = " ".join(s["narration"] for s in science["scenes"])
+    simulation = bool(re.search(r"\bCHAPEA\b|simulated\s+(?:Mars|Martian)|Mars\s+simulation", episode, re.I))
+    # A standalone overlay cannot rely on the following spoken sentence to
+    # retract a misleading location claim. Preserve the director's other copy.
+    if simulation:
+        copy = {key: [re.sub(r"\bon Mars\b", "on Simulated Mars", p, flags=re.I)
+                      if isinstance(p, str) and not re.search(r"\bnot\b", p, re.I) else p
+                      for p in phrases] if isinstance(phrases, list) else phrases
+                for key, phrases in copy.items()}
     for i, segment in enumerate(voice["segments"], 1):
         phrases = copy[str(i)]
         count = max(1, math.ceil(round(segment["seconds"] * 30) / 105))

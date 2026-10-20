@@ -172,6 +172,19 @@ class Pipeline:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row) + "\n")
+        if status in {"started", "failed"}:
+            self.health("running" if status == "started" else "needs_resume",
+                        stage=stage, error_class=details.get("error_class"))
+
+    def health(self, status, *, stage=None, error_class=None):
+        path = self.context.artifact("production-health.json")
+        previous = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        previous.update(agent="PLANEXIUM", mission_id=self.context.mission_id,
+            agent_job_id=self.config.get("_agent_job_id"), status=status,
+            current_stage=stage, production_complete=status == "awaiting_review",
+            public_publish_authorized=False, published=False,
+            blocked_reason=error_class, updated_at=datetime.now(ZoneInfo("UTC")).isoformat())
+        _write(path, previous)
 
     def stage(self, name: str, request, action):
         receipt = self.context.artifact(f"checkpoints/{name}.json")
@@ -218,12 +231,14 @@ class Pipeline:
             _write(ledger_path, ledger)
             try:
                 result = self._produce(commission, plan=plan, pilot=pilot)
-            except Exception:
+            except Exception as exc:
                 ledger[self.context.mission_id]["status"] = "needs_resume"
                 _write(ledger_path, ledger)
+                self.health("needs_resume", stage="pipeline", error_class=type(exc).__name__)
                 raise
             ledger[self.context.mission_id]["status"] = "review_ready"
             _write(ledger_path, ledger)
+            self.health("awaiting_review", stage="package")
             return result
 
     def _produce(self, commission, *, plan, pilot):
