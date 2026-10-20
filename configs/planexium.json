@@ -18,5 +18,12 @@
   "artifact_roots": [],
   "browser_root": "C:/Users/pc/.lao/browser-sessions",
   "provider_lock": "C:/Users/pc/Downloads/YATRA/.envato-provider.lock",
-  "editing_mode": "footage_first"
+  "editing_mode": "footage_first",
+  "render_backend": "resolve_fusion",
+  "resolve": {
+    "server": "C:\\Users\\pc\\Documents\\Codex\\2026-10-16\\mission-planexium-floor-12-architecture-discovery\\work\\resolve-mcp\\src\\server.py",
+    "python": "C:\\Users\\pc\\Documents\\Codex\\2026-10-16\\mission-planexium-floor-12-architecture-discovery\\work\\resolve-mcp\\venv\\Scripts\\python.exe",
+    "work_root": "C:/Users/pc/Movies/PLANEXIUM-agent",
+    "timeout": 14400
+  }
 }

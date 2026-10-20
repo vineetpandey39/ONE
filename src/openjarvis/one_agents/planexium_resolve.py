@@ -59,7 +59,7 @@ LAYOUTS = {
 
 
 def composition(picture, frames, shots, family):
-    """Native editable Fusion titles, animated plate/rule and orbital motif."""
+    """Native editable Fusion titles and animated plate/rule."""
     if family not in LAYOUTS or frames < 1:
         raise ValueError("Known weekday format and positive frame budget required")
     nodes = []
@@ -97,7 +97,7 @@ def composition(picture, frames, shots, family):
             raise ValueError("Fusion beat exceeds measured picture")
         # Keep director-authored copy intact, wrapped for a mobile-readable plate.
         import textwrap
-        lines = textwrap.wrap(text, 30)
+        lines = textwrap.wrap(text, 24)
         if len(lines) > 3:
             raise ValueError("Fusion title exceeds three readable lines; repair director copy")
         fade = f"iif(time>={start} and time<{end},min(1,max(0,(time-{start})/10))*min(1,max(0,({end}-time)/10)),0)"
@@ -105,7 +105,7 @@ def composition(picture, frames, shots, family):
         prefix = f"Beat{index}"
         node(prefix+"Mask", "RectangleMask", [
             inp("MaskWidth", 1920), inp("MaskHeight", 1080),
-            inp("Center", expr=move), inp("Width", .54), inp("Height", .08+.06*len(lines)),
+            inp("Center", expr=move), inp("Width", .58), inp("Height", .08+.06*len(lines)),
             inp("CornerRadius", .025), inp("SoftEdge", .005)])
         node(prefix+"Plate", "Background", dimensions + [
             inp("TopLeftRed", .015), inp("TopLeftGreen", .025), inp("TopLeftBlue", .045),
@@ -270,7 +270,28 @@ async def worker(request):
         async with stdio_client(params) as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
-                await execute(request, MCP(session, Path(request["directory"])/"mcp-events.jsonl"))
+                client = MCP(session, Path(request["directory"])/"mcp-events.jsonl")
+                if request.get("preflight"):
+                    await client.call("resolve_control", "get_version")
+                    current = await client.call("project_manager", "get_current")
+                    if current.get("name") and not current["name"].startswith("PLANEXIUM_"):
+                        raise RuntimeError("Another Resolve project is open; leave it untouched")
+                else:
+                    await execute(request, client)
+
+
+def preflight(root, settings):
+    """Read-only connection check before providers/expensive picture preparation."""
+    directory = Path(settings["work_root"])/"preflight"
+    directory.mkdir(parents=True, exist_ok=True)
+    request = {**settings, "directory": str(directory), "preflight": True}
+    path = directory/"request.json"
+    write(path, request)
+    with (Path(root)/"edit/resolve-preflight.log").open("a", encoding="utf-8") as log:
+        result = subprocess.run([settings["python"], str(Path(__file__).resolve()), str(path)],
+            stdout=log, stderr=subprocess.STDOUT, timeout=180)
+    if result.returncode:
+        raise RuntimeError("Resolve bridge unavailable/busy; open Resolve and its bridge, then resume the mission")
 
 
 def finish(root, settings, shots, family):

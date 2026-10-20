@@ -361,7 +361,7 @@ class Pipeline:
             "cinematic_plan": _hash(root / "cinematic-plan.json") if (root / "cinematic-plan.json").exists() else None,
             "motion_library": library_hash(), "installed_motion_library": shared_motion_hash(tools) if self.config.get("editing_mode")=="footage_first" else None, "motion_format": self.config.get("motion_format"),
             "motion_copy": _hash(root / "motion-copy.json") if (root / "motion-copy.json").exists() else None}
-        if resolve_settings:
+        if resolve_settings and not renderer_config.get("legacy_parent_request"):
             from openjarvis.one_agents import planexium_resolve
             render_request["resolve"] = {"settings": resolve_settings, "adapter": _hash(Path(planexium_resolve.__file__))}
         master = self.stage("render", render_request, cut)
@@ -512,6 +512,17 @@ def run_job(job: dict) -> dict:
     ledger_path = context.root.parent / "production-ledger.json"
     ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.exists() else {}
     unfinished = next((key for key, row in ledger.items() if row.get("status") in {"producing", "needs_resume"}), None)
+    # An old, dated news commission must not consume every subsequent daily
+    # slot indefinitely. Preserve its files for a separately researched revision.
+    if unfinished and unfinished != requested_commission["mission_id"]:
+        previous_path = context_for(unfinished, config).artifact("commission.json")
+        if previous_path.exists():
+            previous = json.loads(previous_path.read_text(encoding="utf-8"))
+            if news_commission_expired(previous, requested_commission):
+                ledger[unfinished].update(status="needs_fresh_research",
+                    recovery_reason="Dated news commission expired before completion; retained for revision")
+                _write(ledger_path, ledger)
+                unfinished = None
     if unfinished:
         context = context_for(unfinished, config)
     commission_path = context.artifact("commission.json")
@@ -535,6 +546,13 @@ def run_job(job: dict) -> dict:
     if result.get("production_complete") and requested_commission["mission_id"] != context.mission_id:
         result["deferred_commission"] = requested_commission
     return result
+
+
+def news_commission_expired(previous: dict, requested: dict) -> bool:
+    if not previous.get("auto_discover") or not previous.get("production_date") or not requested.get("production_date"):
+        return False
+    return (datetime.fromisoformat(requested["production_date"]).date()
+            - datetime.fromisoformat(previous["production_date"]).date()).days > 1
 
 
 def enqueue_deferred_commission(result: dict, *, enqueue):

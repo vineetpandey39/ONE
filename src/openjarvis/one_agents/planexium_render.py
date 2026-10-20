@@ -69,6 +69,9 @@ def _layer(text: str, out: Path, *, y: int, size=48):
 
 def render(root: Path, tools: Path, *, motion_format: str | None = None, resolve_settings=None) -> dict:
     if (root / 'cinematic-plan.json').exists():
+        if resolve_settings:
+            from openjarvis.one_agents.planexium_resolve import preflight
+            preflight(root, resolve_settings)
         from openjarvis.one_agents.planexium_cinematic import render as cinematic_render
         return cinematic_render(root, tools, resolve_settings=resolve_settings)
     if resolve_settings:
@@ -187,9 +190,27 @@ if __name__ == "__main__":
     parser.add_argument("--job-signature")
     parser.add_argument("--resolve-settings", type=Path)
     args = parser.parse_args()
+    resolve_settings = json.loads(args.resolve_settings.read_text(encoding='utf-8')) if args.resolve_settings else None
+    if args.resolve_settings is None:
+        # The resident ONE worker may have imported an older parent pipeline.
+        # Render children always start from current disk code, so adopt the
+        # selected backend here too without restarting unrelated live agents.
+        from openjarvis.one_agents.planexium import load_config, _write
+        backend_path = args.root / 'render-backend.json'
+        if backend_path.exists():
+            backend = json.loads(backend_path.read_text(encoding='utf-8'))
+        else:
+            config = load_config()
+            backend = {'backend': config.get('render_backend', 'legacy'),
+                       'resolve': config.get('resolve'), 'legacy_parent_request': True}
+            _write(backend_path, backend)
+        if backend['backend'] == 'resolve_fusion':
+            resolve_settings = backend.get('resolve')
+            if not resolve_settings:
+                raise ValueError('Resolve/Fusion settings missing; no fallback')
     try:
         result = render(args.root.resolve(), args.tools.resolve(), motion_format=args.format,
-            resolve_settings=json.loads(args.resolve_settings.read_text(encoding='utf-8')) if args.resolve_settings else None)
+            resolve_settings=resolve_settings)
     except Exception:
         progress = args.root.resolve() / 'edit/render-progress.json'
         state = json.loads(progress.read_text(encoding='utf-8')) if progress.exists() else {}

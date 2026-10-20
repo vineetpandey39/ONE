@@ -204,9 +204,16 @@ def nasa_image(query: str, directory: Path, *, read=read_public, exclude_sha256=
     # progressively shorter prefix; every candidate still has to match the
     # original query terms below, so broadening cannot admit unrelated imagery.
     words = re.findall(r"[a-z]{3,}", query.casefold())
-    searches = list(dict.fromkeys([query] + [" ".join(words[:n]) for n in range(len(words) - 1, 0, -1)]))
+    # Preserve the actual subject when simplifying an over-specific editorial
+    # brief. Prefix truncation used to end at "NASA", burying relevant moons
+    # beneath logos and press photographs in the first catalogue page.
+    subjects = [w for w in words if w in {
+        "phobos", "deimos", "mmx", "europa", "ganymede", "titan", "enceladus",
+        "triton", "ceres", "bennu", "osiris", "juno"}]
+    searches = list(dict.fromkeys([query] + subjects +
+        [" ".join(words[:n]) for n in range(len(words) - 1, 1, -1)]))
     for search in searches:
-        catalog = json.loads(read("https://images-api.nasa.gov/search?" + urlencode({"q": search, "media_type": "image", "page_size": 10})))
+        catalog = json.loads(read("https://images-api.nasa.gov/search?" + urlencode({"q": search, "media_type": "image", "page_size": 50})))
         for item in catalog.get("collection", {}).get("items", []):
             data = (item.get("data") or [{}])[0]
             title = data.get("title", "")
