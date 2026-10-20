@@ -190,7 +190,11 @@ def _render(root: Path, *, expected_shots: int = 75, size: tuple[int,int] = (192
     _run(['ffmpeg','-hide_banner','-loglevel','error','-y','-f','lavfi','-i',f"aevalsrc={score}:s=48000:d={duration}",'-af',f'lowpass=f=1800,highpass=f=45,afade=t=in:d=3,afade=t=out:st={max(0,duration-4)}:d=4','-c:a','pcm_s16le',str(bed)])
     chapter_starts=[float(s['start_seconds'])/tempo for i,s in enumerate(shots) if i and s['chapter']!=shots[i-1]['chapter']]
     windows='+'.join(f'if(between(t,{max(0,t-.20):.3f},{t+.24:.3f}),0.007*sin(PI*(t-{max(0,t-.20):.3f})/0.44)^2,0)' for t in chapter_starts) or '0'
-    filters=f"[1:a]atempo={tempo},apad,atrim=duration={duration},asplit=2[voice][side];[2:a][side]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=400[bed];[3:a]highpass=f=700,lowpass=f=5500,volume='{windows}':eval=frame[sfx];[voice][bed][sfx]amix=inputs=3:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11,atrim=duration={duration}[audio]"
+    # Narration is nearly continuous, so sidechain compression suppressed the
+    # score for the entire film.  Keep the music at a consistent documentary
+    # level (about 11 dB below the voice) and let the final loudness pass
+    # control peaks instead of ducking it into inaudibility.
+    filters=f"[1:a]atempo={tempo},apad,atrim=duration={duration}[voice];[2:a]volume=2.0[bed];[3:a]highpass=f=700,lowpass=f=5500,volume='{windows}':eval=frame[sfx];[voice][bed][sfx]amix=inputs=3:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11,atrim=duration={duration}[audio]"
     final=root/'master.mp4'; pending=root/'master.pending.mp4'
     _run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',str(video),'-i',str(voice),'-i',str(bed),'-f','lavfi','-i',f'anoisesrc=color=pink:sample_rate=48000:duration={duration}', '-filter_complex',filters,'-map','0:v:0','-map','[audio]','-vf','ass=captions.ass','-c:v','libx264','-preset','fast','-crf','19','-threads','4','-c:a','aac','-b:a','192k','-ar','48000','-movflags','+faststart','-t',str(duration),str(pending)],root)
     _run(['ffmpeg','-v','error','-xerror','-i',str(pending),'-f','null','-'])
