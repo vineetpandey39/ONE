@@ -306,6 +306,23 @@ def probe_stock(path: Path) -> dict:
     return {"seconds": seconds, "width": 1920, "height": 1080}
 
 
+def stock_context(request):
+    """Bind two independent facts from the authored science stock brief.
+
+    The installed evidence action names its first field 'destination', but
+    checks selected metadata for two independent terms. Science supplies a
+    visual context, never invents a geographical destination.
+    """
+    subject = str(request["subject"]).casefold()
+    stop = {"a","an","the","of","in","with","and","generic","cinematic","close","up",
+            "dramatic","beautiful","footage","video"}
+    context = next((w for w in re.findall(r"[A-Za-z]+", request["query"])
+                    if w.casefold() != subject and w.casefold() not in stop), None)
+    if not context:
+        raise ValueError("Science stock brief needs independent context and subject evidence")
+    return context
+
+
 class EnvatoAdapter:
     def __init__(self, draft: LaoDraft, workflow: Path, context, queue: Path, provider_lock: Path, *, wait_seconds=0, profile_root=None):
         self.draft, self.workflow, self.context = draft, workflow, context
@@ -360,6 +377,7 @@ class EnvatoAdapter:
         workflow = yaml.safe_load(self.workflow.read_text(encoding="utf-8"))
         # Use the latest accepted selectors/actions, not a stale copied workflow.
         steps = workflow["steps"]
+        requires_context = any(s.get("action") == "assert_destination_subject" for s in steps)
         for step in steps:
             if step.get("action") == "open_browser":
                 step.setdefault("args", {}).update(provider_browser(self.context, "envato", profile_root=self.profile_root))
@@ -383,7 +401,8 @@ class EnvatoAdapter:
 
                 inputs = {"sceneId": str(index), "envatoQuery": query, "envatoQueryUrl": quote_plus(query),
                           "fallbackQuery": query, "videoTitle": request["title"], "downloadFormat": "1080P",
-                          "assetFolder": mission_id, "resultIndex": str(first_candidate), "requiredTitleKeyword": request["subject"],
+                          "assetFolder": mission_id, "resultIndex": str(first_candidate),
+                          "requiredTitleKeyword": stock_context(request) if requires_context else request["subject"],
                           "alternateTitleKeyword": request["subject"], "locationMatch": False, "subjectMatch": True,
                           "regionalContext": False, "regionalContextLabel": "", "orientation": "Horizontal",
                           "requiredResolution": "1920 x 1080", "previouslyDownloadedTitles": list(titles),
@@ -402,8 +421,8 @@ class EnvatoAdapter:
                     inputs["envatoQuery"] = catalog_query
                     inputs["envatoQueryUrl"] = quote_plus(catalog_query)
                     inputs["resultIndex"] = str(candidate - first_candidate - 2 if fallback else candidate)
-                    receipt = self.context.artifact(f"receipts/envato-v2-{index}.json" if candidate == first_candidate
-                        else f"receipts/envato-v2-{index}-candidate-{candidate}.json")
+                    receipt = self.context.artifact(f"receipts/envato-v3-{index}.json" if candidate == first_candidate
+                        else f"receipts/envato-v3-{index}-candidate-{candidate}.json")
                     try:
                         out, job = self.draft.run("planexium-envato", asset_steps, inputs, receipt, timeout=10800)
                         query_positions[query] = candidate
