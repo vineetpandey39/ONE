@@ -56,6 +56,25 @@ def media_manifest(shots, music):
     return manifest
 
 
+def reuse_music(library, destination):
+    """Reuse an explicitly configured, hash-verified production asset."""
+    for item in library:
+        source=Path(item['path'])
+        if item.get('provider')!='Envato' or source.suffix.lower() not in {'.wav','.mp3','.m4a'}:
+            raise ValueError('Invalid shared instrumental music entry')
+        if not source.is_file() or sha(source)!=item['sha256']:
+            raise ValueError('Shared instrumental music integrity mismatch')
+        target=Path(destination)/('shared-'+item['sha256'][:12]+source.suffix.lower())
+        if not target.exists():shutil.copy2(source,target)
+        if sha(target)!=item['sha256']:raise ValueError('Copied shared music changed')
+        (Path(destination)/'reuse-receipt.json').write_text(json.dumps({
+            'provider':'Envato','source_mission':item['source_mission'],
+            'sha256':item['sha256'],'path':str(target),
+            'license_review_required_for_current_video':True},indent=2),encoding='utf-8')
+        return target
+    return None
+
+
 def acquire(root, tools):
     import yaml
     from openjarvis.one_agents.planexium import load_config
@@ -76,6 +95,8 @@ def acquire(root, tools):
     music=ctx.artifact('music');music.mkdir(exist_ok=True)
     picker=runtime._yatra_pick_music_track
     track=picker(music)
+    if track is None:
+        track=reuse_music(config.get('music_library',[]),music)
     if track is None:
         workflow=yaml.safe_load((lao/'yatra-music/workflow.yaml').read_text(encoding='utf-8'))
         steps=workflow['steps']
@@ -98,6 +119,8 @@ def acquire(root, tools):
     else:
         stock=adapter(brand='planexium',mission_id=ctx.mission_id,output_root=ctx.root,requests=plan['stock_requests'])['assets']
     result={'stock':stock,'music':{'path':str(track),'sha256':sha(track),'provider':'Envato'},'revision':plan['revision']}
+    if (music/'reuse-receipt.json').exists():
+        result['music']['reuse']=json.loads((music/'reuse-receipt.json').read_text(encoding='utf-8'))
     (root/'edit/cinematic-assets.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
     return result
 

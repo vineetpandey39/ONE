@@ -24,6 +24,15 @@
     "server": "C:\\Users\\pc\\Documents\\Codex\\2026-10-16\\mission-planexium-floor-12-architecture-discovery\\work\\resolve-mcp\\src\\server.py",
     "python": "C:\\Users\\pc\\Documents\\Codex\\2026-10-16\\mission-planexium-floor-12-architecture-discovery\\work\\resolve-mcp\\venv\\Scripts\\python.exe",
     "work_root": "C:/Users/pc/Movies/PLANEXIUM-agent",
-    "timeout": 14400
-  }
+    "timeout": 14400,
+    "bridge_config": "C:/Users/pc/.config/davinci-resolve-mcp/bridge.json"
+  },
+  "music_library": [
+    {
+      "path": "E:\\ONE-Suite\\data\\planexium\\media\\planexium\\daily-20261018\\cinematic-assets\\planexium\\unique-footage-v2\\music\\cinematic-ambient-2026-06-27-15-02-50-utc\\Atmosphere.wav",
+      "sha256": "f0e894b64682020b0cbb2e2a635ad2f12299a2d16a5d863a7d66d61069d7887b",
+      "provider": "Envato",
+      "source_mission": "daily-20261018"
+    }
+  ]
 }

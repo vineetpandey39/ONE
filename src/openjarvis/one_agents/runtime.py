@@ -6283,12 +6283,27 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
                 raise RuntimeError("VISTA master, thumbnail or manual subtitle file is missing")
             stages.set_stage("echo", stages.EXECUTING, "Uploading VISTA's private Short with manual subtitles")
             uploader = youtube_publish._load("youtube_api_upload")
-            report = uploader.run(package, video=master, thumbnail=thumbnail, synthetic="yes", execute=True,
-                                  caption=caption, caption_language="hi")
+            upload_report = uploader.run(package, video=master, thumbnail=thumbnail, synthetic="yes", execute=True,
+                                         caption=caption, caption_language="hi")
+            stages.set_stage("echo", stages.CARRYING_TO_HEAD,
+                             "Taking VISTA's verified private upload back to HELIOS")
+            _require_active_job(job, "report VISTA private upload completion to HELIOS")
+            report = enqueue_job(
+                "helios",
+                json.dumps({**payload, "stage": "distribution_complete",
+                            "format": "youtube_private_draft", "worker": "echo",
+                            "distribution": upload_report, "published": False,
+                            "output": str(package)}, ensure_ascii=False),
+                mode="report",
+                tier="fast",
+                dedupe_key=f"vista:{payload.get('origin_job')}:{slot}:distribution-report",
+            )
             return {"agent": "ECHO", "stage": "vista_short_publish", "status": "uploaded_private",
-                    "video_id": report.get("video_id"), "studio_url": report.get("studio_url"),
+                    "video_id": upload_report.get("video_id"), "studio_url": upload_report.get("studio_url"),
                     "master": str(master), "thumbnail": str(thumbnail), "subtitles": str(caption),
-                    "content": f"VISTA Short uploaded privately: {report.get('studio_url') or report.get('video_id')}"}
+                    "content": f"VISTA Short uploaded privately: "
+                               f"{upload_report.get('studio_url') or upload_report.get('video_id')}",
+                    "handed_to": {"agent": "HELIOS", "job_id": report["id"]}}
         finally:
             stages.clear_stage("echo")
     if payload.get("brand") == "sonia_travel_vlogs" and payload.get("stage") == "pending_comments":

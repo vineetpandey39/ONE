@@ -30,6 +30,18 @@ def write(path, value):
     temp.replace(path)
 
 
+def isolated_environment(settings):
+    # ONE may inject its own PYTHONPATH and HOME for its worker. Neither those
+    # Python packages nor its credentials belong in the Resolve MCP process.
+    allowed = {"SYSTEMROOT","WINDIR","TEMP","TMP","PATH","USERPROFILE","APPDATA",
+               "LOCALAPPDATA","PROGRAMDATA","COMSPEC","PATHEXT","USERNAME","USERDOMAIN"}
+    env = {k:v for k,v in os.environ.items() if k.upper() in allowed}
+    env.update(DAVINCI_RESOLVE_BRIDGE="1", PYTHONUTF8="1")
+    if settings.get("bridge_config"):
+        env["DAVINCI_RESOLVE_BRIDGE_CONFIG"] = settings["bridge_config"]
+    return env
+
+
 def probe(path):
     result = subprocess.run(["ffprobe", "-v", "error", "-show_streams",
         "-show_format", "-of", "json", str(path)], check=True, capture_output=True, text=True)
@@ -311,7 +323,7 @@ async def worker(request):
     server = Path(request["server"])
     params = StdioServerParameters(command=request["python"], args=[str(server)],
         cwd=str(server.parent.parent),
-        env={**os.environ, "DAVINCI_RESOLVE_BRIDGE": "1", "PYTHONUTF8": "1"})
+        env=isolated_environment(request))
     with machine_lock(Path(request["directory"]).parent/"resolve.lock"):
         async with stdio_client(params) as (reader, writer):
             async with ClientSession(reader, writer) as session:
@@ -335,7 +347,7 @@ def preflight(root, settings):
     write(path, request)
     with (Path(root)/"edit/resolve-preflight.log").open("a", encoding="utf-8") as log:
         result = subprocess.run([settings["python"], str(Path(__file__).resolve()), str(path)],
-            stdout=log, stderr=subprocess.STDOUT, timeout=180)
+            stdout=log, stderr=subprocess.STDOUT, timeout=180, env=isolated_environment(settings))
     if result.returncode:
         raise RuntimeError("Resolve bridge unavailable/busy; open Resolve and its bridge, then resume the mission")
 
@@ -365,10 +377,12 @@ def finish(root, settings, shots, family):
     request = {"directory": str(directory), "picture": str(prepared), "composition": str(comp_path),
         "frames": frames, "project": "PLANEXIUM_"+signature[:20], "server": str(server),
         "python": str(python), "timeout": settings.get("timeout", 14400)}
+    if settings.get("bridge_config"):
+        request["bridge_config"]=settings["bridge_config"]
     request_path = directory/"request.json"; write(request_path, request)
     with (work/"resolve-mcp.log").open("a", encoding="utf-8") as log:
         child = subprocess.Popen([str(python), str(Path(__file__).resolve()), str(request_path)],
-                                 stdout=log, stderr=subprocess.STDOUT)
+                                 stdout=log, stderr=subprocess.STDOUT, env=isolated_environment(settings))
         while child.poll() is None:
             path = directory/"progress.json"
             detail = json.loads(path.read_text()) if path.exists() else {"status": "connecting"}
