@@ -365,7 +365,7 @@ def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def enqueue_job(agent_id: str, task: str, mode: str = "plan", tier: str = "fast", *, dedupe_key: str = "") -> dict[str, Any]:
+def enqueue_job(agent_id: str, task: str, mode: str = "plan", tier: str = "fast", *, dedupe_key: str = "", reserved: bool = False) -> dict[str, Any]:
     agent_id = agent_id.strip().lower()
     if agent_id not in AGENTS:
         raise ValueError(f"Unknown agent: {agent_id}")
@@ -430,11 +430,11 @@ def enqueue_job(agent_id: str, task: str, mode: str = "plan", tier: str = "fast"
                     return dict(existing)
         db.execute(
             "INSERT INTO jobs (id, agent_id, task, mode, tier, status, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             # Publishing handoffs carry governed evidence and scorecards. TEXT
             # has no 4K database limit; truncating here corrupts the JSON and
             # makes the receiving agent misclassify the handoff as a new task.
-            (job_id, agent_id, task[:100000], mode, tier, now, now),
+            (job_id, agent_id, task[:100000], mode, tier, "reserved" if reserved else "queued", now, now),
         )
         if dedupe_key:
             # REPLACE: after a failed job the key now points at its retry.
@@ -656,15 +656,18 @@ def agent_stats() -> list[dict[str, Any]]:
 def claim_job(job_id: str | None = None) -> dict[str, Any] | None:
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
-        row = (db.execute("SELECT * FROM jobs WHERE status = 'queued' AND id = ?", (job_id,)).fetchone()
+        # A scoped deployment may reserve a job so an older running worker
+        # cannot win the claim and execute stale code. Only an exact-id claim
+        # can consume that reservation; the normal scheduler ignores it.
+        row = (db.execute("SELECT * FROM jobs WHERE status IN ('queued','reserved') AND id = ?", (job_id,)).fetchone()
                if job_id else db.execute(
                    "SELECT * FROM jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1").fetchone())
         if not row:
             return None
         now = _now()
         changed = db.execute(
-            "UPDATE jobs SET status = 'running', progress = 5, updated_at = ? WHERE id = ? AND status = 'queued'",
-            (now, row["id"]),
+            "UPDATE jobs SET status = 'running', progress = 5, updated_at = ? WHERE id = ? AND status = ?",
+            (now, row["id"], row["status"]),
         ).rowcount
         if not changed:
             return None
