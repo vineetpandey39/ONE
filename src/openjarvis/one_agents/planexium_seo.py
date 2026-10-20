@@ -9,6 +9,16 @@ from openjarvis.one_agents.youtube_channels import PLANEXIUM
 from openjarvis.one_agents.youtube_seo import description_audit, ollama_json, _valid_tags
 
 
+def ares_json(prompt, payload):
+    """Use the stronger installed local model for scientific editorial wording."""
+    from openjarvis.one_agents import local_llm
+    available = local_llm.installed()
+    for model in ("qwen3:8b", "qwen3.5:9b"):
+        if model in available:
+            return local_llm.chat_json(model, prompt, payload, temperature=0.1, num_ctx=8192, timeout=900)
+    return ollama_json(prompt, payload)
+
+
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -39,7 +49,8 @@ def require_seo(package):
 def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=None):
     prompt = (
         "You are ARES, the SEO agent for The Planexium science YouTube channel. "
-        "Return JSON: title, primary_query, opening, tags, hashtags. "
+        "Return JSON: title (string), primary_query (string), opening (string), "
+        "tags (JSON array of strings), hashtags (JSON array of exactly 3 strings). "
         "Use only the supplied science/script; distinguish simulated Mars on Earth from actual Mars. "
         "Title max 100 characters, compelling but factual; complement the existing thumbnail hook. "
         "primary_query: a natural search phrase of 2-6 words. "
@@ -54,10 +65,14 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
         "'findings show' or claim psychological effects unless the input explicitly reports results. "
         "Describe research aims as studying/testing/exploring. Avoid markdown asterisks in YouTube text. "
         "Use 'simulated Mars' rather than 'Mars Sim'. Prefer concrete mission/topic searches over "
-        "generic or speculative psychological-effects keywords. Follow editorial_feedback when supplied.")
+        "generic or speculative psychological-effects keywords. Never invent comparisons, flight times, "
+        "results or crew qualifications. Call analog participants 'crew members', not astronauts. "
+        "Follow editorial_feedback when supplied.")
     errors = None
     for attempt in range(2):
-        out = llm(prompt, {"science": science, "current_title": package["recommended_title"],
+        out = llm(prompt, {"science": {"video_title": science.get("video_title"),
+                                      "claims": science.get("claims", [])},
+                          "current_title": package["recommended_title"],
                           "thumbnail_hook": package.get("thumbnail_strategy", {}).get("concepts", [{}])[0].get("text"),
                           "editorial_feedback": editorial_feedback,
                           "previous_validation_error": errors})
@@ -79,6 +94,9 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
             if isinstance(hashtags, list):
                 hashtags = ["#"+re.sub(r"\s+", "", str(h).strip().lstrip("#"))
                             for h in hashtags]
+            tags = out["tags"]
+            if isinstance(tags, str):
+                tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
             if (not isinstance(hashtags, list) or len(set(hashtags)) != 3
                     or any(not re.fullmatch(r"#[A-Za-z][A-Za-z0-9_]{1,29}", h) for h in hashtags)):
                 raise ValueError("Exactly three valid distinct hashtags required")
@@ -91,7 +109,7 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
             tail = re.sub(r"(?<!\w)#[A-Za-z0-9_]+", "", tail).strip()
             result.update(recommended_title=title, primary_query=query,
                           description=opening+"\n\n"+tail+"\n\n"+" ".join(hashtags),
-                          tags=_valid_tags(out["tags"], limit=450), hashtags=hashtags, seo_owner="ARES",
+                          tags=_valid_tags(tags, limit=450), hashtags=hashtags, seo_owner="ARES",
                           seo_job_id=job_id, metadata_source="ares_model",
                           public_publish_authorized=False)
             result.update(owner="ARES", handoff="PLANEXIUM -> ARES SEO audit -> human upload review")
@@ -155,7 +173,7 @@ def _run_job(job):
     else:
         attempts = []
         def model_with_evidence(prompt, data):
-            candidate = ollama_json(prompt, data)
+            candidate = ares_json(prompt, data)
             attempts.append(candidate)
             _write(seo_dir/"ares-model-attempts.json", {"job_id": job["id"], "attempts": attempts})
             return candidate
