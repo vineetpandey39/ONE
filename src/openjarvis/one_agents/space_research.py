@@ -263,3 +263,61 @@ def embedded_video(url: str, *, read=read_public) -> dict | None:
     if not urls:return None
     validate_url(urls[0],MEDIA_HOSTS)
     return {'source_url':url,'video_url':urls[0],'player':'nasa_videojs','rights_review_required':True}
+
+
+def article_images(url: str, directory: Path, *, read=read_public) -> list[dict]:
+    """Original images inside official article figures, with caption provenance."""
+    validate_url(url)
+    class Figures(HTMLParser):
+        def __init__(self):
+            super().__init__(); self.depth=0; self.caption=False; self.current=None; self.rows=[]
+        def handle_starttag(self, tag, attrs):
+            attrs=dict(attrs)
+            if tag=="figure":
+                self.depth+=1
+                if self.depth==1:self.current={"images":[],"caption":[]}
+            if self.current is not None:
+                if tag=="img":self.current["images"].append(attrs)
+                if tag=="figcaption":self.caption=True
+        def handle_endtag(self,tag):
+            if tag=="figcaption":self.caption=False
+            if tag=="figure" and self.depth:
+                self.depth-=1
+                if self.depth==0:
+                    self.rows.append(self.current);self.current=None
+        def handle_data(self,text):
+            if self.current is not None and self.caption:self.current["caption"].append(text)
+    parser=Figures();parser.feed(read(url).decode("utf-8",errors="replace"))
+    rows=[];seen=set()
+    for figure in parser.rows:
+        caption=" ".join(" ".join(figure["caption"]).split())
+        for image in figure["images"]:
+            link=image.get("src","")
+            try:validate_url(link,MEDIA_HOSTS)
+            except ValueError:continue
+            canonical=urlunsplit((*urlsplit(link)[:3],"",""))
+            if canonical in seen:continue
+            seen.add(canonical)
+            raw=read(link)
+            identity=hashlib.sha256(raw).hexdigest()
+            target=Path(directory)/identity
+            target.mkdir(parents=True,exist_ok=True)
+            path=target/"source.jpg";path.write_bytes(raw)
+            try:
+                from PIL import Image
+                with Image.open(path) as decoded:
+                    if min(decoded.size)<240:continue
+                    decoded.verify()
+                if not nasa_image_is_visible(path):continue
+            except (OSError,ValueError):continue
+            title=image.get("alt","").strip()
+            # Keep the actual complete credit/caption, never invent a creator.
+            credit_match=re.search(r"(?:Credits?|Image credit)\s*:\s*(.+)",caption,re.I)
+            credit=credit_match[1].strip() if credit_match else "NASA"
+            row={"provider":"NASA","path":str(path),"source_url":url,"download_url":link,
+                "title":title,"credit":credit,"caption":caption,"sha256":identity,
+                "metadata":{"title":title,"description":caption,"keywords":[]},
+                "rights_review_required":True,"subject_review_required":True}
+            (target/"source-receipt.json").write_text(json.dumps(row,indent=2),encoding="utf-8")
+            rows.append(row)
+    return rows

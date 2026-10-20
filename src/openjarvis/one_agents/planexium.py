@@ -290,6 +290,16 @@ class Pipeline:
                         stock_targets.append(str(i))
                     media["scenes"][str(i)] = {"kind": "stock", "assets": [], "credit": "Envato - illustrative footage"}
                 elif kind == "obs":
+                    if self.config.get("render_backend") == "resolve_fusion":
+                        # A photo article is evidence media, not an obligation
+                        # to record a browser. Keep its original figure credits.
+                        rows = space_research.article_images(scene["url"],
+                            self.context.artifact("sources/article-images"), read=self.source_reader)
+                        if rows:
+                            media["scenes"][str(i)] = {"kind":"image","assets":rows,"credit":scene["url"]}
+                            files.extend(Path(row["path"]) for row in rows)
+                            files.extend(Path(row["path"]).with_name("source-receipt.json") for row in rows)
+                            continue
                     if self.capture is None:
                         raise RuntimeError("An explicitly requested OBS scene needs its capture adapter")
                     capture = self.services.capture([{"id": str(i), "url": scene["url"], "title": scene["title"],

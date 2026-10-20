@@ -40,6 +40,16 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
             break
         pictures = [r for r in rows if 'seconds' not in r]
         needed = max(1, math.ceil(remaining / 9))
+        # Prefer direct imagery from the commissioned official article before
+        # searching an archive. These are original source figures, not captures.
+        for asset in media.get(str(number),{}).get('assets',[]):
+            if len(pictures)>=needed:break
+            if asset.get('caption') is None or asset['sha256'] in used:continue
+            if not nasa_image_is_visible(asset['path']):continue
+            if hashlib.sha256(Path(asset['path']).read_bytes()).hexdigest()!=asset['sha256']:
+                raise ValueError('Official article image changed')
+            row={'asset':{**asset,'seconds':3600},'kind':'primary'}
+            rows.append(row);pictures.append(row);used.add(asset['sha256'])
         queries = editorial.get('scene_visuals', {}).get(str(number), [])
         for index, query in enumerate(queries, 1):
             if len(pictures) >= needed:
