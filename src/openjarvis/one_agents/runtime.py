@@ -2301,6 +2301,58 @@ def _sonia_brief_repeat(brief: str, prior: list[str], *, window: int = 120) -> s
     return ""
 
 
+def _sonia_unique_evergreen_brief(
+    brief: str,
+    note: str,
+    *,
+    prompt: str,
+    evidence: dict[str, Any],
+    recent: list[str],
+    max_attempts: int = 3,
+    synthesize: Any = None,
+) -> tuple[str, str, str, list[dict[str, str]]]:
+    """Reselect a unique evergreen candidate from the collected evidence."""
+    synthesize = synthesize or _research_synthesis
+    attempts: list[dict[str, str]] = []
+    current_brief, current_note = brief or "", note or ""
+    forbidden: list[str] = []
+    total = max(1, int(max_attempts))
+    for attempt_number in range(1, total + 1):
+        if not current_brief or "COMMISSION: NO" in current_brief.upper():
+            return current_brief, current_note, "", attempts
+        repeat = _sonia_brief_repeat(current_brief, recent)
+        if not repeat:
+            return current_brief, current_note, "", attempts
+        destination_match = re.search(
+            r"(?im)^\s*(?:\*{0,2})destination(?:\s*/\s*topic)?(?:\*{0,2})\s*:\s*(.+?)\s*$",
+            current_brief,
+        )
+        destination = ""
+        if destination_match:
+            destination = re.split(r"\s*[|–—(]\s*", destination_match.group(1), maxsplit=1)[0].strip()
+        if destination and destination.casefold() not in {value.casefold() for value in forbidden}:
+            forbidden.append(destination)
+        attempts.append({
+            "attempt": str(attempt_number),
+            "destination": destination,
+            "repeated_title": repeat,
+        })
+        if attempt_number >= total:
+            return current_brief, current_note, repeat, attempts
+        retry_prompt = (
+            prompt
+            + "\n\nCONTENT CALENDAR REJECTION: The previous candidate repeated a recent upload "
+            + json.dumps(repeat, ensure_ascii=False)
+            + ". Select a materially different destination AND topic using ONLY the same supplied evidence. "
+            + "Do not return any previously rejected destination in this run. Forbidden destinations: "
+            + json.dumps(forbidden, ensure_ascii=False)
+            + ". Preserve the mandatory explicit Destination/Topic and Chosen headline fields. "
+            + "If the evidence cannot support a unique alternative, end with COMMISSION: NO."
+        )
+        current_brief, current_note = synthesize(retry_prompt, evidence=evidence)
+    return current_brief, current_note, "", attempts
+
+
 def _vista_same_day_commissions(*, now: datetime | None = None) -> list[dict[str, str]]:
     """Return today's live/finished VISTA stories from the durable job ledger.
 
@@ -8137,8 +8189,20 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                         "handed_to": None}
             brief, note = _research_synthesis(synthesis_prompt, evidence=synthesis_evidence)
             if story["status"] != "picked" and brief and "COMMISSION: NO" not in brief.upper():
-                repeat = _sonia_brief_repeat(
-                    brief, recent_stories if is_vista_short else prior)
+                brief, note, repeat, reselection_attempts = _sonia_unique_evergreen_brief(
+                    brief,
+                    note,
+                    prompt=synthesis_prompt,
+                    evidence=synthesis_evidence,
+                    recent=recent_stories if is_vista_short else prior,
+                )
+                if reselection_attempts:
+                    output_dir = _home() / "agent_outputs"
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    (output_dir / f"{job['id']}-evergreen-reselection.json").write_text(
+                        json.dumps(reselection_attempts, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
                 if repeat:
                     stages.clear_stage(head_id)
                     reason = ("evergreen fallback failed the no-repeat gate: " + repeat)
