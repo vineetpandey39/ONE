@@ -666,8 +666,8 @@ def claim_job(job_id: str | None = None) -> dict[str, Any] | None:
             return None
         now = _now()
         changed = db.execute(
-            "UPDATE jobs SET status = 'running', progress = 5, updated_at = ? WHERE id = ? AND status = ?",
-            (now, row["id"], row["status"]),
+            "UPDATE jobs SET status = 'running', progress = 5, updated_at = ?, heartbeat_at = ? WHERE id = ? AND status = ?",
+            (now, now, row["id"], row["status"]),
         ).rowcount
         if not changed:
             return None
