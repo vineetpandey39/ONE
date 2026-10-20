@@ -298,8 +298,6 @@ class ProductionServices:
         service and remains an explicit human action, including after a retry.
         """
         import re
-        from openjarvis.one_agents.planexium_seo import require_seo
-        require_seo(package)
 
         self.context.channel.validate_record(package)
         if package.get("brand") != self.context.channel.brand:
@@ -322,5 +320,7 @@ class ProductionServices:
                     raise ValueError("Upload artifacts must exist inside the channel mission")
         if not package.get("master"):
             raise ValueError("A channel-local master is required")
+        from openjarvis.one_agents.planexium_seo import require_seo
+        require_seo(package)
         return adapter(package=package, expected_channel_id=expected_channel_id, privacy="private",
                        ledger=self.context.artifact("upload-ledger.json"))

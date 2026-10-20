@@ -250,6 +250,8 @@ class Pipeline:
                         "mission_id": self.context.mission_id}), mode="execute", tier="fast",
                         dedupe_key=f"planexium:{self.context.mission_id}:ares-seo-v1")
                     self.health("awaiting_seo", stage="seo")
+                    ledger[self.context.mission_id]["status"] = "awaiting_seo"
+                    _write(ledger_path, ledger)
                     result.update(status="awaiting_seo", handed_to={"agent": "ARES", "job_id": seo["id"]})
             return result
 
@@ -695,8 +697,6 @@ def stage_private(payload: dict, *, approval_db: Path | None = None, adapter=Non
             raise ValueError("Review package escapes mission")
         path = selected
     package = json.loads(path.read_text(encoding="utf-8"))
-    from openjarvis.one_agents.planexium_seo import require_seo
-    require_seo(package)
     channel = config.get("channel_id")
     if not channel or not config.get("credential_asset"):
         raise ValueError("The Planexium channel ID and credential-asset binding have not been configured")
@@ -713,6 +713,8 @@ def stage_private(payload: dict, *, approval_db: Path | None = None, adapter=Non
     # Hash the actual master as well: package metadata alone cannot authorize a replaced video.
     if approved.get("master_sha256") != _hash(Path(package["master"])):
         raise PermissionError("Approved master changed")
+    from openjarvis.one_agents.planexium_seo import require_seo
+    require_seo(package)
     for key, approval_key in (("thumbnail_path", "thumbnail_sha256"), ("caption", "caption_sha256")):
         if not package.get(key) or approved.get(approval_key) != _hash(Path(package[key])):
             raise PermissionError("Approval does not match the thumbnail/subtitle artifacts")

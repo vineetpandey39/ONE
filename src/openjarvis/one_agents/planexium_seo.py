@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from datetime import datetime, timezone
 
 from openjarvis.one_agents.youtube_channels import PLANEXIUM
 from openjarvis.one_agents.youtube_seo import description_audit, ollama_json, _valid_tags
@@ -41,6 +42,7 @@ def generate(package, science, *, job_id, llm=ollama_json):
         "Return JSON: title, primary_query, opening, tags, hashtags. "
         "Use only the supplied science/script; distinguish simulated Mars on Earth from actual Mars. "
         "Title max 100 characters, compelling but factual; complement the existing thumbnail hook. "
+        "primary_query: a natural search phrase of 2-6 words. "
         "opening: 2 short useful paragraphs, include the exact natural primary_query and 'this video' "
         "within the first 200 characters. No fabricated keyword volumes, rankings, or trending claims. "
         "tags: 15-25 distinct relevant search phrases, total YouTube tag budget 200-450 characters "
@@ -56,6 +58,11 @@ def generate(package, science, *, job_id, llm=ollama_json):
             result = dict(package)
             title = str(out["title"]).strip()
             opening = str(out["opening"]).strip()
+            query = " ".join(str(out["primary_query"]).split())
+            if not query or len(query) > 80:
+                raise ValueError("Primary query must be a concise natural search phrase")
+            if query.casefold() not in opening[:200].casefold():
+                opening = query + ": " + opening
             hashtags = out["hashtags"]
             if (not isinstance(hashtags, list) or len(set(hashtags)) != 3
                     or any(not re.fullmatch(r"#[A-Za-z][A-Za-z0-9_]{1,29}", h) for h in hashtags)):
@@ -67,11 +74,12 @@ def generate(package, science, *, job_id, llm=ollama_json):
                 raise ValueError("Measured chapters missing")
             tail = "CHAPTERS\n"+old.split("CHAPTERS\n", 1)[1]
             tail = re.sub(r"(?<!\w)#[A-Za-z0-9_]+", "", tail).strip()
-            result.update(recommended_title=title, primary_query=str(out["primary_query"]).strip(),
+            result.update(recommended_title=title, primary_query=query,
                           description=opening+"\n\n"+tail+"\n\n"+" ".join(hashtags),
                           tags=_valid_tags(out["tags"]), hashtags=hashtags, seo_owner="ARES",
                           seo_job_id=job_id, metadata_source="ares_model",
                           public_publish_authorized=False)
+            result.update(owner="ARES", handoff="PLANEXIUM -> ARES SEO audit -> human upload review")
             result["seo_metadata_sha256"] = metadata_hash(result)
             result["description_audit"] = require_seo(result)
             return result
@@ -81,6 +89,23 @@ def generate(package, science, *, job_id, llm=ollama_json):
 
 
 def run_job(job):
+    try:
+        return _run_job(job)
+    except Exception as exc:
+        from openjarvis.one_agents.planexium import load_config, context_for, _write
+        payload = json.loads(job["task"])
+        if payload.get("brand") == "planexium" and payload.get("stage") == "seo":
+            ctx = context_for(payload["mission_id"], load_config())
+            health_path = ctx.root/"production-health.json"
+            health = json.loads(health_path.read_text(encoding="utf-8")) if health_path.exists() else {}
+            health.update(status="seo_failed", stage="seo", seo_owner="ARES", seo_job_id=job["id"],
+                          seo_audit_passed=False, production_complete=False,
+                          error_class=type(exc).__name__, updated_at=datetime.now(timezone.utc).isoformat())
+            _write(health_path, health)
+        raise
+
+
+def _run_job(job):
     from openjarvis.one_agents.planexium import load_config, context_for, _write
     payload = json.loads(job["task"])
     if payload.get("brand") != "planexium" or payload.get("stage") != "seo":
@@ -122,7 +147,15 @@ def run_job(job):
     health = json.loads(health_path.read_text(encoding="utf-8")) if health_path.exists() else {}
     health.update(status="uploaded_private" if health.get("uploaded") else "awaiting_review",
                   seo_owner="ARES", seo_job_id=job["id"], seo_audit_passed=True,
-                  public_publish_authorized=False)
+                  public_publish_authorized=False, production_complete=True,
+                  current_stage="seo", blocked_reason=None, error_class=None,
+                  updated_at=datetime.now(timezone.utc).isoformat())
     _write(health_path, health)
+    ledger_path = root.parent/"production-ledger.json"
+    if ledger_path.exists():
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+        if ctx.mission_id in ledger:
+            ledger[ctx.mission_id]["status"] = health["status"] if health.get("uploaded") else "review_ready"
+            _write(ledger_path, ledger)
     return {"agent": "ARES", "mission_id": ctx.mission_id, "status": "seo_passed",
             "output": str(target), "published": False, "audit": require_seo(result)}
