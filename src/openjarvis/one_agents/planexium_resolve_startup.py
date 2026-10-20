@@ -45,13 +45,20 @@ def launch(settings):
     owner = Path(startup["owner_profile"])
     env = {k: v for k, v in os.environ.items() if k.upper() in {
         "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATH", "COMSPEC",
-        "PATHEXT", "PROGRAMDATA", "USERNAME", "USERDOMAIN"}}
+        "PATHEXT", "PROGRAMDATA", "ALLUSERSPROFILE", "USERNAME", "USERDOMAIN",
+        "USERDOMAIN_ROAMINGPROFILE", "PROGRAMFILES", "PROGRAMFILES(X86)",
+        "PROGRAMW6432", "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)",
+        "COMMONPROGRAMW6432", "OS", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
+        "PROCESSOR_IDENTIFIER", "PROCESSOR_LEVEL", "PROCESSOR_REVISION",
+        "COMPUTERNAME", "SESSIONNAME", "PUBLIC"}}
     env.update(USERPROFILE=str(owner), APPDATA=str(owner/"AppData/Roaming"),
-               LOCALAPPDATA=str(owner/"AppData/Local"))
+               LOCALAPPDATA=str(owner/"AppData/Local"),
+               HOMEDRIVE=owner.drive, HOMEPATH=str(owner)[len(owner.drive):])
     info = subprocess.STARTUPINFO()
     info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     info.wShowWindow = 0
-    subprocess.Popen([str(executable)], env=env, startupinfo=info,
+    return subprocess.Popen([str(executable)], env=env, startupinfo=info,
+                     cwd=str(executable.parent),
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL,
                      creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
@@ -105,7 +112,7 @@ def ensure_ready(settings, *, connector=connect, inventory=processes,
     root = Path(settings["work_root"])
     root.mkdir(parents=True, exist_ok=True)
     receipt = root/"startup-health.json"
-    started, launched = now(), False
+    started, launched, child = now(), False, None
 
     def status(state, reason=None):
         value = {"status": state, "at_epoch": time.time(),
@@ -125,10 +132,12 @@ def ensure_ready(settings, *, connector=connect, inventory=processes,
         deadline = started + min(180, max(10, int(startup.get("timeout", 120))))
         resolve = connector(settings)
         if resolve is None and not inventory():
-            launcher(settings)
+            child = launcher(settings)
             launched = True
             status("starting")
         while resolve is None and now() < deadline:
+            if child is not None and child.poll() is not None:
+                raise StartupBlocked(f"resolve_exited_during_startup_{child.returncode}")
             sleep(3)
             resolve = connector(settings)
         if resolve is None:

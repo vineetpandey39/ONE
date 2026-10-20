@@ -25,7 +25,15 @@
     "python": "C:\\Users\\pc\\Documents\\Codex\\2026-10-16\\mission-planexium-floor-12-architecture-discovery\\work\\resolve-mcp\\venv\\Scripts\\python.exe",
     "work_root": "C:/Users/pc/Movies/PLANEXIUM-agent",
     "timeout": 14400,
-    "bridge_config": "C:/Users/pc/.config/davinci-resolve-mcp/bridge.json"
+    "bridge_config": "C:/Users/pc/.config/davinci-resolve-mcp/bridge.json",
+    "autostart": {
+      "enabled": true,
+      "executable": "C:\\Program Files\\Blackmagic Design\\DaVinci Resolve\\Resolve.exe",
+      "owner_profile": "C:\\Users\\pc",
+      "hook": "C:\\Users\\pc\\AppData\\Roaming\\Blackmagic Design\\DaVinci Resolve\\Support\\Fusion\\Scripts\\PLANEXIUM_Autostart.scriptlib",
+      "hook_sha256": "ab14a665d34c0f3de7b84d790b425da1bf2f37edd230116f9f4c8bbcc324f669",
+      "timeout": 120
+    }
   },
   "music_library": [
     {

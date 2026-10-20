@@ -34,7 +34,13 @@ def isolated_environment(settings):
     # ONE may inject its own PYTHONPATH and HOME for its worker. Neither those
     # Python packages nor its credentials belong in the Resolve MCP process.
     allowed = {"SYSTEMROOT","WINDIR","TEMP","TMP","PATH","USERPROFILE","APPDATA",
-               "LOCALAPPDATA","PROGRAMDATA","COMSPEC","PATHEXT","USERNAME","USERDOMAIN"}
+               "LOCALAPPDATA","PROGRAMDATA","COMSPEC","PATHEXT","USERNAME","USERDOMAIN",
+               "ALLUSERSPROFILE", "USERDOMAIN_ROAMINGPROFILE", "PROGRAMFILES",
+               "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES",
+               "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMW6432", "OS",
+               "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER",
+               "PROCESSOR_LEVEL", "PROCESSOR_REVISION", "COMPUTERNAME", "SESSIONNAME",
+               "PUBLIC"}
     env = {k:v for k,v in os.environ.items() if k.upper() in allowed}
     env.update(DAVINCI_RESOLVE_BRIDGE="1", PYTHONUTF8="1")
     if settings.get("bridge_config"):
@@ -326,7 +332,10 @@ async def worker(request):
         env=isolated_environment(request))
     with machine_lock(Path(request["directory"]).parent/"resolve.lock"):
         # This module is also executed as a file by the isolated MCP Python.
-        from planexium_resolve_startup import ensure_ready
+        if __package__:
+            from .planexium_resolve_startup import ensure_ready
+        else:
+            from planexium_resolve_startup import ensure_ready
         await asyncio.to_thread(ensure_ready, request)
         async with stdio_client(params) as (reader, writer):
             async with ClientSession(reader, writer) as session:
