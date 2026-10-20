@@ -104,6 +104,7 @@ def image_provider(path, shot):
         {"action": "generate_and_download_chatgpt_image", "args": {
             "prompt": shot["prompt"],
             "reference_image_path": shot["reference"],
+            "reference_settle_seconds": 12,
             "filename": output.name, "max_attempts": 2,
             "stall_timeout_ms": 240000, "as": "image_path"}},
     ]
