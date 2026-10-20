@@ -48,6 +48,8 @@ def number_is_spoken(number,narration,*,preceding=None):
         ordinal=_ORDINAL.get(last,last[:-1]+'ieth' if last.endswith('y') else last+'th')
         forms.append(' '.join(standard.split()[:-1]+[ordinal]))
         if 1100<=value<=2099 and value%100:forms.append(_words(value//100)+' '+_words(value%100))
+        if 100<=value<10000:
+            forms.append(_words(value//100)+' hundred'+(' '+_words(value%100) if value%100 else ''))
     return any(' '+normalize((preceding+' ' if preceding else '')+form)+' ' in text for form in ([number]+forms))
 
 
@@ -67,7 +69,8 @@ def validate_motion(result, science, voice):
             raise ValueError("Repeated motion copy would create repetitive title cards")
         spoken = science["scenes"][i-1]["narration"]
         for phrase in phrases:
-            for number in re.findall(r"\b(\d+(?:\.\d+)?)(?:st|nd|rd|th)?\b", phrase):
+            for written in re.findall(r"\b(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(?:st|nd|rd|th)?\b", phrase):
+                number = written.replace(',', '')
                 if not number_is_spoken(number, spoken):
                     # A repeated named entity can span scene boundaries: Falcon
                     # Nine may be abbreviated as Falcon 9 later. Require the

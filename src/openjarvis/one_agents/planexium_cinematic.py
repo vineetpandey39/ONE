@@ -222,6 +222,17 @@ def render(root, tools, *, resolve_settings=None):
         if kind and eligible:
             eligible['science_overlay']=kind
             eligible['callout']=''
+    if resolve_settings:
+        # Reuse the approved native Fusion explainer only when the narration
+        # explicitly discusses BOTH origin hypotheses. Never infer this from stock.
+        for number, scene in enumerate(science['scenes'], 1):
+            narration_text = scene['narration'].casefold()
+            if all(word in narration_text for word in ('mars', 'impact', 'asteroid')):
+                eligible = next((s for s in shots if s['scene']==number and
+                    s['kind']!='primary' and s['frames']>=120 and not s.get('science_overlay')), None)
+                if eligible:
+                    eligible.update(fusion_diagram='moon_origins', callout='')
+                    break
     uniqueness = validate_unique_timeline(shots)
     (work/'timeline-uniqueness.json').write_text(json.dumps(uniqueness, indent=2), encoding='utf-8')
     (work/'render-media-manifest.json').write_text(json.dumps(media_manifest(shots,assets['music']),indent=2),encoding='utf-8')

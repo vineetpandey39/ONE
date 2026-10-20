@@ -59,7 +59,7 @@ LAYOUTS = {
 
 
 def composition(picture, frames, shots, family):
-    """Native editable Fusion titles and animated plate/rule."""
+    """Native titles plus a narration-bound, qualitative moon-origin diagram."""
     if family not in LAYOUTS or frames < 1:
         raise ValueError("Known weekday format and positive frame budget required")
     nodes = []
@@ -88,6 +88,48 @@ def composition(picture, frames, shots, family):
     x, y, size, color = LAYOUTS[family]
     beats = []
     for index, shot in enumerate(shots):
+        if shot.get("fusion_diagram") == "moon_origins" and shot["kind"] != "primary":
+            import math
+            start, count = int(shot["start_frame"]), int(shot["frames"])
+            end = start + count
+            if start < 0 or end > frames or count < 120:
+                raise ValueError("Origin diagram needs a valid four-second shot")
+            gate = f"iif(time>={start} and time<{end},min(1,max(0,(time-{start})/12))*min(1,max(0,({end}-time)/12)),0)"
+            prefix = f"Origins{index}"
+            node(prefix+"PanelMask", "RectangleMask", [
+                inp("MaskWidth", 1920), inp("MaskHeight", 1080),
+                inp("Center", expr="Point(.5,.5)"), inp("Width", .9), inp("Height", .68)])
+            node(prefix+"Panel", "Background", dimensions + [
+                inp("TopLeftRed", .015), inp("TopLeftGreen", .03), inp("TopLeftBlue", .05),
+                inp("TopLeftAlpha", .94), inp("EffectMask", source=prefix+"PanelMask", mask=True)])
+            merge(prefix+"Panel", gate)
+            def disk(suffix, cx, cy, width, height, rgb, border=0):
+                name = prefix+suffix
+                node(name+"Mask", "EllipseMask", [
+                    inp("MaskWidth", 1920), inp("MaskHeight", 1080),
+                    inp("Center", expr=f"Point({cx},{cy})"), inp("Width", width), inp("Height", height),
+                    inp("Solid", 0 if border else 1), inp("BorderWidth", border), inp("SoftEdge", .002)])
+                node(name, "Background", dimensions + [
+                    inp("TopLeftRed", rgb[0]), inp("TopLeftGreen", rgb[1]), inp("TopLeftBlue", rgb[2]),
+                    inp("EffectMask", source=name+"Mask", mask=True)])
+                merge(name, gate)
+            for side, cx in [("Left", .28), ("Right", .72)]:
+                disk(side+"Orbit", cx, .51, .32, .22, (.3,.5,.6), .0015)
+                disk(side+"Mars", cx, .51, .115, .115, (.8,.27,.1))
+                node(prefix+side+"Label", "TextPlus", dimensions + [
+                    inp("StyledText", "CAPTURED ASTEROID?" if side == "Left" else "IMPACT DEBRIS?"),
+                    inp("Font", "Bahnschrift"), inp("Style", "Regular"), inp("Size", .029),
+                    inp("Center", expr=f"Point({cx},.28)")])
+                merge(prefix+side+"Label", gate)
+            disk("Moon", f".28+.16*cos((time-{start})*.026)",
+                 f".51+.11*sin((time-{start})*.026)", .014, .014, (.7,.88,.94))
+            for i in range(16):
+                theta = i*2*math.pi/16
+                disk(f"Debris{i}", f".72+(.07+.09*min(1,max(0,(time-{start})/{count*.7})))*cos({theta}+(time-{start})*.012)",
+                     f".51+(.05+.06*min(1,max(0,(time-{start})/{count*.7})))*sin({theta}+(time-{start})*.012)",
+                     .004, .004, (1,.65,.3))
+            beats.append({"start_frame":start, "frames":count, "diagram":"moon_origins",
+                          "meaning":"Qualitative competing hypotheses, not simulated orbital measurements"})
         text = str(shot.get("callout") or "").strip()
         if not text or shot["kind"] == "primary" or shot.get("science_overlay"):
             continue
@@ -232,8 +274,12 @@ async def execute(request, client):
         await client.call("project_manager", "save")
         await client.call("render", "set_mode", mode=1)
         await client.call("render", "set_format_and_codec", format="mp4", codec="H264")
+        timeline = await client.call("timeline", "get_current")
+        timeline_start = int(timeline["start_frame"])
         await client.call("render", "set_settings", settings={
-            "SelectAllFrames": True, "ExportAudio": True, "ExportVideo": True,
+            "SelectAllFrames": False, "MarkIn": timeline_start,
+            "MarkOut": timeline_start+request["frames"]-1,
+            "ExportAudio": True, "ExportVideo": True,
             "TargetDir": str(directory), "CustomName": "resolve-master"})
         state["phase"] = "submitting"; write(state_path, state)
         state["job_id"] = (await client.call("render", "add_job"))["job_id"]
