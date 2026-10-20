@@ -2268,7 +2268,7 @@ def _sonia_recent_topics(prior: list[str], *, limit: int = 25,
     return unique[:limit]
 
 
-def _sonia_brief_repeat(brief: str, prior: list[str], *, window: int = 7) -> str:
+def _sonia_brief_repeat(brief: str, prior: list[str], *, window: int = 120) -> str:
     """Return the recent title that repeats an evergreen fallback destination.
 
     News discovery owns its own destination gate.  Search-demand fallback is
@@ -2284,10 +2284,16 @@ def _sonia_brief_repeat(brief: str, prior: list[str], *, window: int = 7) -> str
     )
     if not match:
         return "missing explicit Destination/Topic field"
-    destination = re.sub(r"[^a-z0-9]+", " ", match.group(1).casefold()).strip()
+    explicit_place = re.split(r"\s*[|–—(]\s*", match.group(1), maxsplit=1)[0]
+    destination = re.sub(r"[^a-z0-9]+", " ", explicit_place.casefold()).strip()
     destination = re.sub(r"\b(?:specifically|general|destination|topic)\b.*$", "", destination).strip()
     if not destination:
         return "missing explicit Destination/Topic field"
+    # ``prior`` interleaves uploaded titles with reserved/failed commissions
+    # and their research headlines. A count of seven rows is not seven channel
+    # uploads: the live 11-Oct Thailand Short was row 45 on 20-Oct even though
+    # it was only nine uploads old. Scan the bounded 30-day calendar supplied
+    # by the caller instead of an arbitrary first-page slice.
     for title in prior[:max(1, window)]:
         normalized = re.sub(r"[^a-z0-9]+", " ", str(title).casefold()).strip()
         if re.search(rf"\b{re.escape(destination)}\b", normalized):
@@ -8102,7 +8108,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                     "or imply Sonia personally visited. End with COMMISSION: YES or NO. "
                     "The line 'Destination/Topic: <one country or city>' is mandatory. "
                     "The line 'Chosen headline: <the single evidence-backed idea selected>' is mandatory. "
-                    f"Avoid prior topics: {json.dumps(prior[:15], ensure_ascii=False)}")
+                    f"Avoid prior topics: {json.dumps((recent_stories[:40] if is_vista_short else prior[:15]), ensure_ascii=False)}")
                 synthesis_evidence = {"eligible": eligible, "catalog_evidence": [],
                                       "signal_policy": "Google Trends and YouTube public-search metadata are "
                                                        "primary discovery. News is context only. YouTube views are "
@@ -8131,7 +8137,8 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                         "handed_to": None}
             brief, note = _research_synthesis(synthesis_prompt, evidence=synthesis_evidence)
             if story["status"] != "picked" and brief and "COMMISSION: NO" not in brief.upper():
-                repeat = _sonia_brief_repeat(brief, prior)
+                repeat = _sonia_brief_repeat(
+                    brief, recent_stories if is_vista_short else prior)
                 if repeat:
                     stages.clear_stage(head_id)
                     reason = ("evergreen fallback failed the no-repeat gate: " + repeat)
