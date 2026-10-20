@@ -122,6 +122,65 @@ def image_provider(path, shot):
     return receipt
 
 
+def image_batch_provider(path, shots):
+    """Generate all missing episode frames in one persistent ChatGPT chat."""
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+    from openjarvis.one_agents.planexium_adapters import LaoDraft
+    config = read(ROOT / "runtime-config.json")
+    manifest = read(path / "mission.json")
+    browser = manifest["browser"]
+    if Path(browser["profile_dir"]).resolve() != (ROOT / "chrome-profile").resolve():
+        raise ValueError("CHANDAN browser ownership mismatch")
+    missing = [shot for shot in shots if not (Path(shot["image"]).is_file()
+               and Path(shot["image"]).stat().st_size > 10000)]
+    if not missing:
+        return {"status": "reused", "count": len(shots)}
+    output_root = Path(missing[0]["image"]).parent
+    batch_plan = path / "runtime" / "chatgpt-image-batch-plan.json"
+    write(batch_plan, {"calls": [{
+        "kind": "scene", "filename": Path(shot["image"]).name,
+        "prompt": shot["prompt"], "stall_timeout_ms": 240000,
+        "max_attempts": 3,
+    } for shot in missing]})
+    provider = LaoDraft(LaoOrchestratorTool(), config.get("lao_folder_id"),
+                        tuple(Path(p) for p in config["artifact_roots"]))
+    steps = [
+        {"action": "open_browser", "args": {
+            "profile_dir": browser["profile_dir"], "cdp_url": browser["cdp_url"],
+            "start_url": "https://chatgpt.com/"}},
+        {"action": "navigate", "args": {"url": "https://chatgpt.com/"}},
+        {"action": "click_first", "args": {
+            "selectors": ["[data-testid='create-new-chat-button']", "a[href='/']"],
+            "timeout_ms": 30000}},
+        {"action": "wait_for_any_selector", "args": {
+            "selectors": ["#prompt-textarea", "[contenteditable='true']", "textarea"],
+            "timeout_ms": 60000}},
+        {"action": "generate_chatgpt_image_batch", "args": {
+            "plan_path": str(batch_plan),
+            "reference_image_path": missing[0]["reference"],
+            "output_root": str(output_root),
+            "reference_settle_seconds": 12,
+            "retry_backoff_seconds": 60, "poll_ms": 3000,
+            "as": "batch_result"}},
+    ]
+    result, provider_job = provider.run(
+        f"Origin to Ovation - Sachin - {missing[0]['shot_id']}-{missing[-1]['shot_id']} single chat",
+        steps, {}, path / "runtime" / "providers" / "remaining-images-single-chat.json",
+        timeout=7200)
+    absent = [shot["shot_id"] for shot in missing if not (Path(shot["image"]).is_file()
+              and Path(shot["image"]).stat().st_size > 10000)]
+    if absent:
+        raise RuntimeError(f"Single-chat batch left frames missing: {', '.join(absent)}")
+    for shot in missing:
+        output = Path(shot["image"])
+        write(path / "runtime" / "images" / f"{shot['shot_id']}.json", {
+            "status": "generated", "provider": "ChatGPT via LAO single-chat batch",
+            "provider_job": provider_job, "sha256": digest(output),
+            "editorial_review": "pending"})
+    return {"status": "generated", "count": len(missing), "provider_job": provider_job,
+            "chat_policy": "single_chat"}
+
+
 def run_stage(job, *, enqueue):
     payload = json.loads(job["task"])
     path = mission_path(payload)
@@ -155,11 +214,10 @@ def run_stage(job, *, enqueue):
                         [master_dir / "shot-plan.json", path / "mission.json"])
     if agent == "chandan":
         plan = read(master_dir / "shot-plan.json")
-        for index, shot in enumerate(plan):
-            write(path / "runtime" / "active.json", {
-                "agent": agent, "job_id": job["id"], "status": "producing_images",
-                "shot": shot["shot_id"], "processed": index, "total": len(plan)})
-            image_provider(path, shot)
+        write(path / "runtime" / "active.json", {
+            "agent": agent, "job_id": job["id"], "status": "producing_images_single_chat",
+            "processed": sum(Path(s["image"]).is_file() for s in plan), "total": len(plan)})
+        image_batch_provider(path, plan)
         # Generator validates the paid chapter receipts and skips valid audio.
         subprocess.run([sys.executable, str(master_dir / "generate_narration.py")], check=True)
         from openjarvis.one_agents.chandan_render import render
