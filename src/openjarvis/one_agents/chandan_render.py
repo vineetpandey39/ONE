@@ -186,6 +186,7 @@ def _render(root: Path, *, expected_shots: int = 75, size: tuple[int,int] = (192
         "+0.018*sin(2*PI*55*t)*exp(-5*mod(t,2))"
         "+0.006*sin(2*PI*440*t)*exp(-3*mod(t,8))"
     )
+    score=score.replace(',', r'\,')
     _run(['ffmpeg','-hide_banner','-loglevel','error','-y','-f','lavfi','-i',f"aevalsrc={score}:s=48000:d={duration}",'-af',f'lowpass=f=1800,highpass=f=45,afade=t=in:d=3,afade=t=out:st={max(0,duration-4)}:d=4','-c:a','pcm_s16le',str(bed)])
     chapter_starts=[float(s['start_seconds'])/tempo for i,s in enumerate(shots) if i and s['chapter']!=shots[i-1]['chapter']]
     windows='+'.join(f'if(between(t,{max(0,t-.20):.3f},{t+.24:.3f}),0.007*sin(PI*(t-{max(0,t-.20):.3f})/0.44)^2,0)' for t in chapter_starts) or '0'
