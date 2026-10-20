@@ -121,7 +121,10 @@ class LaoDraft:
         error = str(job.get("error_message") or "")
         return (job.get("status") == "Failed" and (
             ("Timed out waiting for selectors" in error and "idp-title" in error and ":has-text(" in error)
-            or "Rejected asset: forbidden visual keyword(s)" in error))
+            or "Rejected asset: forbidden visual keyword(s)" in error
+            or ("Rejected asset: visual subject " in error and " absent from " in error)
+            or ("Rejected asset: destination phrase " in error and " absent from " in error)
+            or "Rejected asset: preview does not confidently support selected-item metadata and subject" in error))
 
     def artifact(self, outputs: dict, job_id: str, filename: str) -> Path:
         # Reuse the same artifact lookup as current Sonia production. Never
