@@ -246,12 +246,18 @@ class Pipeline:
                     require_seo(package)
                 except ValueError:
                     from openjarvis.one_agents.runtime import enqueue_job
-                    seo = enqueue_job("ares", json.dumps({"brand": "planexium", "stage": "seo",
-                        "mission_id": self.context.mission_id}), mode="execute", tier="fast",
-                        dedupe_key=f"planexium:{self.context.mission_id}:ares-seo-v1")
                     self.health("awaiting_seo", stage="seo")
                     ledger[self.context.mission_id]["status"] = "awaiting_seo"
                     _write(ledger_path, ledger)
+                    try:
+                        seo = enqueue_job("ares", json.dumps({"brand": "planexium", "stage": "seo",
+                            "mission_id": self.context.mission_id}), mode="execute", tier="fast",
+                            dedupe_key=f"planexium:{self.context.mission_id}:ares-seo-v1")
+                    except Exception as exc:
+                        ledger[self.context.mission_id]["status"] = "seo_failed"
+                        _write(ledger_path, ledger)
+                        self.health("seo_failed", stage="seo", error_class=type(exc).__name__)
+                        raise
                     result.update(status="awaiting_seo", handed_to={"agent": "ARES", "job_id": seo["id"]})
             return result
 

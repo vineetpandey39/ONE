@@ -36,7 +36,7 @@ def require_seo(package):
     return audit
 
 
-def generate(package, science, *, job_id, llm=ollama_json):
+def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=None):
     prompt = (
         "You are ARES, the SEO agent for The Planexium science YouTube channel. "
         "Return JSON: title, primary_query, opening, tags, hashtags. "
@@ -49,21 +49,36 @@ def generate(package, science, *, job_id, llm=ollama_json):
         "(spaces/commas count); no isolated words such as days/crew/nears, no unrelated topics. "
         "hashtags: exactly 3 relevant hashtags. Keep all scientific quantities source-grounded. "
         "Do not claim the crew are physically on Mars. Return plain Unicode, no mojibake.")
+    prompt += (
+        " Research being conducted is not a proven result: do not write 'proves', 'proving', "
+        "'findings show' or claim psychological effects unless the input explicitly reports results. "
+        "Describe research aims as studying/testing/exploring. Avoid markdown asterisks in YouTube text. "
+        "Use 'simulated Mars' rather than 'Mars Sim'. Prefer concrete mission/topic searches over "
+        "generic or speculative psychological-effects keywords. Follow editorial_feedback when supplied.")
     errors = None
     for attempt in range(2):
         out = llm(prompt, {"science": science, "current_title": package["recommended_title"],
                           "thumbnail_hook": package.get("thumbnail_strategy", {}).get("concepts", [{}])[0].get("text"),
+                          "editorial_feedback": editorial_feedback,
                           "previous_validation_error": errors})
         try:
             result = dict(package)
             title = str(out["title"]).strip()
             opening = str(out["opening"]).strip()
+            if re.search(r"\b(proves?|proving|findings show)\b", opening, re.I):
+                raise ValueError("Description must distinguish research aims from established results")
+            opening = opening.replace("**", "")
             query = " ".join(str(out["primary_query"]).split())
             if not query or len(query) > 80:
                 raise ValueError("Primary query must be a concise natural search phrase")
             if query.casefold() not in opening[:200].casefold():
                 opening = query + ": " + opening
             hashtags = out["hashtags"]
+            if isinstance(hashtags, str):
+                hashtags = re.findall(r"#[A-Za-z][A-Za-z0-9_]+", hashtags)
+            if isinstance(hashtags, list):
+                hashtags = ["#"+re.sub(r"\s+", "", str(h).strip().lstrip("#"))
+                            for h in hashtags]
             if (not isinstance(hashtags, list) or len(set(hashtags)) != 3
                     or any(not re.fullmatch(r"#[A-Za-z][A-Za-z0-9_]{1,29}", h) for h in hashtags)):
                 raise ValueError("Exactly three valid distinct hashtags required")
@@ -76,7 +91,7 @@ def generate(package, science, *, job_id, llm=ollama_json):
             tail = re.sub(r"(?<!\w)#[A-Za-z0-9_]+", "", tail).strip()
             result.update(recommended_title=title, primary_query=query,
                           description=opening+"\n\n"+tail+"\n\n"+" ".join(hashtags),
-                          tags=_valid_tags(out["tags"]), hashtags=hashtags, seo_owner="ARES",
+                          tags=_valid_tags(out["tags"], limit=450), hashtags=hashtags, seo_owner="ARES",
                           seo_job_id=job_id, metadata_source="ares_model",
                           public_publish_authorized=False)
             result.update(owner="ARES", handoff="PLANEXIUM -> ARES SEO audit -> human upload review")
@@ -102,6 +117,12 @@ def run_job(job):
                           seo_audit_passed=False, production_complete=False,
                           error_class=type(exc).__name__, updated_at=datetime.now(timezone.utc).isoformat())
             _write(health_path, health)
+            ledger_path = ctx.root.parent/"production-ledger.json"
+            if ledger_path.exists():
+                ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+                if ctx.mission_id in ledger:
+                    ledger[ctx.mission_id]["status"] = "seo_failed"
+                    _write(ledger_path, ledger)
         raise
 
 
@@ -119,8 +140,12 @@ def _run_job(job):
     if digest(package["master"]) != gate["master_sha256"]:
         raise ValueError("Master differs from reviewed video")
     science = json.loads((root/"science-plan.json").read_text(encoding="utf-8"))
-    target = root/"seo/ares-seo-package.json"
-    receipt_path = root/"seo/ares-receipt.json"
+    revision = payload.get("revision", "")
+    if revision and not re.fullmatch(r"[a-z0-9-]{1,40}", revision):
+        raise ValueError("Invalid SEO revision")
+    seo_dir = root/"seo"/revision if revision else root/"seo"
+    target = seo_dir/"ares-seo-package.json"
+    receipt_path = seo_dir/"ares-receipt.json"
     if target.exists() and receipt_path.exists():
         result = json.loads(target.read_text(encoding="utf-8"))
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -128,7 +153,14 @@ def _run_job(job):
             raise ValueError("Existing ARES receipt changed")
         require_seo(result)
     else:
-        result = generate(package, science, job_id=job["id"])
+        attempts = []
+        def model_with_evidence(prompt, data):
+            candidate = ollama_json(prompt, data)
+            attempts.append(candidate)
+            _write(seo_dir/"ares-model-attempts.json", {"job_id": job["id"], "attempts": attempts})
+            return candidate
+        result = generate(package, science, job_id=job["id"],
+                          editorial_feedback=payload.get("editorial_feedback"), llm=model_with_evidence)
         _write(target, result)
         _write(receipt_path, {"agent": "ARES", "job_id": job["id"],
                              "master_sha256": digest(package["master"]),
@@ -140,7 +172,7 @@ def _run_job(job):
     if checkpoint.exists():
         saved = json.loads(checkpoint.read_text(encoding="utf-8"))
         saved["files"]["review-gate.json"] = digest(gate_path)
-        saved["files"]["seo/ares-seo-package.json"] = digest(target)
+        saved["files"][target.relative_to(root).as_posix()] = digest(target)
         saved["result"].update(output=str(target), seo_job_id=job["id"])
         _write(checkpoint, saved)
     health_path = root/"production-health.json"
