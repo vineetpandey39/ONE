@@ -6388,7 +6388,16 @@ def _vista_spec_from_brief(brief: str, slot: str, lane: str, hook: str) -> dict[
         return match.group(1).strip() if match else ""
 
     chosen = re.search(r"Chosen from today's scored travel news:\s*(.+?)\s*\(score", text)
-    quoted_hook = re.search(r'\*\*"([^"]{12,200})"\*\*', section("Strongest Truthful Hook"))
+    hook_section = section("Strongest Truthful Hook")
+    quoted_hook = re.search(r'\*\*"([^"]{12,200})"\*\*', hook_section)
+    # The evergreen synthesizer commonly emits TrendBrief fields as bold
+    # labels rather than Markdown headings. This remains explicit authored
+    # evidence, not a destination-derived guess: accept only the named field
+    # and, when present, its quoted hook text.
+    hook_field = re.search(
+        r'(?im)^[ \t]*(?:\*\*)?Strongest Truthful Hook:(?:\*\*)?[ \t]*(\S[^\r\n]*)$', text)
+    hook_field_value = hook_field.group(1).strip() if hook_field else ""
+    hook_field_quote = re.search(r'"([^"]{12,200})"', hook_field_value)
     # Evergreen briefs do not have a scored-news receipt. Require an explicit
     # chosen headline instead of depending on incidental bold/quote styling,
     # or guessing one from the destination or the head's reasoning.
@@ -6396,14 +6405,24 @@ def _vista_spec_from_brief(brief: str, slot: str, lane: str, hook: str) -> dict[
         r"(?im)^[ \t]*(?:\*\*)?Chosen headline:(?:\*\*)?[ \t]*(\S[^\r\n]*)$", text)
     headline = (chosen.group(1) if chosen else
                 explicit.group(1).strip(' *"') if explicit else
-                quoted_hook.group(1) if quoted_hook else "").strip()
+                quoted_hook.group(1) if quoted_hook else
+                hook_field_quote.group(1) if hook_field_quote else
+                hook_field_value.strip(' *"')).strip()
     if not headline:
         raise RuntimeError("HELIOS brief names no chosen story headline; VISTA cannot be briefed on a guess")
     place = re.search(r"(?im)^\**Destination/Topic:?\**:?\s*(.+)$", text)
     destination = re.sub(r"\s*\(.*$", "", place.group(1)).strip(" *.") if place else ""
     if not destination:
         destination = re.sub(r"\s+", " ", section("Destination/Topic")).split(".")[0].strip(" *-")
-    search_terms = [t.strip() for t in re.findall(r'"([^"\n]{3,80})"', section("Viral Search Terms"))][:8]
+    # ``Destination/Topic`` may include an explanatory topic after a pipe;
+    # VISTA's geographic contract needs the explicit place on the left.
+    destination = re.split(r"\s*[|–—]\s*", destination, maxsplit=1)[0].strip()
+    search_source = section("Viral Search Terms")
+    if not search_source:
+        search_line = re.search(
+            r"(?im)^[ \t]*(?:\*\*)?Viral Search Terms:(?:\*\*)?[ \t]*(\S[^\r\n]*)$", text)
+        search_source = search_line.group(1) if search_line else ""
+    search_terms = [t.strip() for t in re.findall(r'"([^"\n]{3,80})"', search_source)][:8]
     urls = []
     for url in re.findall(r"https?://[^\s)>\]]+", text):
         url = url.rstrip(".,;")
