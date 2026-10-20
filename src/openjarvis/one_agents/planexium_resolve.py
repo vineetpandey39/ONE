@@ -325,6 +325,9 @@ async def worker(request):
         cwd=str(server.parent.parent),
         env=isolated_environment(request))
     with machine_lock(Path(request["directory"]).parent/"resolve.lock"):
+        # This module is also executed as a file by the isolated MCP Python.
+        from planexium_resolve_startup import ensure_ready
+        await asyncio.to_thread(ensure_ready, request)
         async with stdio_client(params) as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
@@ -339,7 +342,7 @@ async def worker(request):
 
 
 def preflight(root, settings):
-    """Read-only connection check before providers/expensive picture preparation."""
+    """Recover a closed Resolve, then verify MCP before expensive preparation."""
     directory = Path(settings["work_root"])/"preflight"
     directory.mkdir(parents=True, exist_ok=True)
     request = {**settings, "directory": str(directory), "preflight": True}
@@ -347,9 +350,9 @@ def preflight(root, settings):
     write(path, request)
     with (Path(root)/"edit/resolve-preflight.log").open("a", encoding="utf-8") as log:
         result = subprocess.run([settings["python"], str(Path(__file__).resolve()), str(path)],
-            stdout=log, stderr=subprocess.STDOUT, timeout=180, env=isolated_environment(settings))
+            stdout=log, stderr=subprocess.STDOUT, timeout=300, env=isolated_environment(settings))
     if result.returncode:
-        raise RuntimeError("Resolve bridge unavailable/busy; open Resolve and its bridge, then resume the mission")
+        raise RuntimeError("Resolve startup/preflight blocked; inspect startup-health.json and resume the mission")
 
 
 def finish(root, settings, shots, family):
@@ -379,6 +382,9 @@ def finish(root, settings, shots, family):
         "python": str(python), "timeout": settings.get("timeout", 14400)}
     if settings.get("bridge_config"):
         request["bridge_config"]=settings["bridge_config"]
+    if settings.get("autostart"):
+        request["autostart"] = settings["autostart"]
+        request["work_root"] = settings["work_root"]
     request_path = directory/"request.json"; write(request_path, request)
     with (work/"resolve-mcp.log").open("a", encoding="utf-8") as log:
         child = subprocess.Popen([str(python), str(Path(__file__).resolve()), str(request_path)],
@@ -408,5 +414,13 @@ def finish(root, settings, shots, family):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("request", type=Path)
+    parser.add_argument("--bootstrap", action="store_true",
+                        help="Read channel config and only start/check Resolve; never produce/upload")
     args = parser.parse_args()
-    asyncio.run(worker(json.loads(args.request.read_text(encoding="utf-8"))))
+    request = json.loads(args.request.read_text(encoding="utf-8"))
+    if args.bootstrap:
+        request = request["resolve"]
+        directory = Path(request["work_root"])/"bootstrap"
+        directory.mkdir(parents=True, exist_ok=True)
+        request = {**request, "directory": str(directory), "preflight": True}
+    asyncio.run(worker(request))
