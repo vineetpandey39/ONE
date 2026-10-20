@@ -44,13 +44,13 @@ def launch(settings):
     # ONE's worker uses a synthetic HOME. Resolve must use its real owner profile.
     owner = Path(startup["owner_profile"])
     env = {k: v for k, v in os.environ.items() if k.upper() in {
-        "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATH", "COMSPEC",
+        "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP", "PATH", "COMSPEC",
         "PATHEXT", "PROGRAMDATA", "ALLUSERSPROFILE", "USERNAME", "USERDOMAIN",
         "USERDOMAIN_ROAMINGPROFILE", "PROGRAMFILES", "PROGRAMFILES(X86)",
         "PROGRAMW6432", "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)",
         "COMMONPROGRAMW6432", "OS", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
         "PROCESSOR_IDENTIFIER", "PROCESSOR_LEVEL", "PROCESSOR_REVISION",
-        "COMPUTERNAME", "SESSIONNAME", "PUBLIC"}}
+        "COMPUTERNAME", "SESSIONNAME", "PUBLIC", "DRIVERDATA", "LOGONSERVER"}}
     env.update(USERPROFILE=str(owner), APPDATA=str(owner/"AppData/Roaming"),
                LOCALAPPDATA=str(owner/"AppData/Local"),
                HOMEDRIVE=owner.drive, HOMEPATH=str(owner)[len(owner.drive):])

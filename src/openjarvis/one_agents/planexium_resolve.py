@@ -33,14 +33,14 @@ def write(path, value):
 def isolated_environment(settings):
     # ONE may inject its own PYTHONPATH and HOME for its worker. Neither those
     # Python packages nor its credentials belong in the Resolve MCP process.
-    allowed = {"SYSTEMROOT","WINDIR","TEMP","TMP","PATH","USERPROFILE","APPDATA",
+    allowed = {"SYSTEMROOT","SYSTEMDRIVE","WINDIR","TEMP","TMP","PATH","USERPROFILE","APPDATA",
                "LOCALAPPDATA","PROGRAMDATA","COMSPEC","PATHEXT","USERNAME","USERDOMAIN",
                "ALLUSERSPROFILE", "USERDOMAIN_ROAMINGPROFILE", "PROGRAMFILES",
                "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES",
                "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMW6432", "OS",
                "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER",
                "PROCESSOR_LEVEL", "PROCESSOR_REVISION", "COMPUTERNAME", "SESSIONNAME",
-               "PUBLIC"}
+               "PUBLIC", "DRIVERDATA", "LOGONSERVER"}
     env = {k:v for k,v in os.environ.items() if k.upper() in allowed}
     env.update(DAVINCI_RESOLVE_BRIDGE="1", PYTHONUTF8="1")
     if settings.get("bridge_config"):
