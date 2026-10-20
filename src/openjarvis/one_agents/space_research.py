@@ -292,6 +292,10 @@ def article_images(url: str, directory: Path, *, read=read_public) -> list[dict]
     for figure in parser.rows:
         caption=" ".join(" ".join(figure["caption"]).split())
         for image in figure["images"]:
+            # Related-story cards and site chrome are also wrapped in figures.
+            # Main article photographs carry descriptive alt/caption evidence.
+            if not image.get("alt","").strip() and not caption:
+                continue
             link=image.get("src","")
             try:validate_url(link,MEDIA_HOSTS)
             except ValueError:continue

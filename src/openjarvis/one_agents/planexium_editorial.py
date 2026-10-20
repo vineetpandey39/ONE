@@ -44,7 +44,8 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
         # searching an archive. These are original source figures, not captures.
         for asset in media.get(str(number),{}).get('assets',[]):
             if len(pictures)>=needed:break
-            if asset.get('caption') is None or asset['sha256'] in used:continue
+            if (asset.get('caption') is None or asset['sha256'] in used
+                    or not (asset.get('title','').strip() or asset.get('caption','').strip())):continue
             if not nasa_image_is_visible(asset['path']):continue
             if hashlib.sha256(Path(asset['path']).read_bytes()).hexdigest()!=asset['sha256']:
                 raise ValueError('Official article image changed')
