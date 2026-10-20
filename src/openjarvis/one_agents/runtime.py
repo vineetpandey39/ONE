@@ -653,10 +653,12 @@ def agent_stats() -> list[dict[str, Any]]:
     return stats
 
 
-def claim_job() -> dict[str, Any] | None:
+def claim_job(job_id: str | None = None) -> dict[str, Any] | None:
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
-        row = db.execute("SELECT * FROM jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1").fetchone()
+        row = (db.execute("SELECT * FROM jobs WHERE status = 'queued' AND id = ?", (job_id,)).fetchone()
+               if job_id else db.execute(
+                   "SELECT * FROM jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1").fetchone())
         if not row:
             return None
         now = _now()
@@ -6263,9 +6265,9 @@ def _run_vista(job: dict[str, Any]) -> dict[str, Any]:
         stages.set_stage("vista", stages.EXECUTING, "Researching and writing the Short with LAO's ChatGPT")
         from openjarvis.one_agents import resource_lanes
         stages.set_stage("vista", stages.EXECUTING,
-                         "Waiting for Floor 12's exclusive Envato download lane")
+                         "Waiting for VISTA's own Envato session")
         with resource_lanes.claim(
-            "floor12:envato",
+            "browser:vista-envato",
             heartbeat=lambda: job_recovery.heartbeat(_connect, str(job["id"])),
             cancelled=lambda: not _job_is_active(str(job["id"])),
         ):
@@ -9949,9 +9951,9 @@ def _run_yatra_visuals(job: dict[str, Any]) -> dict[str, Any]:
     # missing slots. Its all_covered result is the only footage completion gate.
     from openjarvis.one_agents import resource_lanes
     stages.set_stage("yatra", stages.EXECUTING,
-                     "Waiting for Floor 12's exclusive Envato download lane")
+                     "Waiting for YATRA's own Envato session")
     with resource_lanes.claim(
-        "floor12:envato",
+        "browser:yatra-envato",
         heartbeat=lambda: job_recovery.heartbeat(_connect, str(job["id"])),
         cancelled=lambda: not _job_is_active(str(job["id"])),
     ):
