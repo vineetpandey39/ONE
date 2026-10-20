@@ -239,6 +239,18 @@ class Pipeline:
             ledger[self.context.mission_id]["status"] = "review_ready"
             _write(ledger_path, ledger)
             self.health("awaiting_review", stage="package")
+            if self.config.get("ares_seo") and result.get("output"):
+                from openjarvis.one_agents.planexium_seo import require_seo
+                package = json.loads(Path(result["output"]).read_text(encoding="utf-8"))
+                try:
+                    require_seo(package)
+                except ValueError:
+                    from openjarvis.one_agents.runtime import enqueue_job
+                    seo = enqueue_job("ares", json.dumps({"brand": "planexium", "stage": "seo",
+                        "mission_id": self.context.mission_id}), mode="execute", tier="fast",
+                        dedupe_key=f"planexium:{self.context.mission_id}:ares-seo-v1")
+                    self.health("awaiting_seo", stage="seo")
+                    result.update(status="awaiting_seo", handed_to={"agent": "ARES", "job_id": seo["id"]})
             return result
 
     def _produce(self, commission, *, plan, pilot):
@@ -676,7 +688,15 @@ def stage_private(payload: dict, *, approval_db: Path | None = None, adapter=Non
     config = load_config()
     context = context_for(payload["mission_id"], config)
     path = context.artifact("seo/youtube-seo-package.json")
+    gate_path = context.artifact("review-gate.json")
+    if gate_path.exists():
+        selected = Path(json.loads(gate_path.read_text(encoding="utf-8"))["package"]).resolve()
+        if not selected.is_relative_to(context.root.resolve()):
+            raise ValueError("Review package escapes mission")
+        path = selected
     package = json.loads(path.read_text(encoding="utf-8"))
+    from openjarvis.one_agents.planexium_seo import require_seo
+    require_seo(package)
     channel = config.get("channel_id")
     if not channel or not config.get("credential_asset"):
         raise ValueError("The Planexium channel ID and credential-asset binding have not been configured")

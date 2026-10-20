@@ -6131,6 +6131,9 @@ def _run_chandan(job: dict[str, Any]) -> dict[str, Any]:
 def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 3 - organic publishing distribution or the existing local plan."""
     payload = _json_task(job)
+    if payload.get("brand") == "planexium":
+        from openjarvis.one_agents.planexium_seo import run_job
+        return run_job(job)
     if payload.get("brand") == "origin_to_ovation":
         from openjarvis.one_agents.origin_to_ovation import run_stage
         return run_stage(job, enqueue=enqueue_job)

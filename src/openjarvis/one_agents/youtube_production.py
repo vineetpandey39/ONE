@@ -43,6 +43,8 @@ class ExistingPrivateUploader:
 
     def __call__(self, *, package: dict, expected_channel_id: str, privacy: str, ledger: Path) -> dict:
         import importlib.util
+        from openjarvis.one_agents.planexium_seo import require_seo
+        require_seo(package)
 
         if expected_channel_id != self.channel_id or package.get("channel_id") != self.channel_id:
             raise ValueError("Uploader binding and package identity disagree")
@@ -296,6 +298,8 @@ class ProductionServices:
         service and remains an explicit human action, including after a retry.
         """
         import re
+        from openjarvis.one_agents.planexium_seo import require_seo
+        require_seo(package)
 
         self.context.channel.validate_record(package)
         if package.get("brand") != self.context.channel.brand:

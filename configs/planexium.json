@@ -1,6 +1,7 @@
 {
   "schema": "one.planexium/v1",
   "brand": "planexium",
+  "ares_seo": true,
   "providers_enabled": true,
   "integration_approval_id": "0a709934-203e-4144-aa54-9123efc01677",
   "public_publish_authorized": false,
