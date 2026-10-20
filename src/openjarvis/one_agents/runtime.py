@@ -6233,7 +6233,7 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_vista(job: dict[str, Any]) -> dict[str, Any]:
-    """Run one IRIS-researched, slot-bound Short and hand its package to ECHO."""
+    """Run one HELIOS-researched, slot-bound Short and hand its package to ECHO."""
     payload = _json_task(job)
     if payload.get("brand") != "sonia_travel_vlogs" or payload.get("content_format") != "youtube_short":
         raise RuntimeError("VISTA only accepts Sonia Travel Vlogs youtube_short briefs from HELIOS")
@@ -6298,7 +6298,7 @@ def _run_vista(job: dict[str, Any]) -> dict[str, Any]:
 def _vista_chatgpt(prompt: str) -> tuple[str, str]:
     """VISTA's script writer: LAO's logged-in ChatGPT session (the one YATRA, KAIROS and PEITHO already use).
 
-    A worker may write with it; the floor head IRIS stays local. ChatGPT can open the story's article and the
+    A worker may write with it; the floor head HELIOS stays local. ChatGPT can open the story's article and the
     official page, which a model given only the headline cannot."""
     output, error = _run_peitho_lao_draft([prompt], expected_markers=["BEGIN_VISTA_JSON", "END_VISTA_JSON"],
                                           timeout_ms=420000)
@@ -6306,7 +6306,7 @@ def _vista_chatgpt(prompt: str) -> tuple[str, str]:
 
 
 def _vista_spec_from_brief(brief: str, slot: str, lane: str, hook: str) -> dict[str, Any]:
-    """IRIS's typed hand-off to VISTA: the verified story and the slot's contract - never a script.
+    """HELIOS's typed hand-off to VISTA: the verified story and the slot's contract - never a script.
 
     2026-10-13: the previous adapter cut IRIS's own brief into sentences and used them as the Short's spoken lines,
     title, thumbnail headline and Envato queries. IRIS's brief is reasoning about the pick, so VISTA voiced "The total
@@ -6318,7 +6318,7 @@ def _vista_spec_from_brief(brief: str, slot: str, lane: str, hook: str) -> dict[
     """
     text = str(brief or "").strip()
     if not text:
-        raise RuntimeError("IRIS cannot build a VISTA production_spec from an empty brief")
+        raise RuntimeError("HELIOS cannot build a VISTA production_spec from an empty brief")
 
     def section(name: str) -> str:
         match = re.search(rf"(?ims)^###\s*{re.escape(name)}\s*$\s*(.+?)(?=^###\s|^##\s|\Z)", text)
@@ -6326,9 +6326,16 @@ def _vista_spec_from_brief(brief: str, slot: str, lane: str, hook: str) -> dict[
 
     chosen = re.search(r"Chosen from today's scored travel news:\s*(.+?)\s*\(score", text)
     quoted_hook = re.search(r'\*\*"([^"]{12,200})"\*\*', section("Strongest Truthful Hook"))
-    headline = (chosen.group(1) if chosen else quoted_hook.group(1) if quoted_hook else "").strip()
+    # Evergreen briefs do not have a scored-news receipt. Require an explicit
+    # chosen headline instead of depending on incidental bold/quote styling,
+    # or guessing one from the destination or the head's reasoning.
+    explicit = re.search(
+        r"(?im)^[ \t]*(?:\*\*)?Chosen headline:(?:\*\*)?[ \t]*(\S[^\r\n]*)$", text)
+    headline = (chosen.group(1) if chosen else
+                explicit.group(1).strip(' *"') if explicit else
+                quoted_hook.group(1) if quoted_hook else "").strip()
     if not headline:
-        raise RuntimeError("IRIS brief names no chosen story headline; VISTA cannot be briefed on a guess")
+        raise RuntimeError("HELIOS brief names no chosen story headline; VISTA cannot be briefed on a guess")
     place = re.search(r"(?im)^\**Destination/Topic:?\**:?\s*(.+)$", text)
     destination = re.sub(r"\s*\(.*$", "", place.group(1)).strip(" *.") if place else ""
     if not destination:
@@ -8012,6 +8019,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                     "requiring same-day verification; and explicit exclusions. Never invent a trend "
                     "or imply Sonia personally visited. End with COMMISSION: YES or NO. "
                     "The line 'Destination/Topic: <one country or city>' is mandatory. "
+                    "The line 'Chosen headline: <the single evidence-backed idea selected>' is mandatory. "
                     f"Avoid prior topics: {json.dumps(prior[:15], ensure_ascii=False)}")
                 synthesis_evidence = {"eligible": eligible, "catalog_evidence": [],
                                       "signal_policy": "Google Trends and YouTube public-search metadata are "
@@ -8141,6 +8149,11 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                     "Do not reuse a destination or information angle used by another slot today.\n\n"
                     + brief
                 )
+                # Save the researched contract before parsing so a malformed
+                # handoff can be repaired without rediscovering the story.
+                brief_checkpoint = _home() / "agent_outputs" / f"{job['id']}-vista-slot-brief.md"
+                brief_checkpoint.parent.mkdir(parents=True, exist_ok=True)
+                brief_checkpoint.write_text(grounded_angle, encoding="utf-8")
                 vista_production_spec = _vista_spec_from_brief(
                     grounded_angle, slot, lane, hook
                 )
