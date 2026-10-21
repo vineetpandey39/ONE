@@ -7852,6 +7852,14 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
             f"Picking the {kind_label} back up — LAO job {resume_id[:8]} after a restart",
             lao_job=resume_id)
     else:
+        # A provider's explicit no-token/no-credit response is an external
+        # capacity condition, not a transient browser failure.  Starting the
+        # same paid workflow again cannot heal it and previously burned two
+        # full 900-second Kling waits before anyone could see the real modal.
+        # Re-attaching to an existing LAO job remains allowed above; this gate
+        # applies only before a new paid Leonardo start.
+        from openjarvis.one_agents import provider_capacity
+        provider_capacity.require_available("leonardo")
         # LAO integration wiring (governance approval
         # 61c59bc2-15ae-4deb-bc2f-c65a984bcbb8, decided_by=olympus) was tried
         # 2026-09-13 and REVERTED the same day: live verification showed it
