@@ -17,6 +17,7 @@ A model failure is a diagnostic failure, not permission to bypass the gates.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -47,6 +48,7 @@ ALLOWED_REPOS = (REPO_ROOT, VISTA_REPO, YATRA_CAPTURE_REPO)
 from openjarvis.one_agents.lao_checkpoint_recovery import ENGINE_REPO
 ALLOWED_REPOS = (*ALLOWED_REPOS, ENGINE_REPO)
 PENDING_PREFIX = "pending self-heal: "
+REPAIR_CIRCUIT_MAX_FAILURES = 2
 # These files are the independent checker/maker and self-heal control plane.
 # A production failure may be repaired by that control plane, but a model CLI
 # must never rewrite the rules that supervise or authorize its own repair.
@@ -87,6 +89,88 @@ def _attempt_reason(attempts: list[dict[str, Any]]) -> str:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _repair_signature(evidence: dict[str, Any]) -> str:
+    """Identify one stable failure without persisting its potentially sensitive evidence."""
+    material = "\n".join((
+        str(evidence.get("agent") or "").casefold().strip(),
+        str(evidence.get("job_id") or "").strip(),
+        str(evidence.get("error") or evidence.get("summary") or "").casefold().strip(),
+    ))
+    return hashlib.sha256(material.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _repair_circuit_path(evidence: dict[str, Any]) -> Path:
+    home = Path(os.environ.get("OPENJARVIS_HOME", Path.home() / ".openjarvis"))
+    key = uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"{evidence.get('job_id') or 'unknown'}:{_repair_signature(evidence)}",
+    )
+    return home / "helios_repair_circuits" / f"{key}.json"
+
+
+def _load_repair_circuit(evidence: dict[str, Any]) -> dict[str, Any]:
+    path = _repair_circuit_path(evidence)
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    if saved.get("signature") != _repair_signature(evidence):
+        return {}
+    return saved
+
+
+def _circuit_limit() -> int:
+    try:
+        return max(1, int(os.environ.get(
+            "ONE_HELIOS_REPAIR_MAX_FAILED_ROUNDS",
+            str(REPAIR_CIRCUIT_MAX_FAILURES),
+        )))
+    except ValueError:
+        return REPAIR_CIRCUIT_MAX_FAILURES
+
+
+def _repair_circuit_is_open(evidence: dict[str, Any]) -> bool:
+    return int(_load_repair_circuit(evidence).get("failed_rounds") or 0) >= _circuit_limit()
+
+
+def _record_repair_failure(evidence: dict[str, Any], reason: str) -> dict[str, Any]:
+    """Atomically count a full unsuccessful model round; never store prompts or outputs."""
+    path = _repair_circuit_path(evidence)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    saved = _load_repair_circuit(evidence)
+    failed_rounds = int(saved.get("failed_rounds") or 0) + 1
+    reason_kind = str(reason or "repair round failed").split(":", 1)[0][:160]
+    record = {
+        "job_id": str(evidence.get("job_id") or ""),
+        "signature": _repair_signature(evidence),
+        "failed_rounds": failed_rounds,
+        "limit": _circuit_limit(),
+        "reason": reason_kind,
+        "updated_at": _now(),
+        "status": "open" if failed_rounds >= _circuit_limit() else "retryable",
+    }
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+    temporary.replace(path)
+    _audit_attempt({
+        "job_id": evidence.get("job_id"),
+        "event": "repair_circuit_updated",
+        "failed_rounds": failed_rounds,
+        "limit": _circuit_limit(),
+        "status": record["status"],
+    })
+    return record
+
+
+def _clear_repair_circuit(evidence: dict[str, Any]) -> None:
+    path = _repair_circuit_path(evidence)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    _audit_attempt({"job_id": evidence.get("job_id"), "event": "repair_circuit_closed"})
 
 
 def _which_cli(name: str) -> str | None:
@@ -877,6 +961,13 @@ def heal_failure(connect: Connect, finding: Any) -> str:
     evidence = {"agent": finding.agent_id, "job_id": finding.job_id,
                 "summary": finding.summary, **dict(finding.evidence or {})}
     evidence = _with_checkpoint_evidence(evidence)
+    if _repair_circuit_is_open(evidence):
+        saved = _load_repair_circuit(evidence)
+        return (
+            f"{PENDING_PREFIX}repair circuit open after "
+            f"{saved.get('failed_rounds', _circuit_limit())} failed verified-repair rounds; "
+            "no model providers invoked"
+        )
     # A tested commit awaiting safe activation is still a valid repair. Do not
     # ask another model to invent another patch merely to retry deployment.
     receipt_dir = Path(os.environ.get("OPENJARVIS_HOME", Path.home() / ".openjarvis")) / "helios_verified_repairs"
@@ -893,11 +984,19 @@ def heal_failure(connect: Connect, finding: Any) -> str:
         if repair.get("ok"):
             receipt_path.write_text(json.dumps(repair), encoding="utf-8")
     if not repair.get("ok"):
+        circuit = _record_repair_failure(
+            evidence, str(repair.get("reason") or "no verified repair"),
+        )
         # A retry without a diagnosis and verified repair is not self-healing;
         # it merely repeats the same failure.  The watcher recognizes this
         # prefix as retryable/pending and deliberately does not ledger the
         # failed job as handled, so the next pass can try again.
-        return f"{PENDING_PREFIX}{repair.get('reason') or 'no verified repair'}"
+        suffix = (
+            f"; repair circuit {circuit['status']} "
+            f"({circuit['failed_rounds']}/{circuit['limit']} failed rounds)"
+        )
+        return f"{PENDING_PREFIX}{repair.get('reason') or 'no verified repair'}{suffix}"
+    _clear_repair_circuit(evidence)
     if _repo_for(evidence) == ENGINE_REPO:
         try:
             from openjarvis.one_agents.lao_checkpoint_recovery import activate_engine, resume_failed
