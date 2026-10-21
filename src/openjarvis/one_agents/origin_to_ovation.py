@@ -210,10 +210,23 @@ def run_stage(job, *, enqueue):
                     "upload": upload}
         sys.path.insert(0, str(ROOT))
         from agent_runtime.content_calendar import ContentCalendar
-        ContentCalendar(ROOT).reserve(path.name, "sachin-tendulkar", "Sachin Tendulkar")
+        manifest = read(path / "mission.json")
+        subject_id = manifest.get("subject_id") or ("sachin-tendulkar" if path.name == "sachin-first-video" else None)
+        if not subject_id or not manifest.get("subject"):
+            raise ValueError("Explicit canonical subject required")
+        calendar = ContentCalendar(ROOT)
+        calendar.reserve(path.name, subject_id, manifest["subject"])
+        calendar.export()
+        if manifest.get("production_phase") == "reference_first":
+            return transfer(job, path, "chandan", "produce", enqueue,
+                            [path / "research" / "commission-brief.json", path / "mission.json"])
         return transfer(job, path, "chandan", "produce", enqueue,
                         [master_dir / "shot-plan.json", path / "mission.json"])
     if agent == "chandan":
+        manifest = read(path / "mission.json")
+        if manifest.get("production_phase") == "reference_first":
+            from openjarvis.one_agents.chandan_reference import run_reference
+            return run_reference(path, job)
         plan = read(master_dir / "shot-plan.json")
         write(path / "runtime" / "active.json", {
             "agent": agent, "job_id": job["id"], "status": "producing_images_single_chat",
@@ -296,6 +309,10 @@ def run_stage(job, *, enqueue):
         return transfer(job, path, "echo", "thumbnail_upload", enqueue,
                         [master_dir / "master.mp4", path / "runtime" / "seo.json"])
     if agent == "echo":
+        manifest = read(path / "mission.json")
+        if manifest.get("upload_policy") == "package_only_until_later_explicit_user_instruction":
+            return {"status": "package_ready_upload_not_authorized", "mission_id": path.name,
+                    "master": str(master_dir / "master.mp4"), "seo": str(path / "runtime" / "seo.json")}
         reference = read(master_dir / "shot-plan.json")[0]["reference"]
         image_provider(path, {
             "shot_id": "thumbnail", "image": str(master_dir / "thumbnail.png"),

@@ -14,7 +14,13 @@ def enqueue(agent, task, **kwargs):
 
 
 def main():
-    mission = "sachin-first-video"
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mission", default="sachin-first-video")
+    args = parser.parse_args()
+    mission = args.mission
+    if not mission or Path(mission).name != mission or "/" in mission or "\\" in mission:
+        raise ValueError("Invalid mission name")
     state = ROOT / "missions" / mission / "runtime"
     state.mkdir(exist_ok=True)
     # Windows lock prevents concurrent local mission drivers.
@@ -29,7 +35,7 @@ def main():
         runtime.enqueue_job = enqueue_original_guard(runtime.enqueue_job, mission)
         job = enqueue("helios", json.dumps({"brand": "origin_to_ovation",
                       "mission_id": mission, "stage": "commission"}), mode="execute",
-                      dedupe_key="origin_to_ovation:sachin-first-video:runtime-commission-records-v2")
+                      dedupe_key=f"origin_to_ovation:{mission}:runtime-commission-records-v2")
         while job:
             job = recover_failed(job, state, mission)
             validate_scope(job["task"], mission)
