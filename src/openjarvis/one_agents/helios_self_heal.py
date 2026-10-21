@@ -261,7 +261,8 @@ def _repo_for(evidence: dict[str, Any]) -> Path | None:
     if (str(evidence.get("agent") or "").casefold() == "fabula"
             and evidence.get("external_job")
             and any(message in str(evidence.get("lao_error") or "").casefold()
-                    for message in ("chatgpt", "composer", "conversation", "streaming"))):
+                    for message in ("chatgpt", "composer", "conversation", "streaming",
+                                    "scene-plan recovery"))):
         return ENGINE_REPO
     # The contract validator lives in ONE, but it dynamically loads the OBS
     # parser from yatra-capture.  Its traceback therefore ends in runtime.py
