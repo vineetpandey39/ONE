@@ -725,6 +725,36 @@ def _repair_test_command(repo: Path) -> list[str]:
     return [python, "-m", "pytest", "-q", "--maxfail=1"]
 
 
+def _untracked_paths(repo: Path) -> set[str]:
+    """Return untracked paths without treating existing operator tools as dirt.
+
+    Production checkouts may contain local diagnostic scripts. They must not be
+    swept into a repair commit, but their mere presence must not disable every
+    future self-heal. New files created by a repair attempt are tracked
+    separately and remain subject to the normal path boundary.
+    """
+    result = _git(repo, "ls-files", "--others", "--exclude-standard")
+    return {line.strip().replace("\\", "/") for line in result.stdout.splitlines()
+            if line.strip()} if result.returncode == 0 else set()
+
+
+def _discard_attempt(repo: Path, names: list[str], original_untracked: set[str]) -> None:
+    tracked = [name for name in names if name not in original_untracked and
+               _git(repo, "ls-files", "--error-unmatch", "--", name).returncode == 0]
+    if tracked:
+        _git(repo, "restore", "--worktree", "--", *tracked)
+    for name in names:
+        if name in original_untracked:
+            continue
+        path = (repo / name).resolve()
+        try:
+            path.relative_to(repo.resolve())
+        except ValueError:
+            continue
+        if path.is_file() and _git(repo, "ls-files", "--error-unmatch", "--", name).returncode:
+            path.unlink()
+
+
 def _with_checkpoint_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
     """Give a YATRA parser repair the saved plan shape, not only ONE's wrapper traceback."""
     enriched = dict(evidence)
@@ -752,9 +782,10 @@ def _with_checkpoint_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
 def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str, Any]:
     """Ask the first available model CLI to make one bounded local repair.
 
-    Refuses dirty repositories so unrelated human/agent work can never be
-    swept into HELIOS's commit. The model may edit; HELIOS owns verification
-    and the commit.
+    Refuses tracked or staged concurrent edits so human/agent work can never be
+    swept into HELIOS's commit. Existing untracked diagnostic files are
+    ignored but remembered; any new file produced by the repair is verified
+    and committed only when it is inside the allow-listed boundary.
     """
     if os.environ.get("ONE_HELIOS_AUTO_REPAIR", "true").lower() not in {"1", "true", "yes", "on"}:
         return {"ok": False, "reason": "HELIOS auto repair disabled"}
@@ -762,13 +793,14 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
     repo = _repo_for(evidence)
     if repo is None:
         return {"ok": False, "reason": "failure is outside HELIOS's allow-listed repositories"}
-    status = _git(repo, "status", "--porcelain")
+    status = _git(repo, "status", "--porcelain", "--untracked-files=no")
     if status.returncode or status.stdout.strip():
         _audit_attempt({"job_id": evidence.get("job_id"), "event": "repository_not_clean",
                         "repo": str(repo), "returncode": status.returncode,
                         "status": str(getattr(status, "stdout", ""))[-1200:],
                         "stderr": str(getattr(status, "stderr", ""))[-1200:]})
         return {"ok": False, "reason": "repository is not clean; protected concurrent changes"}
+    original_untracked = _untracked_paths(repo)
 
     prompt = (
         "You are HELIOS's bounded Floor 12 repair worker. Diagnose the supplied latest failed job, "
@@ -797,15 +829,16 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
         _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
         if done.returncode != 0:
             continue
-        changed = _git(repo, "status", "--porcelain")
-        if not changed.stdout.strip():
+        tracked_names = set(_git(repo, "diff", "--name-only").stdout.splitlines())
+        new_untracked = _untracked_paths(repo) - original_untracked
+        names = sorted(path.replace("\\", "/") for path in tracked_names | new_untracked if path)
+        if not names:
             continue
 
         # Block changes outside Floor 12 runtime/tests. This also prevents a
         # model from changing credentials, floor governance, or another line.
-        names = _git(repo, "diff", "--name-only").stdout.splitlines()
         if not names or not all(_allowed_patch_path(repo, path) for path in names):
-            _git(repo, "restore", "--worktree", "--", *names)
+            _discard_attempt(repo, names, original_untracked)
             attempts[-1]["repair_check"] = "patch escaped HELIOS's file boundary"
             _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
             continue
@@ -817,7 +850,7 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
             errors="replace", timeout=1200,
         )
         if check.returncode:
-            _git(repo, "restore", "--worktree", "--", *names)
+            _discard_attempt(repo, names, original_untracked)
             attempts[-1]["repair_check"] = "Floor 12 regression tests failed"
             attempts[-1]["test_output"] = (check.stdout + check.stderr)[-1200:]
             _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
