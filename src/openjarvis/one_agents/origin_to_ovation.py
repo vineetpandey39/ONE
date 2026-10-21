@@ -97,7 +97,7 @@ def image_provider(path, shot):
         # Continue the verified P50 conversation.  Its canonical reference is
         # already attached, which preserves identity and avoids 25 uploads.
         {"action": "navigate", "args": {
-            "url": "https://chatgpt.com/c/6ad78e84-5904-83ee-8711-fbc640db6c1b"}},
+            "url": browser["chat_url"]}},
         {"action": "wait_for_any_selector", "args": {
             "selectors": ["#prompt-textarea", "[contenteditable='true']", "textarea"],
             "timeout_ms": 60000, "as": "composer"}},
@@ -109,7 +109,7 @@ def image_provider(path, shot):
             "stall_timeout_ms": 240000, "as": "image_path"}},
     ]
     result, provider_job = provider.run(
-        f"Origin to Ovation - Sachin First Video - {shot['shot_id']}", steps, {},
+        f"Origin to Ovation - {manifest['subject']} - {shot['shot_id']}", steps, {},
         path / "runtime" / "providers" / f"{shot['shot_id']}.json",
         timeout=1500)
     source = provider.artifact(result, provider_job, output.name)
@@ -131,6 +131,11 @@ def image_batch_provider(path, shots):
     browser = manifest["browser"]
     if Path(browser["profile_dir"]).resolve() != (ROOT / "chrome-profile").resolve():
         raise ValueError("CHANDAN browser ownership mismatch")
+    if not browser.get("chat_url", "").startswith("https://chatgpt.com/c/"):
+        raise ValueError("Episode must have a recorded persistent conversation")
+    for shot in shots:
+        if not Path(shot["image"]).resolve().is_relative_to(path.resolve()):
+            raise ValueError("Image escapes mission")
     missing = [shot for shot in shots if not (Path(shot["image"]).is_file()
                and Path(shot["image"]).stat().st_size > 10000)]
     if not missing:
@@ -148,10 +153,7 @@ def image_batch_provider(path, shots):
         {"action": "open_browser", "args": {
             "profile_dir": browser["profile_dir"], "cdp_url": browser["cdp_url"],
             "start_url": "https://chatgpt.com/"}},
-        {"action": "navigate", "args": {"url": "https://chatgpt.com/"}},
-        {"action": "click_first", "args": {
-            "selectors": ["[data-testid='create-new-chat-button']", "a[href='/']"],
-            "timeout_ms": 30000}},
+        {"action": "navigate", "args": {"url": browser["chat_url"]}},
         {"action": "wait_for_any_selector", "args": {
             "selectors": ["#prompt-textarea", "[contenteditable='true']", "textarea"],
             "timeout_ms": 60000}},
@@ -165,9 +167,9 @@ def image_batch_provider(path, shots):
             "as": "batch_result"}},
     ]
     result, provider_job = provider.run(
-        f"Origin to Ovation - Sachin - {missing[0]['shot_id']}-{missing[-1]['shot_id']} single chat",
+        f"Origin to Ovation - {manifest['subject']} - {missing[0]['shot_id']}-{missing[-1]['shot_id']} single chat",
         steps, {}, path / "runtime" / "providers" / "remaining-images-single-chat.json",
-        timeout=7200)
+        timeout=21600)
     absent = [shot["shot_id"] for shot in missing if not (Path(shot["image"]).is_file()
               and Path(shot["image"]).stat().st_size > 10000)]
     if absent:
@@ -253,6 +255,9 @@ def run_stage(job, *, enqueue):
             "Sharjah, 1998", "The 2003 World Cup", "A double century in Gwalior",
             "The 2011 World Cup", "A hundred international centuries", "The final Test and legacy",
         ]
+        metadata_path = master_dir / "editorial-metadata.json"
+        metadata = read(metadata_path) if metadata_path.is_file() else {}
+        chapter_titles = metadata.get("chapter_titles", chapter_titles)
         chapters = []
         for shot in plan:
             number = int(shot["chapter"])
@@ -272,7 +277,7 @@ def run_stage(job, *, enqueue):
                 continue
             claim = cells[1].strip()
             # C10 is not narrated; its old award-announcement wording needs correction.
-            if claim == "C10":
+            if claim == "C10" and path.name == "sachin-first-video":
                 continue
             for label, url in re.findall(r"\[([^]]+)\]\((https?://[^\s)]+)\)", cells[3]):
                 record = next((r for r in source_records if r["url"] == url), None)
@@ -284,21 +289,20 @@ def run_stage(job, *, enqueue):
         if not source_records:
             raise ValueError("ARES requires the episode's linked claim sources")
         description = (
-            "From a boy in Bombay to a World Cup winner: the journey of Sachin Tendulkar. "
-            "Explore his early training, international debut, defining innings and legacy.\n\n"
+            metadata.get("description_lead", "From a boy in Bombay to a World Cup winner: the journey of Sachin Tendulkar.") + "\n\n"
             "Original CGI illustrations reconstruct the story; these are not archival recordings. "
-            "Third-person narration by George via ElevenLabs. No athlete voice clone or invented dialogue.\n\n"
+            "Third-person narration by " + metadata.get("voice_name", "George") + " via ElevenLabs. No athlete voice clone or invented dialogue.\n\n"
             "CHAPTERS\n" + "\n".join(c["timestamp"] + " " + c["title"] for c in chapters) +
             "\n\nSOURCES\n" + "\n".join(r["url"] for r in source_records) +
             "\n\nWhich sporting journey should we explore next? Subscribe to Origin to Ovation for more biographies.")
         if len(description) > 5000:
             raise ValueError("SEO description exceeds YouTube's 5000-character limit")
         package = {
-            "title": "Sachin Tendulkar: The Boy Behind 100 International Centuries",
+            "title": metadata.get("title", "Sachin Tendulkar: The Boy Behind 100 International Centuries"),
             "description": description,
             "category": "Sports", "language": "en-US",
-            "tags": ["Sachin Tendulkar", "cricket biography", "Origin to Ovation",
-                     "Sachin journey", "cricket history"],
+            "tags": metadata.get("tags", ["Sachin Tendulkar", "cricket biography", "Origin to Ovation",
+                     "Sachin journey", "cricket history"]),
             "chapters": chapters, "sources": source_records,
             "source_ledger": str(ledger),
             "timeline": str(master_dir / "timed-shot-plan.json"),
@@ -310,19 +314,22 @@ def run_stage(job, *, enqueue):
                         [master_dir / "master.mp4", path / "runtime" / "seo.json"])
     if agent == "echo":
         manifest = read(path / "mission.json")
-        if manifest.get("upload_policy") == "package_only_until_later_explicit_user_instruction":
-            return {"status": "package_ready_upload_not_authorized", "mission_id": path.name,
-                    "master": str(master_dir / "master.mp4"), "seo": str(path / "runtime" / "seo.json")}
         reference = read(master_dir / "shot-plan.json")[0]["reference"]
+        metadata_path = master_dir / "editorial-metadata.json"
+        metadata = read(metadata_path) if metadata_path.is_file() else {}
         image_provider(path, {
             "shot_id": "thumbnail", "image": str(master_dir / "thumbnail.png"),
             "reference": reference,
-            "prompt": "Create a premium 16:9 YouTube biography thumbnail in photoreal cinematic CGI. "
+            "prompt": metadata.get("thumbnail_prompt", "Create a premium 16:9 YouTube biography thumbnail in photoreal cinematic CGI. "
                       "Use attached Sachin age-stage reference for consistent stylized identity. "
                       "Adult Sachin determined closeup on right, childhood cricketer smaller on left, "
                       "warm Bombay practice ground transitioning to lit international stadium. "
                       "Strong simple visual contrast, no collage grid, anatomically sound. "
-                      "Large readable headline only: THE BOY BEHIND THE LEGEND."})
+                      "Large readable headline only: THE BOY BEHIND THE LEGEND.")})
+        if manifest.get("upload_policy") == "package_only_until_later_explicit_user_instruction":
+            return {"status": "package_ready_upload_not_authorized", "mission_id": path.name,
+                    "master": str(master_dir / "master.mp4"), "seo": str(path / "runtime" / "seo.json")}
+
         # An upload is never inferred from a generated thumbnail.
         receipt = path / "runtime" / "upload-receipt.json"
         if receipt.is_file():

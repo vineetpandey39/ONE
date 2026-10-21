@@ -134,7 +134,9 @@ def _render(root: Path, *, expected_shots: int = 75, size: tuple[int,int] = (192
         if abs(float(s['start_seconds'])-cursor) > .025 or float(s['end_seconds']) <= cursor:
             raise ValueError('Timeline must be continuous and chronological')
         cursor=float(s['end_seconds'])
-    voice=root/'george-narration-master.wav'
+    voices=list(root.glob('*-narration-master.wav'))
+    if len(voices)!=1: raise ValueError('Exactly one episode narration master required')
+    voice=voices[0]
     voice_duration=float(_probe(voice)['format']['duration'])
     if abs(voice_duration-cursor) > .12:
         raise ValueError(f'Narration/timeline mismatch: {voice_duration} versus {cursor}')
