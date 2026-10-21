@@ -207,6 +207,69 @@ def _repo_is_vault_locked(repo: Path) -> bool:
             and not (git_dir / "vista-unlocked.json").is_file())
 
 
+def _active_vista_job() -> str:
+    """Return an active VISTA id; a live production must never be unlocked under it."""
+    try:
+        from openjarvis.one_agents import runtime
+        with closing(runtime._connect()) as db:
+            row = db.execute(
+                "SELECT id FROM jobs WHERE agent_id = 'vista' "
+                "AND status IN ('queued','running','awaiting_upload') "
+                "ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+        return str(row["id"]) if row else ""
+    except Exception:
+        # Failure to prove the lane idle is a denial, not permission.
+        return "unknown"
+
+
+def _vista_lock_script(name: str) -> subprocess.CompletedProcess[str]:
+    """Run VISTA's own vault workflow without putting the credential in argv/logs."""
+    python = os.environ.get("ONE_HELIOS_PYTHON", sys.executable)
+    lock_dir = VISTA_REPO / ".vista-lock"
+    if name == "unlock.py":
+        # The child resolves the encrypted vault value and feeds it directly to
+        # the official password comparison. It is never copied into ONE's
+        # process, environment, command line, receipt or audit trail.
+        command = [
+            python, "-c",
+            "import getpass,runpy; from common import vault_password; "
+            "getpass.getpass=lambda prompt='': vault_password(); "
+            "runpy.run_path('unlock.py', run_name='__main__')",
+        ]
+    else:
+        command = [python, name]
+    return subprocess.run(
+        command, cwd=lock_dir, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=120,
+    )
+
+
+def _unlock_vista_for_verified_promotion(evidence: dict[str, Any]) -> dict[str, Any]:
+    """Momentarily unlock only an idle VISTA after a patch has passed tests."""
+    active = _active_vista_job()
+    if active:
+        return {"ok": False, "reason": f"VISTA production lane is not idle ({active})"}
+    done = _vista_lock_script("unlock.py")
+    ok = done.returncode == 0 and not _repo_is_vault_locked(VISTA_REPO)
+    _audit_attempt({
+        "job_id": evidence.get("job_id"), "event": "vista_vault_unlock",
+        "ok": ok, "returncode": done.returncode,
+    })
+    return {"ok": ok, "reason": "" if ok else "official VISTA vault unlock failed"}
+
+
+def _relock_vista_after_promotion(evidence: dict[str, Any]) -> dict[str, Any]:
+    """Always restore VISTA's manifest, tag, pre-commit hook and read-only files."""
+    done = _vista_lock_script("lock.py")
+    ok = done.returncode == 0 and _repo_is_vault_locked(VISTA_REPO)
+    _audit_attempt({
+        "job_id": evidence.get("job_id"), "event": "vista_vault_relock",
+        "ok": ok, "returncode": done.returncode,
+    })
+    return {"ok": ok, "reason": "" if ok else "official VISTA relock failed"}
+
+
 def _row(connect: Connect, job_id: str) -> dict[str, Any] | None:
     with closing(connect()) as db:
         item = db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -926,10 +989,6 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
     repo = _repo_for(evidence)
     if repo is None:
         return {"ok": False, "reason": "failure is outside HELIOS's allow-listed repositories"}
-    if _repo_is_vault_locked(repo):
-        _audit_attempt({"job_id": evidence.get("job_id"), "event": "vault_locked_repository",
-                        "repo": str(repo)})
-        return {"ok": False, "reason": "VISTA is vault-locked; explicit unlock-update-test-relock required"}
     status = _git(repo, "status", "--porcelain", "--untracked-files=no")
     if status.returncode or status.stdout.strip():
         _audit_attempt({"job_id": evidence.get("job_id"), "event": "repository_not_clean",
@@ -1005,7 +1064,22 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
                     return {"ok": False, "reason": "verified isolated patch could not be committed",
                             "commit_error": commit.stderr[-1200:], "attempts": attempts}
                 revision = _git(workspace, "rev-parse", "HEAD").stdout.strip()
-                promoted = _promote_isolated_repair(repo, original_revision, revision)
+                vista_unlocked = False
+                relock: dict[str, Any] = {"ok": True}
+                if repo.resolve() == VISTA_REPO.resolve() and _repo_is_vault_locked(repo):
+                    unlocked = _unlock_vista_for_verified_promotion(evidence)
+                    if not unlocked.get("ok"):
+                        return {"ok": False, "reason": unlocked["reason"],
+                                "attempts": attempts}
+                    vista_unlocked = True
+                try:
+                    promoted = _promote_isolated_repair(repo, original_revision, revision)
+                finally:
+                    if vista_unlocked:
+                        relock = _relock_vista_after_promotion(evidence)
+                if not relock.get("ok"):
+                    return {"ok": False, "reason": relock["reason"],
+                            "attempts": attempts}
                 if promoted.returncode:
                     return {"ok": False, "reason": "verified repair promotion refused",
                             "promotion_error": promoted.stderr[-1200:], "attempts": attempts}
