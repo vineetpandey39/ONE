@@ -481,8 +481,14 @@ class EnvatoAdapter:
                     inputs["envatoQuery"] = catalog_query
                     inputs["envatoQueryUrl"] = quote_plus(catalog_query)
                     inputs["resultIndex"] = str(candidate - first_candidate - 2 if fallback else candidate)
-                    receipt = self.context.artifact(f"receipts/envato-v3-{index}.json" if candidate == first_candidate
-                        else f"receipts/envato-v3-{index}-candidate-{candidate}.json")
+                    # v4 binds the receipt namespace to the concrete-subject
+                    # policy above.  A v3 failed job was launched with a
+                    # materially different brief; trying to attach it to the
+                    # repaired request correctly trips LaoDraft's hash gate,
+                    # but must not strand the mission forever.  Accepted
+                    # downloads remain in acquired/ and are still reused.
+                    receipt = self.context.artifact(f"receipts/envato-v4-{index}.json" if candidate == first_candidate
+                        else f"receipts/envato-v4-{index}-candidate-{candidate}.json")
                     try:
                         out, job = self.draft.run("planexium-envato", asset_steps, inputs, receipt, timeout=10800)
                         query_positions[query] = candidate
