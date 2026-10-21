@@ -7,7 +7,7 @@ def run(path,job):
  outputs=[]
  for shotid in ['P12','P14','P15']:
   shot=next(s for s in plan if s['shot_id']==shotid)
-  output=path/'production/identity-corrections-v3'/f'{shotid}-age19-v3.png'
+  output=path/'production/identity-corrections-v4'/f'{shotid}-age19-v4.png'
   output.parent.mkdir(parents=True,exist_ok=True)
   stages.set_stage('chandan',stages.EXECUTING,f'Virat identity repair: {shotid}, age19; reference conditioned')
   write(path/'runtime/active.json',{'agent':'chandan','job_id':job['id'],'status':'identity_correction','shot_id':shotid,'upload_authorized':False})
@@ -19,7 +19,8 @@ def run(path,job):
    'Age19 in Malaysia during the2008 junior cricket tournament. Generic era-correct cricket whites. '
    'No invented logos/dialogue. Anatomically sound arms/hands, proper thumbs, five fingers; avoid complex grip. '
    +shot['visual'])
-  receipt=image_provider(path,{**shot,'shot_id':shotid+'-identity-v3','image':str(output),'reference':m['character_reference'],'prompt':prompt})
+  receipt=image_provider(path,{**shot,'shot_id':shotid+'-identity-v4','image':str(output),'reference':m['character_reference'],'prompt':prompt})
   outputs.append({'shot_id':shotid,'path':str(output),'sha256':digest(output),'reference_sha256':digest(Path(m['character_reference'])),'editorial_status':'pending'})
- write(path/'runtime/identity-corrections-v3.json',{'outputs':outputs,'status':'awaiting_visual_gate','auto_accept':False})
+ write(path/'runtime/identity-corrections-v4.json',{'outputs':outputs,'status':'awaiting_visual_gate','auto_accept':False})
  return {'_blocked':True,'status':'awaiting_identity_review','blocked_reason':'First three reference-conditioned corrections require visual identity, anatomy and period QA before remaining images can run.','outputs':outputs,'upload_authorized':False}
+

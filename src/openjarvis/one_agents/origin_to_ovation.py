@@ -105,7 +105,7 @@ def image_provider(path, shot):
             "prompt": shot["prompt"],
             "reference_image_path": shot["reference"],
             "reference_settle_seconds": 12,
-            "filename": output.name, "max_attempts": 2,
+            "filename": output.name, "max_attempts": 2, "allow_fresh_chat_recovery": False, "strict_fresh_turn": True,
             "stall_timeout_ms": 240000, "as": "image_path"}},
     ]
     result, provider_job = provider.run(
@@ -113,6 +113,13 @@ def image_provider(path, shot):
         path / "runtime" / "providers" / f"{shot['shot_id']}.json",
         timeout=1500)
     source = provider.artifact(result, provider_job, output.name)
+    source_hash = digest(source)
+    for existing in (path / "production").rglob("*.png"):
+        if existing.resolve() != output.resolve() and digest(existing) == source_hash:
+            write(path / "runtime" / "images" / f"{shot['shot_id']}-rejected.json",
+                  {"status": "rejected_stale_duplicate", "duplicate_of": str(existing),
+                   "provider_job": provider_job, "sha256": source_hash})
+            raise RuntimeError("Provider returned a previous scene instead of a fresh image")
     output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, output)
     receipt = {"status": "generated", "provider": "ChatGPT via LAO",
@@ -233,6 +240,19 @@ def run_stage(job, *, enqueue):
             from openjarvis.one_agents.chandan_reference import run_reference
             return run_reference(path, job)
         plan = read(master_dir / "shot-plan.json")
+        if (path / "runtime" / "identity-quarantine.json").exists():
+            release_path = path / "runtime" / "identity-release.json"
+            if not release_path.is_file():
+                return {"_blocked": True, "status": "identity_review_required",
+                        "blocked_reason": "Quarantined frames require hash-bound visual identity, anatomy and period review"}
+            release = read(release_path)
+            for shot in plan:
+                gate = release.get("shots", {}).get(shot["shot_id"], {})
+                if (gate.get("image_sha256") != digest(Path(shot["image"]))
+                        or gate.get("reference_sha256") != digest(Path(shot["reference"]))
+                        or not all(gate.get(k) is True for k in ("identity", "anatomy", "historical_accuracy"))):
+                    return {"_blocked": True, "status": "identity_review_required",
+                            "blocked_reason": "Every quarantined scene needs a matching passed visual gate"}
         write(path / "runtime" / "active.json", {
             "agent": agent, "job_id": job["id"], "status": "producing_images_single_chat",
             "processed": sum(Path(s["image"]).is_file() for s in plan), "total": len(plan)})
