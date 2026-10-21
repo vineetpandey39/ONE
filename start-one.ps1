@@ -360,9 +360,17 @@ if ($foundWorkerPid -gt 0) {
     # changed after the worker started, replace every matching wrapper/child
     # process before accepting it as healthy.
     $runtimeSource = Join-Path $sourceRoot "src\openjarvis\one_agents\runtime.py"
+    # The runtime worker imports the company trigger registry into the same
+    # long-lived process.  Watching runtime.py alone left a committed schedule
+    # policy stale in memory indefinitely: each scheduler pass then wrote the
+    # old values back over the reconciled database.  Treat either source as a
+    # deferred worker reload, using the same no-active-jobs safety gate below.
+    $companyTriggerSource = Join-Path $oneRoot "one-company\floors\_work\triggers.py"
     $workerProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$foundWorkerPid" -ErrorAction SilentlyContinue
-    $runtimeChanged = (Test-Path $runtimeSource) -and $workerProcess -and `
-        ((Get-Item $runtimeSource).LastWriteTime -gt $workerProcess.CreationDate)
+    $reloadSources = @($runtimeSource, $companyTriggerSource) | Where-Object { Test-Path $_ }
+    $runtimeChanged = $workerProcess -and [bool]($reloadSources | Where-Object {
+        (Get-Item $_).LastWriteTime -gt $workerProcess.CreationDate
+    } | Select-Object -First 1)
     if ($runtimeChanged) {
         # This used to Stop-Process -Force unconditionally the moment
         # runtime.py looked newer than the running worker - fine when a human
