@@ -348,6 +348,19 @@ def concrete_stock_brief(request):
         request["blocked_keywords"] += ["astronaut", "spacesuit", "costume", "comedy", "humor"]
     elif subject == "spacesuit":
         request.update(query="astronaut suit display", subject="suit")
+    elif subject == "airfoil":
+        # Envato commonly describes a visible airfoil as an aircraft wing.
+        # Keep the aerodynamic context, but require the concrete object that
+        # can actually be verified in metadata and preview frames.
+        request.update(query="aircraft wing aerodynamics", subject="wing")
+    elif subject == "laboratory" and "engineer" in query:
+        # A laboratory is background context; the authored shot asks for the
+        # person doing the aerospace work.  Requiring "engineer" rejects an
+        # empty generic lab without demanding that every valid title say lab.
+        request.update(query="aerospace engineer laboratory", subject="engineer")
+    elif subject == "computer" and "simulation" in query:
+        # The intended visual is the engineering simulation, not any computer.
+        request.update(query="engineering computer simulation", subject="simulation")
     if "astronaut" in request["query"].casefold():
         request["blocked_keywords"] += ["costume", "comedy", "humor", "urban", "city", "sneakers"]
     return request
