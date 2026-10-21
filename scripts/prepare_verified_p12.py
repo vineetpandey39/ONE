@@ -1,0 +1,4 @@
+from pathlib import Path
+p=Path('E:/ONE-SUITE/src/src/openjarvis/one_agents/chandan_identity_repair.py');s=p.read_text().replace("['P12','P14','P15']","['P12']").replace('corrections-v5','corrections-v6').replace('age19-v5','age19-v6').replace('identity-v5','identity-v6').replace('First three reference-conditioned corrections','First reference-conditioned P12 correction');p.write_text(s)
+p=Path('E:/ONE-SUITE/src/src/openjarvis/one_agents/origin_to_ovation.py');s=p.read_text().replace('payload.get("checkpoint") == "identity_repair_v3"','payload.get("checkpoint") in {"identity_repair_v3", "identity_exact_request_p12"}');p.write_text(s)
+p=Path('E:/ONE-SUITE/src/scripts/run_virat_floor_repair_v5.py');s=p.read_text().replace("'checkpoint':'identity_repair_v3'","'checkpoint':'identity_exact_request_p12'").replace(':identity-repair-v5',':identity-exact-request-p12');Path('E:/ONE-SUITE/src/scripts/run_virat_p12_verified.py').write_text(s)
