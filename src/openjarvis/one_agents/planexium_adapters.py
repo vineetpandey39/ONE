@@ -8,6 +8,7 @@ import re
 import shutil
 import sqlite3
 import time
+import zipfile
 from contextlib import nullcontext
 from contextlib import contextmanager
 from pathlib import Path
@@ -319,6 +320,42 @@ def probe_stock(path: Path) -> dict:
     return {"seconds": seconds, "width": 1920, "height": 1080}
 
 
+def materialize_stock_download(path: Path) -> Path:
+    """Extract Envato's single-video ZIP while preserving the source archive."""
+    path = Path(path)
+    if not path.is_file():
+        return path
+    with path.open("rb") as handle:
+        signature = handle.read(4)
+    if signature != b"PK\x03\x04":
+        return path
+    with zipfile.ZipFile(path) as archive:
+        members = []
+        for info in archive.infolist():
+            member = Path(info.filename.replace("\\", "/"))
+            if info.is_dir():
+                continue
+            if member.is_absolute() or ".." in member.parts:
+                raise ValueError("Envato archive contains an unsafe member path")
+            if member.suffix.casefold() in {".mp4", ".mov", ".m4v"}:
+                members.append(info)
+        if len(members) != 1:
+            raise ValueError("Envato archive must contain exactly one video rendition")
+        member = members[0]
+        if member.file_size <= 0 or member.file_size > 4 * 1024 * 1024 * 1024:
+            raise ValueError("Envato archive video size is invalid")
+        temporary = path.with_name(f".{path.name}.extracting")
+        with archive.open(member) as source, temporary.open("wb") as target:
+            shutil.copyfileobj(source, target, length=1024 * 1024)
+    archive_path = path.with_suffix(path.suffix + ".download.zip")
+    if not archive_path.exists():
+        path.replace(archive_path)
+    else:
+        path.unlink()
+    temporary.replace(path)
+    return path
+
+
 def stock_context(request):
     """Bind two independent facts from the authored science stock brief.
 
@@ -506,6 +543,7 @@ class EnvatoAdapter:
                     source = self.draft.artifact(out, job, path.name)
                     path.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source, path)
+                path = materialize_stock_download(path)
                 sha = hashlib.sha256(path.read_bytes()).hexdigest()
                 if sha in hashes:
                     raise ValueError("Envato returned a duplicate source; preserve receipts for targeted repair")
