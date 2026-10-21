@@ -46,6 +46,10 @@ def number_is_spoken(number,narration,*,preceding=None):
     forms=[standard]
     if fraction:forms=[standard+' point '+' '.join(_SMALL[int(d)] for d in fraction)]
     else:
+        # Leading zeroes identify codes such as roamx-0201 rather than a
+        # quantity. Preserve them by accepting their exact spoken digit form.
+        if len(whole)>1 and whole.startswith('0'):
+            forms.append(' '.join(_SMALL[int(d)] for d in whole))
         last=standard.split()[-1]
         ordinal=_ORDINAL.get(last,last[:-1]+'ieth' if last.endswith('y') else last+'th')
         forms.append(' '.join(standard.split()[:-1]+[ordinal]))
