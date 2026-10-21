@@ -359,15 +359,21 @@ if ($foundWorkerPid -gt 0) {
     # HERMES bypassed BIBLOS and went straight to SCRIBE). If routing source
     # changed after the worker started, replace every matching wrapper/child
     # process before accepting it as healthy.
-    $runtimeSource = Join-Path $sourceRoot "src\openjarvis\one_agents\runtime.py"
-    # The runtime worker imports the company trigger registry into the same
-    # long-lived process.  Watching runtime.py alone left a committed schedule
-    # policy stale in memory indefinitely: each scheduler pass then wrote the
-    # old values back over the reconciled database.  Treat either source as a
-    # deferred worker reload, using the same no-active-jobs safety gate below.
+    $agentSourceRoot = Join-Path $sourceRoot "src\openjarvis\one_agents"
+    # The queue worker imports the whole agent runtime package, not only
+    # runtime.py. Watching one file left committed self-heal, reconciliation,
+    # and adapter repairs stale in memory indefinitely. Watch every Python
+    # source owned by the agent runtime plus the company trigger registry.
+    # Reload still uses the no-active-jobs/no-imminent-trigger gate below.
     $companyTriggerSource = Join-Path $oneRoot "one-company\floors\_work\triggers.py"
     $workerProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$foundWorkerPid" -ErrorAction SilentlyContinue
-    $reloadSources = @($runtimeSource, $companyTriggerSource) | Where-Object { Test-Path $_ }
+    $reloadSources = @(
+        if (Test-Path -LiteralPath $agentSourceRoot) {
+            Get-ChildItem -LiteralPath $agentSourceRoot -Filter "*.py" -File -Recurse |
+                Select-Object -ExpandProperty FullName
+        }
+        if (Test-Path -LiteralPath $companyTriggerSource) { $companyTriggerSource }
+    )
     $runtimeChanged = $workerProcess -and [bool]($reloadSources | Where-Object {
         (Get-Item $_).LastWriteTime -gt $workerProcess.CreationDate
     } | Select-Object -First 1)
