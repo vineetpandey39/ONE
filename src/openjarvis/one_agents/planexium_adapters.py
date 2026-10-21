@@ -396,8 +396,12 @@ def concrete_stock_brief(request):
         # empty generic lab without demanding that every valid title say lab.
         request.update(query="aerospace engineer laboratory", subject="engineer")
     elif subject == "computer" and "simulation" in query:
-        # The intended visual is the engineering simulation, not any computer.
-        request.update(query="engineering computer simulation", subject="simulation")
+        # The authored action is visible digital modelling, not any generic
+        # computer.  Envato often describes the honest shot as a 3D/digital
+        # rendering rather than using the abstract word "simulation".  Bind
+        # both independently visible facts so an office laptop alone cannot
+        # pass, while an engineer inspecting a digital rendering can.
+        request.update(query="digital rendering computer", subject="rendering")
     if "astronaut" in request["query"].casefold():
         request["blocked_keywords"] += ["costume", "comedy", "humor", "urban", "city", "sneakers"]
     return request
@@ -518,14 +522,14 @@ class EnvatoAdapter:
                     inputs["envatoQuery"] = catalog_query
                     inputs["envatoQueryUrl"] = quote_plus(catalog_query)
                     inputs["resultIndex"] = str(candidate - first_candidate - 2 if fallback else candidate)
-                    # v4 binds the receipt namespace to the concrete-subject
+                    # v5 binds the receipt namespace to the concrete-subject
                     # policy above.  A v3 failed job was launched with a
                     # materially different brief; trying to attach it to the
                     # repaired request correctly trips LaoDraft's hash gate,
                     # but must not strand the mission forever.  Accepted
                     # downloads remain in acquired/ and are still reused.
-                    receipt = self.context.artifact(f"receipts/envato-v4-{index}.json" if candidate == first_candidate
-                        else f"receipts/envato-v4-{index}-candidate-{candidate}.json")
+                    receipt = self.context.artifact(f"receipts/envato-v5-{index}.json" if candidate == first_candidate
+                        else f"receipts/envato-v5-{index}-candidate-{candidate}.json")
                     try:
                         out, job = self.draft.run("planexium-envato", asset_steps, inputs, receipt, timeout=10800)
                         query_positions[query] = candidate
