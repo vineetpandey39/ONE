@@ -102,7 +102,8 @@ def image_provider(path, shot):
             "selectors": ["#prompt-textarea", "[contenteditable='true']", "textarea"],
             "timeout_ms": 60000, "as": "composer"}},
         {"action": "generate_and_download_chatgpt_image", "args": {
-            "prompt": shot["prompt"],
+            "prompt": shot["prompt"] + "\nRequest marker: OTO-" + path.name + "-" + shot["shot_id"],
+            "request_marker": "OTO-" + path.name + "-" + shot["shot_id"],
             "reference_image_path": shot["reference"],
             "reference_settle_seconds": 12,
             "filename": output.name, "max_attempts": 2, "allow_fresh_chat_recovery": False, "strict_fresh_turn": True,

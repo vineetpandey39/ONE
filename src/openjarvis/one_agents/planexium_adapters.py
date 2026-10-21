@@ -104,7 +104,12 @@ class LaoDraft:
             if status == "Successful":
                 return job.get("output_result") or {}, job_id
             if status in {"Failed", "Stopped", "Cancelled", "Faulted", "Retried"}:
-                raise RuntimeError(f"LAO draft ended {status}; checkpoint preserved, no automatic duplicate")
+                from openjarvis.one_agents.chandan_control import ProviderTerminalError
+                reason = str(job.get("error_message") or ("Stopped by operator/editorial control" if status in {"Stopped", "Cancelled"} else "Provider gave no error detail"))
+                saved = {**prior, "job_id": job_id, "request_hash": request_hash,
+                         "terminal_status": status, "provider_error": reason}
+                receipt.write_text(json.dumps(saved, indent=2), encoding="utf-8")
+                raise ProviderTerminalError(job_id, status, reason)
             sleep(3)
         raise TimeoutError("LAO draft remains in flight; retry resumes its saved job instead of starting another")
 

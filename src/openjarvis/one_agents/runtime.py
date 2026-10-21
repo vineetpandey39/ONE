@@ -415,12 +415,21 @@ def enqueue_job(agent_id: str, task: str, mode: str = "plan", tier: str = "fast"
     task = task.strip()
     if not task:
         raise ValueError("Task is required")
+    from openjarvis.one_agents.chandan_control import continuation_key
+    checkpoint_key = continuation_key(agent_id, task)
+    if checkpoint_key:
+        dedupe_key = checkpoint_key
     job_id = f"{agent_id}-{uuid.uuid4().hex[:12]}"
     now = _now()
     with _connect() as db:
         db.execute("CREATE TABLE IF NOT EXISTS handoff_keys (key TEXT PRIMARY KEY, job_id TEXT NOT NULL)")
         if dedupe_key:
             db.execute("BEGIN IMMEDIATE")
+            if checkpoint_key:
+                for prior in db.execute("SELECT * FROM jobs WHERE agent_id='chandan' ORDER BY created_at DESC").fetchall():
+                    if continuation_key(agent_id, prior["task"]) == checkpoint_key:
+                        db.execute("INSERT OR REPLACE INTO handoff_keys (key, job_id) VALUES (?, ?)", (checkpoint_key, prior["id"]))
+                        return dict(prior)
             previous = db.execute("SELECT job_id FROM handoff_keys WHERE key = ?", (dedupe_key,)).fetchone()
             if previous:
                 existing = db.execute("SELECT * FROM jobs WHERE id = ?", (previous["job_id"],)).fetchone()
@@ -697,10 +706,11 @@ def mark_blocked(job_id: str, result: dict[str, Any]) -> None:
     the building projection stuck on ``running`` after the worker goes idle.
     """
     reason = str(result.get("blocked_reason") or "Required capability unavailable")[:2000]
+    safe_review = job_id.startswith("chandan-") and result.get("status") in {"review_required", "awaiting_identity_review", "identity_review_required"}
     with _connect() as db:
         db.execute(
-            "UPDATE jobs SET status = 'blocked', progress = 0, result = ?, error = ?, updated_at = ? WHERE id = ?",
-            (json.dumps(result, ensure_ascii=True), reason, _now(), job_id),
+            "UPDATE jobs SET status = ?, progress = 0, result = ?, error = ?, updated_at = ? WHERE id = ?",
+            ("review_required" if safe_review else "blocked", json.dumps(result, ensure_ascii=True), "" if safe_review else reason, _now(), job_id),
         )
     job = get_job(job_id)
     if job:
@@ -6125,7 +6135,11 @@ def _run_chandan(job: dict[str, Any]) -> dict[str, Any]:
     if _json_task(job).get("brand") != "origin_to_ovation":
         raise ValueError("CHANDAN only accepts explicit origin_to_ovation missions")
     from openjarvis.one_agents.origin_to_ovation import run_stage
-    return run_stage(job, enqueue=enqueue_job)
+    from openjarvis.one_agents.chandan_control import ProviderTerminalError, terminal_result
+    try:
+        return run_stage(job, enqueue=enqueue_job)
+    except ProviderTerminalError as error:
+        return terminal_result(error)
 
 
 def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
