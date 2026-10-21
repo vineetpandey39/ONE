@@ -29,7 +29,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -196,6 +196,15 @@ def _which_cli(name: str) -> str | None:
     if not candidates:
         return None
     return str(max(candidates, key=lambda item: item.stat().st_mtime))
+
+
+def _repo_is_vault_locked(repo: Path) -> bool:
+    """Honor VISTA's scoped safeguard without blocking any other repository."""
+    if repo.resolve() != VISTA_REPO.resolve():
+        return False
+    git_dir = repo / ".git"
+    return ((git_dir / "vista-lock-manifest.json").is_file()
+            and not (git_dir / "vista-unlocked.json").is_file())
 
 
 def _row(connect: Connect, job_id: str) -> dict[str, Any] | None:
@@ -839,6 +848,46 @@ def _discard_attempt(repo: Path, names: list[str], original_untracked: set[str])
             path.unlink()
 
 
+@contextmanager
+def _isolated_repair_workspace(source_repo: Path, evidence: dict[str, Any]):
+    """Give repair models a disposable checkout, never the live agent checkout."""
+    home = Path(os.environ.get("OPENJARVIS_HOME", Path.home() / ".openjarvis"))
+    root = (home / "helios_repair_worktrees").resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    workspace = (root / f"repair-{uuid.uuid4().hex}").resolve()
+    workspace.relative_to(root)
+    head = _git(source_repo, "rev-parse", "HEAD")
+    if head.returncode or not head.stdout.strip():
+        raise RuntimeError("could not resolve source repository revision")
+    revision = head.stdout.strip()
+    added = _git(source_repo, "worktree", "add", "--detach", str(workspace), revision, timeout=300)
+    if added.returncode:
+        raise RuntimeError("could not create isolated repair worktree")
+    _audit_attempt({"job_id": evidence.get("job_id"), "event": "repair_worktree_created",
+                    "repo": str(source_repo), "revision": revision[:12]})
+    try:
+        yield workspace, revision
+    finally:
+        removed = _git(source_repo, "worktree", "remove", "--force", str(workspace), timeout=300)
+        _git(source_repo, "worktree", "prune")
+        _audit_attempt({"job_id": evidence.get("job_id"), "event": "repair_worktree_removed",
+                        "ok": removed.returncode == 0})
+
+
+def _promote_isolated_repair(source_repo: Path, original_revision: str,
+                             repair_revision: str) -> subprocess.CompletedProcess[str]:
+    """Fast-forward only when the live checkout is unchanged and tracked-clean."""
+    status = _git(source_repo, "status", "--porcelain", "--untracked-files=no")
+    head = _git(source_repo, "rev-parse", "HEAD")
+    if (status.returncode or status.stdout.strip() or head.returncode
+            or head.stdout.strip() != original_revision):
+        return subprocess.CompletedProcess(
+            ["git", "merge", "--ff-only", repair_revision], 1, "",
+            "source repository changed while isolated repair was running",
+        )
+    return _git(source_repo, "merge", "--ff-only", repair_revision, timeout=300)
+
+
 def _with_checkpoint_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
     """Give a YATRA parser repair the saved plan shape, not only ONE's wrapper traceback."""
     enriched = dict(evidence)
@@ -877,6 +926,10 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
     repo = _repo_for(evidence)
     if repo is None:
         return {"ok": False, "reason": "failure is outside HELIOS's allow-listed repositories"}
+    if _repo_is_vault_locked(repo):
+        _audit_attempt({"job_id": evidence.get("job_id"), "event": "vault_locked_repository",
+                        "repo": str(repo)})
+        return {"ok": False, "reason": "VISTA is vault-locked; explicit unlock-update-test-relock required"}
     status = _git(repo, "status", "--porcelain", "--untracked-files=no")
     if status.returncode or status.stdout.strip():
         _audit_attempt({"job_id": evidence.get("job_id"), "event": "repository_not_clean",
@@ -884,8 +937,6 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
                         "status": str(getattr(status, "stdout", ""))[-1200:],
                         "stderr": str(getattr(status, "stderr", ""))[-1200:]})
         return {"ok": False, "reason": "repository is not clean; protected concurrent changes"}
-    original_untracked = _untracked_paths(repo)
-
     prompt = (
         "You are HELIOS's bounded Floor 12 repair worker. Diagnose the supplied latest failed job, "
         "make the smallest durable code fix in this repository, and add/update focused tests. "
@@ -894,63 +945,75 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
         "checkpoint compatibility. If evidence is insufficient, make no changes and say so.\n\n"
         f"Failure evidence:\n{json.dumps(evidence, ensure_ascii=True)[:16000]}"
     )
+    if not _cli_commands(prompt, repo):
+        return {"ok": False, "reason": "no model CLI produced a verified patch: no providers available",
+                "attempts": []}
     attempts: list[dict[str, Any]] = []
-    for name, command in _cli_commands(prompt, repo):
-        from openjarvis.one_agents import stages
-        stages.set_stage("helios", stages.EXECUTING,
-                         f"Diagnosing {str(evidence.get('agent') or 'Floor 12').upper()} failure with {name} CLI")
-        try:
-            cli_timeout = timeout
-            if name in {"qwen-local", "qwen-local-tools"}:
-                cli_timeout = min(timeout, max(60, int(os.environ.get("ONE_HELIOS_LOCAL_TIMEOUT_SECONDS", "300"))))
-            done = _run_cli(name, command, repo=repo, timeout=cli_timeout)
-            attempts.append({"cli": name, "returncode": done.returncode,
-                             "output": (done.stdout or done.stderr or "")[-1200:]})
-        except Exception as exc:  # noqa: BLE001 - fallback is the point
-            attempts.append({"cli": name, "error": f"{type(exc).__name__}: {exc}"})
-            _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
-            continue
-        _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
-        if done.returncode != 0:
-            continue
-        tracked_names = set(_git(repo, "diff", "--name-only").stdout.splitlines())
-        new_untracked = _untracked_paths(repo) - original_untracked
-        names = sorted(path.replace("\\", "/") for path in tracked_names | new_untracked if path)
-        if not names:
-            continue
+    try:
+        with _isolated_repair_workspace(repo, evidence) as (workspace, original_revision):
+            original_untracked = _untracked_paths(workspace)
+            for name, command in _cli_commands(prompt, workspace):
+                from openjarvis.one_agents import stages
+                stages.set_stage("helios", stages.EXECUTING,
+                                 f"Diagnosing {str(evidence.get('agent') or 'Floor 12').upper()} failure with {name} CLI")
+                try:
+                    cli_timeout = timeout
+                    if name in {"qwen-local", "qwen-local-tools"}:
+                        cli_timeout = min(timeout, max(60, int(os.environ.get("ONE_HELIOS_LOCAL_TIMEOUT_SECONDS", "300"))))
+                    done = _run_cli(name, command, repo=workspace, timeout=cli_timeout)
+                    attempts.append({"cli": name, "returncode": done.returncode,
+                                     "output": (done.stdout or done.stderr or "")[-1200:]})
+                except Exception as exc:  # noqa: BLE001 - fallback is the point
+                    attempts.append({"cli": name, "error": f"{type(exc).__name__}: {exc}"})
+                    _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
+                    continue
+                _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
+                if done.returncode != 0:
+                    continue
+                tracked_names = set(_git(workspace, "diff", "--name-only").stdout.splitlines())
+                new_untracked = _untracked_paths(workspace) - original_untracked
+                names = sorted(path.replace("\\", "/") for path in tracked_names | new_untracked if path)
+                if not names:
+                    continue
 
-        # Block changes outside Floor 12 runtime/tests. This also prevents a
-        # model from changing credentials, floor governance, or another line.
-        if not names or not all(_allowed_patch_path(repo, path) for path in names):
-            _discard_attempt(repo, names, original_untracked)
-            attempts[-1]["repair_check"] = "patch escaped HELIOS's file boundary"
-            _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
-            continue
+                if not all(_allowed_patch_path(repo, path) for path in names):
+                    _discard_attempt(workspace, names, original_untracked)
+                    attempts[-1]["repair_check"] = "patch escaped HELIOS's file boundary"
+                    _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
+                    continue
 
-        stages.set_stage("helios", stages.EXECUTING, f"Testing {name} repair before retry")
-        check = subprocess.run(
-            _repair_test_command(repo),
-            cwd=repo, capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=1200,
-        )
-        if check.returncode:
-            _discard_attempt(repo, names, original_untracked)
-            attempts[-1]["repair_check"] = "Floor 12 regression tests failed"
-            attempts[-1]["test_output"] = (check.stdout + check.stderr)[-1200:]
-            _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
-            # An unverified patch did not repair the failure; continue with a
-            # clean tree so the next configured model gets its own attempt.
-            continue
+                stages.set_stage("helios", stages.EXECUTING, f"Testing {name} repair before retry")
+                test_env = os.environ.copy()
+                if repo.resolve() == REPO_ROOT.resolve():
+                    test_env["PYTHONPATH"] = str(workspace / "src")
+                check = subprocess.run(
+                    _repair_test_command(repo), cwd=workspace, env=test_env,
+                    capture_output=True, text=True, encoding="utf-8",
+                    errors="replace", timeout=1200,
+                )
+                if check.returncode:
+                    _discard_attempt(workspace, names, original_untracked)
+                    attempts[-1]["repair_check"] = "Floor 12 regression tests failed"
+                    attempts[-1]["test_output"] = (check.stdout + check.stderr)[-1200:]
+                    _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
+                    continue
 
-        _git(repo, "add", "--", *names)
-        stages.set_stage("helios", stages.EXECUTING, "Committing the verified Floor 12 repair")
-        commit = _git(repo, "commit", "-m", "HELIOS self-heal Floor 12 failure")
-        if commit.returncode:
-            return {"ok": False, "reason": "verified patch could not be committed",
-                    "commit_error": commit.stderr[-1200:], "attempts": attempts}
-        sha = _git(repo, "rev-parse", "--short", "HEAD").stdout.strip()
-        return {"ok": True, "cli": name, "commit": sha,
-                "files": names, "attempts": attempts}
+                _git(workspace, "add", "--", *names)
+                stages.set_stage("helios", stages.EXECUTING, "Committing the isolated verified Floor 12 repair")
+                commit = _git(workspace, "commit", "-m", "HELIOS self-heal Floor 12 failure")
+                if commit.returncode:
+                    return {"ok": False, "reason": "verified isolated patch could not be committed",
+                            "commit_error": commit.stderr[-1200:], "attempts": attempts}
+                revision = _git(workspace, "rev-parse", "HEAD").stdout.strip()
+                promoted = _promote_isolated_repair(repo, original_revision, revision)
+                if promoted.returncode:
+                    return {"ok": False, "reason": "verified repair promotion refused",
+                            "promotion_error": promoted.stderr[-1200:], "attempts": attempts}
+                return {"ok": True, "cli": name, "commit": revision[:12],
+                        "files": names, "isolated": True, "attempts": attempts}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"isolated repair workspace unavailable: {exc}",
+                "attempts": attempts}
 
     return {"ok": False, "reason": "no model CLI produced a verified patch: " + _attempt_reason(attempts),
             "attempts": attempts}
