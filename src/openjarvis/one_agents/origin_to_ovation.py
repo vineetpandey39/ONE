@@ -174,9 +174,12 @@ def image_batch_provider(path, shots):
             "retry_backoff_seconds": 60, "poll_ms": 3000,
             "as": "batch_result"}},
     ]
+    # The receipt is named by the batch's prompts, not only its steps: the steps carry the plan's path, so a rewritten
+    # plan (the 2026-10-22 faceless replan) used to look like the old Stopped job and could never start.
+    plan_tag = digest(batch_plan)[:12]
     result, provider_job = provider.run(
         f"Origin to Ovation - {manifest['subject']} - {missing[0]['shot_id']}-{missing[-1]['shot_id']} single chat",
-        steps, {}, path / "runtime" / "providers" / "remaining-images-single-chat.json",
+        steps, {}, path / "runtime" / "providers" / f"remaining-images-single-chat-{plan_tag}.json",
         timeout=21600)
     absent = [shot["shot_id"] for shot in missing if not (Path(shot["image"]).is_file()
               and Path(shot["image"]).stat().st_size > 10000)]
@@ -258,6 +261,23 @@ def run_stage(job, *, enqueue):
             "agent": agent, "job_id": job["id"], "status": "producing_images_single_chat",
             "processed": sum(Path(s["image"]).is_file() for s in plan), "total": len(plan)})
         image_batch_provider(path, plan)
+        if all(s.get("director", {}).get("faceless") for s in plan):
+            # Faceless plans (2026-10-22): a frame that still shows a face is regenerated, never reviewed for likeness.
+            from openjarvis.one_agents.origin_to_ovation_faceless import reject_faces
+            rejected_dir = master_dir / "images-rejected-face"
+            history = []
+            for _round in range(2):
+                rejected = reject_faces(plan, rejected_dir)
+                history += rejected
+                if not rejected:
+                    break
+                image_batch_provider(path, plan)
+            still = reject_faces(plan, rejected_dir)
+            write(path / "runtime" / "face-check.json", {"rejected": history + still, "remaining": still})
+            if still:
+                return {"_blocked": True, "status": "faces_still_visible",
+                        "blocked_reason": "These scenes kept showing a face after two regenerations",
+                        "shots": [r["shot_id"] for r in still]}
         # Generator validates the paid chapter receipts and skips valid audio.
         subprocess.run([sys.executable, str(master_dir / "generate_narration.py")], check=True)
         from openjarvis.one_agents.chandan_render import render
