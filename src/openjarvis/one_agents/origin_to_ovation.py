@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+from contextlib import contextmanager
 import sys
 from pathlib import Path
 
@@ -28,6 +29,38 @@ def write(path, value):
 def digest(path):
     with Path(path).open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+@contextmanager
+def building_progress(subject, plan):
+    """Show CHANDAN's work on the building: image count every 30 s, then each phase; cleared however it ends.
+
+    The building draws a worker's activity only from its stage, and CHANDAN never set one, so on 2026-10-22 it was
+    invisible on Floor 12 while generating 75 images beside YATRA."""
+    import threading
+    from openjarvis.one_agents import stages
+    phase = {"name": ""}
+    stop = threading.Event()
+
+    def show():
+        done = sum(Path(s["image"]).is_file() for s in plan)
+        stages.set_stage("chandan", stages.EXECUTING, phase["name"] or f"{subject} · images {done}/{len(plan)}")
+
+    def report():
+        while not stop.wait(30):
+            show()
+
+    def set_phase(name):
+        phase["name"] = f"{subject} · {name}"
+        stages.set_stage("chandan", stages.EXECUTING, phase["name"])
+
+    show()
+    threading.Thread(target=report, daemon=True).start()
+    try:
+        yield set_phase
+    finally:
+        stop.set()
+        stages.clear_stage("chandan")
 
 
 def mission_path(payload):
@@ -260,32 +293,39 @@ def run_stage(job, *, enqueue):
         write(path / "runtime" / "active.json", {
             "agent": agent, "job_id": job["id"], "status": "producing_images_single_chat",
             "processed": sum(Path(s["image"]).is_file() for s in plan), "total": len(plan)})
-        image_batch_provider(path, plan)
-        if all(s.get("director", {}).get("faceless") for s in plan):
-            # Faceless plans (2026-10-22): a frame that still shows a face is regenerated, never reviewed for likeness.
-            from openjarvis.one_agents.origin_to_ovation_faceless import reject_faces
-            rejected_dir = master_dir / "images-rejected-face"
-            history = []
-            for _round in range(2):
-                rejected = reject_faces(plan, rejected_dir)
-                history += rejected
-                if not rejected:
-                    break
-                image_batch_provider(path, plan)
-            still = reject_faces(plan, rejected_dir)
-            write(path / "runtime" / "face-check.json", {"rejected": history + still, "remaining": still})
-            if still:
-                return {"_blocked": True, "status": "faces_still_visible",
-                        "blocked_reason": "These scenes kept showing a face after two regenerations",
-                        "shots": [r["shot_id"] for r in still]}
-        # Generator validates the paid chapter receipts and skips valid audio.
-        subprocess.run([sys.executable, str(master_dir / "generate_narration.py")], check=True)
-        from openjarvis.one_agents.chandan_render import render
-        rendered = render(master_dir)
-        write(path / "runtime" / "render-result.json", rendered)
-        return transfer(job, path, "ares", "seo", enqueue,
-                        [master_dir / "master.mp4", master_dir / "narration.txt",
-                         master_dir / "technical-qc.json"])
+        with building_progress(manifest.get("subject") or path.name, plan) as phase:
+            image_batch_provider(path, plan)
+            if all(s.get("director", {}).get("faceless") for s in plan):
+                # Faceless plans (2026-10-22): a frame that still shows a face is regenerated, never reviewed for
+                # likeness.
+                from openjarvis.one_agents.origin_to_ovation_faceless import reject_faces
+                phase("checking frames for faces")
+                rejected_dir = master_dir / "images-rejected-face"
+                history = []
+                for _round in range(2):
+                    rejected = reject_faces(plan, rejected_dir)
+                    history += rejected
+                    if not rejected:
+                        break
+                    phase(f"regenerating {len(rejected)} frame(s) that showed a face")
+                    image_batch_provider(path, plan)
+                still = reject_faces(plan, rejected_dir)
+                write(path / "runtime" / "face-check.json", {"rejected": history + still, "remaining": still})
+                if still:
+                    return {"_blocked": True, "status": "faces_still_visible",
+                            "blocked_reason": "These scenes kept showing a face after two regenerations",
+                            "shots": [r["shot_id"] for r in still]}
+            # Generator validates the paid chapter receipts and skips valid audio.
+            phase("narration")
+            subprocess.run([sys.executable, str(master_dir / "generate_narration.py")], check=True)
+            from openjarvis.one_agents.chandan_render import render
+            phase("rendering the master")
+            rendered = render(master_dir)
+            write(path / "runtime" / "render-result.json", rendered)
+            phase("handing the master to ARES")
+            return transfer(job, path, "ares", "seo", enqueue,
+                            [master_dir / "master.mp4", master_dir / "narration.txt",
+                             master_dir / "technical-qc.json"])
     if agent == "ares":
         if payload.get("stage") != "seo":
             raise ValueError("ARES needs production handoff")
