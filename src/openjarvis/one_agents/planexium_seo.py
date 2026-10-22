@@ -52,13 +52,18 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
         "Return JSON: title (string), primary_query (string), opening (string), "
         "tags (JSON array of strings), hashtags (JSON array of exactly 3 strings). "
         "Use only the supplied science/script; distinguish simulated Mars on Earth from actual Mars. "
-        "Title max 100 characters, compelling but factual; complement the existing thumbnail hook. "
+        "Title max 100 characters, compelling but factual, making the same promise as the thumbnail you choose. "
         "primary_query: a natural search phrase of 2-6 words. "
         "opening: 2 short useful paragraphs, include the exact natural primary_query and 'this video' "
         "within the first 200 characters. No fabricated keyword volumes, rankings, or trending claims. "
         "tags: 15-25 distinct relevant search phrases, total YouTube tag budget 200-450 characters "
         "(spaces/commas count); no isolated words such as days/crew/nears, no unrelated topics. "
         "hashtags: exactly 3 relevant hashtags. Keep all scientific quantities source-grounded. "
+        "thumbnail (string): when `thumbnails` is supplied, the name of the one thumbnail whose on-image text "
+        "and idea make the same promise as your title; the title and that thumbnail must be about the same "
+        "thing (a distance title goes with the distance thumbnail, not with an airflow question). "
+        "comment (string): the channel's first comment under this video: one question to viewers about this "
+        "video's own subject (name it), 30-220 characters, ending with '?', no links or hashtags. "
         "Do not claim the crew are physically on Mars. Return plain Unicode, no mojibake.")
     prompt += (
         " Research being conducted is not a proven result: do not write 'proves', 'proving', "
@@ -68,17 +73,38 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
         "generic or speculative psychological-effects keywords. Never invent comparisons, flight times, "
         "results or crew qualifications. Call analog participants 'crew members', not astronauts. "
         "Follow editorial_feedback when supplied.")
+    # The rendered thumbnails ARES pairs its title with. Until 2026-10-22 ARES saw only concept 0's text as a "hook to
+    # complement" and the thumbnail was picked by design score alone, so "...Could Fly 26 Times Farther" went out
+    # over "DISTURB AIRFLOW?" while the "0.7 -> 18.7 KM" thumbnail sat unused.
+    concepts = {str(c.get("name")): c for c in package.get("thumbnail_strategy", {}).get("concepts", [])}
+    rendered = [v for v in package.get("thumbnail_experiment", {}).get("variants", [])
+                if v.get("name") in concepts and v.get("path") and Path(v["path"]).is_file()]
+    thumbnails = [{"name": v["name"], "text": concepts[v["name"]].get("text"),
+                   "idea": concepts[v["name"]].get("left_usp")} for v in rendered]
     errors = None
     for attempt in range(2):
         out = llm(prompt, {"science": {"video_title": science.get("video_title"),
                                       "claims": science.get("claims", [])},
                           "current_title": package["recommended_title"],
-                          "thumbnail_hook": package.get("thumbnail_strategy", {}).get("concepts", [{}])[0].get("text"),
+                          "thumbnails": thumbnails or None,
                           "editorial_feedback": editorial_feedback,
                           "previous_validation_error": errors})
         try:
             result = dict(package)
             title = str(out["title"]).strip()
+            # The hourly sweep posts this once the video is public; until 2026-10-22 every Planexium package carried
+            # the same "Which part would you like us to explain next?".
+            comment = " ".join(str(out.get("comment") or "").split())
+            if not 30 <= len(comment) <= 220 or not comment.endswith("?") or re.search(r"https?://|#\w", comment):
+                raise ValueError("comment must be one 30-220 character question about this video, no links or hashtags")
+            result["pinned_comment_draft"] = comment
+            if thumbnails:
+                chosen = next((v for v in rendered
+                               if v["name"].casefold() == str(out.get("thumbnail") or "").strip().casefold()), None)
+                if chosen is None:
+                    raise ValueError("thumbnail must be the name of one supplied thumbnail that matches the title")
+                result["thumbnail_path"] = chosen["path"]
+                result["thumbnail_pairing"] = {"thumbnail": chosen["name"], "title": title, "chosen_by": "ARES"}
             opening = str(out["opening"]).strip()
             if re.search(r"\b(proves?|proving|findings show)\b", opening, re.I):
                 raise ValueError("Description must distinguish research aims from established results")
@@ -185,6 +211,9 @@ def _run_job(job):
                              "package_sha256": digest(target), "audit": require_seo(result)})
     gate.update(package=str(target), package_sha256=digest(target), seo_owner="ARES",
                 seo_audit_passed=True, status="awaiting_human_review")
+    if result.get("thumbnail_path"):
+        # The reviewed and uploaded thumbnail is the one ARES paired with its title.
+        gate["thumbnail_sha256"] = digest(result["thumbnail_path"])
     _write(gate_path, gate)
     checkpoint = root/"checkpoints/package.json"
     if checkpoint.exists():

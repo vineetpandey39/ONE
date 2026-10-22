@@ -691,6 +691,32 @@ def install_disabled_trigger() -> dict:
     return module.upsert(trigger)
 
 
+STANDING_PRIVATE_SCOPE = "private_upload_standing"
+
+
+def standing_private_approval(config: dict, db_path: Path | None = None) -> dict | None:
+    """The Chairman's standing OLYMPUS approval for Planexium private uploads, or None.
+
+    Granted 2026-10-22 ("Planexium ka API upload in private mode ... agent mein jod do"): private drafts on the
+    Planexium channel only. Going public stays a person's Studio action."""
+    db_path = db_path or SUITE / "one-company" / "data" / "company.db"
+    if not Path(db_path).is_file():
+        return None
+    with sqlite3.connect(Path(db_path).resolve().as_uri() + "?mode=ro", uri=True) as db:
+        rows = db.execute("SELECT payload_json FROM approvals WHERE status='approved' AND decided_by='olympus' "
+                          "AND action_type='publish_routine_update' ORDER BY decided_at DESC").fetchall()
+    for (raw,) in rows:
+        try:
+            granted = json.loads(raw or "{}")
+        except ValueError:
+            continue
+        if (granted.get("brand") == "planexium" and granted.get("scope") == STANDING_PRIVATE_SCOPE
+                and granted.get("channel_id") == config.get("channel_id")
+                and granted.get("synthetic") in ("yes", "no")):
+            return granted
+    return None
+
+
 def stage_private(payload: dict, *, approval_db: Path | None = None, adapter=None) -> dict:
     """Only an existing OLYMPUS decision bound to this exact package authorizes staging."""
     config = load_config()
@@ -707,12 +733,26 @@ def stage_private(payload: dict, *, approval_db: Path | None = None, adapter=Non
     if not channel or not config.get("credential_asset"):
         raise ValueError("The Planexium channel ID and credential-asset binding have not been configured")
     db_path = approval_db or SUITE / "one-company" / "data" / "company.db"
-    with sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True) as db:
-        row = db.execute("SELECT status,decided_by,action_type,payload_json FROM approvals WHERE approval_id=?",
-                         (payload.get("approval_id"),)).fetchone()
-    if not row or row[:3] != ("approved", "olympus", "publish_routine_update"):
-        raise PermissionError("An existing human OLYMPUS approval is required for private staging")
-    approved = json.loads(row[3])
+    if payload.get("standing"):
+        # The Chairman's standing approval covers private uploads only; each video must still be exactly the
+        # package, master, thumbnail and subtitles its review gate recorded after ARES passed the SEO audit.
+        standing = standing_private_approval(config, db_path)
+        if standing is None:
+            raise PermissionError("No standing OLYMPUS approval for Planexium private uploads")
+        if not gate_path.exists():
+            raise PermissionError("A standing private upload needs the mission's review gate")
+        gate = json.loads(gate_path.read_text(encoding="utf-8"))
+        if gate.get("status") != "awaiting_human_review" or gate.get("seo_audit_passed") is not True:
+            raise PermissionError("The review gate has not passed ARES's SEO audit")
+        approved = {**gate, "brand": "planexium", "channel_id": channel, "scope": "private_upload",
+                    "synthetic": standing.get("synthetic")}
+    else:
+        with sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True) as db:
+            row = db.execute("SELECT status,decided_by,action_type,payload_json FROM approvals WHERE approval_id=?",
+                             (payload.get("approval_id"),)).fetchone()
+        if not row or row[:3] != ("approved", "olympus", "publish_routine_update"):
+            raise PermissionError("An existing human OLYMPUS approval is required for private staging")
+        approved = json.loads(row[3])
     expected = {"brand": "planexium", "channel_id": channel, "package_sha256": _hash(path), "scope": "private_upload"}
     if any(approved.get(k) != v for k, v in expected.items()):
         raise PermissionError("Approval does not match the exact channel/package/private scope")
@@ -732,6 +772,53 @@ def stage_private(payload: dict, *, approval_db: Path | None = None, adapter=Non
         adapter = ExistingPrivateUploader(lao / "yatra-upload" / "youtube_api_upload.py",
             credential_asset=config["credential_asset"], channel_id=channel, synthetic=approved.get("synthetic"))
     return ProductionServices(context).upload_private(package, expected_channel_id=channel, adapter=adapter, authorized=True)
+
+
+def _channel_uploader(config: dict, ledger: Path):
+    """A fresh uploader module bound to Planexium's own credential, channel and mission ledger.
+
+    The uploader script is shared with Sonia's channel, so every call gets its own instance: Planexium's bindings
+    can never leak into Sonia's sweep or the other way round."""
+    import importlib.util
+    import uuid
+    lao = Path(config.get("lao_root") or Path.home() / "Documents" / "LAO")
+    spec = importlib.util.spec_from_file_location(f"planexium_uploader_{uuid.uuid4().hex}",
+                                                  lao / "yatra-upload" / "youtube_api_upload.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.ASSET = config["credential_asset"]
+    module.EXPECTED_CHANNEL_ID = config["channel_id"]
+    module.LEDGER = ledger
+    return module
+
+
+def mission_ledgers(config: dict) -> list[Path]:
+    """Every Planexium mission's own upload ledger (one per mission folder, never Sonia's ledger)."""
+    root = context_for("daily-00000000", config).root.parent
+    return sorted(root.glob("*/upload-ledger.json"))
+
+
+def pending_comment_videos(config: dict | None = None) -> list[str]:
+    """Planexium uploads that still owe their channel comment (posted once the video is public)."""
+    config = config or load_config()
+    if not config.get("channel_id") or not config.get("credential_asset"):
+        return []
+    owed = []
+    for ledger in mission_ledgers(config):
+        module = _channel_uploader(config, ledger)
+        owed += [str(entry.get("video_id")) for _, entry in module.pending_comment_entries(module.ledger_load())]
+    return owed
+
+
+def post_pending_comments(config: dict | None = None) -> list[dict]:
+    """Post each public Planexium video's comment from its own package, mission by mission."""
+    config = config or load_config()
+    results = []
+    for ledger in mission_ledgers(config):
+        module = _channel_uploader(config, ledger)
+        if module.pending_comment_entries(module.ledger_load()):
+            results += [{"channel": "planexium", **row} for row in module.post_pending_comments()]
+    return results
 
 
 if __name__ == "__main__":
