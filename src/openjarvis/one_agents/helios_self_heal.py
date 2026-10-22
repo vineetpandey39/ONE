@@ -46,7 +46,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 VISTA_REPO = Path(r"C:\Users\pc\Documents\LAO\vista")
 YATRA_CAPTURE_REPO = Path(r"C:\Users\pc\Documents\LAO\yatra-capture")
 ALLOWED_REPOS = (REPO_ROOT, VISTA_REPO, YATRA_CAPTURE_REPO)
-from openjarvis.one_agents.lao_checkpoint_recovery import ENGINE_REPO
+from openjarvis.one_agents.lao_checkpoint_recovery import ENGINE_REPO, WORKER_ROOT
 ALLOWED_REPOS = (*ALLOWED_REPOS, ENGINE_REPO)
 PENDING_PREFIX = "pending self-heal: "
 REPAIR_CIRCUIT_MAX_FAILURES = 2
@@ -1058,9 +1058,29 @@ def _isolated_repair_workspace(source_repo: Path, evidence: dict[str, Any]):
     added = _git(source_repo, "worktree", "add", "--detach", str(workspace), revision, timeout=300)
     if added.returncode:
         raise RuntimeError("could not create isolated repair worktree")
-    _audit_attempt({"job_id": evidence.get("job_id"), "event": "repair_worktree_created",
-                    "repo": str(source_repo), "revision": revision[:12]})
     try:
+        if source_repo.resolve() == ENGINE_REPO.resolve():
+            # Repair the code that is actually running, not a stale repository
+            # snapshot. Production hot-fixes can legitimately make the deployed
+            # engine a tested composite. Commit that exact file only inside the
+            # disposable worktree so the model sees it and later deployment can
+            # prove a non-regressive ancestry without touching the dirty checkout.
+            live_engine = WORKER_ROOT / "workflow_engine.py"
+            workspace_engine = workspace / "workflow_engine.py"
+            if live_engine.is_file() and workspace_engine.is_file():
+                live_bytes = live_engine.read_bytes()
+                compile(live_bytes, str(live_engine), "exec")
+                if live_bytes.replace(b"\r\n", b"\n") != workspace_engine.read_bytes().replace(b"\r\n", b"\n"):
+                    workspace_engine.write_bytes(live_bytes)
+                    _git(workspace, "add", "--", "workflow_engine.py")
+                    baseline = _git(workspace, "commit", "-m", "HELIOS live engine baseline")
+                    if baseline.returncode:
+                        raise RuntimeError("could not preserve deployed engine in isolated repair worktree")
+                    _audit_attempt({"job_id": evidence.get("job_id"),
+                                    "event": "live_engine_baseline_preserved",
+                                    "sha256": hashlib.sha256(live_bytes).hexdigest()})
+        _audit_attempt({"job_id": evidence.get("job_id"), "event": "repair_worktree_created",
+                        "repo": str(source_repo), "revision": revision[:12]})
         yield workspace, revision
     finally:
         removed = _git(source_repo, "worktree", "remove", "--force", str(workspace), timeout=300)

@@ -42,12 +42,54 @@ def checkpoint_of(job):
 def evidence_for(external_job):
     job = client().get(f"/jobs/{external_job}")
     checkpoint = checkpoint_of(job)
+    browser_context = checkpoint.get("browser_context") or {}
     # Never expose credential variables or complete input_args to a model.
     return {"lao_error": str(job.get("error_message") or "")[:4000],
             "lao_status": job.get("status"),
             "resume_step": checkpoint["step_index"],
             "saved_script_present": True,
-            "conversation_url": (checkpoint.get("browser_context") or {}).get("conversation_url", "")}
+            "conversation_url": browser_context.get("conversation_url", ""),
+            "assistant_response_shape": _assistant_response_shape(browser_context)}
+
+
+def _assistant_response_shape(browser_context: dict) -> list[dict]:
+    """Return bounded DOM structure evidence, never the full production reply."""
+    endpoint = str(browser_context.get("browser_cdp_url") or "")
+    conversation = str(browser_context.get("conversation_url") or "")
+    if not endpoint.startswith("http://127.0.0.1:") or not conversation.startswith("https://chatgpt.com/c/"):
+        return []
+    selectors = (
+        "[data-markdown-text-style='assistant-message']",
+        "div:has(> [data-conversation-role='assistant'])",
+        "[data-message-author-role='assistant']",
+    )
+    try:
+        from playwright.sync_api import sync_playwright
+        manager = sync_playwright().start()
+        try:
+            browser = manager.chromium.connect_over_cdp(endpoint)
+            pages = [page for context in browser.contexts for page in context.pages
+                     if page.url == conversation]
+            if len(pages) != 1:
+                return [{"error": "checkpoint conversation page not uniquely attached"}]
+            page = pages[0]
+            result = []
+            marker = "===SCENE_PLAN_START==="
+            for selector in selectors:
+                elements = page.locator(selector)
+                count = elements.count()
+                text = elements.nth(count - 1).inner_text(timeout=5000) if count else ""
+                prefix = " ".join(str(text or "").split())[:240]
+                result.append({"selector": selector, "count": count,
+                               "latest_prefix": prefix,
+                               "scene_marker_index": str(text or "").find(marker)})
+            return result
+        finally:
+            # Stopping Playwright disconnects this diagnostic client. Do not
+            # call browser.close(), which could terminate the owned session.
+            manager.stop()
+    except Exception as exc:  # evidence enrichment must never block repair
+        return [{"error": f"{type(exc).__name__}: {str(exc)[:180]}"}]
 
 
 def _overlay_reviewed_engine_patch(current: bytes, base_revision: str,
@@ -138,12 +180,28 @@ def activate_engine(*, revision: str = ""):
             capture_output=True, check=True,
         ).stdout
         current = target.read_bytes()
-        if current.replace(b"\r\n", b"\n") == base.replace(b"\r\n", b"\n"):
+        current_normalized = current.replace(b"\r\n", b"\n")
+        if current_normalized == base.replace(b"\r\n", b"\n"):
             expected = reviewed
             source_label = f"{resolved}:workflow_engine.py"
         else:
-            expected = _overlay_reviewed_engine_patch(current, head, resolved)
-            source_label = f"live engine + reviewed delta {head[:12]}..{resolved[:12]}"
+            lineage = subprocess.run(
+                ["git", "rev-list", "--ancestry-path", f"{head}..{resolved}"],
+                cwd=ENGINE_REPO, capture_output=True, text=True, check=True,
+            ).stdout.splitlines()
+            preserved = any(
+                subprocess.run(
+                    ["git", "show", f"{item}:workflow_engine.py"], cwd=ENGINE_REPO,
+                    capture_output=True, check=True,
+                ).stdout.replace(b"\r\n", b"\n") == current_normalized
+                for item in lineage
+            )
+            if preserved:
+                expected = reviewed
+                source_label = f"{resolved}:workflow_engine.py (preserved live baseline)"
+            else:
+                expected = _overlay_reviewed_engine_patch(current, head, resolved)
+                source_label = f"live engine + reviewed delta {head[:12]}..{resolved[:12]}"
     else:
         status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
                                 cwd=ENGINE_REPO, capture_output=True, text=True, check=True)
