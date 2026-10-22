@@ -49,7 +49,7 @@ def evidence_for(external_job):
             "conversation_url": (checkpoint.get("browser_context") or {}).get("conversation_url", "")}
 
 
-def activate_engine():
+def activate_engine(*, revision: str = ""):
     """Deploy a committed engine only onto a known ancestor, atomically.
 
     Agent bootstrap is installed/reloaded by safe maintenance once. Subsequent
@@ -60,16 +60,38 @@ def activate_engine():
     bootstrap = (WORKER_ROOT / "agent.py").read_text(encoding="utf-8")
     if "importlib.reload(engine_module).WorkflowEngine" not in bootstrap:
         raise RuntimeError("LAO job-boundary loader not deployed; safe maintenance required")
-    status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
-                            cwd=ENGINE_REPO, capture_output=True, text=True, check=True)
-    if status.stdout.strip():
-        raise RuntimeError("LAO engine has uncommitted changes; deployment refused")
-    expected = source.read_bytes()
-    compile(expected, str(source), "exec")
+    if revision:
+        resolved = subprocess.run(
+            ["git", "rev-parse", "--verify", f"{revision}^{{commit}}"], cwd=ENGINE_REPO,
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ENGINE_REPO,
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", head, resolved], cwd=ENGINE_REPO,
+            capture_output=True,
+        )
+        if ancestor.returncode:
+            raise RuntimeError("Reviewed engine repair is not based on the current repository HEAD")
+        expected = subprocess.run(
+            ["git", "show", f"{resolved}:workflow_engine.py"], cwd=ENGINE_REPO,
+            capture_output=True, check=True,
+        ).stdout
+        source_label = f"{resolved}:workflow_engine.py"
+    else:
+        status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
+                                cwd=ENGINE_REPO, capture_output=True, text=True, check=True)
+        if status.stdout.strip():
+            raise RuntimeError("LAO engine has uncommitted changes; deployment refused")
+        expected = source.read_bytes()
+        source_label = str(source)
+    compile(expected, source_label, "exec")
     current = target.read_bytes()
     if current == expected:
         return hashlib.sha256(expected).hexdigest()
-    revisions = subprocess.run(["git", "log", "--format=%H", "--", "workflow_engine.py"],
+    revisions = subprocess.run(["git", "log", "--all", "--format=%H", "--", "workflow_engine.py"],
                                cwd=ENGINE_REPO, capture_output=True, text=True, check=True).stdout.splitlines()
     known = any(subprocess.run(["git", "show", f"{rev}:workflow_engine.py"],
                               cwd=ENGINE_REPO, capture_output=True, check=True).stdout.replace(b"\r\n", b"\n")

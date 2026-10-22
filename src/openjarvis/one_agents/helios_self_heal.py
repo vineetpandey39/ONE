@@ -1071,14 +1071,30 @@ def _isolated_repair_workspace(source_repo: Path, evidence: dict[str, Any]):
 
 def _promote_isolated_repair(source_repo: Path, original_revision: str,
                              repair_revision: str) -> subprocess.CompletedProcess[str]:
-    """Fast-forward only when the live checkout is unchanged and tracked-clean."""
+    """Fast-forward a clean repo, or retain an engine repair without touching dirty work."""
     status = _git(source_repo, "status", "--porcelain", "--untracked-files=no")
     head = _git(source_repo, "rev-parse", "HEAD")
-    if (status.returncode or status.stdout.strip() or head.returncode
-            or head.stdout.strip() != original_revision):
+    if status.returncode or head.returncode or head.stdout.strip() != original_revision:
         return subprocess.CompletedProcess(
             ["git", "merge", "--ff-only", repair_revision], 1, "",
             "source repository changed while isolated repair was running",
+        )
+    if status.stdout.strip():
+        if source_repo.resolve() != ENGINE_REPO.resolve():
+            return subprocess.CompletedProcess(
+                ["git", "merge", "--ff-only", repair_revision], 1, "",
+                "source repository changed while isolated repair was running",
+            )
+        # Preserve every byte in the operator's dirty engine checkout. The
+        # tested repair remains reachable and deployable from its own ref.
+        # Nothing is stashed, staged, committed, reset or overwritten here.
+        repair_ref = f"refs/heads/helios-repairs/{repair_revision[:12]}"
+        retained = _git(source_repo, "update-ref", repair_ref, repair_revision)
+        if retained.returncode:
+            return retained
+        return subprocess.CompletedProcess(
+            ["git", "update-ref", repair_ref, repair_revision], 0,
+            f"detached-engine-repair:{repair_ref}", "",
         )
     return _git(source_repo, "merge", "--ff-only", repair_revision, timeout=300)
 
@@ -1122,12 +1138,18 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
     if repo is None:
         return {"ok": False, "reason": "failure is outside HELIOS's allow-listed repositories"}
     status = _git(repo, "status", "--porcelain", "--untracked-files=no")
-    if status.returncode or status.stdout.strip():
+    dirty_engine = (repo.resolve() == ENGINE_REPO.resolve()
+                    and status.returncode == 0 and bool(status.stdout.strip()))
+    if status.returncode or (status.stdout.strip() and not dirty_engine):
         _audit_attempt({"job_id": evidence.get("job_id"), "event": "repository_not_clean",
                         "repo": str(repo), "returncode": status.returncode,
                         "status": str(getattr(status, "stdout", ""))[-1200:],
                         "stderr": str(getattr(status, "stderr", ""))[-1200:]})
         return {"ok": False, "reason": "repository is not clean; protected concurrent changes"}
+    if dirty_engine:
+        _audit_attempt({"job_id": evidence.get("job_id"),
+                        "event": "dirty_engine_checkout_preserved",
+                        "paths": status.stdout.splitlines()[:20]})
     prompt = (
         "You are HELIOS's bounded Floor 12 repair worker. Diagnose the supplied latest failed job, "
         "make the smallest durable code fix in this repository, and add/update focused tests. "
@@ -1236,13 +1258,16 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
                 if promoted.returncode:
                     return {"ok": False, "reason": "verified repair promotion refused",
                             "promotion_error": promoted.stderr[-1200:], "attempts": attempts}
+                detached_engine = promoted.stdout.startswith("detached-engine-repair:")
                 if control_plane:
                     _write_control_plane_receipt(
                         evidence, original_revision, revision, name,
                         str(independent_review.get("reviewer") or ""), names,
                     )
                 return {"ok": True, "cli": name, "commit": revision[:12],
+                        "full_commit": revision,
                         "files": names, "isolated": True,
+                        "detached_engine": detached_engine,
                         "control_plane": control_plane,
                         "reviewer": independent_review.get("reviewer", ""),
                         "attempts": attempts}
@@ -1275,7 +1300,11 @@ def heal_failure(connect: Connect, finding: Any) -> str:
     repo = _repo_for(evidence)
     if receipt_path.exists() and repo:
         saved = json.loads(receipt_path.read_text(encoding="utf-8"))
-        if saved.get("commit") == _git(repo, "rev-parse", "--short", "HEAD").stdout.strip():
+        saved_revision = str(saved.get("full_commit") or saved.get("commit") or "")
+        if repo.resolve() == ENGINE_REPO.resolve():
+            if saved_revision and _git(repo, "cat-file", "-e", f"{saved_revision}^{{commit}}").returncode == 0:
+                repair = saved
+        elif saved.get("commit") == _git(repo, "rev-parse", "--short", "HEAD").stdout.strip():
             repair = saved
     if repair is None:
         repair = repair_with_cli(evidence)
@@ -1298,7 +1327,7 @@ def heal_failure(connect: Connect, finding: Any) -> str:
     if _repo_for(evidence) == ENGINE_REPO:
         try:
             from openjarvis.one_agents.lao_checkpoint_recovery import activate_engine, resume_failed
-            activate_engine()
+            activate_engine(revision=str(repair.get("full_commit") or ""))
             action = resume_failed(connect, _row(connect, finding.job_id),
                                    reviewed_conversation_url=repair.get("reviewed_conversation_url", ""))
         except Exception as exc:
