@@ -10448,6 +10448,10 @@ def _job_watchdog_seconds(job: dict[str, Any] | None = None) -> float:
         # Sequential full-video acquisition has its own bounded per-clip waits.
         # Outer watchdog must outlive 12h acquisition + capture/edit stages.
         return max(default, 16 * 3600.0)
+    if job and job.get("agent_id") == "chandan":
+        # One ChatGPT chat makes 75 frames (its own 6 h provider limit), then narration and render. On 2026-10-22
+        # the 45-minute net marked the Virat run failed at 75 minutes; the work finished anyway and handed to ARES.
+        return max(default, 8 * 3600.0)
     if job and job.get("agent_id") == "scribe":
         try:
             lao_wait = float(os.environ.get("ONE_LAO_MAX_WAIT_SECONDS", "10800"))

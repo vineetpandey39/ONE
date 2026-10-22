@@ -401,6 +401,30 @@ def run_stage(job, *, enqueue):
         reference = read(master_dir / "shot-plan.json")[0]["reference"]
         metadata_path = master_dir / "editorial-metadata.json"
         metadata = read(metadata_path) if metadata_path.is_file() else {}
+        if metadata.get("thumbnail_concepts"):
+            # 2026-10-23: one story-led concept per angle, none repeating an earlier episode or showing a face.
+            from openjarvis.one_agents import origin_to_ovation_thumbnails as T
+            from openjarvis.one_agents.origin_to_ovation_faceless import FACELESS_RULES, visible_faces
+            earlier = T.earlier_thumbnails(ROOT / "missions", path.name)
+            concepts = []
+            for concept in metadata["thumbnail_concepts"]:
+                image = master_dir / "thumbnails" / f"{concept['name']}.png"
+                image_provider(path, {"shot_id": concept["name"], "image": str(image), "reference": reference,
+                                      "prompt": f"{concept['prompt']} {FACELESS_RULES} "
+                                                f"Headline text exactly: {concept['headline']}."})
+                reasons = T.resemblance(image, concept["headline"], earlier)
+                if visible_faces(image):
+                    reasons.append("a face is visible")
+                concepts.append({**concept, "image": str(image), "rejected": reasons})
+            picked = T.choose(concepts, metadata.get("thumbnail_choice"))
+            write(path / "runtime" / "thumbnail-concepts.json",
+                  {"concepts": concepts, "picked": picked and picked["name"],
+                   "chairman_choice": metadata.get("thumbnail_choice")})
+            if picked is None:
+                return {"_blocked": True, "status": "thumbnail_concepts_rejected",
+                        "blocked_reason": "Every thumbnail concept showed a face or repeated an earlier episode",
+                        "concepts": concepts}
+            shutil.copy2(picked["image"], master_dir / "thumbnail.png")
         image_provider(path, {
             "shot_id": "thumbnail", "image": str(master_dir / "thumbnail.png"),
             "reference": reference,
