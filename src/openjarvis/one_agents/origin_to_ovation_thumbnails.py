@@ -16,6 +16,7 @@ from typing import Any
 # Average-difference hash on a 9x8 grey thumbnail: 64 bits. Two renders of one layout land within a few bits;
 # unrelated compositions sit far apart. 12 bits is "the same picture with small changes".
 SIMILAR_BITS = 12
+DEFAULT_HEADLINE = "THE BOY BEHIND THE LEGEND"
 
 
 def dhash(image: Path) -> int:
@@ -55,7 +56,9 @@ def earlier_thumbnails(missions_root: Path, current: str) -> list[dict[str, Any]
             continue
         meta_path = mission / "production" / "master-v1" / "editorial-metadata.json"
         meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
-        headline = meta.get("thumbnail_headline") or _headline_from_prompt(meta.get("thumbnail_prompt", ""))
+        # An episode without a thumbnail prompt used the pipeline default (Sachin, the first episode).
+        headline = (meta.get("thumbnail_headline") or _headline_from_prompt(meta.get("thumbnail_prompt", ""))
+                    or DEFAULT_HEADLINE)
         found.append({"mission": mission.name, "image": image, "headline": headline})
     return found
 
