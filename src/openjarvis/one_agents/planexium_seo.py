@@ -236,5 +236,16 @@ def _run_job(job):
         if ctx.mission_id in ledger:
             ledger[ctx.mission_id]["status"] = health["status"] if health.get("uploaded") else "review_ready"
             _write(ledger_path, ledger)
-    return {"agent": "ARES", "mission_id": ctx.mission_id, "status": "seo_passed",
-            "output": str(target), "published": False, "audit": require_seo(result)}
+    out = {"agent": "ARES", "mission_id": ctx.mission_id, "status": "seo_passed",
+           "output": str(target), "published": False, "audit": require_seo(result)}
+    # With the Chairman's standing approval (2026-10-22) the finished package goes straight to ECHO for a private
+    # upload on Planexium's own channel; without it, nothing changes and the video waits for review.
+    from openjarvis.one_agents.planexium import standing_private_approval
+    if standing_private_approval(load_config()) is not None:
+        from openjarvis.one_agents.runtime import enqueue_job
+        echo = enqueue_job("echo", json.dumps({"brand": "planexium", "stage": "private_upload",
+                                               "mission_id": ctx.mission_id, "standing": True}),
+                           mode="execute", tier="fast",
+                           dedupe_key=f"planexium:{ctx.mission_id}:private-standing:{gate['package_sha256'][:16]}")
+        out["handed_to"] = {"agent": "ECHO", "job_id": echo["id"]}
+    return out

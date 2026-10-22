@@ -6332,9 +6332,19 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
             uploader = youtube_publish._load("youtube_api_upload")
             posted = uploader.post_pending_comments() if payload.get("videos", True) else []
             languages = _echo_missing_languages(uploader) if payload.get("languages") else []
+            planexium_posted: list[dict[str, Any]] = []
+            if payload.get("planexium"):
+                # Planexium's own channel, credential and ledgers; a failure there is reported, not raised.
+                try:
+                    from openjarvis.one_agents import planexium
+                    planexium_posted = planexium.post_pending_comments()
+                except Exception as exc:  # noqa: BLE001
+                    planexium_posted = [{"channel": "planexium", "error": f"{type(exc).__name__}: {str(exc)[:160]}"}]
+            everything = posted + planexium_posted
             return {"agent": "ECHO", "stage": "pending_comments", "results": posted, "languages": languages,
-                    "content": f"{sum(1 for r in posted if r.get('posted'))} comment(s) posted; "
-                               f"{sum(1 for r in posted if r.get('waiting'))} video(s) still private. "
+                    "planexium": planexium_posted,
+                    "content": f"{sum(1 for r in everything if r.get('posted'))} comment(s) posted; "
+                               f"{sum(1 for r in everything if r.get('waiting'))} video(s) still private. "
                                f"Languages added on {sum(1 for r in languages if r.get('localized'))} upload(s). "
                                "Pin each posted comment in Studio."}
         finally:
@@ -6773,21 +6783,31 @@ def _iris_comment_sweep(job: dict[str, Any], *, head_id: str = "ia",
     # The same sweep finishes metadata languages a Short's upload ran out of time for (2026-10-13): nothing added
     # them afterwards, so a video could stay with 8 of its 14 languages for good.
     languages = [entry.get("video_id") for _, entry, _ in uploader.pending_localization_entries(ledger)]
-    if not owed and not languages:
+    # Then The Planexium, its own channel, credential and per-mission ledgers (Chairman, 2026-10-22: one channel
+    # after the other, never merged). Planexium trouble never stops Sonia's sweep.
+    try:
+        from openjarvis.one_agents import planexium
+        planexium_owed = planexium.pending_comment_videos()
+    except Exception:  # noqa: BLE001
+        planexium_owed = []
+    if not owed and not languages and not planexium_owed:
         return {"agent": head_name, "mode": "comment_sweep",
-                "content": "No Sonia video owes a channel comment or a metadata language."}
+                "content": "No Sonia or Planexium video owes a channel comment or a metadata language."}
     follow = stages.head_briefs_worker(
         head_id, "echo", carrying_detail="Taking the owed channel comments and languages to ECHO",
-        briefing_detail=(f"ECHO, post the channel comment on any of {len(owed)} video(s) now public, and add the "
-                         f"missing languages on {len(languages)} upload(s)."),
+        briefing_detail=(f"ECHO, post the channel comment on any of {len(owed)} Sonia and {len(planexium_owed)} "
+                         f"Planexium video(s) now public, and add the missing languages on {len(languages)} upload(s)."),
         awaiting_detail="Waiting on ECHO for channel comments and languages",
         enqueue=lambda: enqueue_job("echo", json.dumps({"brand": "sonia_travel_vlogs", "stage": "pending_comments",
-                                                         "videos": owed, "languages": languages}),
+                                                         "videos": owed, "languages": languages,
+                                                         "planexium": planexium_owed}),
                                     mode="execute", tier="fast", dedupe_key=f"sonia:comments:{job['id']}"))
     return {"agent": head_name, "mode": "comment_sweep", "owed": owed, "languages": languages,
+            "planexium_owed": planexium_owed,
             "handed_to": {"agent": "ECHO", "job_id": follow["id"]},
-            "content": (f"{len(owed)} video(s) owe a channel comment; {len(languages)} upload(s) owe languages. "
-                        "ECHO posts each comment once the video is public and adds the languages.")}
+            "content": (f"{len(owed)} Sonia and {len(planexium_owed)} Planexium video(s) owe a channel comment; "
+                        f"{len(languages)} upload(s) owe languages. ECHO posts each comment once the video is public "
+                        "and adds the languages.")}
 
 
 def _iris_community_poll(job: dict[str, Any], *, head_id: str = "ia",
