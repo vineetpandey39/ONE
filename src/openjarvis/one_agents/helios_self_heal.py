@@ -18,6 +18,7 @@ A model failure is a diagnostic failure, not permission to bypass the gates.
 from __future__ import annotations
 
 import hashlib
+import ast
 import json
 import os
 import shutil
@@ -58,6 +59,22 @@ PROTECTED_CONTROL_PLANE_PATHS = {
     "src/openjarvis/one_agents/lao_checkpoint_recovery.py",
     "src/openjarvis/one_agents/floor_watch.py",
     "src/openjarvis/one_agents/helios_self_heal.py",
+}
+CONTROL_PLANE_IMMUTABLE_FUNCTIONS = {
+    "src/openjarvis/one_agents/helios_self_heal.py": {
+        "_allowed_patch_path", "_control_plane_candidate_allowed",
+        "_review_control_plane_candidate", "_promote_isolated_repair",
+        "_repair_test_command", "_run_cli", "repair_with_cli",
+        "_record_repair_failure", "_clear_repair_circuit",
+        "_vista_lock_script", "_unlock_vista_for_verified_promotion",
+        "_relock_vista_after_promotion",
+    },
+    "src/openjarvis/one_agents/floor_watch.py": {
+        "_load_ledger", "_remember_healed", "apply_fix", "watch_floor",
+    },
+    "src/openjarvis/one_agents/lao_checkpoint_recovery.py": {
+        "client", "activate_engine", "resume_failed",
+    },
 }
 
 
@@ -110,6 +127,19 @@ def _repair_circuit_path(evidence: dict[str, Any]) -> Path:
     return home / "helios_repair_circuits" / f"{key}.json"
 
 
+def _control_plane_digest() -> str:
+    """Version repair circuits by the actual supervising code, not wall time."""
+    digest = hashlib.sha256()
+    for relative in sorted(PROTECTED_CONTROL_PLANE_PATHS):
+        path = REPO_ROOT / relative
+        digest.update(relative.encode("utf-8"))
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            digest.update(b"missing")
+    return digest.hexdigest()
+
+
 def _load_repair_circuit(evidence: dict[str, Any]) -> dict[str, Any]:
     path = _repair_circuit_path(evidence)
     try:
@@ -117,6 +147,10 @@ def _load_repair_circuit(evidence: dict[str, Any]) -> dict[str, Any]:
     except (OSError, ValueError, TypeError):
         return {}
     if saved.get("signature") != _repair_signature(evidence):
+        return {}
+    # A control-plane repair changes what the Governor can diagnose or route.
+    # Old open circuits must not permanently suppress a newly capable watcher.
+    if saved.get("control_plane_digest") != _control_plane_digest():
         return {}
     return saved
 
@@ -150,6 +184,7 @@ def _record_repair_failure(evidence: dict[str, Any], reason: str) -> dict[str, A
         "reason": reason_kind,
         "updated_at": _now(),
         "status": "open" if failed_rounds >= _circuit_limit() else "retryable",
+        "control_plane_digest": _control_plane_digest(),
     }
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     temporary.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
@@ -417,7 +452,8 @@ def _repo_for(evidence: dict[str, Any]) -> Path | None:
     if (str(evidence.get("agent") or "").casefold() == "fabula"
             and evidence.get("external_job")
             and any(message in str(evidence.get("lao_error") or "").casefold()
-                    for message in ("chatgpt", "composer", "conversation", "streaming"))):
+                    for message in ("chatgpt", "composer", "conversation", "streaming",
+                                    "scene-plan recovery", "scene plan recovery"))):
         return ENGINE_REPO
     # The contract validator lives in ONE, but it dynamically loads the OBS
     # parser from yatra-capture.  Its traceback therefore ends in runtime.py
@@ -870,6 +906,102 @@ def _allowed_patch_path(repo: Path, path: str) -> bool:
     return False
 
 
+def _ast_definition_fingerprint(path: Path, names: set[str]) -> dict[str, str]:
+    """Hash authorization-critical definitions without depending on line numbers."""
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path))
+    found: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names:
+            found[node.name] = hashlib.sha256(
+                ast.dump(node, include_attributes=False).encode("utf-8")
+            ).hexdigest()
+    return found
+
+
+def _control_plane_candidate_allowed(source: Path, workspace: Path,
+                                     names: list[str]) -> tuple[bool, str]:
+    """Permit a bounded control-plane fix while keeping its authority immutable."""
+    normalized = {name.replace("\\", "/") for name in names}
+    protected = normalized & PROTECTED_CONTROL_PLANE_PATHS
+    if source.resolve() != REPO_ROOT.resolve() or not protected:
+        return False, "not a control-plane candidate"
+    allowed = PROTECTED_CONTROL_PLANE_PATHS | {
+        name for name in normalized if name.startswith("tests/one_agents/") and name.endswith(".py")
+    }
+    if not normalized <= allowed:
+        return False, "control-plane patch includes non-test files outside its boundary"
+    for relative in protected:
+        immutable = CONTROL_PLANE_IMMUTABLE_FUNCTIONS.get(relative, set())
+        before = _ast_definition_fingerprint(source / relative, immutable)
+        after = _ast_definition_fingerprint(workspace / relative, immutable)
+        if before != after or set(before) != immutable:
+            return False, f"authorization-critical definitions changed in {relative}"
+    return True, "bounded control-plane candidate"
+
+
+def _review_control_plane_candidate(workspace: Path, author: str,
+                                    names: list[str], test_tail: str) -> dict[str, Any]:
+    """Require a different model to approve a tested protected-code patch."""
+    diff = _git(workspace, "diff", "--", *names).stdout
+    if not diff.strip():
+        return {"ok": False, "reason": "control-plane candidate has no reviewable diff"}
+    prompt = (
+        "You are the independent safety reviewer for a tested autonomous Governor patch. "
+        "Do not edit files or run production. Check that the patch fixes the stated routing/recovery issue, "
+        "does not weaken authorization, credential, publishing, retry, checkpoint, or rollback gates, and "
+        "keeps changes minimal. Reply with exactly CONTROL_PLANE_REVIEW: APPROVE or "
+        "CONTROL_PLANE_REVIEW: REJECT followed by one short reason.\n\n"
+        f"Changed files: {json.dumps(names)}\nTest tail:\n{test_tail[-2000:]}\nPatch:\n{diff[:30000]}"
+    )
+    reviews: list[dict[str, Any]] = []
+    with tempfile.TemporaryDirectory(prefix="helios-control-review-") as directory:
+        review_root = Path(directory)
+        _git(review_root, "init")
+        (review_root / "candidate.diff").write_text(diff, encoding="utf-8")
+        for reviewer, command in _cli_commands(prompt, review_root):
+            if reviewer == author:
+                continue
+            try:
+                done = _run_cli(reviewer, command, repo=review_root, timeout=600)
+                output = done.stdout or done.stderr or ""
+                approved = done.returncode == 0 and "CONTROL_PLANE_REVIEW: APPROVE" in output
+                reviews.append({"reviewer": reviewer, "returncode": done.returncode,
+                                "approved": approved, "output": output[-500:]})
+                _audit_attempt({"event": "control_plane_review", "author": author,
+                                "reviewer": reviewer, "approved": approved,
+                                "returncode": done.returncode})
+                if approved:
+                    return {"ok": True, "reviewer": reviewer, "reviews": reviews}
+            except Exception as exc:  # noqa: BLE001 - another independent reviewer may work
+                reviews.append({"reviewer": reviewer,
+                                "error": f"{type(exc).__name__}: {exc}"})
+    return {"ok": False, "reason": "no independent model approved the control-plane patch",
+            "reviews": reviews}
+
+
+def _write_control_plane_receipt(evidence: dict[str, Any], original: str,
+                                 revision: str, author: str, reviewer: str,
+                                 names: list[str]) -> None:
+    home = Path(os.environ.get("OPENJARVIS_HOME", Path.home() / ".openjarvis"))
+    root = home / "helios_control_plane_repairs"
+    root.mkdir(parents=True, exist_ok=True)
+    receipt = {
+        "job_id": str(evidence.get("job_id") or ""),
+        "original_revision": original,
+        "repair_revision": revision,
+        "author": author,
+        "reviewer": reviewer,
+        "files": names,
+        "tested": True,
+        "created_at": _now(),
+    }
+    path = root / f"{revision}.json"
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
+    temporary.replace(path)
+
+
 def _repair_test_command(repo: Path) -> list[str]:
     python = os.environ.get("ONE_HELIOS_PYTHON", sys.executable)
     if repo.resolve() == ENGINE_REPO.resolve():
@@ -1035,11 +1167,16 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
                 if not names:
                     continue
 
+                control_plane = False
                 if not all(_allowed_patch_path(repo, path) for path in names):
-                    _discard_attempt(workspace, names, original_untracked)
-                    attempts[-1]["repair_check"] = "patch escaped HELIOS's file boundary"
-                    _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
-                    continue
+                    control_plane, boundary_reason = _control_plane_candidate_allowed(
+                        repo, workspace, names,
+                    )
+                    if not control_plane:
+                        _discard_attempt(workspace, names, original_untracked)
+                        attempts[-1]["repair_check"] = boundary_reason
+                        _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
+                        continue
 
                 stages.set_stage("helios", stages.EXECUTING, f"Testing {name} repair before retry")
                 test_env = os.environ.copy()
@@ -1056,6 +1193,22 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
                     attempts[-1]["test_output"] = (check.stdout + check.stderr)[-1200:]
                     _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
                     continue
+
+                independent_review: dict[str, Any] = {"ok": True, "reviewer": ""}
+                if control_plane:
+                    stages.set_stage("helios", stages.EXECUTING,
+                                     "Independently reviewing tested Governor control-plane repair")
+                    independent_review = _review_control_plane_candidate(
+                        workspace, name, names, check.stdout + check.stderr,
+                    )
+                    if not independent_review.get("ok"):
+                        _discard_attempt(workspace, names, original_untracked)
+                        attempts[-1]["repair_check"] = independent_review.get(
+                            "reason", "independent control-plane review failed",
+                        )
+                        attempts[-1]["reviews"] = independent_review.get("reviews", [])
+                        _audit_attempt({"job_id": evidence.get("job_id"), **attempts[-1]})
+                        continue
 
                 _git(workspace, "add", "--", *names)
                 stages.set_stage("helios", stages.EXECUTING, "Committing the isolated verified Floor 12 repair")
@@ -1083,8 +1236,16 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
                 if promoted.returncode:
                     return {"ok": False, "reason": "verified repair promotion refused",
                             "promotion_error": promoted.stderr[-1200:], "attempts": attempts}
+                if control_plane:
+                    _write_control_plane_receipt(
+                        evidence, original_revision, revision, name,
+                        str(independent_review.get("reviewer") or ""), names,
+                    )
                 return {"ok": True, "cli": name, "commit": revision[:12],
-                        "files": names, "isolated": True, "attempts": attempts}
+                        "files": names, "isolated": True,
+                        "control_plane": control_plane,
+                        "reviewer": independent_review.get("reviewer", ""),
+                        "attempts": attempts}
     except RuntimeError as exc:
         return {"ok": False, "reason": f"isolated repair workspace unavailable: {exc}",
                 "attempts": attempts}
