@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -49,6 +50,59 @@ def evidence_for(external_job):
             "conversation_url": (checkpoint.get("browser_context") or {}).get("conversation_url", "")}
 
 
+def _overlay_reviewed_engine_patch(current: bytes, base_revision: str,
+                                   repair_revision: str) -> bytes:
+    """Layer only the reviewed repair delta onto the live engine and retest it.
+
+    The worker can legitimately contain a newer, previously deployed composite
+    than the engine repository's checkout. Replacing it with the repair branch
+    would regress those live fixes. A clean three-way-like patch application
+    preserves the live bytes; the repair commit's complete test suite then runs
+    against the combined candidate before it can be deployed.
+    """
+    patch = subprocess.run(
+        ["git", "diff", "--binary", base_revision, repair_revision, "--", "workflow_engine.py"],
+        cwd=ENGINE_REPO, capture_output=True, check=True,
+    ).stdout
+    if not patch:
+        raise RuntimeError("Reviewed engine repair contains no workflow_engine.py change")
+    with tempfile.TemporaryDirectory(prefix="lao-engine-overlay-") as temporary:
+        root = Path(temporary)
+        candidate_path = root / "workflow_engine.py"
+        candidate_path.write_bytes(current)
+        applied = subprocess.run(
+            ["git", "apply", "--whitespace=nowarn", "-"], cwd=root,
+            input=patch, capture_output=True,
+        )
+        if applied.returncode:
+            raise RuntimeError("Reviewed engine repair does not apply cleanly to the live engine")
+        candidate = candidate_path.read_bytes()
+        compile(candidate, str(candidate_path), "exec")
+
+        checkout = root / "review"
+        added = subprocess.run(
+            ["git", "worktree", "add", "--detach", str(checkout), repair_revision],
+            cwd=ENGINE_REPO, capture_output=True, text=True,
+        )
+        if added.returncode:
+            raise RuntimeError("Could not create isolated live-overlay verification checkout")
+        try:
+            (checkout / "workflow_engine.py").write_bytes(candidate)
+            tested = subprocess.run(
+                [sys.executable, "-m", "unittest", "discover", "-v"], cwd=checkout,
+                capture_output=True, text=True, timeout=900,
+            )
+            if tested.returncode:
+                detail = (tested.stdout + "\n" + tested.stderr)[-2000:]
+                raise RuntimeError(f"Live-overlay engine tests failed: {detail}")
+        finally:
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", str(checkout)], cwd=ENGINE_REPO,
+                capture_output=True, text=True,
+            )
+        return candidate
+
+
 def activate_engine(*, revision: str = ""):
     """Deploy a committed engine only onto a known ancestor, atomically.
 
@@ -75,11 +129,21 @@ def activate_engine(*, revision: str = ""):
         )
         if ancestor.returncode:
             raise RuntimeError("Reviewed engine repair is not based on the current repository HEAD")
-        expected = subprocess.run(
+        reviewed = subprocess.run(
             ["git", "show", f"{resolved}:workflow_engine.py"], cwd=ENGINE_REPO,
             capture_output=True, check=True,
         ).stdout
-        source_label = f"{resolved}:workflow_engine.py"
+        base = subprocess.run(
+            ["git", "show", f"{head}:workflow_engine.py"], cwd=ENGINE_REPO,
+            capture_output=True, check=True,
+        ).stdout
+        current = target.read_bytes()
+        if current.replace(b"\r\n", b"\n") == base.replace(b"\r\n", b"\n"):
+            expected = reviewed
+            source_label = f"{resolved}:workflow_engine.py"
+        else:
+            expected = _overlay_reviewed_engine_patch(current, head, resolved)
+            source_label = f"live engine + reviewed delta {head[:12]}..{resolved[:12]}"
     else:
         status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
                                 cwd=ENGINE_REPO, capture_output=True, text=True, check=True)
@@ -96,7 +160,7 @@ def activate_engine(*, revision: str = ""):
     known = any(subprocess.run(["git", "show", f"{rev}:workflow_engine.py"],
                               cwd=ENGINE_REPO, capture_output=True, check=True).stdout.replace(b"\r\n", b"\n")
                 == current.replace(b"\r\n", b"\n") for rev in revisions)
-    if not known:
+    if not known and not revision:
         raise RuntimeError("Live LAO engine diverged from reviewed history; refuse overwrite")
     backup = target.with_name("workflow_engine.backup-" + hashlib.sha256(current).hexdigest()[:16] + ".py")
     if not backup.exists():
