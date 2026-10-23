@@ -4604,6 +4604,7 @@ def _run_imprimatur(job: dict[str, Any]) -> dict[str, Any]:
             raise PermissionError("Approved KDP files no longer match the submission packet")
         stages.set_stage("imprimatur", stages.EXECUTING, f"Submitting approved title: {packet.title}")
         submitted = submit_approved(packet, approval_id, headless=False)
+        stages.scribe_waits_for_kdp(run_dir, packet.title, scribe_job_id)
         poll_job = enqueue_job("imprimatur", json.dumps({
             "phase": "poll", "run_dir": run_dir, "scribe_job_id": scribe_job_id,
             "approval_id": approval_id,
@@ -4679,6 +4680,7 @@ def _run_imprimatur(job: dict[str, Any]) -> dict[str, Any]:
         timer.start()
         stages.set_stage("imprimatur", stages.AWAITING_WORKER,
                          f"Amazon is still processing {packet.title}; ASIN not assigned yet")
+        stages.scribe_waits_for_kdp(run_dir, packet.title, scribe_job_id)
         return {"agent": "IMPRIMATUR", "phase": "awaiting_asin", "status": status,
                 "next_check_seconds": delay,
                 "content": "Amazon is still processing the title. ASIN monitoring remains active."}
@@ -10440,6 +10442,8 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
             write_state(packet, "AWAITING_LOGIN", resume_state=prior,
                         resume_phase=payload.get("phase", "prepare"), job_id=job["id"],
                         scribe_job_id=payload.get("scribe_job_id"), reason=str(exc))
+            stages.scribe_waits_for_kdp(payload["run_dir"], packet.title,
+                                        payload.get("scribe_job_id", ""))
             _publishing_event(
                 job, agent="IMPRIMATUR", event_type="login_required", stage="awaiting_login",
                 summary="KDP login required; existing book and publishing phase preserved",

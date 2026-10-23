@@ -123,6 +123,29 @@ def get_stages() -> dict[str, dict[str, Any]]:
     for agent_id, entry in stages.items():
         if not isinstance(entry, dict):
             continue
+        if agent_id == "scribe" and entry.get("kdp_run_dir"):
+            # The publisher checkpoint, not the lifetime of the process that
+            # wrote this bubble, owns an external Amazon wait.
+            try:
+                state = json.loads((Path(entry["kdp_run_dir"]) / "kdp_publish_state.json").read_text(encoding="utf-8"))
+                title = str(state.get("title") or "Book")
+                phase = state.get("stage")
+                detail = None
+                if phase in {"SUBMITTED", "AWAITING_ASIN"}:
+                    status = str(state.get("kdp_status") or "processing")
+                    detail = f'{title}: submitted to Amazon; {status}. Waiting for review/ASIN.'
+                elif phase == "AWAITING_LOGIN":
+                    detail = f'{title}: KDP login required; publishing progress saved. Resume after sign-in.'
+                elif phase == "ASIN_ASSIGNED":
+                    continue
+                elif phase == "BLOCKED":
+                    detail = f'{title}: publishing needs attention. {str(state.get("error") or "Check IMPRIMATUR")[:200]}'
+                if detail:
+                    live[agent_id] = {**entry, "stage": AWAITING_WORKER, "detail": detail}
+                    continue
+            except (OSError, ValueError, TypeError):
+                # Do not retain a purported external wait without evidence.
+                continue
         if entry.get("stage") in _DURABLE:
             live[agent_id] = entry
             continue
@@ -175,6 +198,13 @@ def set_stage(agent_id: str, stage: str, detail: str = "", **extra: Any) -> None
 
 def clear_stage(agent_id: str) -> None:
     set_stage(agent_id, IDLE)
+
+
+def scribe_waits_for_kdp(run_dir: str, title: str, scribe_job_id: str) -> None:
+    """Bind the status bubble to this book's durable publisher checkpoint."""
+    set_stage("scribe", AWAITING_WORKER,
+              f"{title}: waiting for KDP publishing status",
+              kdp_run_dir=str(run_dir), job_id=scribe_job_id)
 
 
 def clear_all() -> None:
