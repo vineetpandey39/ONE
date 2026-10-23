@@ -26,6 +26,7 @@ _WORD = re.compile(r"[a-z0-9]+")
 _HOOK_OK = {"new", "now", "rule", "rules", "why", "how", "what", "this", "that", "dont", "don", "t", "miss", "stop",
             "before", "you", "your", "go", "read", "first", "wait", "watch", "update", "alert", "guide", "know",
             "need", "must", "real", "truth", "mistake", "mistakes", "check", "safe", "plan", "trip", "is", "it", "a"}
+_GENERIC_THUMBNAIL_HOOKS = {"WHAT'S NEW?", "WHATS NEW?", "BIG UPDATE", "MUST WATCH", "NEW UPDATE"}
 
 LLM = Callable[[str, dict], dict]
 
@@ -266,8 +267,11 @@ def metadata_from_model(record: dict, packaging: dict, llm: LLM | None,
     tag_direction = ("characters; mix exact topic, long-tail Indian traveller intent, destination/year, acronyms and full "
                      if channel == SONIA else "characters; mix exact topic, relevant viewer questions, acronyms and full ")
     variant_direction = (
-        "(exactly 3 objects with keys name, left_usp (one concrete visual idea, no text), sonia_expression "
-        "(2 to 3 words), text (a 2 to 4 word hook in capitals using only words found in the title or brief))."
+        "(exactly 3 objects with keys name, left_usp (one concrete hero visual idea, no text), sonia_expression "
+        "(2 to 3 words), text (a 1 to 3 word hook in capitals using only words found in the title or brief). "
+        "Prefer zero or very little text: the visual must communicate the story before the words do. Do not use "
+        "generic hooks such as WHAT'S NEW, BIG UPDATE or MUST WATCH when a topic-specific place, number or change "
+        "is available)."
         if channel.thumbnail_mode == "portrait" else
         "(exactly 3 objects with keys name, left_usp (one truthful focal visual, no portrait), "
         "text (a 2 to 4 word hook in capitals using only words found in the title or brief)).")
@@ -320,7 +324,8 @@ def metadata_from_model(record: dict, packaging: dict, llm: LLM | None,
     for v in out.get("thumbnail_variants", []):
         text = _clean((v or {}).get("text", ""), 28).upper()
         words = text.split()
-        if (v or {}).get("left_usp") and 1 <= len(words) <= 4 and _words(text) <= allowed:
+        if ((v or {}).get("left_usp") and 1 <= len(words) <= 3 and _words(text) <= allowed
+                and text not in _GENERIC_THUMBNAIL_HOOKS):
             variants.append({"name": _clean(v.get("name", "Variant"), 30), "left_usp": _clean(v["left_usp"], 160),
                              "sonia_expression": _clean(v.get("sonia_expression", "curious"), 40), "text": text})
     if len(variants) >= 1:
@@ -364,12 +369,16 @@ THUMBNAIL_PROMPT = (
     "tone. Keep her skin natural and clean; do not add blemishes or retouch her into someone else. Do not copy "
     "another creator's exact branding.\n\nSTORY: {video_title}\nDESTINATION: {destination}\nTRUTHFUL VISUAL: "
     "{left_usp}\nSONIA EXPRESSION: {sonia_expression}\n\nCOMPOSITION: 16:9. Sonia as a large close-up on the RIGHT, "
-    "34 to 42 percent of the frame, eyes unobstructed, clean shoulder cutout, natural high-energy expression. Reserve "
-    "the LEFT 58 to 66 percent for one instantly understood visual that clearly shows {destination}. One dominant "
-    "background, at most one supporting cue, a strong diagonal flow toward Sonia, no collage, no secondary people, "
-    "no tiny objects.\n\nLIGHTING: bright saturated colours that suit {destination}, warm highlights, one controlled "
+    "32 to 34 percent of the frame, eyes unobstructed, clean shoulder cutout, natural high-energy expression. Use "
+    "three strict zones: LEFT 0-43 percent is a low-detail, high-contrast hook zone; CENTRE 43-66 percent contains "
+    "one large, unobstructed hero proof of the story ({left_usp}); RIGHT 66-100 percent contains Sonia. The hero "
+    "proof must remain fully recognizable at phone size and must not sit behind the future hook text or Sonia. "
+    "Use one dominant background and at most one supporting cue. No collage, no secondary people, no tiny objects, "
+    "no repeated landmarks, no decorative clutter. The image must tell one visual sentence before any text is added.\n\n"
+    "LIGHTING: bright saturated colours that suit {destination}, warm highlights, one controlled "
     "red or yellow cue, subtle rim light around Sonia, crisp face, strong subject separation, natural skin.\n\nTEXT: "
-    "Do not render any text inside the image. Keep the left side clean for this later overlay: {thumbnail_text}.\n\n"
+    "Do not render any text inside the image. Keep only the LEFT 0-43 percent clean for this later overlay: "
+    "{thumbnail_text}. Never place the main story object inside that text zone.\n\n"
     "EVIDENCE SAFETY: do not fabricate a visa, passport stamp, government seal, amount, date or document text, and "
     "do not imply Sonia personally visited {destination}.\n\nTECHNICAL: 1280x720 composition, ultra-sharp focal "
     "subject, no watermark, no logo, no border, no small text, no distorted hands or faces, keep the bottom-right "
@@ -512,8 +521,8 @@ def build_package(record: dict[str, Any], *, master: Path, plan_path: Path, port
             "owner": "ARES" if channel == SONIA else "LYRA", "generator": "chatgpt_image_generation",
             "generation_mode": f"edit approved {channel.display_name if channel != SONIA else 'Sonia'} portrait; preserve identity" if channel.thumbnail_mode == "portrait" else "original image; no portrait reference",
             **({"portrait_library": str(portrait_library)} if channel.thumbnail_mode == "portrait" else {}),
-            "required_layout": f"{channel.display_name if channel != SONIA else 'Sonia'} close-up on right 34-42%; primary story USP on left 58-66%" if channel.thumbnail_mode == "portrait" else "One truthful focal subject on right; clear text area on left",
-            "text": variants[0]["text"], "max_words": 4, "variants": variants,
+            "required_layout": f"{channel.display_name if channel != SONIA else 'Sonia'} close-up on right 32-34%; hook on left 0-43%; unobstructed story USP in centre 43-66%" if channel.thumbnail_mode == "portrait" else "One truthful focal subject on right; clear text area on left",
+            "text": variants[0]["text"], "max_words": 3, "variants": variants,
             "quality_gates": ["1280x720", "16:9", "under 2 MB export", "recognizable at 10% size",
                               "text readable at mobile size", *(["face intact"] if channel.thumbnail_mode == "portrait" else ["no portrait reference", "truthful illustration"])],
             "chatgpt_prompt_template": (THUMBNAIL_PROMPT.replace("Sonia Travel Vlogs", channel.display_name).replace("Sonia", channel.display_name)

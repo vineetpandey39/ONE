@@ -83,8 +83,9 @@ def transfer(job, path, target, stage, enqueue, evidence):
               "from_agent": job["agent_id"], "parent_job": job["id"],
               "evidence": evidence_hashes}
     revision = hashlib.sha256(json.dumps(evidence_hashes, sort_keys=True).encode()).hexdigest()[:12]
+    dispatch_options = {"reserved": True} if read(path / "mission.json").get("fresh_code_required") else {}
     receipt = enqueue(target, json.dumps(packet), mode="execute",
-                      dedupe_key=f"{BRAND}:{path.name}:{stage}:{revision}")
+                      dedupe_key=f"{BRAND}:{path.name}:{stage}:{revision}", **dispatch_options)
     write(path / "runtime" / f"handoff-{job['agent_id']}-{target}.json",
           {**packet, "to_agent": target, "job_id": receipt["id"]})
     return {"status": "handed_off", "next_job": receipt["id"], "to_agent": target,
@@ -263,7 +264,8 @@ def run_stage(job, *, enqueue):
         if not subject_id or not manifest.get("subject"):
             raise ValueError("Explicit canonical subject required")
         calendar = ContentCalendar(ROOT)
-        calendar.reserve(path.name, subject_id, manifest["subject"])
+        manifest["content_calendar"] = calendar.reserve(path.name, subject_id, manifest["subject"])
+        write(path / "mission.json", manifest)
         calendar.export()
         if manifest.get("production_phase") == "reference_first":
             return transfer(job, path, "chandan", "produce", enqueue,
@@ -275,9 +277,15 @@ def run_stage(job, *, enqueue):
         if payload.get("checkpoint") in {"identity_repair_v3", "identity_exact_request_p12"}:
             from openjarvis.one_agents.chandan_identity_repair import run
             return run(path, job)
-        if manifest.get("production_phase") == "reference_first":
+        if manifest.get("production_phase") in {"reference_first", "reference_then_produce"}:
             from openjarvis.one_agents.chandan_reference import run_reference
-            return run_reference(path, job)
+            reference_result = run_reference(path, job)
+            if manifest["production_phase"] == "reference_first":
+                return reference_result
+            from openjarvis.one_agents.origin_to_ovation_faceless import visible_faces
+            if visible_faces(Path(reference_result["reference"])):
+                return {"_blocked": True, "status": "review_required", "blocked_reason": "Reference exposes a face; revise before scenes"}
+            manifest = read(path / "mission.json")
         plan = read(master_dir / "shot-plan.json")
         # Bind packaging, opening, factual beat loops, ending and post-publish learning before expensive generation.
         from openjarvis.one_agents.origin_to_ovation_story import write_contract as write_story_contract

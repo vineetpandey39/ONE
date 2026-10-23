@@ -21,14 +21,17 @@ TERMINAL = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 
 EXPERIMENT_FORMATS = (
-    {"name": "Price shock", "sonia_expression": "genuinely shocked, raised brows, wide eyes, mouth slightly open",
+    {"name": "Single hero", "sonia_expression": "genuinely surprised, raised brows, alert eyes",
      "posture": "leaning slightly toward the hook", "gesture": "index finger clearly pointing toward the hook text",
+     "composition": "one oversized story object in the protected centre lane; no decorative objects",
      "primary_colour": [255, 255, 255], "accent_colour": [255, 214, 0]},
-    {"name": "Decision", "sonia_expression": "curious and skeptical, one eyebrow raised",
+    {"name": "Visual contrast", "sonia_expression": "curious and skeptical, one eyebrow raised",
      "posture": "upright three-quarter pose", "gesture": "one hand at chin, evaluating the offer",
+     "composition": "one simple visual contrast using only truthful story elements; hero remains unobstructed",
      "primary_colour": [255, 255, 255], "accent_colour": [255, 64, 48]},
-    {"name": "Warning", "sonia_expression": "concerned urgency, alert eyes",
+    {"name": "Clean curiosity", "sonia_expression": "concerned curiosity, alert eyes",
      "posture": "slightly forward-facing", "gesture": "open-palm stop or caution gesture beside the hook",
+     "composition": "one curiosity object at large scale with a clean silhouette and no collage",
      "primary_colour": [255, 255, 255], "accent_colour": [151, 255, 45]},
 )
 
@@ -252,8 +255,11 @@ def next_layout(history: list[dict[str, Any]]) -> str:
 
 LAYOUT_SWAPS = (
     ("Sonia as a large close-up on the RIGHT", "Sonia as a large close-up on the LEFT"),
-    ("Reserve the LEFT 58 to 66 percent", "Reserve the RIGHT 58 to 66 percent"),
-    ("Keep the left side clean for this later overlay", "Keep the right side clean for this later overlay"),
+    ("LEFT 0-43 percent is a low-detail, high-contrast hook zone; CENTRE 43-66 percent contains one large, "
+     "unobstructed hero proof of the story ({left_usp}); RIGHT 66-100 percent contains Sonia",
+     "RIGHT 57-100 percent is a low-detail, high-contrast hook zone; CENTRE 34-57 percent contains one large, "
+     "unobstructed hero proof of the story ({left_usp}); LEFT 0-34 percent contains Sonia"),
+    ("Keep only the LEFT 0-43 percent clean", "Keep only the RIGHT 57-100 percent clean"),
 )
 
 
@@ -355,7 +361,9 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
         # with a slimmer jaw, a narrower face and poreless skin - recognisably
         # a beautified version of her rather than her. The prohibitions are
         # spelled out because that is the drift these models have by default.
-        prompt += ("\n\nVARIANT DIRECTION (mandatory): Sonia posture: " + str(variant.get("posture") or "close-up")
+        prompt += ("\n\nVARIANT DIRECTION (mandatory): Composition: "
+                   + str(variant.get("composition") or "one unobstructed hero object")
+                   + ". Sonia posture: " + str(variant.get("posture") or "close-up")
                    + ". Gesture: " + str(variant.get("gesture") or "point toward the hook")
                    + ". Only her pose, gesture and expression change for this variant."
                    + "\n\nIDENTITY (do not deviate): this is a real person and the thumbnail goes on "
@@ -467,7 +475,10 @@ def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: 
     package_path.write_text(json.dumps(pkg, ensure_ascii=False, indent=2), encoding="utf-8")
     root = package_path.parent.parent
     history = thumbnail_history(root.parent, exclude=root)
-    layout = next_layout(history)
+    # Sonia's channel identity is now fixed: host on the right, short hook on
+    # the left, and the truthful story USP protected in the centre. Variety
+    # comes from portrait, expression and art direction—not mirrored hierarchy.
+    layout = "right"
     portrait = pick_portrait(Path(pkg["thumbnail"]["portrait_library"]), pkg.get("recommended_title", ""),
                              [h["portrait"] for h in history])
     results = []

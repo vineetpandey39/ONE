@@ -15,7 +15,11 @@ SIZE = (1280, 720)
 # Noto Sans Bold includes the Indian rupee glyph used by travel-price hooks.
 # Impact/Arial Black render it as a missing-glyph box on common Windows hosts.
 FONT_CANDIDATES = (r"C:\Windows\Fonts\NotoSans-Bold.ttf", r"C:\Windows\Fonts\arialbd.ttf", r"C:\Windows\Fonts\impact.ttf")
-TEXT_ZONE = 0.62          # the hook may use at most this share of the width, on its own side
+# MrBeast-style hierarchy: a short hook gets its own narrow lane, the story's
+# hero object stays visible in the middle, and Sonia owns the right.  The old
+# 62% lane put giant type directly over the plane/landmark it was meant to sell.
+TEXT_ZONE = 0.43
+USP_ZONE = (0.43, 0.66)   # protected from the deterministic text overlay
 MARGIN = 48
 LEFT_MARGIN = MARGIN       # kept for callers that read it
 MAX_TEXT_WIDTH = int(SIZE[0] * TEXT_ZONE) - MARGIN
@@ -85,8 +89,8 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
     if side not in ("left", "right"):
         raise ValueError("side must be 'left' or 'right'")
     words = text.upper().split()
-    if not 1 <= len(words) <= 4:
-        raise ValueError("thumbnail text must be 1 to 4 words")
+    if not 1 <= len(words) <= 3:
+        raise ValueError("thumbnail text must be 1 to 3 words")
     img = _contrast_gradient(_cover(Image.open(base).convert("RGB")), side)
     draw = ImageDraw.Draw(img)
     chosen = None
@@ -146,6 +150,9 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
           "text_left_edge": left_edge, "text_right_edge": right_edge,
           "inside_text_zone": inside, "inside_left_zone": inside,  # old name, read by older receipts and scoring
           "readable": size >= MIN_FONT,
+          "protected_usp_zone": [round(SIZE[0] * USP_ZONE[0]), round(SIZE[0] * USP_ZONE[1])],
+          "text_clear_of_usp": inside,
           "bytes": final.stat().st_size, "under_2mb": final.stat().st_size <= MAX_BYTES}
-    qc["ok"] = bool(qc["inside_text_zone"] and qc["readable"] and qc["under_2mb"])
+    qc["ok"] = bool(qc["inside_text_zone"] and qc["text_clear_of_usp"]
+                    and qc["readable"] and qc["under_2mb"])
     return {"path": str(final), "qc": qc}
