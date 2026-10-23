@@ -202,6 +202,11 @@ def clear_stage(agent_id: str) -> None:
 
 def scribe_waits_for_kdp(run_dir: str, title: str, scribe_job_id: str) -> None:
     """Bind the status bubble to this book's durable publisher checkpoint."""
+    current = get_stages().get("scribe", {})
+    if current.get("job_id") and current["job_id"] != scribe_job_id:
+        return
+    if current and title not in current.get("detail", "") and not current.get("kdp_run_dir"):
+        return
     set_stage("scribe", AWAITING_WORKER,
               f"{title}: waiting for KDP publishing status",
               kdp_run_dir=str(run_dir), job_id=scribe_job_id)
