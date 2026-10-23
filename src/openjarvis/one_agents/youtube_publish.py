@@ -33,6 +33,8 @@ PUBLIC_CHECKLIST = [
     "Recheck every visa, entry-rule, fee and price claim on the official sources today",
     "Review the machine-translated Hindi title and description",
     "Open the Studio link, confirm the thumbnail and chapters, then set visibility to Public",
+    "For an eligible long-form video, start YouTube's native Test & Compare with all 3 sealed thumbnails; "
+    "keep candidate 1 if YouTube reports same or inconclusive",
     # YouTube disables comments on a private video, so the channel comment can only go up after this step.
     "Once it is public, post the channel comment from the SEO package (pinned_comment_draft) and pin it",
 ]
@@ -332,6 +334,21 @@ def prepare_gate(package_path: Path) -> dict[str, Any]:
         else:
             blockers.append("no final thumbnail in thumbnail/ (ARES must produce one)")
 
+    # Preserve all three QC-passed candidates for YouTube Studio's native
+    # concurrent test. The private Data API upload can set only the editorial
+    # default; it cannot start or score Test & Compare.
+    from openjarvis.one_agents import youtube_thumbnail_ab
+    if receipt_file.is_file():
+        try:
+            experiment_receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
+            thumbnail_ab = youtube_thumbnail_ab.build_plan(
+                root, experiment_receipt, visibility="private",
+                content_format=str(pkg.get("content_format") or "long_form"))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            thumbnail_ab = {"status": "blocked", "blockers": [f"A/B/C plan could not be sealed: {exc}"]}
+    else:
+        thumbnail_ab = {"status": "blocked", "blockers": ["thumbnail experiment receipt is missing"]}
+
     already = None
     if master.is_file():
         already = (uploader.ledger_load().get(uploader.file_sha256(master)) or {}).get("video_id")
@@ -340,6 +357,7 @@ def prepare_gate(package_path: Path) -> dict[str, Any]:
         "schema": "sonia-youtube-upload-gate/1", "status": status, "prepared_at": datetime.now(timezone.utc).isoformat(),
         "package": str(package_path), "master": str(master), "title": pkg.get("recommended_title"),
         "thumbnails": thumbnails, "already_uploaded_as": already,
+        "thumbnail_ab_test": thumbnail_ab,
         "blockers": blockers, "warnings": warnings, "token": token, "qc": qc,
         "decisions_required": ["synthetic_disclosure (yes|no)", "thumbnail (one of thumbnails)",
                                "rechecked_on (today's date: visa/TDAC/price facts re-verified)", "approver and rationale (10+ chars)"],
@@ -405,6 +423,10 @@ def approve_and_upload(gate_path: Path, *, synthetic: str, thumbnail: str | None
                 subtitle=str(subtitle), subtitle_language=language,
                 uploaded_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 next_step="Review in Studio, then set visibility to Public by hand.")
+    if isinstance(gate.get("thumbnail_ab_test"), dict) and gate["thumbnail_ab_test"].get("path"):
+        from openjarvis.one_agents import youtube_thumbnail_ab
+        gate["thumbnail_ab_test"] = youtube_thumbnail_ab.mark_private_upload(
+            gate["thumbnail_ab_test"], video_id=report.get("video_id"), studio_url=report.get("studio_url"))
     gate_path.write_text(json.dumps(gate, ensure_ascii=False, indent=2), encoding="utf-8")
     gate["cleanup"] = cleanup_after_upload(gate)
     gate_path.write_text(json.dumps(gate, ensure_ascii=False, indent=2), encoding="utf-8")

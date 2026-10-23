@@ -366,7 +366,8 @@ def description_audit(description: str, primary_query: str, tags: list[str],
 THUMBNAIL_PROMPT = (
     "Create a high-CTR, mobile-first YouTube travel thumbnail background for Sonia Travel Vlogs. Use the attached "
     "approved Sonia portrait as the only human subject and preserve her real identity, facial structure and skin "
-    "tone. Keep her skin natural and clean; do not add blemishes or retouch her into someone else. Do not copy "
+    "tone. Softly remove only temporary acne/blemishes while preserving natural pores, permanent marks and every "
+    "identity feature; never airbrush, reshape, age-shift or retouch her into someone else. Do not copy "
     "another creator's exact branding.\n\nSTORY: {video_title}\nDESTINATION: {destination}\nTRUTHFUL VISUAL: "
     "{left_usp}\nSONIA EXPRESSION: {sonia_expression}\n\nCOMPOSITION: 16:9. Sonia as a large close-up on the RIGHT, "
     "32 to 34 percent of the frame, eyes unobstructed, clean shoulder cutout, natural high-energy expression. Use "

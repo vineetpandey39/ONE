@@ -162,7 +162,8 @@ REFERENCE_SHEET_NOTE = (
     "\n\nREFERENCE SHEET (mandatory): the attached image holds two photos of the SAME woman, Sonia. Take her face "
     "exactly from the close-up on the RIGHT panel: eye shape, nose, lips, jawline, cheeks, eyebrows, skin tone and "
     "age. Take her hair and outfit from the LEFT panel. Show her ONCE in the thumbnail, never twice, and never "
-    "invent or beautify facial features.")
+    "invent or beautify facial features. Remove only temporary acne/blemishes; keep natural pores and every "
+    "permanent facial feature unchanged.")
 FACE_MIN_PIXELS = 220  # a face smaller than this in its photo is too few pixels for the image model to copy
 
 
@@ -373,11 +374,10 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
                      "Reproduce the face in the reference portrait exactly: same face shape and "
                      "width, same jawline and chin, same nose, same eye shape and spacing, same "
                      "eyebrows, same hairline, same age, same body shape. Keep her real skin "
-                     "texture and tone - not a rendered or plastic surface. (Spots are cleared "
-                     "afterwards by the retouch step, to the Chairman's standard; that is not "
-                     "your job and is no reason to redraw the face.) "
-                     "Do NOT slim, lift, sculpt or narrow the face or jaw; do NOT smooth, clear, "
-                     "airbrush or retouch the skin; do NOT make her younger, thinner or more "
+                     "texture, pores and tone - not a rendered or plastic surface. You may softly remove only "
+                     "temporary acne/blemishes; do not erase permanent marks or change facial geometry. "
+                     "Do NOT slim, lift, sculpt or narrow the face or jaw; do NOT globally smooth or "
+                     "airbrush the skin; do NOT make her younger, thinner or more "
                      "symmetrical; do NOT give her a different nose, lips or eyes. No beauty filter "
                      "of any kind. She is not a lookalike, a model or an idealised version - she is "
                      "this woman. Keep both hands anatomically correct and keep the gesture clear of text.")
@@ -516,6 +516,9 @@ def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: 
                    "portrait": str(portrait),
                    "winner_score": winner["preupload_score"], "variants": results,
                    "selection": "highest transparent pre-upload score; actual CTR requires YouTube Test & Compare"}
+        from openjarvis.one_agents import youtube_thumbnail_ab
+        receipt["native_ab_test"] = youtube_thumbnail_ab.build_plan(
+            root, receipt, visibility="private", content_format=str(pkg.get("content_format") or "long_form"))
     (root / "thumbnail" / "thumbnail-experiment.json").write_text(
         json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
     (root / "thumbnail" / "thumbnail-receipt.json").write_text(
