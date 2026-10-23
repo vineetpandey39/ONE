@@ -1,6 +1,14 @@
 """Sourced, subject-neutral, face-obscured reference commissioning."""
 from pathlib import Path
 import shutil
+import re
+
+def captured_chat(result):
+    """Validate the named workflow tab URL captured before browser cleanup."""
+    url = str(result.get('episode_chat_url', '')).split('?')[0]
+    if not re.fullmatch(r'https://chatgpt\.com/c/[a-f0-9-]{36}', url):
+        raise RuntimeError('Provider did not capture a canonical episode conversation')
+    return url
 
 def reference_prompt(manifest, brief):
     from openjarvis.one_agents.origin_to_ovation_faceless import FACELESS_RULES
@@ -47,12 +55,13 @@ def run_reference(path, job):
     write(path/'production/character-bible/reference-request.json',{'prompt':prompt,'sources':brief['reference_stages']})
     stages.set_stage('chandan',stages.EXECUTING,f"{manifest['subject']}: sourced age/body/kit reference")
     steps=[{'action':'open_browser','args':{'profile_dir':browser['profile_dir'],'cdp_url':browser['cdp_url'],'start_url':'https://chatgpt.com/'}},
-      {'action':'navigate','args':{'url':'https://chatgpt.com/'}},
+      {'action':'open_tab','args':{'url':'https://chatgpt.com/','name':'episode_reference'}},
       {'action':'wait_for_any_selector','args':{'selectors':['#prompt-textarea',"[contenteditable='true']",'textarea'],'timeout_ms':60000}},
-      {'action':'generate_and_download_chatgpt_image','args':{'prompt':prompt,'request_marker':marker,'strict_fresh_turn':True,'allow_fresh_chat_recovery':False,'filename':target.name,'max_attempts':1,'stall_timeout_ms':300000,'as':'image_path'}}]
+      {'action':'generate_and_download_chatgpt_image','args':{'prompt':prompt,'request_marker':marker,'strict_fresh_turn':True,'allow_fresh_chat_recovery':False,'filename':target.name,'max_attempts':1,'stall_timeout_ms':300000,'as':'image_path'}},
+      {'action':'switch_tab','args':{'name':'episode_reference','as':'episode_chat_url'}}]
     config=read(ROOT/'runtime-config.json');provider=LaoDraft(LaoOrchestratorTool(),config.get('lao_folder_id'),tuple(Path(p) for p in config['artifact_roots']))
     result,pid=provider.run(f"Origin to Ovation - {manifest['subject']} - reference",steps,{},path/'runtime/providers/character-reference.json',timeout=900)
     shutil.copy2(provider.artifact(result,pid,target.name),target)
-    manifest['browser']['chat_url']=record_chat(browser,marker);manifest['character_reference']=str(target);write(path/'mission.json',manifest)
+    manifest['browser']['chat_url']=captured_chat(result);manifest['character_reference']=str(target);write(path/'mission.json',manifest)
     receipt={'status':'reference_ready_for_editorial_review','reference':str(target),'sha256':digest(target),'provider_job':pid,'chat_url':manifest['browser']['chat_url'],'upload_authorized':False}
     write(path/'runtime/reference-result.json',receipt);return receipt

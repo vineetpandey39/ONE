@@ -259,7 +259,9 @@ LAYOUT_SWAPS = (
      "unobstructed hero proof of the story ({left_usp}); RIGHT 66-100 percent contains Sonia",
      "RIGHT 62-100 percent is a low-detail, high-contrast hook zone; CENTRE 34-62 percent contains one large, "
      "unobstructed hero proof of the story ({left_usp}); LEFT 0-34 percent contains Sonia"),
-    ("Keep only the LEFT 0-38 percent clean", "Keep only the RIGHT 62-100 percent clean"),
+    ("Keep the LOWER-LEFT portion of the LEFT 0-38 percent clean",
+     "Keep the LOWER-RIGHT portion of the RIGHT 62-100 percent clean"),
+    ("inside that lower-left text-safe area", "inside that lower-right text-safe area"),
 )
 
 

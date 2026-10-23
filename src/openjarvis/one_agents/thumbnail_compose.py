@@ -107,10 +107,13 @@ def _low_detail_y(img: Image.Image, block_h: int, side: str) -> tuple[int, int]:
 
 
 def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] = WHITE,
-            accent: tuple[int, int, int] = ACCENT, side: str = "left") -> dict[str, Any]:
+            accent: tuple[int, int, int] = ACCENT, side: str = "left",
+            vertical_anchor: str = "bottom") -> dict[str, Any]:
     """Set the hook on `side` ('left' when Sonia is on the right, 'right' when she is on the left)."""
     if side not in ("left", "right"):
         raise ValueError("side must be 'left' or 'right'")
+    if vertical_anchor not in ("top", "middle", "bottom", "adaptive"):
+        raise ValueError("vertical_anchor must be top, middle, bottom or adaptive")
     words = text.upper().split()
     if not 1 <= len(words) <= 3:
         raise ValueError("thumbnail text must be 1 to 3 words")
@@ -142,7 +145,10 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
             return accent if any(c.isdigit() for c in token) else primary
         return accent if token == last else primary
 
-    y0, detail_energy = _low_detail_y(img, block_h, side)
+    adaptive_y, detail_energy = _low_detail_y(img, block_h, side)
+    anchors = {"top": 38, "middle": max(38, (SIZE[1] - block_h) // 2),
+               "bottom": max(38, SIZE[1] - block_h - 38)}
+    y0 = adaptive_y if vertical_anchor == "adaptive" else anchors[vertical_anchor]
     placements, y = [], y0
     for line in lines:
         width = _line_width(line, font, draw)
@@ -177,7 +183,8 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
           "readable": size >= MIN_FONT,
           "protected_usp_zone": [round(SIZE[0] * USP_ZONE[0]), round(SIZE[0] * USP_ZONE[1])],
           "text_clear_of_usp": inside,
-          "adaptive_low_detail_anchor": True,
+          "vertical_anchor": vertical_anchor,
+          "adaptive_low_detail_anchor": vertical_anchor == "adaptive",
           "text_y": y0,
           "text_lane_edge_energy": detail_energy,
           "bytes": final.stat().st_size, "under_2mb": final.stat().st_size <= MAX_BYTES}
