@@ -1,14 +1,4 @@
-"""Origin to Ovation scenes that never show a fabricated face (Chairman, 2026-10-22).
-
-The first Virat Kohli batch stalled for a day on face identity: ChatGPT will not reproduce a real celebrity's face,
-so every "age 19 Virat" came back as a generic young man and the identity gate (rightly) refused it. A made-up
-realistic face of a real person is also the riskiest thing a biography channel can publish. Scenes now show the
-subject from the side, from behind, over the shoulder, or through hands and equipment, and recognition comes from
-documented signatures for that era: shirt number, kit, hairstyle, beard, batting hand.
-
-A local CPU face detector checks every generated frame; a frame with a prominent visible face is rejected and
-regenerated instead of waiting for a person to review its likeness.
-"""
+"""Face-obscured biography direction. Automated detection is screening, not editorial approval."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,7 +15,10 @@ FACELESS_RULES = (
     "The subject's face is never visible: no frontal view, no profile showing eyes, nose or mouth; the head is turned "
     "away from camera, cropped out of frame, or in deep shadow. Recognition comes only from the signature details "
     "given. No logos, crests, sponsor marks, signatures or watermark; the only text allowed is the shirt number "
-    "stated. Cricket anatomy and bat grip physically correct, no extra fingers or twisted wrists.")
+    "or documented jersey name stated. Never add a modern number/name to an era without evidence. "
+    "Use rear views, over-shoulder views, silhouettes, torso, equipment, hands, feet, environmental POV or "
+    "reflections without facial detail. Side angles are allowed only with the face fully obscured. "
+    "Cricket anatomy and bat grip physically correct, no extra fingers or twisted wrists.")
 
 
 def visuals(chapter: dict[str, Any]) -> list[str]:
@@ -92,3 +85,21 @@ def reject_faces(plan: list[dict[str, Any]], rejected_dir: Path) -> list[dict[st
             image.replace(target)
             rejected.append({"shot_id": shot["shot_id"], "moved_to": str(target), "faces": faces})
     return rejected
+
+
+def enforce_prompt(text: str) -> str:
+    """Enforce channel policy at every provider boundary, including old callers."""
+    return str(text).rstrip() + "\nMANDATORY CAMERA RULE (overrides any portrait/likeness instruction above): " + FACELESS_RULES
+
+
+def scene_qa(image: Path, *, age, era, reviewer=None) -> dict:
+    """A detector negative cannot certify hidden identity, anatomy or historical detail."""
+    import hashlib
+    findings = visible_faces(image)
+    checks = reviewer or {}
+    required = ("face_obscured", "anatomy", "historical_accuracy")
+    return {"image_sha256": hashlib.sha256(image.read_bytes()).hexdigest(), "age": age, "era": era,
+            "detected_faces": findings, "screening": "rejected" if findings else "no_face_detected",
+            "editorial_status": "passed" if not findings and all(checks.get(k) is True for k in required)
+                and age is not None and era else "review_required",
+            "visual_checks": {k: checks.get(k) for k in required}}

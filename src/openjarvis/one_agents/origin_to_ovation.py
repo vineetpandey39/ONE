@@ -108,6 +108,7 @@ def image_provider(path, shot):
     """The worker invokes the installed LAO ChatGPT provider; never uses Codex media."""
     from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
     from openjarvis.one_agents.planexium_adapters import LaoDraft
+    from openjarvis.one_agents.origin_to_ovation_faceless import enforce_prompt
     config = read(ROOT / "runtime-config.json")
     manifest = read(path / "mission.json")
     browser = manifest["browser"]
@@ -135,7 +136,7 @@ def image_provider(path, shot):
             "selectors": ["#prompt-textarea", "[contenteditable='true']", "textarea"],
             "timeout_ms": 60000, "as": "composer"}},
         {"action": "generate_and_download_chatgpt_image", "args": {
-            "prompt": shot["prompt"] + "\nRequest marker: OTO-" + path.name + "-" + shot["shot_id"],
+            "prompt": enforce_prompt(shot["prompt"]) + "\nRequest marker: OTO-" + path.name + "-" + shot["shot_id"],
             "request_marker": "OTO-" + path.name + "-" + shot["shot_id"],
             "reference_image_path": shot["reference"],
             "reference_settle_seconds": 12,
@@ -167,6 +168,7 @@ def image_batch_provider(path, shots):
     """Generate all missing episode frames in one persistent ChatGPT chat."""
     from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
     from openjarvis.one_agents.planexium_adapters import LaoDraft
+    from openjarvis.one_agents.origin_to_ovation_faceless import enforce_prompt
     config = read(ROOT / "runtime-config.json")
     manifest = read(path / "mission.json")
     browser = manifest["browser"]
@@ -185,7 +187,7 @@ def image_batch_provider(path, shots):
     batch_plan = path / "runtime" / "chatgpt-image-batch-plan.json"
     write(batch_plan, {"calls": [{
         "kind": "scene", "filename": Path(shot["image"]).name,
-        "prompt": shot["prompt"], "stall_timeout_ms": 240000,
+        "prompt": enforce_prompt(shot["prompt"]), "stall_timeout_ms": 240000,
         "max_attempts": 3,
     } for shot in missing]})
     provider = LaoDraft(LaoOrchestratorTool(), config.get("lao_folder_id"),
@@ -277,6 +279,17 @@ def run_stage(job, *, enqueue):
             from openjarvis.one_agents.chandan_reference import run_reference
             return run_reference(path, job)
         plan = read(master_dir / "shot-plan.json")
+        # Bind packaging, opening, factual beat loops, ending and post-publish learning before expensive generation.
+        from openjarvis.one_agents.origin_to_ovation_story import write_contract as write_story_contract
+        metadata_path = master_dir / "editorial-metadata.json"
+        metadata = read(metadata_path) if metadata_path.is_file() else {}
+        # Tiny fixtures/diagnostic renders are not publishable episodes. Keep them usable while
+        # enforcing the contract on every real long-form plan.
+        if len(plan) >= 10:
+            story_contract = write_story_contract(master_dir, plan, metadata, manifest.get("subject") or path.name, write)
+            if story_contract["validation"]["status"] != "passed":
+                return {"_blocked": True, "status": "story_contract_required",
+                        "blocked_reason": "; ".join(story_contract["validation"]["errors"])}
         if (path / "runtime" / "identity-quarantine.json").exists():
             release_path = path / "runtime" / "identity-release.json"
             if not release_path.is_file():
@@ -295,7 +308,7 @@ def run_stage(job, *, enqueue):
             "processed": sum(Path(s["image"]).is_file() for s in plan), "total": len(plan)})
         with building_progress(manifest.get("subject") or path.name, plan) as phase:
             image_batch_provider(path, plan)
-            if all(s.get("director", {}).get("faceless") for s in plan):
+            if plan:
                 # Faceless plans (2026-10-22): a frame that still shows a face is regenerated, never reviewed for
                 # likeness.
                 from openjarvis.one_agents.origin_to_ovation_faceless import reject_faces
@@ -310,11 +323,17 @@ def run_stage(job, *, enqueue):
                     phase(f"regenerating {len(rejected)} frame(s) that showed a face")
                     image_batch_provider(path, plan)
                 still = reject_faces(plan, rejected_dir)
-                write(path / "runtime" / "face-check.json", {"rejected": history + still, "remaining": still})
+                write(path / "runtime" / "face-check.json", {"rejected": history + still, "remaining": still,
+                      "editorial_status": "review_required", "limitations": "Detector negatives do not approve face obscuration, anatomy or historical accuracy"})
                 if still:
                     return {"_blocked": True, "status": "faces_still_visible",
                             "blocked_reason": "These scenes kept showing a face after two regenerations",
                             "shots": [r["shot_id"] for r in still]}
+            from openjarvis.one_agents.origin_to_ovation_faceless import scene_qa
+            write(path / "runtime" / "scene-visual-qa.json", {
+                "status": "review_required", "shots": {
+                    shot["shot_id"]: scene_qa(Path(shot["image"]), age=shot.get("age"), era=shot.get("era"))
+                    for shot in plan if Path(shot["image"]).is_file()}})
             # Generator validates the paid chapter receipts and skips valid audio.
             phase("narration")
             subprocess.run([sys.executable, str(master_dir / "generate_narration.py")], check=True)
@@ -448,12 +467,9 @@ def run_stage(job, *, enqueue):
         image_provider(path, {
             "shot_id": "thumbnail", "image": str(master_dir / "thumbnail.png"),
             "reference": reference,
-            "prompt": metadata.get("thumbnail_prompt", "Create a premium 16:9 YouTube biography thumbnail in photoreal cinematic CGI. "
-                      "Use attached Sachin age-stage reference for consistent stylized identity. "
-                      "Adult Sachin determined closeup on right, childhood cricketer smaller on left, "
-                      "warm Bombay practice ground transitioning to lit international stadium. "
-                      "Strong simple visual contrast, no collage grid, anatomically sound. "
-                      "Large readable headline only: THE BOY BEHIND THE LEGEND.")})
+            "prompt": metadata.get("thumbnail_prompt", "Create a premium 16:9 cinematic CGI biography thumbnail. "
+                      "Show the episode athlete from behind, face completely hidden, with historically accurate equipment. "
+                      "Use the episode metadata for the headline; no visible faces or invented identity.")})
         if manifest.get("upload_policy") == "package_only_until_later_explicit_user_instruction":
             return {"status": "package_ready_upload_not_authorized", "mission_id": path.name,
                     "master": str(master_dir / "master.mp4"), "seo": str(path / "runtime" / "seo.json")}
