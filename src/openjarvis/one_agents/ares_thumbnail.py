@@ -255,11 +255,11 @@ def next_layout(history: list[dict[str, Any]]) -> str:
 
 LAYOUT_SWAPS = (
     ("Sonia as a large close-up on the RIGHT", "Sonia as a large close-up on the LEFT"),
-    ("LEFT 0-43 percent is a low-detail, high-contrast hook zone; CENTRE 43-66 percent contains one large, "
+    ("LEFT 0-38 percent is a low-detail, high-contrast hook zone; CENTRE 38-66 percent contains one large, "
      "unobstructed hero proof of the story ({left_usp}); RIGHT 66-100 percent contains Sonia",
-     "RIGHT 57-100 percent is a low-detail, high-contrast hook zone; CENTRE 34-57 percent contains one large, "
+     "RIGHT 62-100 percent is a low-detail, high-contrast hook zone; CENTRE 34-62 percent contains one large, "
      "unobstructed hero proof of the story ({left_usp}); LEFT 0-34 percent contains Sonia"),
-    ("Keep only the LEFT 0-43 percent clean", "Keep only the RIGHT 57-100 percent clean"),
+    ("Keep only the LEFT 0-38 percent clean", "Keep only the RIGHT 62-100 percent clean"),
 )
 
 

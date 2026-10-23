@@ -370,14 +370,14 @@ THUMBNAIL_PROMPT = (
     "another creator's exact branding.\n\nSTORY: {video_title}\nDESTINATION: {destination}\nTRUTHFUL VISUAL: "
     "{left_usp}\nSONIA EXPRESSION: {sonia_expression}\n\nCOMPOSITION: 16:9. Sonia as a large close-up on the RIGHT, "
     "32 to 34 percent of the frame, eyes unobstructed, clean shoulder cutout, natural high-energy expression. Use "
-    "three strict zones: LEFT 0-43 percent is a low-detail, high-contrast hook zone; CENTRE 43-66 percent contains "
+    "three strict zones: LEFT 0-38 percent is a low-detail, high-contrast hook zone; CENTRE 38-66 percent contains "
     "one large, unobstructed hero proof of the story ({left_usp}); RIGHT 66-100 percent contains Sonia. The hero "
     "proof must remain fully recognizable at phone size and must not sit behind the future hook text or Sonia. "
     "Use one dominant background and at most one supporting cue. No collage, no secondary people, no tiny objects, "
     "no repeated landmarks, no decorative clutter. The image must tell one visual sentence before any text is added.\n\n"
     "LIGHTING: bright saturated colours that suit {destination}, warm highlights, one controlled "
     "red or yellow cue, subtle rim light around Sonia, crisp face, strong subject separation, natural skin.\n\nTEXT: "
-    "Do not render any text inside the image. Keep only the LEFT 0-43 percent clean for this later overlay: "
+    "Do not render any text inside the image. Keep only the LEFT 0-38 percent clean for this later overlay: "
     "{thumbnail_text}. Never place the main story object inside that text zone.\n\n"
     "EVIDENCE SAFETY: do not fabricate a visa, passport stamp, government seal, amount, date or document text, and "
     "do not imply Sonia personally visited {destination}.\n\nTECHNICAL: 1280x720 composition, ultra-sharp focal "
@@ -521,7 +521,7 @@ def build_package(record: dict[str, Any], *, master: Path, plan_path: Path, port
             "owner": "ARES" if channel == SONIA else "LYRA", "generator": "chatgpt_image_generation",
             "generation_mode": f"edit approved {channel.display_name if channel != SONIA else 'Sonia'} portrait; preserve identity" if channel.thumbnail_mode == "portrait" else "original image; no portrait reference",
             **({"portrait_library": str(portrait_library)} if channel.thumbnail_mode == "portrait" else {}),
-            "required_layout": f"{channel.display_name if channel != SONIA else 'Sonia'} close-up on right 32-34%; hook on left 0-43%; unobstructed story USP in centre 43-66%" if channel.thumbnail_mode == "portrait" else "One truthful focal subject on right; clear text area on left",
+            "required_layout": f"{channel.display_name if channel != SONIA else 'Sonia'} close-up on right 32-34%; hook on left 0-38%; unobstructed story USP in centre 38-66%" if channel.thumbnail_mode == "portrait" else "One truthful focal subject on right; clear text area on left",
             "text": variants[0]["text"], "max_words": 3, "variants": variants,
             "quality_gates": ["1280x720", "16:9", "under 2 MB export", "recognizable at 10% size",
                               "text readable at mobile size", *(["face intact"] if channel.thumbnail_mode == "portrait" else ["no portrait reference", "truthful illustration"])],

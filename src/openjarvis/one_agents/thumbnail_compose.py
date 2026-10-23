@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageStat
 
 SIZE = (1280, 720)
 # Noto Sans Bold includes the Indian rupee glyph used by travel-price hooks.
@@ -18,8 +18,8 @@ FONT_CANDIDATES = (r"C:\Windows\Fonts\NotoSans-Bold.ttf", r"C:\Windows\Fonts\ari
 # MrBeast-style hierarchy: a short hook gets its own narrow lane, the story's
 # hero object stays visible in the middle, and Sonia owns the right.  The old
 # 62% lane put giant type directly over the plane/landmark it was meant to sell.
-TEXT_ZONE = 0.43
-USP_ZONE = (0.43, 0.66)   # protected from the deterministic text overlay
+TEXT_ZONE = 0.38
+USP_ZONE = (0.38, 0.66)   # protected from the deterministic text overlay
 MARGIN = 48
 LEFT_MARGIN = MARGIN       # kept for callers that read it
 MAX_TEXT_WIDTH = int(SIZE[0] * TEXT_ZONE) - MARGIN
@@ -83,6 +83,29 @@ def _contrast_gradient(img: Image.Image, side: str) -> Image.Image:
     return Image.composite(dark, img, shade)
 
 
+def _low_detail_y(img: Image.Image, block_h: int, side: str) -> tuple[int, int]:
+    """Choose the quietest top/middle/bottom slot inside the text lane.
+
+    This is deliberately based on the actual generated pixels. A fixed vertical
+    placement covered aircraft, landmarks and documents even when their prompt
+    asked the image model to reserve a text lane. Edge energy is a conservative
+    proxy for visual detail: the hook goes where it hides the least information.
+    """
+    pad = 38
+    maximum = max(pad, SIZE[1] - block_h - pad)
+    candidates = sorted({pad, max(pad, (SIZE[1] - block_h) // 2), maximum})
+    lane = int(SIZE[0] * TEXT_ZONE)
+    x0, x1 = ((0, lane) if side == "left" else (SIZE[0] - lane, SIZE[0]))
+    edges = img.convert("L").filter(ImageFilter.FIND_EDGES)
+    scored = []
+    for order, y in enumerate(candidates):
+        crop = edges.crop((x0, y, x1, min(SIZE[1], y + block_h)))
+        energy = float(ImageStat.Stat(crop).mean[0]) if crop.size[0] and crop.size[1] else 255.0
+        scored.append((energy, order, y))
+    energy, _order, y = min(scored)
+    return y, round(energy)
+
+
 def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] = WHITE,
             accent: tuple[int, int, int] = ACCENT, side: str = "left") -> dict[str, Any]:
     """Set the hook on `side` ('left' when Sonia is on the right, 'right' when she is on the left)."""
@@ -91,7 +114,10 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
     words = text.upper().split()
     if not 1 <= len(words) <= 3:
         raise ValueError("thumbnail text must be 1 to 3 words")
-    img = _contrast_gradient(_cover(Image.open(base).convert("RGB")), side)
+    # Preserve the story pixels. Readability comes from the heavy outline and
+    # local shadow, not from darkening the entire side (which used to hide the
+    # very aircraft/landmark the thumbnail was selling).
+    img = _cover(Image.open(base).convert("RGB"))
     draw = ImageDraw.Draw(img)
     chosen = None
     for size in range(190, MIN_FONT - 1, -6):
@@ -116,8 +142,7 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
             return accent if any(c.isdigit() for c in token) else primary
         return accent if token == last else primary
 
-    # Keep the lower-middle clear for a host's pointing hand/gesture.
-    y0 = max(70, (SIZE[1] - block_h) // 2 - 90)
+    y0, detail_energy = _low_detail_y(img, block_h, side)
     placements, y = [], y0
     for line in lines:
         width = _line_width(line, font, draw)
@@ -152,6 +177,9 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
           "readable": size >= MIN_FONT,
           "protected_usp_zone": [round(SIZE[0] * USP_ZONE[0]), round(SIZE[0] * USP_ZONE[1])],
           "text_clear_of_usp": inside,
+          "adaptive_low_detail_anchor": True,
+          "text_y": y0,
+          "text_lane_edge_energy": detail_energy,
           "bytes": final.stat().st_size, "under_2mb": final.stat().st_size <= MAX_BYTES}
     qc["ok"] = bool(qc["inside_text_zone"] and qc["text_clear_of_usp"]
                     and qc["readable"] and qc["under_2mb"])
