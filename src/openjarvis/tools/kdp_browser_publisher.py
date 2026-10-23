@@ -1767,6 +1767,9 @@ def submit_approved(packet: SubmissionPacket, approval_id: str, *, headless: boo
         page.screenshot(path=screenshot, full_page=True)
         return write_state(packet, "SUBMITTED", approval_id=approval_id,
                            submitted_at=_now(), evidence_screenshot=screenshot)
+    except Exception:
+        _refuse_if_challenged(page)
+        raise
     finally:
         close_session(context)
 
@@ -1795,5 +1798,8 @@ def poll_asin(packet: SubmissionPacket, *, headless: bool = True) -> dict[str, A
                                kdp_status=status_match.group(0) if status_match else "unknown")
         return write_state(packet, "AWAITING_ASIN",
                            kdp_status=status_match.group(0) if status_match else "unknown")
+    except Exception:
+        _refuse_if_challenged(page)
+        raise
     finally:
         close_session(context)
