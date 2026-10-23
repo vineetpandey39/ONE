@@ -381,8 +381,18 @@ def run_stage(job, *, enqueue):
             "\n\nWhich sporting journey should we explore next? Subscribe to Origin to Ovation for more biographies.")
         if len(description) > 5000:
             raise ValueError("SEO description exceeds YouTube's 5000-character limit")
+        # 2026-10-23: the episode's own title, never an earlier episode's sentence or Sachin's default.
+        from openjarvis.one_agents import origin_to_ovation_titles as titles
+        subject = read(path / "mission.json").get("subject", "")
+        title, refused = titles.pick(titles.candidates(metadata, path.name), subject,
+                                     titles.earlier_titles(ROOT / "missions", path.name))
+        if title is None:
+            return {"_blocked": True, "status": "title_not_its_own",
+                    "blocked_reason": "No title of this episode's own: give editorial-metadata.json a title "
+                                      "(or title_options) that does not repeat an earlier episode",
+                    "refused": refused}
         package = {
-            "title": metadata.get("title", "Sachin Tendulkar: The Boy Behind 100 International Centuries"),
+            "title": title,
             "description": description,
             "category": "Sports", "language": "en-US",
             "tags": metadata.get("tags", ["Sachin Tendulkar", "cricket biography", "Origin to Ovation",
@@ -425,6 +435,16 @@ def run_stage(job, *, enqueue):
                         "blocked_reason": "Every thumbnail concept showed a face or repeated an earlier episode",
                         "concepts": concepts}
             shutil.copy2(picked["image"], master_dir / "thumbnail.png")
+            if picked.get("title"):
+                # The title written for this picture sells the same story; it replaces ARES's when it is its own.
+                from openjarvis.one_agents import origin_to_ovation_titles as titles
+                reasons = titles.repeats(picked["title"], manifest.get("subject", ""),
+                                         titles.earlier_titles(ROOT / "missions", path.name))
+                seo_path = path / "runtime" / "seo.json"
+                if not reasons and seo_path.is_file():
+                    write(seo_path, {**read(seo_path), "title": picked["title"]})
+                write(path / "runtime" / "thumbnail-title.json",
+                      {"concept": picked["name"], "title": picked["title"], "used": not reasons, "refused": reasons})
         image_provider(path, {
             "shot_id": "thumbnail", "image": str(master_dir / "thumbnail.png"),
             "reference": reference,
