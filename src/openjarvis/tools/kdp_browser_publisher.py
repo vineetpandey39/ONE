@@ -1611,6 +1611,8 @@ def existing_print_draft(packet: SubmissionPacket, fmt: str) -> str:
         prior = json.loads(state_path(packet).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return ""
+    if prior.get("stage") == "AWAITING_LOGIN":
+        prior = prior.get("resume_state", prior)
     if prior.get("checksums") != packet.checksums:
         return ""               # the book changed; its old draft is not this one
     url = str(prior.get("draft_url") or "")
@@ -1760,6 +1762,7 @@ def submit_approved(packet: SubmissionPacket, approval_id: str, *, headless: boo
         # coordinates: a missing semantic control is a safe failure.
         _click(page, (r"Publish Your Kindle eBook", r"Publish.*eBook"))
         page.wait_for_timeout(2500)
+        _refuse_if_challenged(page)
         screenshot = str(Path(packet.run_dir) / "kdp_submitted.png")
         page.screenshot(path=screenshot, full_page=True)
         return write_state(packet, "SUBMITTED", approval_id=approval_id,

@@ -10331,7 +10331,12 @@ def _govern(job: dict[str, Any]) -> dict[str, Any] | None:
     agent_id = job.get("agent_id", "")
     job_id = job.get("id", "")
 
-    repeat = floors_bridge.claim_once(f"job:{job_id}", event_type="job.execute")
+    attempt_key = f"job:{job_id}"
+    # Login recovery is a new execution attempt of the same durable task,
+    # not a new manuscript or approval. The queue owns the attempt counter.
+    if agent_id == "imprimatur" and int(job.get("resume_count") or 0) > 0:
+        attempt_key += f":resume:{int(job['resume_count'])}"
+    repeat = floors_bridge.claim_once(attempt_key, event_type="job.execute")
     if repeat is False:
         return {"governed": "refused",
                 "reason": "this job id has already been executed; repeating it "
