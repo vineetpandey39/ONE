@@ -733,6 +733,36 @@ def mark_awaiting_upload(job_id: str, result: dict[str, Any]) -> None:
         )
 
 
+def mark_awaiting_login(job_id: str, result: dict[str, Any]) -> None:
+    with _connect() as db:
+        db.execute(
+            "UPDATE jobs SET status='awaiting_login', result=?, error='', updated_at=? "
+            "WHERE id=? AND status='running'",
+            (json.dumps(result), _now(), job_id),
+        )
+    stages.clear_stage("imprimatur")
+
+
+def _resume_kdp_login_jobs() -> None:
+    with _connect() as db:
+        waiting = db.execute(
+            "SELECT id FROM jobs WHERE agent_id='imprimatur' AND status='awaiting_login'"
+        ).fetchall()
+    if not waiting:
+        return
+    from openjarvis.tools.kdp_browser_publisher import login_ready
+    if not login_ready():
+        return
+    # Requeue the original task, retaining its phase, approval, and book folder.
+    with _connect() as db:
+        for row in waiting:
+            db.execute(
+                "UPDATE jobs SET status='queued', error='', updated_at=?, "
+                "resume_count=COALESCE(resume_count,0)+1 WHERE id=? AND status='awaiting_login'",
+                (_now(), row["id"]),
+            )
+
+
 def mark_awaiting_growth_review(job_id: str, result: dict[str, Any]) -> None:
     """Hold a finished manuscript while MERCURY and ALFA review it."""
     with _connect() as db:
@@ -10396,6 +10426,23 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
     try:
         result = handler(job)
     except Exception as exc:  # noqa: BLE001 - recorded, then re-raised unchanged
+        from openjarvis.tools.kdp_browser_publisher import AmazonChallenge, validate_packet, state_path, write_state
+        if job.get("agent_id") == "imprimatur" and isinstance(exc, AmazonChallenge):
+            payload = _json_task(job)
+            packet = validate_packet(payload["run_dir"])
+            prior = json.loads(state_path(packet).read_text(encoding="utf-8"))
+            prior = prior.get("resume_state", prior)
+            write_state(packet, "AWAITING_LOGIN", resume_state=prior,
+                        resume_phase=payload.get("phase", "prepare"), job_id=job["id"],
+                        scribe_job_id=payload.get("scribe_job_id"), reason=str(exc))
+            _publishing_event(
+                job, agent="IMPRIMATUR", event_type="login_required", stage="awaiting_login",
+                summary="KDP login required; existing book and publishing phase preserved",
+                details={"reason": str(exc)}, status="waiting",
+            )
+            return {"_await_login": True, "status": "awaiting_login",
+                    "run_dir": payload["run_dir"], "phase": payload.get("phase", "prepare"),
+                    "reason": str(exc)}
         if job.get("agent_id") == "hermes":
             _publishing_event(
                 job, agent="HERMES", event_type="research_failed",
@@ -10529,7 +10576,9 @@ def _finish_active_job(job: dict[str, Any], outcome: dict[str, Any]) -> None:
     #
     # None means the registry could not answer - tree absent, index
     # stale - and None is not permission. Hold, and let a person look.
-    if result.pop("_blocked", False):
+    if result.pop("_await_login", False):
+        mark_awaiting_login(job["id"], result)
+    elif result.pop("_blocked", False):
         mark_blocked(job["id"], result)
     elif result.pop("_await_growth_review", False):
         mark_awaiting_growth_review(job["id"], result)
@@ -10746,6 +10795,10 @@ def run_worker(poll_seconds: float = 2.0) -> None:
                 print(f"[one-agents] periodic recovery skipped: {type(exc).__name__}", flush=True)
             last_recovery_check = time.time()
         if time.time() - last_schedule_check >= 30:
+            try:
+                _resume_kdp_login_jobs()
+            except Exception as exc:
+                print(f"[one-agents] KDP login probe deferred: {type(exc).__name__}", flush=True)
             _enqueue_due_recurring_jobs()
             last_schedule_check = time.time()
         if time.time() - last_leak_check >= 300:

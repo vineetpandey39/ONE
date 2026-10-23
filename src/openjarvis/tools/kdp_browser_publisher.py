@@ -174,6 +174,7 @@ def write_state(packet: SubmissionPacket, stage: str, **extra: Any) -> dict[str,
 
 
 def _click(page: Any, labels: tuple[str, ...], *, required: bool = True) -> bool:
+    _refuse_if_challenged(page)
     for label in labels:
         locator = page.get_by_role("button", name=re.compile(label, re.I)).first
         try:
@@ -383,6 +384,29 @@ class AmazonChallenge(RuntimeError):
     """
 
 
+def login_ready() -> bool:
+    """Read-only probe of the owner's browser; never launch a competing profile."""
+    from playwright.sync_api import sync_playwright
+
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.connect_over_cdp(
+                os.environ.get("LAO_KDP_CDP_URL", "http://127.0.0.1:9321"), timeout=3000)
+            if not browser.contexts:
+                return False
+            page = browser.contexts[0].new_page()
+            try:
+                page.goto(KDP_CREATE_URL,
+                          wait_until="domcontentloaded", timeout=15000)
+                _refuse_if_challenged(page)
+                return ("kdp.amazon.com/en_US/create" in page.url
+                        and page.get_by_text("Create eBook", exact=True).count() > 0)
+            finally:
+                page.close()
+    except Exception:
+        return False
+
+
 def _refuse_if_challenged(page: Any) -> None:
     """Raise if the browser is sitting on a sign-in or verification wall."""
     url = str(getattr(page, "url", "") or "").lower()
@@ -392,7 +416,7 @@ def _refuse_if_challenged(page: Any) -> None:
             "phone on the KDP account. ONE cannot enter it. Run kdp-login.ps1, "
             "complete the verification, and tick 'Don't require code on this "
             "browser' so this profile stops being challenged.")
-    if "/ap/signin" in url:
+    if any(part in url for part in ("/ap/signin", "/ap/cvf", "/ap/challenge")):
         raise AmazonChallenge(
             "Amazon returned this profile to the sign-in form. ONE never types "
             "a password - run kdp-login.ps1 and sign in there.")
@@ -784,7 +808,7 @@ def _complete_ebook_content(page: Any, packet: "SubmissionPacket") -> dict[str, 
         if not declaration:
             _capture_failure(page, packet, "ai_levels_unstated")
             missing = [kind for kind in _AI_VALUES if kind not in packet.ai_levels]
-            raise RuntimeError(
+            raise AmazonChallenge(
                 "KDP asks how much of the " + " and ".join(missing) + " was AI-generated, and nobody has "
                 "stated it. It is a declaration to Amazon, so it is not guessed: set ONE_KDP_AI_LEVELS in "
                 "one.env (or ai_disclosure.<kind>_level in the book's metadata) and run again.")
@@ -1430,8 +1454,7 @@ def prepare_draft(packet: SubmissionPacket, *, headless: bool = False) -> dict[s
         if "signin" in page.url.lower() or page.get_by_text("Sign in", exact=True).count():
             write_state(packet, "LOGIN_REQUIRED", url=page.url)
             raise RuntimeError(
-                "KDP persistent profile needs its one-time login. Complete login in the opened window, "
-                "then run the publisher again. Credentials are never stored by ONE."
+                "KDP login expired. Sign in to the dedicated KDP browser; this job will resume automatically."
             )
         # Resume before creating. A half-finished draft on the shelf is worth
         # more than a fresh one: finishing it costs no title slot, and Amazon
@@ -1566,6 +1589,9 @@ def prepare_draft(packet: SubmissionPacket, *, headless: bool = False) -> dict[s
                            evidence_screenshot=screenshot, pricing=pricing,
                            categories=chosen_categories, content=content)
     except Exception as exc:
+        _refuse_if_challenged(page)
+        if isinstance(exc, AmazonChallenge):
+            raise
         write_state(packet, "BLOCKED", error=f"{type(exc).__name__}: {exc}", url=page.url)
         raise
     finally:
@@ -1606,6 +1632,9 @@ def finish_print_draft(packet: SubmissionPacket, fmt: str, draft_url: str, *,
         return write_state(packet, f"{fmt.upper()}_READY", draft_url=page.url,
                            evidence_screenshot=screenshot, resumed=True, **content)
     except Exception as exc:
+        _refuse_if_challenged(page)
+        if isinstance(exc, AmazonChallenge):
+            raise
         write_state(packet, "BLOCKED", error=f"{type(exc).__name__}: {exc}", url=page.url)
         raise
     finally:
@@ -1649,7 +1678,7 @@ def prepare_print_draft(packet: SubmissionPacket, fmt: str, ebook_asin: str, *,
             open_print_setup(page, fmt, ebook_asin)
         except SignInRequired:
             write_state(packet, "LOGIN_REQUIRED", url=page.url)
-            raise RuntimeError("KDP profile needs its one-time login.") from None
+            raise AmazonChallenge("KDP login required; sign in to resume this job.") from None
         page.wait_for_timeout(4000)
         # Each format carries its own weekly allowance, so this is checked per
         # format rather than once for the book.
@@ -1701,6 +1730,9 @@ def prepare_print_draft(packet: SubmissionPacket, fmt: str, ebook_asin: str, *,
                            evidence_screenshot=screenshot, interior=str(interior),
                            cover=str(cover), **details, **content)
     except Exception as exc:
+        _refuse_if_challenged(page)
+        if isinstance(exc, AmazonChallenge):
+            raise
         write_state(packet, "BLOCKED", error=f"{type(exc).__name__}: {exc}", url=page.url)
         raise
     finally:
@@ -1712,6 +1744,8 @@ def submit_approved(packet: SubmissionPacket, approval_id: str, *, headless: boo
     if not approval_id.strip():
         raise ValueError("A per-title Olympus approval id is required")
     prior = json.loads(state_path(packet).read_text(encoding="utf-8"))
+    if prior.get("stage") == "AWAITING_LOGIN":
+        prior = prior.get("resume_state", prior)
     if prior.get("stage") != "READY_FOR_APPROVAL":
         raise ValueError("KDP draft is not ready for approval")
     if prior.get("checksums") != packet.checksums:
@@ -1721,6 +1755,7 @@ def submit_approved(packet: SubmissionPacket, approval_id: str, *, headless: boo
     page = context.pages[0] if context.pages else context.new_page()
     try:
         page.goto(str(prior["draft_url"]), wait_until="domcontentloaded", timeout=90_000)
+        _refuse_if_challenged(page)
         # The exact label varies by format and marketplace. Never fall back to
         # coordinates: a missing semantic control is a safe failure.
         _click(page, (r"Publish Your Kindle eBook", r"Publish.*eBook"))
@@ -1739,6 +1774,7 @@ def poll_asin(packet: SubmissionPacket, *, headless: bool = True) -> dict[str, A
     page = context.pages[0] if context.pages else context.new_page()
     try:
         page.goto("https://kdp.amazon.com/en_US/bookshelf", wait_until="domcontentloaded", timeout=90_000)
+        _refuse_if_challenged(page)
         title = page.get_by_text(packet.title, exact=False).first
         if not title.count():
             return write_state(packet, "AWAITING_ASIN", kdp_status="title_not_visible")
