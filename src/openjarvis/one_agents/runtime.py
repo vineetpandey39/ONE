@@ -1767,6 +1767,48 @@ def _publishing_skill_text() -> str:
     return "\n\n".join(parts)[:16000]
 
 
+def _delivered_book_lane(run_dir: str, title: str) -> dict[str, Any]:
+    """Is the book LAO actually wrote still inside the catalogue lane?
+
+    The commissioning gate judges the brief. Nothing judged the book until
+    this: LAO is handed `mode`, `region` and a one-line `topicOverride`, and
+    nothing else - no lane, no series, no rejection list - so it is free to
+    drift, and it does. On 2026-10-23 a commission for "The Business Plan
+    Workbook" came back as "The Venture Ledger", a startup-finance book built
+    around two invented people rebuilding a cloud kitchen.
+
+    Read what was delivered, not what was asked for.
+    """
+    meta: dict[str, Any] = {}
+    path = Path(run_dir) / "kdp_metadata.json" if run_dir else None
+    if path is not None and path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                meta = loaded
+        except (OSError, ValueError):
+            meta = {}
+
+    keywords = meta.get("keywords")
+    identity = "\n".join(str(part) for part in (
+        meta.get("title") or title,
+        meta.get("subtitle") or "",
+        " ".join(str(k) for k in keywords) if isinstance(keywords, list) else (keywords or ""),
+    ) if part)
+
+    verdict = publishing_strategy.authority_fit(identity)
+    return {
+        "passed": bool(verdict["passed"]),
+        "matches": verdict["matches"],
+        "delivered_title": str(meta.get("title") or title),
+        "read_metadata": bool(meta),
+        # A missing kdp_metadata.json is not a pass. It is a book nobody can
+        # check, and this gate exists precisely because the unchecked ones
+        # were the ones that drifted.
+        "identity": identity[:400],
+    }
+
+
 def _media_skill_text() -> str:
     """Load IRIS's floor-owned trend-research method; same pattern as
     _publishing_skill_text -- runtime code is not its policy owner. Added
@@ -5609,7 +5651,20 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     # the book gets written about instead of being silently discarded.
     input_args: dict[str, Any] = {"mode": kdp_mode, "region": region, "dryRun": True}
     if angle:
-        input_args["topicOverride"] = angle
+        # The lane travels with the angle. LAO's package exposes no input for
+        # it, and what it is handed is all it knows: on 2026-10-23 it took a
+        # business-plan angle and wrote a startup-finance book around two
+        # invented people, because nothing it received said otherwise. This is
+        # the weaker half of the fix -- the delivered-lane gate below does not
+        # depend on LAO reading it.
+        input_args["topicOverride"] = (
+            f"{angle}\n\n"
+            "Hard constraints: this is a nonfiction utility book in the "
+            "Windows / PowerShell / networking / enterprise automation / "
+            "agentic AI operations / AI governance lane. Teach a method the "
+            "reader applies to their own work. Do not invent named people, "
+            "companies or case studies, and do not write a narrative."
+        )
 
     # Declared before the nested attempt function and mutated via `nonlocal`
     # (not returned) so a heal-and-retry cycle can still see the latest
@@ -5804,6 +5859,32 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
             stages.clear_stage("scribe")
             stages.clear_stage("hermes")
             raise
+
+    # The lane is checked again here, on the book that exists rather than on
+    # the brief that asked for it. LAO receives no lane constraint at all, so
+    # a commission that passed every gate upstream can still come back as a
+    # different book about something else -- and until this, it did, with the
+    # submission packet written for it and the Chairman asked to upload it.
+    delivered = _delivered_book_lane(run_dir, title)
+    if not delivered["passed"]:
+        stages.clear_stage("scribe")
+        stages.clear_stage("hermes")
+        _publishing_event(
+            job, agent="SCRIBE", event_type="research_blocked",
+            stage="delivered_lane_gate",
+            summary=(f"Rejected: the delivered book "
+                     f"{delivered['delivered_title']!r} is outside the catalogue lane"),
+            details=delivered, status="rejected",
+        )
+        return {
+            "agent": "SCRIBE", "mode": "blocked", "_blocked": True,
+            "content": ("The manuscript is preserved, but the book that was "
+                        "written is not in the catalogue lane and will not be "
+                        "packaged for upload."),
+            "blocked_reason": (f"delivered book {delivered['delivered_title']!r} is "
+                               f"outside Vineet Pandey's authority lane"),
+            "run_dir": run_dir, "title": title, "delivered_lane": delivered,
+        }
 
     # KDP has no upload/metadata API (confirmed 2026-08-26) and the real
     # submit stays a manual human step -- see _generate_kdp_packet's
