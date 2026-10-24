@@ -51,12 +51,13 @@ def _line_width(line: str, font: ImageFont.FreeTypeFont, draw: ImageDraw.ImageDr
     return int(sum(draw.textlength(t + " ", font=font) for t in tokens) - draw.textlength(" ", font=font))
 
 
-def _wrap(words: list[str], font: ImageFont.FreeTypeFont, draw: ImageDraw.ImageDraw, stroke: int) -> list[str] | None:
+def _wrap(words: list[str], font: ImageFont.FreeTypeFont, draw: ImageDraw.ImageDraw, stroke: int,
+          max_text_width: int = MAX_TEXT_WIDTH) -> list[str] | None:
     lines: list[str] = []
     current = ""
     for word in words:
         trial = f"{current} {word}".strip()
-        if _line_width(trial, font, draw) + 2 * stroke <= MAX_TEXT_WIDTH:
+        if _line_width(trial, font, draw) + 2 * stroke <= max_text_width:
             current = trial
         else:
             if not current:
@@ -64,7 +65,7 @@ def _wrap(words: list[str], font: ImageFont.FreeTypeFont, draw: ImageDraw.ImageD
             lines.append(current)
             current = word
             # A word moved to a new line was never measured on its own: "FLIGHTS" then ran past the zone.
-            if _line_width(current, font, draw) + 2 * stroke > MAX_TEXT_WIDTH:
+            if _line_width(current, font, draw) + 2 * stroke > max_text_width:
                 return None
     lines.append(current)
     return lines
@@ -83,7 +84,8 @@ def _contrast_gradient(img: Image.Image, side: str) -> Image.Image:
     return Image.composite(dark, img, shade)
 
 
-def _low_detail_y(img: Image.Image, block_h: int, side: str) -> tuple[int, int]:
+def _low_detail_y(img: Image.Image, block_h: int, side: str,
+                  text_zone: float = TEXT_ZONE) -> tuple[int, int]:
     """Choose the quietest top/middle/bottom slot inside the text lane.
 
     This is deliberately based on the actual generated pixels. A fixed vertical
@@ -94,7 +96,7 @@ def _low_detail_y(img: Image.Image, block_h: int, side: str) -> tuple[int, int]:
     pad = 38
     maximum = max(pad, SIZE[1] - block_h - pad)
     candidates = sorted({pad, max(pad, (SIZE[1] - block_h) // 2), maximum})
-    lane = int(SIZE[0] * TEXT_ZONE)
+    lane = int(SIZE[0] * text_zone)
     x0, x1 = ((0, lane) if side == "left" else (SIZE[0] - lane, SIZE[0]))
     edges = img.convert("L").filter(ImageFilter.FIND_EDGES)
     scored = []
@@ -108,12 +110,15 @@ def _low_detail_y(img: Image.Image, block_h: int, side: str) -> tuple[int, int]:
 
 def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] = WHITE,
             accent: tuple[int, int, int] = ACCENT, side: str = "left",
-            vertical_anchor: str = "bottom") -> dict[str, Any]:
+            vertical_anchor: str = "bottom", text_zone: float = TEXT_ZONE) -> dict[str, Any]:
     """Set the hook on `side` ('left' when Sonia is on the right, 'right' when she is on the left)."""
     if side not in ("left", "right"):
         raise ValueError("side must be 'left' or 'right'")
     if vertical_anchor not in ("top", "middle", "bottom", "adaptive"):
         raise ValueError("vertical_anchor must be top, middle, bottom or adaptive")
+    if not 0.30 <= text_zone <= 0.50:
+        raise ValueError("text_zone must be between 0.30 and 0.50")
+    max_text_width = int(SIZE[0] * text_zone) - MARGIN
     words = text.upper().split()
     if not 1 <= len(words) <= 3:
         raise ValueError("thumbnail text must be 1 to 3 words")
@@ -125,7 +130,7 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
     chosen = None
     for size in range(190, MIN_FONT - 1, -6):
         font, stroke = _font(size), max(6, size // 12)
-        lines = _wrap(words, font, draw, stroke)
+        lines = _wrap(words, font, draw, stroke, max_text_width)
         if not lines or len(lines) > 3:
             continue
         line_h = draw.textbbox((0, 0), "HG", font=font, stroke_width=stroke)[3]
@@ -145,7 +150,7 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
             return accent if any(c.isdigit() for c in token) else primary
         return accent if token == last else primary
 
-    adaptive_y, detail_energy = _low_detail_y(img, block_h, side)
+    adaptive_y, detail_energy = _low_detail_y(img, block_h, side, text_zone)
     anchors = {"top": 38, "middle": max(38, (SIZE[1] - block_h) // 2),
                "bottom": max(38, SIZE[1] - block_h - 38)}
     y0 = adaptive_y if vertical_anchor == "adaptive" else anchors[vertical_anchor]
@@ -176,13 +181,14 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
     if out.stat().st_size > MAX_BYTES:
         final = out.with_suffix(".jpg")
         img.save(final, "JPEG", quality=90, optimize=True)
-    inside = (right_edge <= SIZE[0] * TEXT_ZONE) if side == "left" else (left_edge >= SIZE[0] * (1 - TEXT_ZONE))
+    inside = (right_edge <= SIZE[0] * text_zone) if side == "left" else (left_edge >= SIZE[0] * (1 - text_zone))
     qc = {"size": list(SIZE), "font_size": size, "lines": lines, "side": side,
           "text_left_edge": left_edge, "text_right_edge": right_edge,
           "inside_text_zone": inside, "inside_left_zone": inside,  # old name, read by older receipts and scoring
           "readable": size >= MIN_FONT,
           "protected_usp_zone": [round(SIZE[0] * USP_ZONE[0]), round(SIZE[0] * USP_ZONE[1])],
           "text_clear_of_usp": inside,
+          "text_zone": text_zone,
           "vertical_anchor": vertical_anchor,
           "adaptive_low_detail_anchor": vertical_anchor == "adaptive",
           "text_y": y0,

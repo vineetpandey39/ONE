@@ -6,7 +6,10 @@ def readable_thumbnail_hook(text):
     """Apply narrow, meaning-preserving display abbreviations before generation."""
     replacements = {"MINUTES": "MINS", "MINUTE": "MIN", "WHERE'S": "WHERE"}
     words = [replacements.get(word, word) for word in str(text).upper().split()]
-    if not 1 <= len(words) <= 3 or any(len(word) > 6 for word in words):
+    # Keep hooks phone-readable without banning normal topic words such as
+    # SUNRISES, ASTRONAUT or JUPITER. The previous six-character ceiling made
+    # valid episode-specific hooks fail after a successful 20-minute render.
+    if not 1 <= len(words) <= 3 or any(len(word) > 10 for word in words):
         raise ValueError('Thumbnail hook needs one to three short readable words')
     return ' '.join(words)
 
