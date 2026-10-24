@@ -63,7 +63,7 @@ def _feature_mask(size: tuple[int, int], face: tuple[int, int, int, int]) -> Ima
     draw = ImageDraw.Draw(mask)
     draw.rounded_rectangle((x + .10*w, y + .18*h, x + .90*w, y + .48*h), radius=max(4, w // 30), fill=255)
     draw.ellipse((x + .35*w, y + .43*h, x + .65*w, y + .67*h), fill=210)
-    draw.rounded_rectangle((x + .23*w, y + .65*h, x + .77*w, y + .86*h), radius=max(4, w // 26), fill=255)
+    draw.rounded_rectangle((x + .34*w, y + .66*h, x + .66*w, y + .86*h), radius=max(4, w // 26), fill=255)
     return mask.filter(ImageFilter.GaussianBlur(max(2, w // 80)))
 
 
@@ -105,14 +105,15 @@ def clear_skin(image: Image.Image, strength: float = 0.90) -> tuple[Image.Image,
     ) / 2.0
     red_anomaly = red_delta - local_red_delta
     blemish = np.where(
-        (skin > 0) & (dark_delta > 10.0) & ((red_anomaly > 5.0) | (dark_delta > 18.0)), 255, 0
+        (skin > 0) & (dark_delta > 4.0) & ((red_anomaly > 1.5) | (dark_delta > 12.0)), 255, 0
     ).astype(np.uint8)
     blemish = cv2.morphologyEx(blemish, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     blemish = cv2.dilate(blemish, np.ones((5, 5), np.uint8), iterations=1)
     corrected = cv2.inpaint(rgb, blemish, 5, cv2.INPAINT_TELEA)
     # A global edge mask preserved acne as if it were an eye or lip.  Use a
     # low-frequency skin layer, then restore only known facial-feature zones.
-    smooth = cv2.bilateralFilter(corrected, d=0, sigmaColor=64, sigmaSpace=13)
+    smooth = cv2.medianBlur(corrected, 21)
+    smooth = cv2.bilateralFilter(smooth, d=0, sigmaColor=64, sigmaSpace=13)
     smooth = cv2.GaussianBlur(smooth, (0, 0), 2.2)
     softened = Image.fromarray(smooth)
     area = Image.new("L", image.size, 0)
