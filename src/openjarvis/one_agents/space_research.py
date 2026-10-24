@@ -205,6 +205,13 @@ def nasa_subject_matches(query, metadata):
     if context_hit and not query_allows:
         return False
     candidate=set(re.findall(r'[a-z0-9]{3,}',subject_text))
+    visual_qualifiers={
+        'exterior','interior','sunrise','sunset','horizon','cupola','treadmill',
+        'solar','robotic','canadarm','laboratory','diagram','illustration',
+    }
+    requested_visual=words & visual_qualifiers
+    if requested_visual and not requested_visual & candidate:
+        return False
     specific=words & {'phobos','deimos','mmx','europa','ganymede','titan','enceladus','triton','ceres','bennu','osiris','juno'}
     if specific:return bool(specific & candidate)
     generic={'nasa','jaxa','esa','image','imagery','photo','photograph','picture','archive','space','spacecraft',
