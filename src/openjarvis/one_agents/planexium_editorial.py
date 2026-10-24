@@ -30,11 +30,17 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
                 rows.append({'asset': original, 'kind': 'primary'})
                 used.add(original['sha256'])
         choices = editorial['scene_assets'][str(number)]
+        # Budget motion from the scene's original remainder.  Recomputing the
+        # share after every clip progressively under-filled later clips and
+        # forced long narration scenes to demand three or more archive stills
+        # even when two or three unique licensed clips were available.
+        motion_share = remaining / max(1, len(choices))
         for index in choices:
             asset = assets['stock'][index]
             if asset['sha256'] in used:
                 continue
-            seconds = min(12.0, max(5.0, remaining / max(1, len(choices))), float(asset['seconds']) - asset.get('usable_in', 0) - .1)
+            seconds = min(18.0, max(5.0, motion_share),
+                          float(asset['seconds']) - asset.get('usable_in', 0) - .1)
             if seconds < 2:
                 continue
             rows.append({'asset': asset, 'kind': 'envato', 'seconds': seconds})
