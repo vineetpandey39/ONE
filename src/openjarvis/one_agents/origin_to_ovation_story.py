@@ -27,6 +27,13 @@ PATTERN_INTERRUPTS = (
     "sound_or_silence_shift", "camera_grammar_change",
 )
 
+VISUAL_FAMILIES = {
+    "establishing_wide", "dynamic_action", "equipment_macro", "environmental_pov",
+    "obscured_side_action", "low_angle", "overhead", "reflection", "crowd_reaction",
+    "document_or_score_evidence", "team_context", "travel_context", "feet_detail",
+    "behind_stumps", "quiet_aftermath",
+}
+
 NARRATION_RULES = (
     "Third-person English narration; emotionally specific, conversational and restrained. "
     "Humanise through documented choices, effort, consequences and relationships. Never invent dialogue, "
@@ -119,6 +126,33 @@ def validate(plan: list[dict[str, Any]], contract: dict[str, Any]) -> list[str]:
         narration = str(shot.get("narration", "")).strip()
         if narration and not shot.get("claim_ids"):
             errors.append(f"{shot.get('shot_id')}: narrated factual beat has no claim_ids")
+    # Long-form boards fail closed on composition diversity.  Pixel hashes only
+    # catch duplicate files; these fields catch the repeated five-shot grammar
+    # that passed the Dhoni technical checks while remaining visually monotonous.
+    if len(plan) >= 40:
+        types = [str(s.get("shot_type") or s.get("director", {}).get("shot_type") or "") for s in plan]
+        missing = [s.get("shot_id") for s, kind in zip(plan, types) if kind not in VISUAL_FAMILIES]
+        if missing:
+            errors.append("visual diversity metadata missing/invalid for: " + ", ".join(map(str, missing[:8])))
+        else:
+            counts = {kind: types.count(kind) for kind in set(types)}
+            if len(counts) < 10:
+                errors.append(f"visual grammar has only {len(counts)} shot types; minimum is 10")
+            if max(counts.values()) / len(plan) > 0.20:
+                errors.append("one shot type exceeds 20% of the episode")
+            if any(types[i] == types[i - 1] for i in range(1, len(types))):
+                errors.append("adjacent shots repeat the same visual type")
+        signatures = []
+        for _, shots in _chapters(plan):
+            signature = tuple(str(s.get("shot_type") or s.get("director", {}).get("shot_type") or "") for s in shots)
+            if signature in signatures:
+                errors.append("two chapters repeat the same camera-grammar sequence")
+                break
+            signatures.append(signature)
+        static_holds = [s.get("shot_id") for s in plan if float(s.get("duration_seconds", 0) or 0) > 7
+                        and not s.get("motion") and not s.get("overlay")]
+        if static_holds:
+            errors.append("static still exceeds 7 seconds without motion/overlay: " + ", ".join(map(str, static_holds[:8])))
     return errors
 
 

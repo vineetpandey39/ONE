@@ -8,8 +8,34 @@ from typing import Any
 # 12 side-profile/portrait shots and none of the wide, equipment or rear shots (stadium crowds stay below it).
 FACE_MIN_FRACTION = 0.07
 
-COVERAGE = ("establishing_wide", "shoulder_side", "hands_equipment", "over_shoulder", "rear_walk")
+# A vocabulary, not a five-shot template.  The old implementation emitted the
+# same wide/shoulder/hands/over-shoulder/walk cycle for every chapter; a 75-shot
+# episode consequently looked like five pictures repeated fourteen times.
+COVERAGE = (
+    "establishing_wide", "dynamic_action", "equipment_macro", "environmental_pov",
+    "obscured_side_action", "low_angle", "overhead", "reflection", "crowd_reaction",
+    "document_or_score_evidence", "team_context", "travel_context", "feet_detail",
+    "behind_stumps", "quiet_aftermath",
+)
 MOTION = ("slow_push", "lateral_drift", "focus_detail", "slow_pullback", "wide_hold")
+
+_DIRECTIONS = {
+    "establishing_wide": "Wide period establishing view of {place}; environment leads the frame; no identifiable athlete",
+    "dynamic_action": "Dynamic faceless action at {place}: {action}; body mechanics and equipment contact physically correct",
+    "equipment_macro": "Macro still-life of {object}; period wear and texture visible; no face or generic bat-grip repeat",
+    "environmental_pov": "First-person environmental POV at {place}, using {object} as foreground story evidence; no face",
+    "obscured_side_action": "Side action angle with the entire face hidden by helmet, deep shadow or crop: {action}; {look}",
+    "low_angle": "Ground-level low angle showing {action}, feet, surface and scale; head turned completely away; {look}",
+    "overhead": "High overhead composition mapping {place}, subject small and face unreadable, action: {action}",
+    "reflection": "Oblique reflection in glass, rain or polished equipment; facial detail impossible; {place}; {look}",
+    "crowd_reaction": "Reaction-led frame from spectators or teammates while the faceless subject remains distant at {place}",
+    "document_or_score_evidence": "Graphic-ready factual insert of {evidence}; historically accurate object or scoreboard, no invented text",
+    "team_context": "Team-context tableau around {action}; subject seen from rear or fully occluded, distinct body poses, {look}",
+    "travel_context": "Period-accurate journey or transition through {place}; luggage or equipment tells the story; face hidden",
+    "feet_detail": "Close detail of period footwear, crease or ground during {action}; anatomically correct stance, no face",
+    "behind_stumps": "Behind-stumps view of {action}; wicketkeeping/batting equipment correct, face fully blocked by helmet or crop",
+    "quiet_aftermath": "Quiet aftermath at {place}: empty space, used {object}, or distant rear silhouette carries the consequence",
+}
 
 FACELESS_RULES = (
     "The subject's face is never visible: no frontal view, no profile showing eyes, nose or mouth; the head is turned "
@@ -21,18 +47,70 @@ FACELESS_RULES = (
     "Cricket anatomy and bat grip physically correct, no extra fingers or twisted wrists.")
 
 
-def visuals(chapter: dict[str, Any]) -> list[str]:
-    """Five faceless shots for one chapter, in COVERAGE order."""
-    era, look = chapter["era"], signature(chapter)
-    place = chapter.get("place_detail") or f"historically appropriate cricket venue of {era}"
-    return [
-        f"Wide establishing view of {place}; no identifiable athlete",
-        f"Side view from behind the subject's right shoulder, face turned away toward the field; {look}",
-        f"Close-up of the subject's gloved hands on the bat handle and wristband, no face in frame; {chapter['kit']}",
-        f"Over-the-shoulder from behind: back of the head and shoulders, looking out at {place}; {look}",
-        f"Rear view walking toward the middle, cinematic wide perspective; {look}",
-    ]
+def visual_specs(chapter: dict[str, Any]) -> list[dict[str, str]]:
+    """Return five chapter-specific directions with rotating camera grammar.
 
+    Editors can supply ``visual_beats`` (five sourced actions/objects) and
+    ``coverage`` (five types).  Otherwise the chapter number rotates through
+    the full vocabulary instead of resetting to the same five shots.
+    """
+    era, look = chapter["era"], signature(chapter)
+    place = chapter.get("place_detail") or f"historically appropriate setting of {era}"
+    chapter_no = int(chapter.get("chapter", chapter.get("chapter_number", 1)))
+    requested = chapter.get("coverage")
+    if requested is not None:
+        if len(requested) != 5 or any(kind not in COVERAGE for kind in requested):
+            raise ValueError("chapter coverage must contain five valid, distinct visual types")
+        kinds = list(requested)
+    else:
+        offset = ((chapter_no - 1) * 5) % len(COVERAGE)
+        kinds = [COVERAGE[(offset + i) % len(COVERAGE)] for i in range(5)]
+    if len(set(kinds)) != 5:
+        raise ValueError("a chapter cannot repeat a visual type")
+    beats = chapter.get("visual_beats") or []
+    defaults = [chapter.get("action") or "the documented chapter action"] * 5
+    actions = [str(beats[i]) if i < len(beats) else defaults[i] for i in range(5)]
+    objects = chapter.get("story_objects") or [chapter.get("equipment") or chapter.get("kit") or "period equipment"]
+    evidence = chapter.get("evidence_visual") or "the chapter's sourced date, score, record or period document"
+    specs = []
+    for i, kind in enumerate(kinds):
+        text = _DIRECTIONS[kind].format(place=place, action=actions[i], object=objects[i % len(objects)],
+                                         evidence=evidence, look=look)
+        specs.append({"shot_type": kind, "visual": text, "motion": MOTION[(offset + i) % len(MOTION)]})
+    return specs
+
+
+def visual_specs(chapter: dict[str, Any]) -> list[dict[str, str]]:
+    """Return five chapter-specific directions with rotating camera grammar."""
+    era, look = chapter["era"], signature(chapter)
+    place = chapter.get("place_detail") or f"historically appropriate setting of {era}"
+    chapter_no = int(chapter.get("chapter", chapter.get("chapter_number", 1)))
+    requested = chapter.get("coverage")
+    if requested is not None:
+        if len(requested) != 5 or any(kind not in COVERAGE for kind in requested):
+            raise ValueError("chapter coverage must contain five valid visual types")
+        kinds = list(requested)
+    else:
+        offset = ((chapter_no - 1) * 5) % len(COVERAGE)
+        kinds = [COVERAGE[(offset + i) % len(COVERAGE)] for i in range(5)]
+    if len(set(kinds)) != 5:
+        raise ValueError("a chapter cannot repeat a visual type")
+    beats = chapter.get("visual_beats") or []
+    action = chapter.get("action") or "the documented chapter action"
+    actions = [str(beats[i]) if i < len(beats) else action for i in range(5)]
+    objects = chapter.get("story_objects") or [chapter.get("equipment") or chapter.get("kit") or "period equipment"]
+    evidence = chapter.get("evidence_visual") or "the chapter's sourced date, score, record or period document"
+    specs = []
+    for i, kind in enumerate(kinds):
+        text = _DIRECTIONS[kind].format(place=place, action=actions[i], object=objects[i % len(objects)],
+                                         evidence=evidence, look=look)
+        specs.append({"shot_type": kind, "visual": text, "motion": MOTION[(offset + i) % len(MOTION)]})
+    return specs
+
+
+def visuals(chapter: dict[str, Any]) -> list[str]:
+    """Compatibility wrapper returning five diversified visual strings."""
+    return [item["visual"] for item in visual_specs(chapter)]
 
 def signature(chapter: dict[str, Any]) -> str:
     """The era's recognisable details, all visible without a face."""
