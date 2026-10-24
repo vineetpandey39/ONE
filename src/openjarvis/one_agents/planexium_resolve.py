@@ -262,7 +262,18 @@ async def execute(request, client):
             write(state_path, state)
     if not state.get("job_id"):
         if state.get("phase") in {"creating", "assembling"}:
-            raise RuntimeError("Partial project assembly needs reconciliation; no duplicate timeline created")
+            # A transient Resolve API refusal can occur immediately after a
+            # project is created.  Resume only when live MCP evidence proves
+            # that assembly never crossed either duplicate-producing boundary:
+            # no timeline and no imported media.  Anything else remains
+            # fail-closed for manual reconciliation.
+            summary = await client.call("project_settings", "project_summary",
+                                        include_clips=True, clip_limit=1)
+            pool = summary.get("media_pool") or {}
+            if int(summary.get("timeline_count") or 0) != 0 or int(pool.get("clip_count") or 0) != 0:
+                raise RuntimeError("Partial project assembly needs reconciliation; no duplicate timeline created")
+            state["phase"] = "created"
+            write(state_path, state)
         state.update(created=True, phase="assembling")
         write(state_path, state)
         for key, value in [("timelineFrameRate", "30"), ("timelineResolutionWidth", "1920"),
