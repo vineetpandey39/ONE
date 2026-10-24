@@ -137,7 +137,9 @@ class LaoDraft:
             or ("Rejected asset: visual subject " in error and " absent from " in error)
             or ("Rejected asset: destination phrase " in error and " absent from " in error)
             or "Rejected asset: preview does not confidently support selected-item metadata and subject" in error
-            or "Asset preview unavailable" in error))
+            or "Asset preview unavailable" in error
+            or ("started no download within 60s" in error
+                and "account most likely already holds this asset" in error)))
 
     def artifact(self, outputs: dict, job_id: str, filename: str) -> Path:
         # Reuse the same artifact lookup as current Sonia production. Never
