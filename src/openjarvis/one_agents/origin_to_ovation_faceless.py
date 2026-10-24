@@ -63,41 +63,13 @@ def visual_specs(chapter: dict[str, Any]) -> list[dict[str, str]]:
             raise ValueError("chapter coverage must contain five valid, distinct visual types")
         kinds = list(requested)
     else:
-        offset = ((chapter_no - 1) * 5) % len(COVERAGE)
-        kinds = [COVERAGE[(offset + i) % len(COVERAGE)] for i in range(5)]
+        offset = (chapter_no - 1) % len(COVERAGE)
+        kinds = [COVERAGE[(offset + i * 3) % len(COVERAGE)] for i in range(5)]
     if len(set(kinds)) != 5:
         raise ValueError("a chapter cannot repeat a visual type")
     beats = chapter.get("visual_beats") or []
     defaults = [chapter.get("action") or "the documented chapter action"] * 5
     actions = [str(beats[i]) if i < len(beats) else defaults[i] for i in range(5)]
-    objects = chapter.get("story_objects") or [chapter.get("equipment") or chapter.get("kit") or "period equipment"]
-    evidence = chapter.get("evidence_visual") or "the chapter's sourced date, score, record or period document"
-    specs = []
-    for i, kind in enumerate(kinds):
-        text = _DIRECTIONS[kind].format(place=place, action=actions[i], object=objects[i % len(objects)],
-                                         evidence=evidence, look=look)
-        specs.append({"shot_type": kind, "visual": text, "motion": MOTION[(offset + i) % len(MOTION)]})
-    return specs
-
-
-def visual_specs(chapter: dict[str, Any]) -> list[dict[str, str]]:
-    """Return five chapter-specific directions with rotating camera grammar."""
-    era, look = chapter["era"], signature(chapter)
-    place = chapter.get("place_detail") or f"historically appropriate setting of {era}"
-    chapter_no = int(chapter.get("chapter", chapter.get("chapter_number", 1)))
-    requested = chapter.get("coverage")
-    if requested is not None:
-        if len(requested) != 5 or any(kind not in COVERAGE for kind in requested):
-            raise ValueError("chapter coverage must contain five valid visual types")
-        kinds = list(requested)
-    else:
-        offset = ((chapter_no - 1) * 5) % len(COVERAGE)
-        kinds = [COVERAGE[(offset + i) % len(COVERAGE)] for i in range(5)]
-    if len(set(kinds)) != 5:
-        raise ValueError("a chapter cannot repeat a visual type")
-    beats = chapter.get("visual_beats") or []
-    action = chapter.get("action") or "the documented chapter action"
-    actions = [str(beats[i]) if i < len(beats) else action for i in range(5)]
     objects = chapter.get("story_objects") or [chapter.get("equipment") or chapter.get("kit") or "period equipment"]
     evidence = chapter.get("evidence_visual") or "the chapter's sourced date, score, record or period document"
     specs = []
