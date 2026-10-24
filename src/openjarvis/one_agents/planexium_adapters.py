@@ -226,6 +226,7 @@ class ChatGPTAdapter:
             'Choose the strongest unusual visual or scientific question in THIS episode, not a generic ISS/planet illustration. '
             'Titles and thumbnail text must complement rather than repeat each other; create specific curiosity that the narration actually resolves. '
             'Thumbnail text 1-4 words. Author three genuinely different subjects/compositions: phenomenon close-up, contextual relationship, and a distinct explanation question. '
+            'Every thumbnail text must contain at least one literal non-generic word from a proposed title or the focus scene screen_text, so title and image promise visibly match. '
             'Color, crop and styling alone are not different concepts. Do not invent events, findings, scale, urgency or audience CTR predictions. '
             'Order concepts and titles by editorial preference, provisional until audience testing. '
             'Music must suit the subject and have no vocals. Use the script, not unrelated space filler. SCRIPT: '+json.dumps(science))

@@ -606,7 +606,9 @@ def run_job(job: dict) -> dict:
     draft_path = context.artifact("script-draft.json")
     # A draft may be created before its writer has finished. Treat an empty
     # checkpoint as absent so the pipeline can use its normal writer path.
-    draft = json.loads(draft_path.read_text(encoding="utf-8")) if draft_path.is_file() and draft_path.stat().st_size else None
+    script_sealed = context.artifact("checkpoints/script.json").is_file()
+    draft = (json.loads(draft_path.read_text(encoding="utf-8"))
+             if not script_sealed and draft_path.is_file() and draft_path.stat().st_size else None)
     result = bound_pipeline(context, {**config, "_agent_job_id": job.get("id"),
         "_production_build": {"pipeline": BUILD_SHA, "adapters": ADAPTER_BUILD}}).produce(commission, plan=draft)
     if result.get("production_complete") and requested_commission["mission_id"] != context.mission_id:
