@@ -21,6 +21,8 @@ CHANNEL_NAME = "Sonia Travel Vlogs"
 CHANNEL_LINK_SELECTOR = f'a[href*="/channel/{CHANNEL_ID}"]'
 THUMBNAIL_LOADER_SELECTOR = "input#file-loader[type='file'][accept*='image']"
 UPLOADED_THUMBNAIL_SELECTOR = "[aria-label='Uploaded thumbnail']"
+THUMBNAIL_SECTION_TEXT = "Thumbnail"
+UPLOAD_FILE_TEXT = "Upload file"
 SONIA_BROWSER_DIR = Path(os.environ.get("SONIA_BROWSER_DIR") or r"C:\Users\pc\Documents\LAO\sonia-community")
 VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
@@ -98,9 +100,15 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
             loader = page.locator(THUMBNAIL_LOADER_SELECTOR).first
             loader.wait_for(state="attached", timeout=45_000)
             # Studio renders the thumbnail editor well below the initial fold.
-            # Bring its real file input into the viewport before attaching the
-            # file so the persistent browser follows the same path as a human.
-            loader.scroll_into_view_if_needed(timeout=30_000)
+            # Its file input is intentionally hidden, so scroll the visible
+            # section/tile just as a human does and use the input only to
+            # attach the file.
+            section = page.get_by_text(THUMBNAIL_SECTION_TEXT, exact=True).first
+            section.wait_for(state="visible", timeout=45_000)
+            section.scroll_into_view_if_needed(timeout=30_000)
+            upload_tile = page.get_by_text(UPLOAD_FILE_TEXT, exact=True).first
+            upload_tile.wait_for(state="visible", timeout=30_000)
+            upload_tile.scroll_into_view_if_needed(timeout=30_000)
             loader.set_input_files(str(thumbnail))
             uploaded = page.locator(UPLOADED_THUMBNAIL_SELECTOR).first
             uploaded.wait_for(state="visible", timeout=60_000)
