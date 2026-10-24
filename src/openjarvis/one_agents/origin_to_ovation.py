@@ -399,15 +399,6 @@ def run_stage(job, *, enqueue):
                     record["claim_ids"].append(claim)
         if not source_records:
             raise ValueError("ARES requires the episode's linked claim sources")
-        description = (
-            metadata.get("description_lead", "From a boy in Bombay to a World Cup winner: the journey of Sachin Tendulkar.") + "\n\n"
-            "Original CGI illustrations reconstruct the story; these are not archival recordings. "
-            "Third-person narration by " + metadata.get("voice_name", "George") + " via ElevenLabs. No athlete voice clone or invented dialogue.\n\n"
-            "CHAPTERS\n" + "\n".join(c["timestamp"] + " " + c["title"] for c in chapters) +
-            "\n\nSOURCES\n" + "\n".join(r["url"] for r in source_records) +
-            "\n\nWhich sporting journey should we explore next? Subscribe to Origin to Ovation for more biographies.")
-        if len(description) > 5000:
-            raise ValueError("SEO description exceeds YouTube's 5000-character limit")
         # 2026-10-23: the episode's own title, never an earlier episode's sentence or Sachin's default.
         from openjarvis.one_agents import origin_to_ovation_titles as titles
         subject = read(path / "mission.json").get("subject", "")
@@ -418,18 +409,17 @@ def run_stage(job, *, enqueue):
                     "blocked_reason": "No title of this episode's own: give editorial-metadata.json a title "
                                       "(or title_options) that does not repeat an earlier episode",
                     "refused": refused}
-        package = {
-            "title": title,
-            "description": description,
+        from openjarvis.one_agents import origin_to_ovation_seo as oto_seo
+        package = oto_seo.build(
+            subject=subject, title=title, metadata=metadata, chapters=chapters,
+            sources=source_records, voice_name=metadata.get("voice_name", "George"))
+        package.update({
             "category": "Sports", "language": "en-US",
-            "tags": metadata.get("tags", ["Sachin Tendulkar", "cricket biography", "Origin to Ovation",
-                     "Sachin journey", "cricket history"]),
-            "chapters": chapters, "sources": source_records,
             "source_ledger": str(ledger),
             "timeline": str(master_dir / "timed-shot-plan.json"),
             "timeline_tempo": TEMPO,
             "shot_count": len(plan),
-            "master_sha256": digest(master_dir / "master.mp4")}
+            "master_sha256": digest(master_dir / "master.mp4")})
         write(path / "runtime" / "seo.json", package)
         return transfer(job, path, "echo", "thumbnail_upload", enqueue,
                         [master_dir / "master.mp4", path / "runtime" / "seo.json"])
