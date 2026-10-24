@@ -90,6 +90,7 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
     concepts = {str(c.get("name")): c for c in package.get("thumbnail_strategy", {}).get("concepts", [])}
     rendered = [v for v in package.get("thumbnail_experiment", {}).get("variants", [])
                 if v.get("name") in concepts and v.get("path") and Path(v["path"]).is_file()]
+    preferred = max(rendered, key=lambda row: float((row.get('score') or {}).get('score', 0))) if rendered else None
     thumbnails = [{"name": v["name"], "text": concepts[v["name"]].get("text"),
                    "idea": concepts[v["name"]].get("left_usp")} for v in rendered]
     errors = None
@@ -98,6 +99,7 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
                                       "claims": science.get("claims", [])},
                           "current_title": package["recommended_title"],
                           "thumbnails": thumbnails or None,
+                          "required_thumbnail": preferred["name"] if preferred else None,
                           "editorial_feedback": editorial_feedback,
                           "previous_validation_error": errors})
         try:
@@ -114,6 +116,8 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
                                if v["name"].casefold() == str(out.get("thumbnail") or "").strip().casefold()), None)
                 if chosen is None:
                     raise ValueError("thumbnail must be the name of one supplied thumbnail that matches the title")
+                if preferred and chosen["name"] != preferred["name"]:
+                    raise ValueError("title must match the highest-scoring QC-passed thumbnail")
                 result["thumbnail_path"] = chosen["path"]
                 result["thumbnail_pairing"] = {"thumbnail": chosen["name"], "title": title, "chosen_by": "ARES"}
             opening = str(out["opening"]).strip()

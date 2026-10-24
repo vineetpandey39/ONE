@@ -321,12 +321,23 @@ def score_thumbnail(path: Path, qc: dict[str, Any], variant: dict[str, Any], *, 
     export = 1.0 if qc.get("under_2mb") and qc.get("size") == [1280, 720] else 0.0
     expression = (1.0 if variant.get("sonia_expression") and variant.get("gesture") else 0.5) if portrait else (
         1.0 if variant.get("visual_direction") else 0.5)
-    score = round(100 * (0.30 * legibility + 0.20 * safe + 0.15 * export +
-                         0.15 * contrast + 0.10 * clutter + 0.10 * expression), 1)
+    if portrait:
+        coverage = 1.0
+        score = round(100 * (0.30 * legibility + 0.20 * safe + 0.15 * export +
+                             0.15 * contrast + 0.10 * clutter + 0.10 * expression), 1)
+    else:
+        from PIL import ImageFilter
+        edges = img.filter(ImageFilter.FIND_EDGES)
+        regions = [ImageStat.Stat(edges.crop((x*80, y*90, (x+1)*80, (y+1)*90))).mean[0]
+                   for y in range(2) for x in range(4)]
+        blank_quadrants = sum(value < 5 for value in regions)
+        coverage = max(0.0, 1.0 - blank_quadrants / 4.0)
+        score = round(100 * (0.20 * legibility + 0.10 * safe + 0.10 * export +
+                             0.15 * contrast + 0.05 * clutter + 0.10 * expression + 0.30 * coverage), 1)
     return {"score": score, "scale": "vidiq_style_preupload_0_100", "not_actual_ctr": True,
             "signals": {"mobile_legibility": round(legibility * 100), "safe_zone": round(safe * 100),
                         "export_quality": round(export * 100), "hook_contrast": round(contrast * 100),
-                        "controlled_clutter": round(clutter * 100),
+                        "controlled_clutter": round(clutter * 100), "canvas_coverage": round(coverage * 100),
                         "expression_gesture" if portrait else "visual_direction": round(expression * 100)}}
 
 

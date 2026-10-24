@@ -1,4 +1,5 @@
 """Episode-specific packaging, separate from unvalidated audience predictions."""
+import re
 
 
 def readable_thumbnail_hook(text):
@@ -45,8 +46,19 @@ def validate_packaging(value, science):
         raise ValueError('Title candidates must differ')
     if len(concepts) != 3:
         raise ValueError('Provide three distinct thumbnail concepts')
+    episode_words = set()
+    for text in [science.get('video_title', ''), *titles,
+                 science['scenes'][scene-1].get('screen_text', '')]:
+        episode_words.update(re.findall(r'[a-z0-9]+', text.casefold()))
+    aliases = {'mins': 'minutes', 'min': 'minute'}
+    episode_words = {aliases.get(word, word) for word in episode_words}
+    generic = {'the','and','why','how','where','what','times','every','one','does','this'}
     for concept in concepts:
         concept['text'] = readable_thumbnail_hook(concept.get('text', ''))
+        hook_words = {aliases.get(word, word) for word in re.findall(r'[a-z0-9]+', concept['text'].casefold())
+                      if not word.isdigit()} - generic
+        if not hook_words or not hook_words & (episode_words - generic):
+            raise ValueError('Thumbnail hook must name a specific promise from this episode')
         for field in ['name', 'visual_direction', 'composition', 'left_usp']:
             if not isinstance(concept.get(field), str) or not concept[field].strip():
                 raise ValueError('Thumbnail concepts need a subject, composition and visual direction')

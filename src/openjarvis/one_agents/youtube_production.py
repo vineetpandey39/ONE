@@ -172,6 +172,11 @@ class ProductionServices:
             prompt += "\nCreative direction: " + chosen["visual_direction"]
         if chosen.get("composition"):
             prompt += "\nComposition: " + chosen["composition"]
+        if channel.brand == "planexium":
+            prompt += ("\nPLANEXIUM THUMBNAIL GATE: one unmistakable episode-specific hero subject must occupy "
+                       "45-70% of the canvas. Keep the hook in one compact text lane. Do not leave any other "
+                       "empty quadrant, do not use generic space wallpaper, and do not create a collage. The "
+                       "image must communicate the episode promise at phone size without relying on the title.")
         folder = self.context.artifact(f"thumbnail/variant-{variant + 1}")
         folder.mkdir(parents=True, exist_ok=True)
         generated = generate(prompt=prompt, output=folder / "base.png", brand=channel.brand)
@@ -249,7 +254,7 @@ class ProductionServices:
             diversity=check_thumbnail_diversity([row['path'] for row in results])
             for row in results:
                 row['preupload_score'].update(scale='internal_design_readiness_0_100',score_purpose='design_readiness_only',not_actual_ctr=True)
-        winner = results[0] if authored else max(results, key=lambda row: row["preupload_score"]["score"])
+        winner = max(results, key=lambda row: row["preupload_score"]["score"])
         final = self.context.artifact("thumbnail/final" + Path(winner["path"]).suffix)
         shutil.copy2(winner["path"], final)
         result = {"ok": True, "path": str(final), "brand": self.context.channel.brand,
@@ -257,7 +262,7 @@ class ProductionServices:
                   "portrait_used": False, "generator": "chatgpt_image_generation",
                   "selection": "highest QC-passed transparent pre-upload score; stable variant-order tie-break; not actual CTR"}
         if authored:
-            result.update(selection='editorial first choice among QC-passed distinct concepts; provisional, not an audience winner',
+            result.update(selection='highest design-readiness score among QC-passed distinct concepts; provisional, not an audience winner',
                           winner_status='provisional_editorial_default', audience_winner=None,
                           internal_score_role='design_readiness_only', image_diversity=diversity,
                           measurement_plan=package['thumbnail_strategy']['measurement_plan'])

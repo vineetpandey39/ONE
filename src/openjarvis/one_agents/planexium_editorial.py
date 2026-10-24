@@ -24,8 +24,11 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
                 primary_cursor += seconds
                 remaining -= seconds
         elif not primary_is_video and original['sha256'] not in used:
-            rows.append({'asset': original, 'kind': 'primary'})
-            used.add(original['sha256'])
+            owned = next((a for a in media.get(str(number), {}).get('assets', [])
+                          if a.get('sha256') == original['sha256']), None)
+            if owned and nasa_subject_matches(scene.get('media_query', ''), owned.get('metadata', {})):
+                rows.append({'asset': original, 'kind': 'primary'})
+                used.add(original['sha256'])
         choices = editorial['scene_assets'][str(number)]
         for index in choices:
             asset = assets['stock'][index]

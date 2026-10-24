@@ -189,7 +189,11 @@ def discover_topic(recent: set[str], *, read=read_public) -> dict:
 
 def nasa_subject_matches(query, metadata):
     words=set(re.findall(r'[a-z0-9]{3,}',query.casefold()))
-    subject_text=' '.join([str(metadata.get('title','')), ' '.join(metadata.get('keywords') or [])]).casefold()
+    subject_text=' '.join([str(metadata.get('title','')), str(metadata.get('description','')),
+                           ' '.join(metadata.get('keywords') or [])]).casefold()
+    blocked={'insignia','logo','patch','emblem','badge'}
+    if blocked & set(re.findall(r'[a-z0-9]{3,}',subject_text)) and not blocked & words:
+        return False
     candidate=set(re.findall(r'[a-z0-9]{3,}',subject_text))
     specific=words & {'phobos','deimos','mmx','europa','ganymede','titan','enceladus','triton','ceres','bennu','osiris','juno'}
     if specific:return bool(specific & candidate)
