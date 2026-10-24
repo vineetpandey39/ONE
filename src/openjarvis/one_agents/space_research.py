@@ -194,13 +194,30 @@ def nasa_subject_matches(query, metadata):
     blocked={'insignia','logo','patch','emblem','badge'}
     if blocked & set(re.findall(r'[a-z0-9]{3,}',subject_text)) and not blocked & words:
         return False
+    incidental_words={
+        'officials','administrator','director','managers','personnel','ceremony',
+        'portrait','headshot','profile',
+    }
+    incidental_phrases={'firing room','control room','press conference','launch countdown'}
+    context_words=set(re.findall(r'[a-z0-9]{3,}',subject_text))
+    context_hit=bool(incidental_words & context_words or any(p in subject_text for p in incidental_phrases))
+    query_allows=bool(incidental_words & words or any(p in query.casefold() for p in incidental_phrases))
+    if context_hit and not query_allows:
+        return False
     candidate=set(re.findall(r'[a-z0-9]{3,}',subject_text))
     specific=words & {'phobos','deimos','mmx','europa','ganymede','titan','enceladus','triton','ceres','bennu','osiris','juno'}
     if specific:return bool(specific & candidate)
     generic={'nasa','jaxa','esa','image','imagery','photo','photograph','picture','archive','space','spacecraft',
              'illustration','illustrative','dramatic','close','observation','view','official','surface','orbiting','from','the'}
     terms=words-generic
-    return bool(terms and terms & candidate)
+    matched=terms & candidate
+    # A single incidental word is not enough for a multi-part visual brief.
+    # NASA descriptions often mention the ISS, Earth, or a mission in passing
+    # while the actual photograph shows officials, a launch room, or hardware.
+    # Requiring two distinct subject terms keeps those results out while still
+    # allowing genuinely single-subject searches such as "Europa".
+    required=1 if len(terms) <= 2 else 2
+    return len(matched) >= required
 
 
 def nasa_image_is_visible(path):
