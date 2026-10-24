@@ -80,13 +80,42 @@ class ExistingPrivateUploader:
         module.LEDGER = ledger
         package_path = master.parent / "channel-upload-package.json"
         package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
-        return module.run(
+        result = module.run(
             package_path, video=master,
             thumbnail=Path(package["thumbnail_path"]) if package.get("thumbnail_path") else None,
             caption=Path(package["caption"]) if package.get("caption") else None,
             caption_language=package.get("upload", {}).get("defaultAudioLanguage", "en"),
             synthetic=self.synthetic, execute=True, post_comment=False,
         )
+        video_id = str(result.get("video_id") or "")
+        if not video_id:
+            raise RuntimeError("Private uploader returned no video ID")
+        # Resumable YouTube uploads retain the snippet from the session's first
+        # request. If ARES changes the title before an interrupted upload is
+        # resumed, the uploader can report the new package title while Studio
+        # still shows the old one. Read the actual remote snippet, reconcile it,
+        # then read it again before claiming success.
+        credentials = module.load_credentials()
+        access, _scopes = module.refresh_access(credentials)
+        actual = module._own_video(access, video_id)
+        expected_title = str(package.get("recommended_title") or "").strip()
+        if actual.get("status", {}).get("privacyStatus") != "private":
+            raise RuntimeError("Post-upload verification expected a private YouTube draft")
+        if actual.get("snippet", {}).get("title") != expected_title:
+            snippet = actual.get("snippet", {})
+            allowed = ("description", "tags", "categoryId", "defaultLanguage", "defaultAudioLanguage")
+            updated = {key: snippet[key] for key in allowed if key in snippet}
+            updated["title"] = expected_title
+            module._json(
+                "https://www.googleapis.com/youtube/v3/videos?part=snippet",
+                headers={"Authorization": "Bearer " + access},
+                data={"id": video_id, "snippet": updated}, method="PUT")
+            actual = module._own_video(access, video_id)
+        if actual.get("snippet", {}).get("title") != expected_title:
+            raise RuntimeError("YouTube title read-back differs from the reviewed package")
+        result.update(actual_title=expected_title, actual_privacy="private",
+                      metadata_readback_verified=True)
+        return result
 
 
 @contextmanager
