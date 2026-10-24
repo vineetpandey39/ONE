@@ -230,17 +230,23 @@ def floor_agents(head_id: str) -> list[str]:
 
 
 def _latest_job_per_agent(
-    connect: Connect, agent_ids: list[str], lookback_seconds: float
+    connect: Connect, agent_ids: list[str], lookback_seconds: float,
+    *, skip_job_ids: set[str] | None = None,
 ) -> dict[str, sqlite3.Row]:
-    """The single most recent job for each agent, within the lookback window.
+    """The single job that most needs inspection for each recent agent.
 
-    Deliberately one row per agent rather than a history: the watch's job is
-    "is the floor healthy right now", not "audit everything that ever went
-    wrong". A backlog of old failures is a report, not a repair queue.
+    A later unrelated success must not hide an unresolved failure. That exact
+    ordering bug concealed ECHO's 2026-10-24 community-poll timeout behind a
+    successful hourly comment sweep before HELIOS's next watch. Prefer live
+    work first (never repair underneath an active job), then the newest
+    unhandled failure, then the newest remaining row. The healed ledger keeps
+    this bounded to one actionable row per agent rather than reopening history.
     """
     latest: dict[str, sqlite3.Row] = {}
+    skipped = skip_job_ids or set()
     if not agent_ids:
         return latest
+    cutoff = datetime.fromtimestamp(time.time() - lookback_seconds, timezone.utc).isoformat()
     with closing(connect()) as db:
         for agent_id in agent_ids:
             # mode='watch' is excluded because a watch is bookkeeping ABOUT the
@@ -251,16 +257,17 @@ def _latest_job_per_agent(
             # reconciling its own monitoring against itself is a loop, not a
             # check. Found by running this across all thirteen heads instead of
             # only the one being worked on.
-            row = db.execute(
+            rows = db.execute(
                 "SELECT * FROM jobs WHERE agent_id = ? AND mode != 'watch' "
-                "ORDER BY created_at DESC LIMIT 1",
-                (agent_id,),
-            ).fetchone()
-            if row is None:
+                "AND created_at >= ? ORDER BY updated_at DESC, created_at DESC LIMIT 100",
+                (agent_id, cutoff),
+            ).fetchall()
+            rows = [row for row in rows if str(row["id"]) not in skipped]
+            if not rows:
                 continue
-            if _age_seconds(str(row["created_at"] or "")) > lookback_seconds:
-                continue
-            latest[agent_id] = row
+            active = next((row for row in rows if str(row["status"] or "") in {"queued", "running"}), None)
+            failed = next((row for row in rows if str(row["status"] or "") == "failed"), None)
+            latest[agent_id] = active or failed or rows[0]
     return latest
 
 
@@ -348,13 +355,12 @@ def scan(
     findings: list[Finding] = []
     agents = floor_agents(head_id)
     ledger = _load_ledger()
-    latest = _latest_job_per_agent(connect, agents, lookback_seconds)
+    latest = _latest_job_per_agent(
+        connect, agents, lookback_seconds, skip_job_ids=set(ledger),
+    )
 
     for agent_id, row in latest.items():
         job_id = str(row["id"])
-        if job_id in ledger:
-            continue  # already acted on; never heal the same row twice
-
         status = str(row["status"] or "")
         result = str(row["result"] or "")
         error = str(row["error"] or "")
