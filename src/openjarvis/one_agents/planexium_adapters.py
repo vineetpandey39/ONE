@@ -142,6 +142,17 @@ class LaoDraft:
             or ("started no download within 60s" in error
                 and "account most likely already holds this asset" in error)))
 
+    def transient_pre_download_failure(self, receipt: Path) -> bool:
+        """One bounded retry for browser evidence capture that failed before any download action."""
+        if not receipt.is_file():
+            return False
+        saved = json.loads(receipt.read_text(encoding="utf-8"))
+        error = str(saved.get("provider_error") or "")
+        lowered = error.casefold()
+        return (saved.get("terminal_status") == "Failed"
+                and ("locator.screenshot: timeout" in lowered or "taking element screenshot" in lowered)
+                and not any(term in lowered for term in ("download", "sign in", "authentication", "payment")))
+
     def artifact(self, outputs: dict, job_id: str, filename: str) -> Path:
         # Reuse the same artifact lookup as current Sonia production. Never
         # inspect unrelated browser profiles or credential files.
@@ -605,6 +616,12 @@ class EnvatoAdapter:
                         query_positions[query] = candidate
                         break
                     except RuntimeError:
+                        if getattr(self.draft, "transient_pre_download_failure", lambda _receipt: False)(receipt):
+                            retry_receipt = self.context.artifact(
+                                f"receipts/envato-v5-{index}-candidate-{candidate}-browser-retry.json")
+                            out, job = self.draft.run("planexium-envato", asset_steps, inputs, retry_receipt, timeout=10800)
+                            query_positions[query] = candidate
+                            break
                         if not self.draft.subject_rejected(receipt):
                             raise
                         if candidate == first_candidate + self.failure_limit - 1:

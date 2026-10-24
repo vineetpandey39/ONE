@@ -10628,6 +10628,14 @@ def _job_watchdog_seconds(job: dict[str, Any] | None = None) -> float:
     except ValueError:
         default = 2700.0
 
+    if job and job.get("agent_id") == "echo":
+        payload = _json_task(job)
+        if (payload.get("brand") == "sonia_travel_vlogs"
+                and payload.get("stage") == "community_poll"):
+            # A poll can make three attempts at a four-option set. Each option can try six sequential photo jobs,
+            # and every photo job has its own bounded 10-minute wait. The outer net must outlive that legitimate
+            # 12-hour worst case; on 2026-10-24 the generic 45-minute net abandoned a poll while it was still working.
+            return max(default, 13 * 3600.0)
     if job and job.get("agent_id") == "planexium":
         return max(default, 16 * 3600.0)
     if job and job.get('agent_id') == 'yatra':
