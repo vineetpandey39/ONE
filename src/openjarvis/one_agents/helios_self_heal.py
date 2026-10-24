@@ -321,18 +321,51 @@ def _active_for_agent(connect: Connect, agent_id: str, excluding: str) -> str:
     return str(row["id"]) if row else ""
 
 
-def _queue_copy(connect: Connect, previous: dict[str, Any], *, task: str | None = None) -> str:
+def _queue_copy(
+    connect: Connect,
+    previous: dict[str, Any],
+    *,
+    task: str | None = None,
+    reserved: bool = False,
+) -> str:
     agent = str(previous.get("agent_id") or "").lower()
     new_id = f"{agent}-{uuid.uuid4().hex[:12]}"
     with closing(connect()) as db, db:
         db.execute(
             "INSERT INTO jobs (id, agent_id, task, mode, status, created_at, updated_at, "
-            "tier, external_job, external_kind) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)",
+            "tier, external_job, external_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (new_id, agent, task if task is not None else previous.get("task") or "",
-             previous.get("mode") or "execute", _now(), _now(), previous.get("tier") or "fast",
+             previous.get("mode") or "execute", "reserved" if reserved else "queued",
+             _now(), _now(), previous.get("tier") or "fast",
              previous.get("external_job") or "", previous.get("external_kind") or ""),
         )
     return new_id
+
+
+def _launch_fresh_code_job(job_id: str) -> int:
+    """Run one reserved successor with the current checkout, never a scheduler."""
+    output = Path(os.environ.get("OPENJARVIS_HOME", Path.home() / ".openjarvis")) / "agent_outputs"
+    output.mkdir(parents=True, exist_ok=True)
+    stdout = (output / f"{job_id}-governor-fresh.log").open("a", encoding="utf-8")
+    stderr = (output / f"{job_id}-governor-fresh-error.log").open("a", encoding="utf-8")
+    environment = os.environ.copy()
+    source = str(REPO_ROOT / "src")
+    environment["PYTHONPATH"] = source + (os.pathsep + environment["PYTHONPATH"]
+                                               if environment.get("PYTHONPATH") else "")
+    flags = 0
+    if os.name == "nt":
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+    try:
+        process = subprocess.Popen(
+            [os.environ.get("ONE_HELIOS_PYTHON", sys.executable),
+             str(REPO_ROOT / "scripts" / "one_agent_run_once.py"), job_id],
+            cwd=REPO_ROOT, env=environment, stdin=subprocess.DEVNULL,
+            stdout=stdout, stderr=stderr, close_fds=True, creationflags=flags,
+        )
+        return int(process.pid)
+    finally:
+        stdout.close()
+        stderr.close()
 
 
 def _downstream_for(connect: Connect, origin_job: str) -> str:
@@ -353,7 +386,7 @@ def _downstream_for(connect: Connect, origin_job: str) -> str:
     return ""
 
 
-def resume_checkpoint(connect: Connect, job_id: str) -> str:
+def resume_checkpoint(connect: Connect, job_id: str, *, fresh_code: bool = False) -> str:
     """Queue one checkpoint-safe retry of a failed Floor 12 job."""
     previous = _row(connect, job_id)
     if not previous or previous.get("status") != "failed":
@@ -428,7 +461,10 @@ def resume_checkpoint(connect: Connect, job_id: str) -> str:
     if agent not in SAFE_RETRY_AGENTS:
         return ""  # HELIOS discovery and FABULA voice are not blind-retry safe
 
-    new_id = _queue_copy(connect, previous)
+    new_id = _queue_copy(connect, previous, reserved=fresh_code)
+    if fresh_code:
+        pid = _launch_fresh_code_job(new_id)
+        return f"queued fresh-code checkpoint retry {new_id} (runner {pid})"
     return f"queued checkpoint retry {new_id}"
 
 
@@ -1428,6 +1464,8 @@ def heal_failure(connect: Connect, finding: Any) -> str:
         except Exception as exc:
             return f"{PENDING_PREFIX}verified engine repair; deployment/resume pending: {exc}"
     else:
-        action = resume_checkpoint(connect, finding.job_id)
+        action = resume_checkpoint(
+            connect, finding.job_id, fresh_code=bool(repair.get("reused_from_job")),
+        )
     prefix = f"{repair['cli']} repaired and committed {repair['commit']}"
     return f"{prefix}; {action}" if action else prefix
