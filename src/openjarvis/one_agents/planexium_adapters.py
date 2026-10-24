@@ -115,7 +115,13 @@ class LaoDraft:
         raise TimeoutError("LAO draft remains in flight; retry resumes its saved job instead of starting another")
 
     def subject_rejected(self, receipt: Path) -> bool:
-        """Only a confirmed pre-download title mismatch may advance a candidate."""
+        """Only a confirmed pre-download rejection/unavailable preview may advance.
+
+        A missing catalog preview is scoped to the selected Envato result, not
+        the authored scene or the production.  Advancing to the next bounded
+        candidate is therefore safe; download/authentication failures still
+        stop the mission so the governor never creates a paid duplicate.
+        """
         if not receipt.is_file():
             return False
         saved = json.loads(receipt.read_text(encoding="utf-8"))
@@ -130,7 +136,8 @@ class LaoDraft:
             or "Rejected asset: forbidden visual keyword(s)" in error
             or ("Rejected asset: visual subject " in error and " absent from " in error)
             or ("Rejected asset: destination phrase " in error and " absent from " in error)
-            or "Rejected asset: preview does not confidently support selected-item metadata and subject" in error))
+            or "Rejected asset: preview does not confidently support selected-item metadata and subject" in error
+            or "Asset preview unavailable" in error))
 
     def artifact(self, outputs: dict, job_id: str, filename: str) -> Path:
         # Reuse the same artifact lookup as current Sonia production. Never
