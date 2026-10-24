@@ -13,10 +13,21 @@ def ares_json(prompt, payload):
     """Use the stronger installed local model for scientific editorial wording."""
     from openjarvis.one_agents import local_llm
     available = local_llm.installed()
+    last = None
     for model in ("qwen3:8b", "qwen3.5:9b"):
         if model in available:
-            return local_llm.chat_json(model, prompt, payload, temperature=0.1, num_ctx=8192, timeout=900)
-    return ollama_json(prompt, payload)
+            try:
+                return local_llm.chat_json(model, prompt, payload, temperature=0.1, num_ctx=8192, timeout=900)
+            except Exception as exc:  # one unhealthy local model must not strand the finished video
+                last = exc
+    # The ordinary SEO ladder can use another installed CPU model. Preserve
+    # the final error only when no fallback model can produce valid JSON.
+    try:
+        return ollama_json(prompt, payload)
+    except Exception:
+        if last is not None:
+            raise last
+        raise
 
 
 def digest(path):
