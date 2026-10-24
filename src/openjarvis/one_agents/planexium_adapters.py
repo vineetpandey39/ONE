@@ -399,6 +399,13 @@ def concrete_stock_brief(request):
         # Keep the aerodynamic context, but require the concrete object that
         # can actually be verified in metadata and preview frames.
         request.update(query="aircraft wing aerodynamics", subject="wing")
+    elif subject == "cupola":
+        # Catalog stemming turns "cupola" into cupcake results, while valid
+        # ISS-window footage is normally titled as a space-station window or
+        # Earth view.  Require those visible objects, not an astronaut who is
+        # optional to the authored establishing shot.
+        request.update(query="space station window earth", subject="window")
+        request["blocked_keywords"] += ["cupcake", "cake", "frosting", "bakery"]
     elif subject == "laboratory" and "engineer" in query:
         # A laboratory is background context; the authored shot asks for the
         # person doing the aerospace work.  Requiring "engineer" rejects an
