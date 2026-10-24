@@ -21,6 +21,7 @@ CHANNEL_NAME = "Sonia Travel Vlogs"
 CHANNEL_LINK_SELECTOR = f'a[href*="/channel/{CHANNEL_ID}"]'
 THUMBNAIL_LOADER_SELECTOR = "input#file-loader[type='file'][accept*='image']"
 UPLOADED_THUMBNAIL_SELECTOR = "[aria-label='Uploaded thumbnail']"
+THUMBNAIL_EDITOR_SELECTOR = "ytcp-thumbnail-editor:visible"
 THUMBNAIL_SECTION_TEXT = "Thumbnail"
 UPLOAD_FILE_TEXT = "Upload file"
 SONIA_BROWSER_DIR = Path(os.environ.get("SONIA_BROWSER_DIR") or r"C:\Users\pc\Documents\LAO\sonia-community")
@@ -56,6 +57,29 @@ def _selected_uploaded_thumbnail(page) -> dict[str, Any]:
           return {present:true, selected, attrs, image_src:image?.currentSrc || image?.src || null};
         }"""
     )
+
+
+def _wait_for_uploaded_thumbnail_evidence(
+    page, *, timeout: int = 45_000
+) -> dict[str, Any]:
+    """Wait for persisted thumbnail data without requiring its hover overlay."""
+    uploaded = page.locator(UPLOADED_THUMBNAIL_SELECTOR).first
+    uploaded.wait_for(state="attached", timeout=timeout)
+    page.wait_for_function(
+        """selector => [...document.querySelectorAll(selector)].some(node => {
+          const image = node.querySelector('img');
+          return Boolean(image?.currentSrc || image?.src);
+        })""",
+        arg=UPLOADED_THUMBNAIL_SELECTOR,
+        timeout=timeout,
+    )
+    evidence = _selected_uploaded_thumbnail(page)
+    if not evidence.get("present") or not evidence.get("image_src"):
+        raise RuntimeError(
+            "Studio save returned but the exact video's uploaded thumbnail "
+            "could not be verified after reload"
+        )
+    return evidence
 
 
 def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | None = None) -> dict[str, Any]:
@@ -140,16 +164,15 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
             page.locator(CHANNEL_LINK_SELECTOR).first.wait_for(state="attached", timeout=45_000)
             if f"/video/{video_id}/edit" not in page.url:
                 raise RuntimeError("Studio thumbnail verification left the exact video details page")
-            uploaded = page.locator(UPLOADED_THUMBNAIL_SELECTOR).first
-            uploaded.wait_for(state="visible", timeout=45_000)
-            uploaded.scroll_into_view_if_needed(timeout=30_000)
-            evidence = _selected_uploaded_thumbnail(page)
-            if not evidence.get("present"):
-                raise RuntimeError(
-                    "Studio save returned but the exact video's uploaded thumbnail was not visible after reload"
-                )
+            # The preview button is a hover overlay and is normally hidden
+            # after reload.  Verify its persisted image data instead of
+            # treating overlay visibility as upload state.
+            evidence = _wait_for_uploaded_thumbnail_evidence(page)
             proof = receipt_path.with_suffix(".png")
-            uploaded.screenshot(path=str(proof))
+            editor = page.locator(THUMBNAIL_EDITOR_SELECTOR).first
+            editor.wait_for(state="visible", timeout=30_000)
+            editor.scroll_into_view_if_needed(timeout=30_000)
+            editor.screenshot(path=str(proof))
         finally:
             page.close()
 
