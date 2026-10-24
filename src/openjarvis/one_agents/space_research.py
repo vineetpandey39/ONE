@@ -116,7 +116,7 @@ def validate_script(plan: dict, evidence: dict) -> None:
             raise ValueError("Claim IDs must be unique and statements nonempty")
         source = sources.get(claim.get("source_id"))
         quote = " ".join(str(claim.get("evidence_quote", "")).split())
-        if not source or len(quote) < 12 or quote.casefold() not in source["text"].casefold():
+        if not source or len(quote) < 12 or not _evidence_quote_matches(quote, source["text"]):
             raise ValueError("Claim evidence quote is absent from its fetched primary source")
         known[claim["id"]] = (claim, source)
     for scene in scenes:
@@ -138,6 +138,16 @@ def validate_script(plan: dict, evidence: dict) -> None:
             validate_url(scene.get("url", ""))
             if scene["url"] not in {known[ref][1]["url"] for ref in refs}:
                 raise ValueError("OBS scene URL must be its referenced primary source")
+
+
+def _evidence_quote_matches(quote: str, source: str) -> bool:
+    """Allow only typographic/Markdown transport differences in a verbatim quote."""
+    def normalized(value: str) -> str:
+        value = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r"\1", value)
+        value = value.replace("\ufffd", " ")
+        value = re.sub(r"[^\w]+", " ", value.casefold(), flags=re.UNICODE)
+        return " ".join(value.split())
+    return normalized(quote) in normalized(source)
 
 
 def writer_prompt(topic: str, evidence: dict) -> str:

@@ -277,6 +277,9 @@ class Pipeline:
             if plan is None and self.writer is None:
                 raise RuntimeError("Science writer binding required")
             result = plan if plan is not None else self.writer(space_research.writer_prompt(commission["topic"], evidence))
+            # Preserve rejected provider output so HELIOS can diagnose the
+            # actual claim/scene instead of receiving only a generic traceback.
+            _write(self.context.artifact("script-draft.json"), result)
             space_research.validate_script(result, evidence)
             path = self.context.artifact("science-plan.json")
             _write(path, result)
