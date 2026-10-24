@@ -18,6 +18,7 @@ from typing import Any
 
 CHANNEL_ID = "UCyqSprXlCEpBXMQRdkstLqA"
 CHANNEL_NAME = "Sonia Travel Vlogs"
+CHANNEL_LINK_SELECTOR = f'a[href*="/channel/{CHANNEL_ID}"]'
 SONIA_BROWSER_DIR = Path(os.environ.get("SONIA_BROWSER_DIR") or r"C:\Users\pc\Documents\LAO\sonia-community")
 VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
@@ -88,7 +89,11 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
         page.set_default_timeout(30_000)
         try:
             page.goto(studio_url, wait_until="domcontentloaded", timeout=90_000)
-            page.get_by_text(CHANNEL_NAME, exact=True).first.wait_for(timeout=45_000)
+            # Studio's current video-details shell no longer renders the
+            # channel name as visible text.  The persistent Sonia session does
+            # expose exact channel navigation links, which are a stronger
+            # identity check than a translated/hidden display label.
+            page.locator(CHANNEL_LINK_SELECTOR).first.wait_for(state="attached", timeout=45_000)
             loader = page.locator("input#file-loader[type='file'][accept*='image']").first
             loader.wait_for(state="attached", timeout=45_000)
             loader.set_input_files(str(thumbnail))
@@ -98,7 +103,7 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
             save.click()
             page.wait_for_function("() => document.querySelector('button[aria-label=\"Save\"]')?.disabled === true", timeout=60_000)
             page.reload(wait_until="domcontentloaded", timeout=90_000)
-            page.get_by_text(CHANNEL_NAME, exact=True).first.wait_for(timeout=45_000)
+            page.locator(CHANNEL_LINK_SELECTOR).first.wait_for(state="attached", timeout=45_000)
             evidence = _selected_uploaded_thumbnail(page)
             expected_image_path = f"/vi/{video_id}/"
             if (not evidence.get("present")
