@@ -6599,6 +6599,14 @@ def _run_vista(job: dict[str, Any]) -> dict[str, Any]:
     stages.worker_confirms_receipt("vista", f"Received HELIOS's researched {slot} Short brief")
     try:
         stages.set_stage("vista", stages.EXECUTING, "Producing the slot-bound vertical Short and QC package")
+        # VISTA's production runner checkpoints by this job's stable story slug
+        # and reuses its saved spec, narration segments and acquired clips on a
+        # retry.  Register that durable ownership before entering the runner so
+        # restart recovery can requeue this same job instead of treating it as
+        # an unknown external start and abandoning the checkpoint.
+        recovery_id = job_recovery.resume_target(job) or f"vista:{job['id']}"
+        job_recovery.attach(_connect, str(job["id"]), recovery_id,
+                            kind="vista_checkpoint")
         runner = _load_vista_runner()
         stages.set_stage("vista", stages.EXECUTING, "Researching and writing the Short with LAO's ChatGPT")
         from openjarvis.one_agents import resource_lanes
@@ -10464,10 +10472,15 @@ def _govern(job: dict[str, Any]) -> dict[str, Any] | None:
     job_id = job.get("id", "")
 
     attempt_key = f"job:{job_id}"
-    # Login recovery is a new execution attempt of the same durable task,
-    # not a new manuscript or approval. The queue owns the attempt counter.
-    if agent_id == "imprimatur" and int(job.get("resume_count") or 0) > 0:
-        attempt_key += f":resume:{int(job['resume_count'])}"
+    # A checkpoint recovery is a new execution attempt of the same durable
+    # task, not a repeat of its paid work.  The queue owns the attempt counter;
+    # the external reference proves the handler can reattach/resume.  Login
+    # recovery remains the one checkpoint flow whose durable state is stored
+    # outside external_job.
+    resume_count = int(job.get("resume_count") or 0)
+    if resume_count > 0 and (agent_id == "imprimatur"
+                             or bool(job_recovery.resume_target(job))):
+        attempt_key += f":resume:{resume_count}"
     repeat = floors_bridge.claim_once(attempt_key, event_type="job.execute")
     if repeat is False:
         return {"governed": "refused",
