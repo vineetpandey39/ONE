@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 from dataclasses import replace, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -830,7 +830,27 @@ def stage_private(payload: dict, *, approval_db: Path | None = None, adapter=Non
         lao = Path(config.get("lao_root") or Path.home() / "Documents" / "LAO")
         adapter = ExistingPrivateUploader(lao / "yatra-upload" / "youtube_api_upload.py",
             credential_asset=config["credential_asset"], channel_id=channel, synthetic=approved.get("synthetic"))
-    return ProductionServices(context).upload_private(package, expected_channel_id=channel, adapter=adapter, authorized=True)
+    result = ProductionServices(context).upload_private(
+        package, expected_channel_id=channel, adapter=adapter, authorized=True)
+    # Distribution is a separate durable stage from production and public
+    # review.  Record the private draft immediately so Floor 12 never shows a
+    # completed ECHO upload beside stale ``awaiting_review`` production state.
+    health_path = context.artifact("production-health.json")
+    health = json.loads(health_path.read_text(encoding="utf-8")) if health_path.exists() else {}
+    health.update(status="uploaded_private", current_stage="review", production_complete=True,
+                  uploaded=True, published=False, public_publish_authorized=False,
+                  private_video_id=result.get("video_id"), blocked_reason=None, error_class=None,
+                  updated_at=datetime.now(timezone.utc).isoformat())
+    _write(health_path, health)
+    gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    gate.update(private_upload_complete=True, private_video_id=result.get("video_id"),
+                public_publish_authorized=False)
+    _write(gate_path, gate)
+    ledger_path = context.root.parent / "production-ledger.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.exists() else {}
+    ledger.setdefault(context.mission_id, {})["status"] = "uploaded_private"
+    _write(ledger_path, ledger)
+    return result
 
 
 def _channel_uploader(config: dict, ledger: Path):

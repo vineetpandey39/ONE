@@ -42,6 +42,7 @@ class ExistingPrivateUploader:
         self.synthetic = synthetic
 
     def __call__(self, *, package: dict, expected_channel_id: str, privacy: str, ledger: Path) -> dict:
+        import hashlib
         import importlib.util
         from openjarvis.one_agents.planexium_seo import require_seo
         require_seo(package)
@@ -51,6 +52,23 @@ class ExistingPrivateUploader:
         if (privacy != "private" or package.get("upload", {}).get("privacyStatus") != "private"
                 or package.get("upload", {}).get("publishAt") or package.get("public_publish_authorized")):
             raise PermissionError("Existing uploader adapter accepts private drafts only")
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        master = Path(package["master"])
+        # A process can die after YouTube accepts the private draft but before
+        # PLANEXIUM updates its health file.  Reconcile from the uploader's
+        # durable master-hash ledger instead of calling YouTube again and
+        # surfacing its duplicate refusal as a new production failure.
+        master_sha256 = hashlib.sha256(master.read_bytes()).hexdigest()
+        try:
+            prior = json.loads(ledger.read_text(encoding="utf-8")).get(master_sha256) or {}
+        except (OSError, ValueError):
+            prior = {}
+        if prior.get("video_id") and prior.get("privacy") == "private":
+            return {"executed": False, "already_uploaded_as": prior["video_id"],
+                    "video_id": prior["video_id"], "title": prior.get("title"),
+                    "privacy": "private", "thumbnail_set": prior.get("thumbnail_set", False),
+                    "studio_url": f"https://studio.youtube.com/video/{prior['video_id']}/edit",
+                    "published": False, "reconciled_from_ledger": True}
         spec = importlib.util.spec_from_file_location(f"channel_uploader_{uuid.uuid4().hex}", self.script)
         if spec is None or spec.loader is None:
             raise RuntimeError("Installed YouTube uploader is unavailable")
@@ -60,8 +78,6 @@ class ExistingPrivateUploader:
         module.ASSET = self.credential_asset
         module.EXPECTED_CHANNEL_ID = self.channel_id
         module.LEDGER = ledger
-        ledger.parent.mkdir(parents=True, exist_ok=True)
-        master = Path(package["master"])
         package_path = master.parent / "channel-upload-package.json"
         package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
         return module.run(
