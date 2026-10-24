@@ -155,7 +155,7 @@ def writer_prompt(topic: str, evidence: dict) -> str:
         "Write an original English science video for The Planexium using only the supplied evidence. "
         "No travel branding or host portrait. Do not claim an illustration is a real observation. "
         "Distinguish uncertainty and mission proposals from confirmed results. All factual sentences must "
-        "be supported by scene claim_ids. For the normal daily episode, aim for 900-1500 words in 10-16 scenes, about 8-12 minutes. Never pad a short source: the narration must earn its length with independent evidence, distinct scientific ideas and relevant visuals. "
+        "be supported by scene claim_ids. For the normal daily episode, write 900-1200 narration words in exactly 10-12 scenes, about 8-12 minutes. Use no more than 12 claims; reuse a supported claim across scenes instead of duplicating it. Keep claim statements and exact evidence quotes concise so the complete JSON stays below 12000 output tokens. Never pad a short source: the narration must earn its length with independent evidence, distinct scientific ideas and relevant visuals. "
         "Design a footage-rich documentary: most scenes should support two or three short motion-footage beats, while official NASA/government images are reserved for evidence that stock cannot honestly represent. "
         "Do not make archival stills the dominant visual language. Return only BEGIN_PLANEXIUM_JSON followed "
         "by JSON and END_PLANEXIUM_JSON. JSON keys: brand "
