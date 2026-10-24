@@ -47,7 +47,13 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
             remaining -= seconds
             used.add(asset['sha256'])
         pictures = [r for r in rows if 'seconds' not in r]
-        needed = max(1, math.ceil(remaining / 9))
+        # A still receives a restrained pan/zoom in the cinematic assembler.
+        # Fifteen seconds is the upper editorial beat; the previous nine-second
+        # divisor could require more NASA images than the three authored
+        # archive queries can supply when valid licensed clips are short.
+        # The assembler adds a restrained pan/zoom, so this remains a moving
+        # visual beat rather than a static card.
+        needed = max(1, math.ceil(remaining / 15))
         # Prefer direct imagery from the commissioned official article before
         # searching an archive. These are original source figures, not captures.
         for asset in media.get(str(number),{}).get('assets',[]):
