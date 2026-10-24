@@ -73,6 +73,8 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
         "thumbnail (string): when `thumbnails` is supplied, the name of the one thumbnail whose on-image text "
         "and idea make the same promise as your title; the title and that thumbnail must be about the same "
         "thing (a distance title goes with the distance thumbnail, not with an airflow question). "
+        "When `required_titles` is supplied, copy exactly one of those titles; do not combine quantities from "
+        "different title candidates. "
         "comment (string): the channel's first comment under this video: one question to viewers about this "
         "video's own subject (name it), 30-220 characters, ending with '?', no links or hashtags. "
         "Do not claim the crew are physically on Mars. Return plain Unicode, no mojibake.")
@@ -91,6 +93,9 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
     rendered = [v for v in package.get("thumbnail_experiment", {}).get("variants", [])
                 if v.get("name") in concepts and v.get("path") and Path(v["path"]).is_file()]
     preferred = max(rendered, key=lambda row: float((row.get('score') or {}).get('score', 0))) if rendered else None
+    preferred_hook = str(concepts.get(preferred.get("name"), {}).get("text") or "") if preferred else ""
+    required_titles = [str(t) for t in package.get("title_variants", [])
+                       if title_matches_thumbnail_promise(str(t), preferred_hook)] if preferred_hook else []
     thumbnails = [{"name": v["name"], "text": concepts[v["name"]].get("text"),
                    "idea": concepts[v["name"]].get("left_usp")} for v in rendered]
     errors = None
@@ -100,6 +105,7 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
                           "current_title": package["recommended_title"],
                           "thumbnails": thumbnails or None,
                           "required_thumbnail": preferred["name"] if preferred else None,
+                          "required_titles": required_titles or None,
                           "editorial_feedback": editorial_feedback,
                           "previous_validation_error": errors})
         try:
@@ -121,6 +127,8 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
                 hook = str(concepts[chosen["name"]].get("text") or "")
                 if not title_matches_thumbnail_promise(title, hook):
                     raise ValueError("title must state the winning thumbnail's numeric/topic promise")
+                if required_titles and title.casefold() not in {t.casefold() for t in required_titles}:
+                    raise ValueError("title must use the matching factual title candidate verbatim")
                 result["thumbnail_path"] = chosen["path"]
                 result["thumbnail_pairing"] = {"thumbnail": chosen["name"], "title": title, "chosen_by": "ARES"}
             opening = str(out["opening"]).strip()
