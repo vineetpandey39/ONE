@@ -6225,7 +6225,13 @@ def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
 
             stages.set_stage("ares", stages.CARRYING_TO_HEAD,
                              "Taking the QC-passed Short package to ECHO for private upload")
-            handoff_key = f"vista:{origin}:{slot}:publish"
+            # The trigger origin identifies the commissioned story, not the
+            # concrete rebuilt cut.  A later VISTA successor for that story
+            # must not inherit the completed ECHO job from the withdrawn cut.
+            # The originating VISTA job is stable across retries of this ARES
+            # stage and unique across intentional rebuilds.
+            vista_job_id = str(payload.get("vista_job") or job.get("id") or "")
+            handoff_key = f"vista:{origin}:{slot}:{vista_job_id}:publish"
             if payload.get("rebuild_run_dir"):
                 import hashlib
                 master = Path(str(result.get("master") or ""))
@@ -6374,7 +6380,10 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
                             "output": str(package)}, ensure_ascii=False),
                 mode="report",
                 tier="fast",
-                dedupe_key=f"vista:{payload.get('origin_job')}:{slot}:distribution-report",
+                dedupe_key=(
+                    f"vista:{payload.get('origin_job')}:{slot}:"
+                    f"{payload.get('vista_job') or job.get('id')}:distribution-report"
+                ),
             )
             return {"agent": "ECHO", "stage": "vista_short_publish", "status": "uploaded_private",
                     "video_id": upload_report.get("video_id"), "studio_url": upload_report.get("studio_url"),
@@ -6527,7 +6536,14 @@ def _run_vista(job: dict[str, Any]) -> dict[str, Any]:
             "ares", json.dumps({**payload, "stage": "vista_thumbnail_seo", "handoff": handoff,
                                  "publish_authorized": True, "trigger_id": trigger_id,
                                  "vista_job": job.get("id")}),
-            mode="execute", tier="fast", dedupe_key=f"vista:{origin}:{slot}:thumbnail-seo")
+            # A saved HELIOS brief may be intentionally rebuilt after its private
+            # draft is withdrawn.  The HELIOS origin is still the same authentic
+            # trigger receipt, but the VISTA run and handoff are new.  Keying only
+            # on origin+slot returned the *completed ARES job from the old cut*,
+            # silently stranding the fresh handoff.  Keep retries of this exact
+            # VISTA job idempotent while allowing a later VISTA successor to move.
+            mode="execute", tier="fast",
+            dedupe_key=f"vista:{origin}:{slot}:{job.get('id')}:thumbnail-seo")
         return {"agent": "VISTA", **result,
                 "handed_to": {"agent": "ARES", "job_id": ares_job["id"]}}
     finally:
