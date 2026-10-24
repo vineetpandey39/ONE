@@ -79,6 +79,12 @@ def build(*, subject: str, title: str, metadata: dict[str, Any], chapters: list[
         "tags": ranked_tags(subject, metadata, title), "hashtags": hashtags(subject, metadata),
         "chapters": selected_chapters, "original_chapter_count": len(chapters), "sources": sources, "seo_owner": "ARES",
         "strategy": "unique_story_promise_plus_subject_search_intent_v1",
+        "post_publish_learning": {
+            "minimum_wait": "Wait for processed traffic-source and retention data; never infer causation from a few views.",
+            "compare": ["impressions", "ctr_by_traffic_source", "youtube_search_terms", "intro_30s",
+                        "average_view_duration", "average_percentage_viewed", "suggested_video_sources"],
+            "decision": "Record the metadata change, timestamp, before/after window, hypothesis and one next-video test.",
+        },
     }
     errors = audit(package, subject)
     if errors:
