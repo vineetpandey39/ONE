@@ -3837,8 +3837,15 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         region = _marker(brief, "REGION", "global").lower()
         angle = _marker(brief, "ANGLE")
 
+    # The book's own identity, and nothing else. This used to append the whole
+    # `brief` as well, which made the lane gate decorative: on 2026-10-23 "The
+    # Business Plan Workbook: Build Your Roadmap in 30 Days" passed it on a
+    # single match - the series label the model had just written itself. Its
+    # title, buyer ("aspiring entrepreneur") and purchase query ("business plan
+    # book pdf") are nowhere near the lane, and on these four fields it fails.
     authority = publishing_strategy.authority_fit(
-        "\n".join((_marker(brief, "TITLE"), angle, _marker(brief, "PURCHASE_QUERY"), brief))
+        "\n".join((_marker(brief, "TITLE"), angle, _marker(brief, "BUYER"),
+                   _marker(brief, "PURCHASE_QUERY")))
     )
     selected_series = _marker(brief, "SERIES")
     allowed_series = {

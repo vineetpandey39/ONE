@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import sqlite3
+import sys
 import time
 import zipfile
 from contextlib import nullcontext
@@ -210,7 +211,7 @@ class ChatGPTAdapter:
         prompt=('Act as a factual space documentary editor. Return JSON between BEGIN_PLANEXIUM_EDIT and END_PLANEXIUM_EDIT. '
             'Schema: {"music_query":"cinematic instrumental no vocals ...","stock_requests":[{"query":"2-5 catalog search words",'
             '"subject":"one literal word that must appear in a relevant asset title","title":"episode title","blocked_keywords":["cartoon","wildlife"]}]}. '
-            'Give 6-8 diverse, topic-relevant Envato footage/animation briefs. Prefer concrete visual subjects: astronaut, rover, '
+            'Give 16-24 diverse, topic-relevant Envato footage/animation briefs for an 8-12 minute film. Prefer concrete visual subjects: astronaut, rover, '
             'planet, observatory, mission hardware, actual environments. No abstract typography or text cards. '
             'Stock is illustrative, not evidence of the documented mission; do not rely on on-screen provider labels. '
             'Use visible, catalog-searchable nouns rather than inferred actions: laptop for email, treadmill for exercise, '
@@ -218,9 +219,9 @@ class ChatGPTAdapter:
             'research as the only context. For Earth analog missions, use ordinary laboratory, crop and exercise imagery '
             'instead of astronaut costumes in cities or fantasy Mars colonies. Put costume, comedy, humor and urban '
             'in blocked_keywords for astronaut training briefs. Never imply that generic footage is the actual crew. '
-            'Also include scene_assets: an object mapping EVERY 1-based scene number string to 0-2 relevant ZERO-based stock_requests indexes; use an empty list when archive imagery is more appropriate. Each stock index belongs to at most one scene. '
-            'Also include scene_visuals mapping EVERY scene number to 3-5 DIFFERENT concise NASA archive image search queries, each directly relevant to that scene narration. Avoid multiple near-identical views. These are archival context, not evidence of the current event. '
-            'Do not reuse stock indexes across scenes: choose the most relevant scene for each clip. '
+            'Also include scene_assets: an object mapping EVERY 1-based scene number string to 0-3 relevant ZERO-based stock_requests indexes; use an empty list only when official evidence imagery is essential. Each stock index belongs to at most one scene. '
+            'Also include scene_visuals mapping EVERY scene number to 1-3 DIFFERENT concise NASA archive image search queries, each directly relevant to that scene narration. NASA imagery is supporting evidence and must not dominate the cut. Avoid multiple near-identical views. '
+            'Assign every stock index exactly once and do not reuse it across scenes: choose the most relevant scene for each clip. '
             'Also include packaging: {claim_ids:[supported claim IDs],focus_scene:1-based scene number,viewer_question:string,description_opening:two source-grounded sentences that explain the hook,titles:[three titles],concepts:[three objects with name,text,left_usp,composition,visual_direction]}. '
             'Choose the strongest unusual visual or scientific question in THIS episode, not a generic ISS/planet illustration. '
             'Titles and thumbnail text must complement rather than repeat each other; create specific curiosity that the narration actually resolves. '
@@ -237,25 +238,30 @@ class ChatGPTAdapter:
             'timeout_ms':360000,'as':'editorial_plan'}}]
         out,_=self.draft.run('planexium-science-script-editorial',steps,{},self.context.artifact('receipts/editorial.json'))
         result=_marked_json(out.get('editorial_plan'), 'BEGIN_PLANEXIUM_EDIT', 'END_PLANEXIUM_EDIT')
-        if not isinstance(result.get('music_query'),str) or not 6<=len(result.get('stock_requests',[]))<=8:
-            raise ValueError('Editorial plan needs music and 6-8 relevant footage briefs')
+        if not isinstance(result.get('music_query'),str) or not 16<=len(result.get('stock_requests',[]))<=24:
+            raise ValueError('Editorial plan needs music and 16-24 relevant footage briefs')
         for request in result['stock_requests']:
             if not all(isinstance(request.get(k),str) and request[k].strip() for k in ['query','subject']):
                 raise ValueError('Editorial footage brief missing query/subject')
             request['title']=science['video_title']
             request['blocked_keywords']=list(set(request.get('blocked_keywords',[])+['seagull','wildlife','cartoon']))
-        result['revision']='unique-footage-v2'
+        result['revision']='motion-rich-v3'
+        result['visual_policy']={'target_minutes':[8,12],'stock_clips':[16,24],
+            'stock_per_scene':3,'archive_shot_ratio_max':0.40,'envato_failure_threshold':10,
+            'fallback_providers':['Pexels','Pixabay']}
         mapping=result.get('scene_assets',{})
         if set(mapping)!={str(i) for i in range(1,len(science['scenes'])+1)} or any(
-            not isinstance(v,list) or len(v)>2 or any(type(i) is not int or not 0<=i<len(result['stock_requests']) for i in v)
+            not isinstance(v,list) or len(v)>3 or any(type(i) is not int or not 0<=i<len(result['stock_requests']) for i in v)
             for v in mapping.values()):raise ValueError('Editorial plan lacks a valid per-scene footage mapping')
         assigned=[i for indexes in mapping.values() for i in indexes]
         if len(assigned)!=len(set(assigned)):
             raise ValueError('An illustrative stock clip cannot be assigned to multiple scenes')
+        if set(assigned)!=set(range(len(result['stock_requests']))):
+            raise ValueError('Every requested stock clip must be assigned to exactly one scene')
         from openjarvis.one_agents.planexium_packaging import validate_packaging
         validate_packaging(result.get('packaging'),science)
         visuals=result.get('scene_visuals',{})
-        if set(visuals)!=set(mapping) or any(not isinstance(v,list) or not 3<=len(v)<=5 or any(not isinstance(q,str) or not q.strip() for q in v) for v in visuals.values()):
+        if set(visuals)!=set(mapping) or any(not isinstance(v,list) or not 1<=len(v)<=3 or any(not isinstance(q,str) or not q.strip() for q in v) for v in visuals.values()):
             raise ValueError('Editorial plan requires distinct per-scene archive queries')
         return result
 
@@ -438,9 +444,54 @@ def verified_stock_subject(title, subject, outputs):
 
 
 class EnvatoAdapter:
-    def __init__(self, draft: LaoDraft, workflow: Path, context, queue: Path, provider_lock: Path, *, wait_seconds=0, profile_root=None):
+    def __init__(self, draft: LaoDraft, workflow: Path, context, queue: Path, provider_lock: Path, *, wait_seconds=0,
+                 profile_root=None, failure_limit=10, free_stock=None):
         self.draft, self.workflow, self.context = draft, workflow, context
         self.queue, self.provider_lock, self.wait_seconds, self.profile_root = queue, provider_lock, wait_seconds, profile_root
+        self.failure_limit, self.free_stock = int(failure_limit), free_stock or self._yatra_free_stock
+
+    def _yatra_free_stock(self, request, index, output_root):
+        """Reuse YATRA's vetted Pexels/Pixabay client after an Envato brief is genuinely exhausted."""
+        import importlib.util
+        helper_root = self.workflow.parent
+        helper_path = helper_root / "stuck_shot.py"
+        acquire_path = helper_root / "acquire_scenes.py"
+        if not helper_path.is_file() or not acquire_path.is_file():
+            raise RuntimeError("YATRA free-stock fallback is unavailable")
+        if str(helper_root) not in sys.path:
+            sys.path.insert(0, str(helper_root))
+        spec = importlib.util.spec_from_file_location("stuck_shot", helper_path)
+        helper = importlib.util.module_from_spec(spec); sys.modules["stuck_shot"] = helper; spec.loader.exec_module(helper)
+        spec = importlib.util.spec_from_file_location("planexium_yatra_acquire", acquire_path)
+        acquire = importlib.util.module_from_spec(spec); spec.loader.exec_module(acquire)
+        folder = Path(output_root) / f"scene-{index}"
+        folder.mkdir(parents=True, exist_ok=True)
+        blocked = ["fantasy", "surreal", "alien", *request.get("blocked_keywords", [])]
+        for name, key_fn, asset_name, search, prefix, download in (
+            ("Pexels", helper.pexels_key, helper.PEXELS_ASSET, helper.pexels_search,
+             helper.PEXELS_PREFIX, helper.pexels_download),
+            ("Pixabay", helper.pixabay_key, helper.PIXABAY_ASSET, helper.pixabay_search,
+             helper.PIXABAY_PREFIX, helper.pixabay_download)):
+            key = key_fn(acquire.resolve_vault_asset)
+            if not key:
+                continue
+            for query in dict.fromkeys((request["query"], request["subject"])):
+                try:
+                    hits = search(key, query)
+                except Exception:
+                    continue
+                picked = helper.pixabay_pick(hits, request["subject"], helper.used_ids(output_root, prefix), blocked, 3.0)
+                if not picked:
+                    continue
+                hit, subject_named = picked
+                path = download(hit, folder, output_root, query, subject_named)
+                measured = probe_stock(path)
+                return {"provider": name, "path": str(path), "job_id": None, "query": request["query"],
+                    "title": str(hit.get("tags") or request["subject"]), "catalog_query": query,
+                    "illustrative": True, "rights_review_required": True, "subject_evidence": subject_named,
+                    "source_url": str(hit.get("pageURL") or ""), "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    **measured}
+        raise RuntimeError(f"Envato failed {self.failure_limit} quality-reviewed candidates and no usable Pexels/Pixabay fallback was available")
 
     def accepted(self, index, request):
         saved = self.context.artifact(f"acquired/stock-{index}.json")
@@ -532,12 +583,13 @@ class EnvatoAdapter:
                         key = str(step.get("args", {}).get("forbidden", ""))
                         if key == "{{input.blockedTitleKeywords}}":step["args"]["forbidden"] = inputs["blockedTitleKeywords"]
                         if key == "{{input.previouslyDownloadedTitles}}":step["args"]["forbidden"] = inputs["previouslyDownloadedTitles"]
-                for candidate in range(first_candidate, first_candidate + 6):
-                    fallback = candidate >= first_candidate + 3
+                fallback_row = None
+                for candidate in range(first_candidate, first_candidate + self.failure_limit):
+                    fallback = candidate >= first_candidate + max(1, self.failure_limit // 2)
                     catalog_query = str(request["subject"]) if fallback else query
                     inputs["envatoQuery"] = catalog_query
                     inputs["envatoQueryUrl"] = quote_plus(catalog_query)
-                    inputs["resultIndex"] = str(candidate - first_candidate - 2 if fallback else candidate)
+                    inputs["resultIndex"] = str(candidate - first_candidate - max(1, self.failure_limit // 2) + 1 if fallback else candidate)
                     # v5 binds the receipt namespace to the concrete-subject
                     # policy above.  A v3 failed job was launched with a
                     # materially different brief; trying to attach it to the
@@ -553,11 +605,22 @@ class EnvatoAdapter:
                     except RuntimeError:
                         if not self.draft.subject_rejected(receipt):
                             raise
-                        if candidate == first_candidate + 5:
-                            raise RuntimeError("Six Envato candidates across two queries failed quality gates; revise the brief") from None
+                        if candidate == first_candidate + self.failure_limit - 1:
+                            fallback_row = self.free_stock(request, index, Path(output_root))
+                            break
                         # The failed candidate ended before any paid/download step.
                         # Keep its receipt; the next distinct result gets its own job.
 
+                if fallback_row is not None:
+                    if fallback_row["sha256"] in hashes:
+                        raise ValueError("Free-stock fallback returned a duplicate source")
+                    hashes.add(fallback_row["sha256"]); titles.append(fallback_row["title"])
+                    saved = self.context.artifact(f"acquired/stock-{index}.json")
+                    saved.parent.mkdir(parents=True, exist_ok=True)
+                    saved.write_text(json.dumps({"request_hash": fingerprint(original_request), "asset": fallback_row,
+                        "effective_brief": request, "candidate": self.failure_limit, "fallback_after_envato_failures": self.failure_limit}, indent=2), encoding="utf-8")
+                    receipts.append(fallback_row)
+                    continue
                 path = Path(output_root) / f"scene-{index}" / f"planexium-scene-{index}.mp4"
                 if not path.is_file():
                     source = self.draft.artifact(out, job, path.name)

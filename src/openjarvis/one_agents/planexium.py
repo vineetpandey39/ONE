@@ -286,6 +286,13 @@ class Pipeline:
             return result, [path]
         science = self.stage("script", {"commission": commission, "evidence": evidence, "supplied_plan": plan}, write_script)
         space_research.validate_script(science, evidence)
+        episode_policy = self.config.get("episode_policy") or {}
+        if episode_policy and not pilot:
+            words = sum(len(str(scene.get("narration", "")).split()) for scene in science["scenes"])
+            minimum_words = int(episode_policy.get("target_words", [900])[0])
+            minimum_scenes = int(episode_policy.get("target_scenes", [10])[0])
+            if words < minimum_words or len(science["scenes"]) < minimum_scenes:
+                raise ValueError(f"Long-form gate: script has {words} words/{len(science['scenes'])} scenes; needs at least {minimum_words}/{minimum_scenes}")
         if not pilot and not any(s.get("visual_kind") == "stock" for s in science["scenes"]):
             raise ValueError("Full productions require at least one licensed Envato stock scene; pilot exemption only")
         def speak():
@@ -301,6 +308,12 @@ class Pipeline:
         if self.config.get("voice"):
             voice_request["settings"] = self.config["voice"]
         voice = self.stage("narration", voice_request, speak)
+        if episode_policy and not pilot:
+            total_seconds = sum(float(segment["seconds"]) for segment in voice["segments"])
+            minimum_seconds = float(episode_policy.get("target_minutes", [8])[0]) * 60 * 0.875
+            maximum_seconds = float(episode_policy.get("target_minutes", [8, 12])[-1]) * 60 * 1.10
+            if not minimum_seconds <= total_seconds <= maximum_seconds:
+                raise ValueError(f"Long-form gate: measured narration is {total_seconds/60:.1f} minutes; target is 8-12 minutes")
         if self.director and (self.context.artifact("motion-copy.json").exists()
                               or not (self.context.artifact("checkpoints/render.json").exists()
                                       or any(self.context.artifact("repairs").glob("*/render.json")))):

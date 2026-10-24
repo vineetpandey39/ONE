@@ -39,10 +39,47 @@ AUTHORITY_PATTERNS = (
 )
 
 
+# The catalogue series are named after the lane, so their own titles contain
+# lane words. Left in the text being matched, a commission passes the lane gate
+# purely by naming a series - which is exactly how "The Business Plan Workbook:
+# Build Your Roadmap in 30 Days" was commissioned on 2026-10-23 into
+# "Enterprise Automation Playbooks". Its only match was that series label.
+SERIES_NAMES = (
+    "Windows Power User Field Guides",
+    "Enterprise Automation Playbooks",
+    "Agentic AI Operations",
+)
+
+
+def _without_series_labels(text: str) -> str:
+    """The text with lines that are only a series label dropped.
+
+    Only whole lines, and only lines that are nothing but the label: a book
+    honestly titled "Governing Agentic AI Operations with Windows Automation"
+    must keep every word of its title. Deleting the phrase wherever it appears
+    takes the lane evidence out of the titles that most deserve to pass.
+    """
+    labels = {name.casefold() for name in SERIES_NAMES}
+    kept = []
+    for line in text.splitlines():
+        bare = re.sub(r"^\s*series\s*:\s*", "", line, flags=re.IGNORECASE).strip()
+        if bare.casefold() in labels:
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
 def authority_fit(text: str) -> dict[str, Any]:
-    """Deterministically enforce the catalogue lane; the model cannot self-score it."""
+    """Deterministically enforce the catalogue lane; the model cannot self-score it.
+
+    Pass the book's own identity - title, angle, buyer, purchase query - and
+    nothing else. Handing this the whole brief makes it meaningless: a brief is
+    thousands of words and one passing mention of "AI agents" anywhere in it
+    carries a book about something else entirely through the gate.
+    """
+    subject = _without_series_labels(text)
     matches = [pattern for pattern in AUTHORITY_PATTERNS
-               if re.search(pattern, text, re.IGNORECASE)]
+               if re.search(pattern, subject, re.IGNORECASE)]
     return {"passed": bool(matches), "score": 100.0 if matches else 0.0,
             "matches": matches}
 

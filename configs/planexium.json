@@ -21,6 +21,18 @@
   "provider_lock": "C:/Users/pc/Downloads/YATRA/.envato-provider.lock",
   "editing_mode": "footage_first",
   "render_backend": "resolve_fusion",
+  "episode_policy": {
+    "target_minutes": [8, 12],
+    "target_words": [900, 1500],
+    "target_scenes": [10, 16]
+  },
+  "stock_policy": {
+    "target_clips": [16, 24],
+    "max_per_scene": 3,
+    "archive_shot_ratio_max": 0.4,
+    "envato_failure_threshold": 10,
+    "fallback_providers": ["Pexels", "Pixabay"]
+  },
   "resolve": {
     "server": "C:\\Users\\pc\\Documents\\Codex\\2026-10-16\\mission-planexium-floor-12-architecture-discovery\\work\\resolve-mcp\\src\\server.py",
     "python": "C:\\Users\\pc\\Documents\\Codex\\2026-10-16\\mission-planexium-floor-12-architecture-discovery\\work\\resolve-mcp\\venv\\Scripts\\python.exe",

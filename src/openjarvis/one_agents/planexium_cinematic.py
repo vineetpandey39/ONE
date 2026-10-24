@@ -111,7 +111,8 @@ def acquire(root, tools):
         track=picker(music)
         if track is None:raise RuntimeError('Music provider finished without a usable instrumental track')
     adapter=EnvatoAdapter(draft,lao/'yatra-acquisition/workflow.yaml',ctx,queue,lock,
-        wait_seconds=3600,profile_root=Path(config['browser_root']))
+        wait_seconds=3600,profile_root=Path(config['browser_root']),
+        failure_limit=config.get('stock_policy',{}).get('envato_failure_threshold',10))
     cached=[adapter.accepted(i,request) for i,request in enumerate(plan['stock_requests'],1)]
     if all(cached):
         stock=[row[0] for row in cached]

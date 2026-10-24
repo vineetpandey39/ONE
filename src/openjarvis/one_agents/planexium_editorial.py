@@ -34,13 +34,12 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
             asset = assets['stock'][index]
             if asset['sha256'] in used:
                 continue
-            seconds = min(6.0, remaining / 3, float(asset['seconds']) - asset.get('usable_in', 0) - .1)
+            seconds = min(12.0, max(5.0, remaining / max(1, len(choices))), float(asset['seconds']) - asset.get('usable_in', 0) - .1)
             if seconds < 2:
                 continue
             rows.append({'asset': asset, 'kind': 'envato', 'seconds': seconds})
             remaining -= seconds
             used.add(asset['sha256'])
-            break
         pictures = [r for r in rows if 'seconds' not in r]
         needed = max(1, math.ceil(remaining / 9))
         # Prefer direct imagery from the commissioned official article before
@@ -85,6 +84,16 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
         result[str(number)] = rows
     if not any(t['kind'] == 'envato' for rows in result.values() for t in rows):
         raise ValueError('Unique visual plan has no licensed footage')
+    flat=[t for rows in result.values() for t in rows]
+    motion=sum(t.get('seconds',0) for t in flat if t['kind']=='envato')
+    archive=sum(1 for t in flat if t['kind']=='archive')
+    if len([t for t in flat if t['kind']=='envato']) < min(16,len(assets['stock'])):
+        raise ValueError('Visual-density gate: too few distinct licensed motion clips')
+    policy=editorial.get('visual_policy')
+    if policy and archive/len(flat) > float(policy.get('archive_shot_ratio_max',0.40)):
+        raise ValueError('Visual-density gate: archival stills would dominate the cut')
+    (root / 'edit/visual-mix.json').write_text(json.dumps({'licensed_motion_clips':sum(t['kind']=='envato' for t in flat),
+        'licensed_motion_seconds':round(motion,2),'archive_stills':archive,'total_assets':len(flat)},indent=2),encoding='utf-8')
     (root / 'edit/resolved-editorial-plan.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
     return result
 
