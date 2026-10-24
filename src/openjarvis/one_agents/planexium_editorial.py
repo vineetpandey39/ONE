@@ -12,6 +12,7 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
     used = set()
     result = {}
     primary_cursor = 0.0
+    archive_seconds = 0.0
     primary_is_video = Path(original['path']).suffix.lower() not in {'.jpg', '.jpeg', '.png'}
     for number, (scene, segment) in enumerate(zip(science['scenes'], voice['segments'], strict=True), 1):
         rows = []
@@ -39,7 +40,7 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
             asset = assets['stock'][index]
             if asset['sha256'] in used:
                 continue
-            seconds = min(18.0, max(5.0, motion_share),
+            seconds = min(20.0, max(5.0, motion_share),
                           float(asset['seconds']) - asset.get('usable_in', 0) - .1)
             if seconds < 2:
                 continue
@@ -93,6 +94,9 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
             used.add(asset['sha256'])
         if len(pictures) < needed:
             raise ValueError(f'Scene {number} lacks distinct relevant imagery; shorten narration or revise its visual brief')
+        if pictures:
+            archive_seconds += (remaining / len(pictures)) * sum(
+                row['kind'] == 'archive' for row in pictures)
         result[str(number)] = rows
     if not any(t['kind'] == 'envato' for rows in result.values() for t in rows):
         raise ValueError('Unique visual plan has no licensed footage')
@@ -102,10 +106,14 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
     if len([t for t in flat if t['kind']=='envato']) < min(16,len(assets['stock'])):
         raise ValueError('Visual-density gate: too few distinct licensed motion clips')
     policy=editorial.get('visual_policy')
-    if policy and archive/len(flat) > float(policy.get('archive_shot_ratio_max',0.40)):
+    total_seconds = sum(float(segment['seconds']) for segment in voice['segments'])
+    archive_time_ratio = archive_seconds / total_seconds if total_seconds else 1.0
+    if policy and archive_time_ratio > float(policy.get('archive_shot_ratio_max',0.40)):
         raise ValueError('Visual-density gate: archival stills would dominate the cut')
     (root / 'edit/visual-mix.json').write_text(json.dumps({'licensed_motion_clips':sum(t['kind']=='envato' for t in flat),
-        'licensed_motion_seconds':round(motion,2),'archive_stills':archive,'total_assets':len(flat)},indent=2),encoding='utf-8')
+        'licensed_motion_seconds':round(motion,2),'archive_stills':archive,
+        'archive_screen_seconds':round(archive_seconds,2),'archive_screen_fraction':round(archive_time_ratio,4),
+        'total_assets':len(flat)},indent=2),encoding='utf-8')
     (root / 'edit/resolved-editorial-plan.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
     return result
 

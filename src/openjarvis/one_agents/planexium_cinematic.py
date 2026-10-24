@@ -227,7 +227,9 @@ def render(root, tools, *, resolve_settings=None):
                 matched=next((a for a in assets['stock'] if a['sha256']==asset['sha256']),None)
                 if matched:asset['usable_in']=matched.get('usable_in',0)
                 if sha(asset['path'])!=asset['sha256']:raise ValueError('Editorial asset bytes changed')
-                if frames<=0 or frames>360:raise ValueError('Shot exceeds twelve seconds; supply more distinct visuals')
+                frame_limit = 450 if t['kind'] == 'archive' else 600
+                if frames<=0 or frames>frame_limit:
+                    raise ValueError('Shot exceeds its bounded editorial beat; supply more distinct visuals')
                 shots.append({'scene':number,'shot':index+1,'frames':frames,'start_frame':cursor,
                     'kind':t['kind'],'asset':asset,'offset':t.get('offset',0),
                     'callout':science['scenes'][number-1]['title'] if index==0 else '', 'diagram':False})
