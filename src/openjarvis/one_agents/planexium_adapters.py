@@ -592,6 +592,17 @@ class EnvatoAdapter:
                 import copy
                 asset_steps = copy.deepcopy(steps)
                 for step in asset_steps:
+                    # Envato has used both /search/stock-video/... and
+                    # /stock-video/... result routes.  The shared workflow
+                    # keeps its conservative selectors; PLANEXIUM adds the
+                    # current generic route in-memory so a catalogue redesign
+                    # cannot leave a daily run parked on an obsolete selector.
+                    if (step.get("action") == "wait_for_any_selector"
+                            and step.get("args", {}).get("as") == "envato_results_ready"):
+                        selectors = step["args"].setdefault("selectors", [])
+                        current = "a[href*='/stock-video/']"
+                        if current not in selectors:
+                            selectors.append(current)
                     if step.get("action") == "assert_text_absent":
                         key = str(step.get("args", {}).get("forbidden", ""))
                         if key == "{{input.blockedTitleKeywords}}":step["args"]["forbidden"] = inputs["blockedTitleKeywords"]
