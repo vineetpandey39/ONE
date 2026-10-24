@@ -1322,6 +1322,64 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
             "attempts": attempts}
 
 
+def _verified_repair_receipt(
+    connect: Connect,
+    evidence: dict[str, Any],
+    repo: Path,
+    receipt_dir: Path,
+    direct_path: Path,
+) -> dict[str, Any] | None:
+    """Reuse a verified repair when the exact failed task recurs.
+
+    A long-lived worker can fail once more with its old in-memory code after a
+    repair has already been committed. Requiring a second source edit in that
+    case strands the checkpoint: a responsible model correctly reports that
+    no further patch is needed. Reuse is deliberately narrow: same agent,
+    byte-identical task and error, an earlier healed-ledger entry, its own
+    durable verification receipt, and a repair commit that is still an
+    ancestor of the current checkout.
+    """
+    def load_valid(path: Path) -> dict[str, Any] | None:
+        try:
+            saved = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return None
+        revision = str(saved.get("full_commit") or saved.get("commit") or "")
+        if not revision:
+            return None
+        if repo.resolve() == ENGINE_REPO.resolve():
+            valid = _git(repo, "cat-file", "-e", f"{revision}^{{commit}}").returncode == 0
+        else:
+            valid = _git(repo, "merge-base", "--is-ancestor", revision, "HEAD").returncode == 0
+        return saved if valid else None
+
+    direct = load_valid(direct_path)
+    if direct:
+        return direct
+
+    try:
+        home = Path(os.environ.get("OPENJARVIS_HOME", Path.home() / ".openjarvis"))
+        ledger = json.loads((home / "floor_watch_healed.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    current_agent = str(evidence.get("agent") or "").casefold()
+    current_task = str(evidence.get("task") or "")
+    current_error = str(evidence.get("error") or "")
+    for old_job_id, entry in ledger.items():
+        if "repaired and committed" not in str((entry or {}).get("action") or ""):
+            continue
+        old = _row(connect, str(old_job_id))
+        if not old or str(old.get("agent_id") or "").casefold() != current_agent:
+            continue
+        if str(old.get("task") or "") != current_task or str(old.get("error") or "") != current_error:
+            continue
+        old_path = receipt_dir / (str(uuid.uuid5(uuid.NAMESPACE_URL, str(old_job_id))) + ".json")
+        saved = load_valid(old_path)
+        if saved:
+            return {**saved, "reused_from_job": str(old_job_id)}
+    return None
+
+
 def heal_failure(connect: Connect, finding: Any) -> str:
     """Repair first; resume only after HELIOS produced a verified commit."""
     evidence = {"agent": finding.agent_id, "job_id": finding.job_id,
@@ -1341,14 +1399,8 @@ def heal_failure(connect: Connect, finding: Any) -> str:
     receipt_path = receipt_dir / (str(uuid.uuid5(uuid.NAMESPACE_URL, str(finding.job_id))) + ".json")
     repair = None
     repo = _repo_for(evidence)
-    if receipt_path.exists() and repo:
-        saved = json.loads(receipt_path.read_text(encoding="utf-8"))
-        saved_revision = str(saved.get("full_commit") or saved.get("commit") or "")
-        if repo.resolve() == ENGINE_REPO.resolve():
-            if saved_revision and _git(repo, "cat-file", "-e", f"{saved_revision}^{{commit}}").returncode == 0:
-                repair = saved
-        elif saved.get("commit") == _git(repo, "rev-parse", "--short", "HEAD").stdout.strip():
-            repair = saved
+    if repo:
+        repair = _verified_repair_receipt(connect, evidence, repo, receipt_dir, receipt_path)
     if repair is None:
         repair = repair_with_cli(evidence)
         if repair.get("ok"):
