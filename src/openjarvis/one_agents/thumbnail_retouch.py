@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter
 
 MODEL = Path(os.environ.get("ONE_ISNET_MODEL") or r"E:\ONE-Suite\data\models\isnet-general-use.onnx")
 _SESSION: Any = None
@@ -56,8 +56,19 @@ def faces(image: Image.Image) -> list[tuple[int, int, int, int]]:
         return []
 
 
-def clear_skin(image: Image.Image, strength: float = 0.5) -> tuple[Image.Image, int]:
-    """Soften spots inside the face; strong edges (eyes, brows, lips, outline) keep their detail."""
+def _feature_mask(size: tuple[int, int], face: tuple[int, int, int, int]) -> Image.Image:
+    """Protect identity-bearing eyes, brows, nostrils and lips, but not cheek blemishes."""
+    x, y, w, h = face
+    mask = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rounded_rectangle((x + .10*w, y + .18*h, x + .90*w, y + .48*h), radius=max(4, w // 30), fill=255)
+    draw.ellipse((x + .35*w, y + .43*h, x + .65*w, y + .67*h), fill=210)
+    draw.rounded_rectangle((x + .23*w, y + .65*h, x + .77*w, y + .86*h), radius=max(4, w // 26), fill=255)
+    return mask.filter(ImageFilter.GaussianBlur(max(2, w // 80)))
+
+
+def clear_skin(image: Image.Image, strength: float = 0.90) -> tuple[Image.Image, int]:
+    """Reduce temporary spots while preserving facial geometry and identity-bearing features."""
     try:
         import cv2
         import numpy as np
@@ -67,20 +78,72 @@ def clear_skin(image: Image.Image, strength: float = 0.5) -> tuple[Image.Image, 
     if not boxes:
         return image, 0
     rgb = np.asarray(image.convert("RGB"))
-    smooth = cv2.bilateralFilter(rgb, d=0, sigmaColor=38, sigmaSpace=9)
-    smooth = cv2.bilateralFilter(smooth, d=0, sigmaColor=28, sigmaSpace=5)
-    # Keep real edges: where the original has strong gradients, take the original back.
-    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    edges = cv2.Canny(gray, 60, 140)
-    edges = cv2.GaussianBlur(cv2.dilate(edges, np.ones((3, 3), np.uint8)), (0, 0), 2.0)
-    keep = (edges.astype(np.float32) / 255.0)[..., None]
-    softened = (smooth * (1 - keep) + rgb * keep).astype(np.uint8)
+    feature_pil = _feature_mask(image.size, boxes[0])
+    feature_arr = np.asarray(feature_pil)
+    # Remove compact dark/red blemishes against the local skin tone before
+    # smoothing.  Feature zones are excluded, so eyes, brows, nostrils and
+    # lips cannot be mistaken for acne.
+    skin = np.zeros(rgb.shape[:2], dtype=np.uint8)
+    for x, y, w, h in boxes:
+        cv2.ellipse(skin, (x + w // 2, y + int(h * .56)),
+                    (int(w * .47), int(h * .55)), 0, 0, 360, 255, -1)
+        skin[y + int(h * .76):, :] = 0  # a hand may overlap the lower face
+    ycrcb = cv2.cvtColor(rgb, cv2.COLOR_RGB2YCrCb)
+    skin_colour = (
+        (ycrcb[..., 0] > 55) & (ycrcb[..., 1] >= 128) & (ycrcb[..., 1] <= 190)
+        & (ycrcb[..., 2] >= 72) & (ycrcb[..., 2] <= 138)
+    )
+    skin[~skin_colour] = 0
+    skin[feature_arr > 48] = 0
+    local = cv2.medianBlur(rgb, 21)
+    dark_delta = local.mean(axis=2) - rgb.mean(axis=2)
+    red_delta = rgb[..., 0].astype(np.float32) - (
+        rgb[..., 1].astype(np.float32) + rgb[..., 2].astype(np.float32)
+    ) / 2.0
+    local_red_delta = local[..., 0].astype(np.float32) - (
+        local[..., 1].astype(np.float32) + local[..., 2].astype(np.float32)
+    ) / 2.0
+    red_anomaly = red_delta - local_red_delta
+    blemish = np.where(
+        (skin > 0) & (dark_delta > 10.0) & ((red_anomaly > 5.0) | (dark_delta > 18.0)), 255, 0
+    ).astype(np.uint8)
+    blemish = cv2.morphologyEx(blemish, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    blemish = cv2.dilate(blemish, np.ones((5, 5), np.uint8), iterations=1)
+    corrected = cv2.inpaint(rgb, blemish, 5, cv2.INPAINT_TELEA)
+    # A global edge mask preserved acne as if it were an eye or lip.  Use a
+    # low-frequency skin layer, then restore only known facial-feature zones.
+    smooth = cv2.bilateralFilter(corrected, d=0, sigmaColor=64, sigmaSpace=13)
+    smooth = cv2.GaussianBlur(smooth, (0, 0), 2.2)
+    softened = Image.fromarray(smooth)
     area = Image.new("L", image.size, 0)
     draw = ImageDraw.Draw(area)
     for x, y, w, h in boxes:
         draw.ellipse((x - w * 0.08, y - h * 0.05, x + w * 1.08, y + h * 1.18), fill=int(255 * strength))
     area = area.filter(ImageFilter.GaussianBlur(max(6, boxes[0][2] // 12)))
-    return Image.composite(Image.fromarray(softened), image.convert("RGB"), area), len(boxes)
+    cleared = Image.composite(softened, image.convert("RGB"), area)
+    return Image.composite(image.convert("RGB"), cleared, feature_pil), len(boxes)
+
+
+def natural_face_finish(image: Image.Image, face: tuple[int, int, int, int] | None,
+                        lift: float = 1.08, warmth: float = 1.025) -> Image.Image:
+    """Apply identity-safe face lighting and subtle natural makeup toning."""
+    if not face:
+        return image
+    x, y, w, h = face
+    lifted = ImageEnhance.Brightness(image).enhance(lift)
+    lifted = ImageEnhance.Contrast(lifted).enhance(1.025)
+    r, g, b = lifted.split()
+    lifted = Image.merge("RGB", (
+        r.point(lambda v: min(255, int(v * warmth))),
+        g,
+        b.point(lambda v: max(0, int(v * 0.985))),
+    ))
+    area = Image.new("L", image.size, 0)
+    ImageDraw.Draw(area).ellipse(
+        (x - .06*w, y - .04*h, x + 1.06*w, y + 1.12*h), fill=205
+    )
+    area = area.filter(ImageFilter.GaussianBlur(max(8, w // 10)))
+    return Image.composite(lifted, image, area)
 
 
 def under_eye_boxes(image: Image.Image, face: tuple[int, int, int, int]) -> list[tuple[int, int, int, int]]:
@@ -108,7 +171,6 @@ def brighten_under_eyes(image: Image.Image, face: tuple[int, int, int, int] | No
     """Lift the dark circles under her eyes (the Chairman, 2026-10-09) with a soft, warm local brightening."""
     if not face:
         return image
-    from PIL import ImageEnhance
     lighter = ImageEnhance.Brightness(image).enhance(lift)
     r, g, b = lighter.split()  # dark circles read blue-grey; trimming a little blue evens them with the cheek
     lighter = Image.merge("RGB", (r, g, b.point(lambda v: int(v * 0.985))))
@@ -193,9 +255,16 @@ def retouch(base: Path, out: Path) -> dict[str, Any]:
     found = faces(image)
     image, face_count = clear_skin(image)
     image = brighten_under_eyes(image, found[0] if found else None)
+    image = natural_face_finish(image, found[0] if found else None)
     mask = subject_mask(image)
     if mask is not None and mask.getbbox():
         image = outline_glow(image, mask, face=found[0] if found else None)
     out.parent.mkdir(parents=True, exist_ok=True)
     image.save(out, "PNG", optimize=True)
-    return {"path": str(out), "skin_cleared_faces": face_count, "glow": mask is not None and bool(mask.getbbox())}
+    return {
+        "path": str(out),
+        "skin_cleared_faces": face_count,
+        "face_lighting": bool(found),
+        "natural_makeup": bool(found),
+        "glow": mask is not None and bool(mask.getbbox()),
+    }

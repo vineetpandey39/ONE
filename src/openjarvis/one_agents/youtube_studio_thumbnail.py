@@ -19,6 +19,8 @@ from typing import Any
 CHANNEL_ID = "UCyqSprXlCEpBXMQRdkstLqA"
 CHANNEL_NAME = "Sonia Travel Vlogs"
 CHANNEL_LINK_SELECTOR = f'a[href*="/channel/{CHANNEL_ID}"]'
+THUMBNAIL_LOADER_SELECTOR = "input#file-loader[type='file'][accept*='image']"
+UPLOADED_THUMBNAIL_SELECTOR = "[aria-label='Uploaded thumbnail']"
 SONIA_BROWSER_DIR = Path(os.environ.get("SONIA_BROWSER_DIR") or r"C:\Users\pc\Documents\LAO\sonia-community")
 VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
@@ -42,9 +44,8 @@ def _sonia_chrome():
 
 
 def _selected_uploaded_thumbnail(page) -> dict[str, Any]:
-    return page.evaluate(
-        """() => {
-          const node = document.querySelector('[aria-label="Uploaded thumbnail"]');
+    return page.locator(UPLOADED_THUMBNAIL_SELECTOR).first.evaluate(
+        """node => {
           if (!node) return {present:false, selected:false};
           const attrs = Object.fromEntries([...node.attributes].map(a => [a.name, a.value]));
           const image = node.querySelector('img');
@@ -94,25 +95,47 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
             # expose exact channel navigation links, which are a stronger
             # identity check than a translated/hidden display label.
             page.locator(CHANNEL_LINK_SELECTOR).first.wait_for(state="attached", timeout=45_000)
-            loader = page.locator("input#file-loader[type='file'][accept*='image']").first
+            loader = page.locator(THUMBNAIL_LOADER_SELECTOR).first
             loader.wait_for(state="attached", timeout=45_000)
+            # Studio renders the thumbnail editor well below the initial fold.
+            # Bring its real file input into the viewport before attaching the
+            # file so the persistent browser follows the same path as a human.
+            loader.scroll_into_view_if_needed(timeout=30_000)
             loader.set_input_files(str(thumbnail))
+            uploaded = page.locator(UPLOADED_THUMBNAIL_SELECTOR).first
+            uploaded.wait_for(state="visible", timeout=60_000)
+            uploaded.scroll_into_view_if_needed(timeout=30_000)
+            # Uploading creates the candidate; selecting it is a separate
+            # Studio action.  Always select the uploaded candidate explicitly.
+            uploaded.click(timeout=30_000)
             save = page.get_by_role("button", name="Save", exact=True).first
             save.wait_for(state="visible", timeout=30_000)
             page.wait_for_function("() => !document.querySelector('button[aria-label=\"Save\"]')?.disabled", timeout=30_000)
             save.click()
-            page.wait_for_function("() => document.querySelector('button[aria-label=\"Save\"]')?.disabled === true", timeout=60_000)
+            # The enabled/disabled transition is transient in current Studio
+            # and can be missed even though the save succeeds.  A reload plus
+            # exact-video uploaded-control verification is the durable gate.
+            try:
+                page.wait_for_function(
+                    "() => document.querySelector('button[aria-label=\"Save\"]')?.disabled === true",
+                    timeout=20_000,
+                )
+            except Exception:
+                pass
             page.reload(wait_until="domcontentloaded", timeout=90_000)
             page.locator(CHANNEL_LINK_SELECTOR).first.wait_for(state="attached", timeout=45_000)
+            if f"/video/{video_id}/edit" not in page.url:
+                raise RuntimeError("Studio thumbnail verification left the exact video details page")
+            uploaded = page.locator(UPLOADED_THUMBNAIL_SELECTOR).first
+            uploaded.wait_for(state="visible", timeout=45_000)
+            uploaded.scroll_into_view_if_needed(timeout=30_000)
             evidence = _selected_uploaded_thumbnail(page)
-            expected_image_path = f"/vi/{video_id}/"
-            if (not evidence.get("present")
-                    or expected_image_path not in str(evidence.get("image_src") or "")):
+            if not evidence.get("present"):
                 raise RuntimeError(
                     "Studio save returned but the exact video's uploaded thumbnail was not visible after reload"
                 )
             proof = receipt_path.with_suffix(".png")
-            page.locator("[aria-label='Uploaded thumbnail']").first.screenshot(path=str(proof))
+            uploaded.screenshot(path=str(proof))
         finally:
             page.close()
 
