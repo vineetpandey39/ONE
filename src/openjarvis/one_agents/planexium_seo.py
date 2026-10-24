@@ -118,6 +118,9 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
                     raise ValueError("thumbnail must be the name of one supplied thumbnail that matches the title")
                 if preferred and chosen["name"] != preferred["name"]:
                     raise ValueError("title must match the highest-scoring QC-passed thumbnail")
+                hook = str(concepts[chosen["name"]].get("text") or "")
+                if not title_matches_thumbnail_promise(title, hook):
+                    raise ValueError("title must state the winning thumbnail's numeric/topic promise")
                 result["thumbnail_path"] = chosen["path"]
                 result["thumbnail_pairing"] = {"thumbnail": chosen["name"], "title": title, "chosen_by": "ARES"}
             opening = str(out["opening"]).strip()
@@ -264,3 +267,22 @@ def _run_job(job):
                            dedupe_key=f"planexium:{ctx.mission_id}:private-standing:{gate['package_sha256'][:16]}")
         out["handed_to"] = {"agent": "ECHO", "job_id": echo["id"]}
     return out
+
+def title_matches_thumbnail_promise(title: str, hook: str) -> bool:
+    """Require the selected title to state the winning thumbnail's concrete promise."""
+    aliases = {"mins": "minute", "min": "minute", "minutes": "minute"}
+    generic = {"the", "a", "an", "why", "how", "where", "what", "does", "do", "is"}
+
+    def tokens(value: str) -> set[str]:
+        found = set(re.findall(r"\d+(?:\.\d+)?|[a-z]+", value.casefold()))
+        normalized = set()
+        for word in found:
+            word = aliases.get(word, word)
+            if word not in generic and not re.fullmatch(r"\d+(?:\.\d+)?", word) and len(word) > 4:
+                word = word.rstrip("s")
+            normalized.add(word)
+        return normalized - generic
+
+    promise = tokens(hook)
+    return bool(promise and promise.issubset(tokens(title)))
+
