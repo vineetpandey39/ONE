@@ -2256,7 +2256,7 @@ def _sonia_recent_topics(prior: list[str], *, limit: int = 25,
                 or "completed through YATRA" in task
             ):
                 # VISTA Shorts use the same research helper and filename
-                # suffix, and their three daily slots must not evict a week of
+                # suffix, and their daily slot must not evict a week of
                 # long-form history from YATRA's repeat window. But a Short
                 # asking what has already been covered has to see the other
                 # Shorts - skipping them is what let 17 October repeat 16
@@ -2397,7 +2397,7 @@ def _sonia_unique_evergreen_brief(
 def _vista_same_day_commissions(*, now: datetime | None = None) -> list[dict[str, str]]:
     """Return today's live/finished VISTA stories from the durable job ledger.
 
-    VISTA runs three independent slots. Memory is prose, not a reliable
+    VISTA runs one daily peak slot. Memory is prose, not a reliable
     concurrency/deduplication primitive: the 13:00 brief used to be invisible
     to the 18:00 picker because ``memory.prior_titles`` only reads ``ANGLE:``
     records. The queue already contains the typed headline and destination
@@ -6330,10 +6330,39 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
             caption = Path(str(pkg.get("caption") or ""))
             if not master.is_file() or not thumbnail.is_file() or not caption.is_file():
                 raise RuntimeError("VISTA master, thumbnail or manual subtitle file is missing")
-            stages.set_stage("echo", stages.EXECUTING, "Uploading VISTA's private Short with manual subtitles")
+            stages.set_stage("echo", stages.EXECUTING,
+                             "Uploading VISTA's private Short; Studio will attach its separate thumbnail")
             uploader = youtube_publish._load("youtube_api_upload")
-            upload_report = uploader.run(package, video=master, thumbnail=thumbnail, synthetic="yes", execute=True,
-                                         caption=caption, caption_language="hi")
+            # Upload and Studio thumbnailing are two durable stages. If Studio is temporarily unavailable, an ECHO
+            # retry resumes the already-created private video instead of uploading the exact master a second time.
+            upload_receipt = package.with_name("private-upload-receipt.json")
+            with master.open("rb") as master_handle:
+                master_sha256 = hashlib.file_digest(master_handle, "sha256").hexdigest()
+            try:
+                saved_upload = json.loads(upload_receipt.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                saved_upload = {}
+            if (saved_upload.get("master_sha256") == master_sha256
+                    and (saved_upload.get("report") or {}).get("video_id")):
+                upload_report = dict(saved_upload["report"])
+            else:
+                # The API creates the private draft and attaches subtitles/SEO, but deliberately does not set the
+                # thumbnail. Shorts must begin with the actual video hook rather than a 0.5 s embedded cover.
+                upload_report = uploader.run(package, video=master, thumbnail=None, synthetic="yes", execute=True,
+                                             caption=caption, caption_language="hi")
+                temporary = upload_receipt.with_suffix(upload_receipt.suffix + ".tmp")
+                temporary.write_text(json.dumps({"schema": "vista-private-upload/1",
+                                                 "master_sha256": master_sha256,
+                                                 "report": upload_report}, ensure_ascii=False, indent=2),
+                                     encoding="utf-8")
+                os.replace(temporary, upload_receipt)
+            from openjarvis.one_agents import youtube_studio_thumbnail
+            thumbnail_report = youtube_studio_thumbnail.set_short_thumbnail(
+                str(upload_report.get("video_id") or ""), thumbnail,
+                receipt_path=package.with_name("studio-thumbnail-receipt.json"),
+            )
+            upload_report = {**upload_report, "thumbnail_set": "youtube_studio_persistent_session",
+                             "studio_thumbnail": thumbnail_report}
             stages.set_stage("echo", stages.CARRYING_TO_HEAD,
                              "Taking VISTA's verified private upload back to HELIOS")
             _require_active_job(job, "report VISTA private upload completion to HELIOS")
@@ -8204,8 +8233,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
     duplicate_days = float(policy.get("duplicate_window_days") or 30)
     if brand.get("slug") == "sonia_travel_vlogs":
         # A Short must see the other Shorts, and must see them by date rather
-        # than by position in a list. VISTA publishes three a day, so counting
-        # titles is counting hours.
+        # than by position in a list. Counting list positions is not a calendar.
         # Two windows, because the policy names two rules. The destination gate
         # is same_day_destination_reuse and lasts a day: stretching it to the
         # 30-day duplicate window left Japan, Singapore, Thailand, Vietnam and
@@ -8400,16 +8428,14 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                     3: ("myth_reversal", "assumption -> contradiction -> evidence -> practical takeaway"),
                     4: ("destination_comparison", "A vs B -> three rounds -> winner by traveller type"),
                     5: ("countdown_curiosity", "open loop -> escalating discoveries -> strongest reveal -> replay ending"),
+                    6: ("news_wall", "verified headline -> why it matters now -> three sourced facts -> practical takeaway"),
                 }
-                if weekday not in hooks:
-                    stages.clear_stage(head_id)
-                    return {"agent": head_name, "mode": "skipped", "content": "Sunday is VISTA analytics and research refresh; no Short is commissioned.", "handed_to": None}
                 hook, structure = hooks[weekday]
                 grounded_angle = (
                     f"# VISTA SLOT CONTRACT\nSlot: {slot}\nLane: {lane}\nHook family: {hook}\n"
                     f"Required structure: {structure}\nDuration: 25-40 seconds. Every beat adds information within 4 seconds. "
                     "The first 0-3 seconds must stop the swipe. Use a save/share/comment CTA appropriate to the hook. "
-                    "Do not reuse a destination or information angle used by another slot today.\n\n"
+                    "Do not reuse a destination or information angle from the recent content calendar.\n\n"
                     + brief
                 )
                 # Save the researched contract before parsing so a malformed
