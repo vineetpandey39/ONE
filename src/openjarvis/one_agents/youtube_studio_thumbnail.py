@@ -109,7 +109,13 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
             upload_tile = page.get_by_text(UPLOAD_FILE_TEXT, exact=True).first
             upload_tile.wait_for(state="visible", timeout=30_000)
             upload_tile.scroll_into_view_if_needed(timeout=30_000)
-            loader.set_input_files(str(thumbnail))
+            # Studio wires upload processing to the visible button's file-
+            # chooser event.  Setting the hidden input directly changes its
+            # value but bypasses the component callback, leaving the preview
+            # hidden.  Follow the real button -> chooser path.
+            with page.expect_file_chooser(timeout=30_000) as chooser_info:
+                upload_tile.click(timeout=30_000)
+            chooser_info.value.set_files(str(thumbnail))
             uploaded = page.locator(UPLOADED_THUMBNAIL_SELECTOR).first
             uploaded.wait_for(state="visible", timeout=60_000)
             uploaded.scroll_into_view_if_needed(timeout=30_000)
