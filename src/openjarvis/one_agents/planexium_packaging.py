@@ -2,6 +2,39 @@
 import re
 
 
+def repair_thumbnail_hooks(value, science):
+    """Repair only a generic hook, using literal episode words already present in its own concept brief."""
+    if not isinstance(value, dict):
+        return value
+    titles = value.get('titles') or []
+    scene = value.get('focus_scene')
+    focus = science['scenes'][scene-1].get('screen_text', '') if type(scene) is int and 1 <= scene <= len(science['scenes']) else ''
+    episode = set(re.findall(r'[a-z0-9]+', ' '.join([science.get('video_title',''), *titles, focus]).casefold()))
+    generic = {'the','and','why','how','where','what','times','every','one','does','this','new','two'}
+    eligible = episode - generic
+    for concept in value.get('concepts') or []:
+        original = str(concept.get('text') or '')
+        hook = set(re.findall(r'[a-z0-9]+', original.casefold())) - generic
+        if hook & eligible:
+            continue
+        evidence = ' '.join(str(concept.get(field) or '') for field in
+                            ('left_usp','name','composition','visual_direction'))
+        chosen = []
+        for word in re.findall(r'[A-Za-z0-9]+', evidence):
+            lowered = word.casefold()
+            if lowered in eligible and lowered not in {w.casefold() for w in chosen}:
+                chosen.append(word.upper())
+            if len(chosen) == 2:
+                break
+        if not chosen:
+            continue
+        repaired = ' '.join(chosen)
+        concept['text'] = repaired
+        concept['text_repair'] = {'from': original, 'to': repaired,
+                                  'policy': 'literal episode term from this concept brief'}
+    return value
+
+
 def readable_thumbnail_hook(text):
     """Apply narrow, meaning-preserving display abbreviations before generation."""
     replacements = {"MINUTES": "MINS", "MINUTE": "MIN", "WHERE'S": "WHERE"}

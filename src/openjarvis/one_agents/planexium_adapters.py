@@ -259,7 +259,8 @@ class ChatGPTAdapter:
             raise ValueError('An illustrative stock clip cannot be assigned to multiple scenes')
         if set(assigned)!=set(range(len(result['stock_requests']))):
             raise ValueError('Every requested stock clip must be assigned to exactly one scene')
-        from openjarvis.one_agents.planexium_packaging import validate_packaging
+        from openjarvis.one_agents.planexium_packaging import repair_thumbnail_hooks, validate_packaging
+        result['packaging'] = repair_thumbnail_hooks(result.get('packaging'), science)
         validate_packaging(result.get('packaging'),science)
         visuals=result.get('scene_visuals',{})
         if set(visuals)!=set(mapping) or any(not isinstance(v,list) or not 1<=len(v)<=3 or any(not isinstance(q,str) or not q.strip() for q in v) for v in visuals.values()):
