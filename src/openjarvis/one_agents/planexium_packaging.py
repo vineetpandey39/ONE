@@ -1,6 +1,15 @@
 """Episode-specific packaging, separate from unvalidated audience predictions."""
 
 
+def readable_thumbnail_hook(text):
+    """Apply narrow, meaning-preserving display abbreviations before generation."""
+    replacements = {"MINUTES": "MINS", "MINUTE": "MIN", "WHERE'S": "WHERE"}
+    words = [replacements.get(word, word) for word in str(text).upper().split()]
+    if not 1 <= len(words) <= 3 or any(len(word) > 6 for word in words):
+        raise ValueError('Thumbnail hook needs one to three short readable words')
+    return ' '.join(words)
+
+
 def check_thumbnail_diversity(paths):
     """Catch duplicated or nearly identical layouts, including color-only changes."""
     from PIL import Image, ImageOps
@@ -37,8 +46,7 @@ def validate_packaging(value, science):
     if len(concepts) != 3:
         raise ValueError('Provide three distinct thumbnail concepts')
     for concept in concepts:
-        if not 1 <= len(str(concept.get('text', '')).split()) <= 4:
-            raise ValueError('Thumbnail text must contain one to four words')
+        concept['text'] = readable_thumbnail_hook(concept.get('text', ''))
         for field in ['name', 'visual_direction', 'composition', 'left_usp']:
             if not isinstance(concept.get(field), str) or not concept[field].strip():
                 raise ValueError('Thumbnail concepts need a subject, composition and visual direction')
