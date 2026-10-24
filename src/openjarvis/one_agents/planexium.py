@@ -36,8 +36,13 @@ TOPICS = (
     {"topic": "What a black hole is", "sources": ["https://science.nasa.gov/universe/black-holes/"]},
     {"topic": "How the Sun works", "sources": ["https://science.nasa.gov/sun/facts/"]},
     {"topic": "Earth's Moon", "sources": ["https://science.nasa.gov/moon/facts/"]},
-    {"topic": "The International Space Station", "sources": ["https://www.nasa.gov/international-space-station/"]},
+    {"topic": "The International Space Station", "sources": ["https://www.nasa.gov/international-space-station/space-station-facts-and-figures/"]},
 )
+
+SOURCE_ALIASES = {
+    "https://www.nasa.gov/international-space-station/":
+        "https://www.nasa.gov/international-space-station/space-station-facts-and-figures/",
+}
 
 
 def load_config(path: Path | None = None) -> dict:
@@ -619,6 +624,57 @@ def register_checkpoint_owner(job_id: str, context: ProductionContext, connect):
         raise ValueError("Cannot register recovery before a durable commission exists")
     from openjarvis.one_agents import job_recovery
     job_recovery.attach(connect, job_id, context.mission_id, kind="planexium_checkpoint")
+
+
+def recover_known_source_drift(connect, job_id: str) -> str:
+    """Migrate one allow-listed stale source and queue a checkpoint-safe retry."""
+    with connect() as db:
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT task,status FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if not row or row["status"] != "failed":
+        return ""
+    payload = json.loads(row["task"])
+    commission = payload.get("commission") or {}
+    if commission.get("brand") != "planexium" or not commission.get("mission_id"):
+        return ""
+    old_sources = list(commission.get("sources", []))
+    migrated = [SOURCE_ALIASES.get(url, url) for url in old_sources]
+    if migrated == old_sources:
+        return ""
+    context = context_for(commission["mission_id"], load_config())
+    durable_commission = context.artifact("commission.json")
+    if durable_commission.exists():
+        saved = json.loads(durable_commission.read_text(encoding="utf-8"))
+        if saved.get("source_revision") == "known-alias-recovery-v1":
+            return ""
+    with resource_lease(context.media_root / ".leases", "planexium-production"):
+        tag = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        repair_root = context.artifact(f"repairs/{tag}")
+        moved = []
+        for relative in ("evidence.json", "checkpoints/research.json", "receipts/writer.json"):
+            source = context.artifact(relative)
+            if source.exists():
+                target = repair_root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(source), str(target))
+                moved.append(relative)
+        commission["sources"] = migrated
+        commission["source_revision"] = "known-alias-recovery-v1"
+        _write(context.artifact("commission.json"), commission)
+        _write(repair_root / "source-recovery.json", {
+            "failed_job": job_id, "reason": "Known authoritative source URL changed target",
+            "archived": moved, "previous_sources": old_sources, "replacement_sources": migrated,
+        })
+        ledger_path = context.root.parent / "production-ledger.json"
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.exists() else {}
+        ledger.setdefault(context.mission_id, {}).update(
+            status="needs_resume", recovery_reason="known_source_alias_migrated")
+        _write(ledger_path, ledger)
+    payload["commission"] = commission
+    from openjarvis.one_agents.runtime import enqueue_job
+    retry = enqueue_job("planexium", json.dumps(payload), mode="execute", tier="fast",
+        dedupe_key=f"youtube:planexium:{commission['mission_id']}:source-recovery-v1")
+    return f"migrated stale authoritative source and queued {retry['id']} from saved mission"
 
 
 def bound_pipeline(context: ProductionContext, config: dict) -> Pipeline:

@@ -578,6 +578,9 @@ def apply_fix(connect: Connect, finding: Finding) -> str:
         return _enqueue_collection(connect, finding.job_id, external) if external else ""
     if finding.auto_fix == "clear_stage":
         return _clear_stage(finding.agent_id)
+    if finding.auto_fix == "planexium_source_recovery":
+        from openjarvis.one_agents import planexium
+        return planexium.recover_known_source_drift(connect, finding.job_id)
     if finding.auto_fix == "helios_self_heal":
         from openjarvis.one_agents import helios_self_heal
         return helios_self_heal.heal_failure(connect, finding)
@@ -668,9 +671,15 @@ def watch_floor(
         # The Chairman explicitly authorized Floor 12's head to repair the
         # latest failed YouTube job and resume its saved checkpoint. All other
         # floor heads retain the diagnosis-only policy above.
+        from openjarvis.one_agents import planexium
         for finding in findings:
             if finding.code == "D4" and finding.job_id:
-                finding.auto_fix = "helios_self_heal"
+                task = str(finding.evidence.get("task") or "")
+                if (finding.agent_id == "planexium"
+                        and any(source in task for source in planexium.SOURCE_ALIASES)):
+                    finding.auto_fix = "planexium_source_recovery"
+                else:
+                    finding.auto_fix = "helios_self_heal"
     healed: list[dict[str, str]] = []
     proposed: list[dict[str, str]] = []
 
