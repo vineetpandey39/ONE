@@ -23,8 +23,8 @@
   "render_backend": "resolve_fusion",
   "episode_policy": {
     "target_minutes": [8, 12],
-    "target_words": [900, 1200],
-    "target_scenes": [10, 12]
+    "target_words": [900, 1100],
+    "target_scenes": [10, 10]
   },
   "stock_policy": {
     "target_clips": [16, 24],
