@@ -67,8 +67,8 @@ def _feature_mask(size: tuple[int, int], face: tuple[int, int, int, int]) -> Ima
     return mask.filter(ImageFilter.GaussianBlur(max(2, w // 80)))
 
 
-def clear_skin(image: Image.Image, strength: float = 0.90) -> tuple[Image.Image, int]:
-    """Reduce temporary spots while preserving facial geometry and identity-bearing features."""
+def clear_skin(image: Image.Image, strength: float = 0.82) -> tuple[Image.Image, int]:
+    """Remove compact temporary spots without smoothing intact facial texture."""
     try:
         import cv2
         import numpy as np
@@ -109,24 +109,21 @@ def clear_skin(image: Image.Image, strength: float = 0.90) -> tuple[Image.Image,
     ).astype(np.uint8)
     blemish = cv2.morphologyEx(blemish, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     blemish = cv2.dilate(blemish, np.ones((5, 5), np.uint8), iterations=1)
-    corrected = cv2.inpaint(rgb, blemish, 5, cv2.INPAINT_TELEA)
-    # A global edge mask preserved acne as if it were an eye or lip.  Use a
-    # low-frequency skin layer, then restore only known facial-feature zones.
-    smooth = cv2.medianBlur(corrected, 21)
-    smooth = cv2.bilateralFilter(smooth, d=0, sigmaColor=64, sigmaSpace=13)
-    smooth = cv2.GaussianBlur(smooth, (0, 0), 2.2)
-    softened = Image.fromarray(smooth)
-    area = Image.new("L", image.size, 0)
-    draw = ImageDraw.Draw(area)
-    for x, y, w, h in boxes:
-        draw.ellipse((x - w * 0.08, y - h * 0.05, x + w * 1.08, y + h * 1.18), fill=int(255 * strength))
-    area = area.filter(ImageFilter.GaussianBlur(max(6, boxes[0][2] // 12)))
-    cleared = Image.composite(softened, image.convert("RGB"), area)
-    return Image.composite(image.convert("RGB"), cleared, feature_pil), len(boxes)
+    corrected = cv2.inpaint(rgb, blemish, 4, cv2.INPAINT_TELEA)
+    # Never blur the whole face.  The previous median+bilateral+Gaussian stack
+    # turned natural skin into the white beauty-filter patch visible on mobile.
+    # Feather only the compact pixels classified as blemishes; every other skin
+    # pixel, including pores and natural tonal variation, remains byte-for-byte
+    # from the generated base image.
+    area = Image.fromarray(blemish, mode="L").filter(
+        ImageFilter.GaussianBlur(max(1, boxes[0][2] // 180))
+    ).point(lambda v: int(v * strength))
+    cleared = Image.composite(Image.fromarray(corrected), image.convert("RGB"), area)
+    return Image.composite(cleared, image.convert("RGB"), feature_pil), len(boxes)
 
 
 def natural_face_finish(image: Image.Image, face: tuple[int, int, int, int] | None,
-                        lift: float = 1.08, warmth: float = 1.025) -> Image.Image:
+                        lift: float = 1.025, warmth: float = 1.008) -> Image.Image:
     """Apply identity-safe face lighting and subtle natural makeup toning."""
     if not face:
         return image
@@ -141,7 +138,7 @@ def natural_face_finish(image: Image.Image, face: tuple[int, int, int, int] | No
     ))
     area = Image.new("L", image.size, 0)
     ImageDraw.Draw(area).ellipse(
-        (x - .06*w, y - .04*h, x + 1.06*w, y + 1.12*h), fill=205
+        (x - .06*w, y - .04*h, x + 1.06*w, y + 1.12*h), fill=92
     )
     area = area.filter(ImageFilter.GaussianBlur(max(8, w // 10)))
     return Image.composite(lifted, image, area)
@@ -168,7 +165,7 @@ def under_eye_boxes(image: Image.Image, face: tuple[int, int, int, int]) -> list
 
 
 def brighten_under_eyes(image: Image.Image, face: tuple[int, int, int, int] | None,
-                        lift: float = 1.16, strength: float = 0.65) -> Image.Image:
+                        lift: float = 1.06, strength: float = 0.32) -> Image.Image:
     """Lift the dark circles under her eyes (the Chairman, 2026-10-09) with a soft, warm local brightening."""
     if not face:
         return image
