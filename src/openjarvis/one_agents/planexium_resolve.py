@@ -15,6 +15,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import time
+import uuid
 
 
 def sha(path):
@@ -25,9 +26,24 @@ def sha(path):
 def write(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(".tmp")
-    temp.write_text(json.dumps(value, indent=2), encoding="utf-8")
-    temp.replace(path)
+    # Progress is written by a parent process while Resolve reports through a
+    # child.  A shared ``render-progress.tmp`` makes concurrent/retried jobs
+    # overwrite one another, and Windows indexers/readers may briefly deny the
+    # final replace.  Give every write its own sibling and retry only that
+    # bounded transient condition.
+    temp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp.write_text(json.dumps(value, indent=2), encoding="utf-8")
+        for attempt in range(8):
+            try:
+                os.replace(temp, path)
+                return
+            except PermissionError:
+                if attempt == 7:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 def isolated_environment(settings):
