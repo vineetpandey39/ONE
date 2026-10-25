@@ -9581,6 +9581,23 @@ def _yatra_acquire_footage(plan_file: Path, asset_folder: str,
     return result
 
 
+def _yatra_acquire_complete_footage(plan_file: Path, asset_folder: str,
+                                     narration_manifest: str = "") -> dict[str, Any]:
+    """Give a cleanly-finished partial acquisition one bounded resume.
+
+    acquire_scenes persists accepted slots, query cursors and rejection
+    streaks.  Its stuck-shot fallback is checked before the next attempt, so a
+    rejection that reaches the threshold at the end of a run leaves a SHORT
+    manifest even though the next resume can immediately fill only those open
+    slots.  Infrastructure/tool failures remain terminal and are never retried
+    here.
+    """
+    result = _yatra_acquire_footage(plan_file, asset_folder, narration_manifest)
+    if result.get("ok") and not result.get("all_covered"):
+        result = _yatra_acquire_footage(plan_file, asset_folder, narration_manifest)
+    return result
+
+
 def _yatra_render_opening_map(plan_file: Path, asset_folder: str) -> dict[str, Any]:
     """Turn ChatGPT's checked map brief into two reusable 1080p opening shots."""
     script = _YATRA_TOOLS / "yatra-map" / "render_opening_map.py"
@@ -10385,8 +10402,9 @@ def _run_yatra_visuals(job: dict[str, Any]) -> dict[str, Any]:
     ):
         stages.set_stage("yatra", stages.EXECUTING,
                          "Acquiring stock footage for every approved scene")
-        footage = _yatra_acquire_footage(plan_file, asset_folder,
-                                         str(narration.get("manifest") or ""))
+        footage = _yatra_acquire_complete_footage(
+            plan_file, asset_folder, str(narration.get("manifest") or "")
+        )
         if not footage.get("ok") or not footage.get("all_covered"):
             raise RuntimeError("YATRA could not acquire the complete unique-shot 1080p plan; "
                                "refusing to cut with repeated or missing footage\n"
