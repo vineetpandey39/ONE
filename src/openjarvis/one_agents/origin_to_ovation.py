@@ -462,7 +462,9 @@ def run_stage(job, *, enqueue):
             from openjarvis.one_agents.origin_to_ovation_faceless import FACELESS_RULES, visible_faces
             earlier = T.earlier_thumbnails(ROOT / "missions", path.name)
             concepts = []
-            for concept in metadata["thumbnail_concepts"]:
+            for index, concept in enumerate(metadata["thumbnail_concepts"], start=1):
+                concept = dict(concept)
+                concept.setdefault("name", f"concept-{index:02d}")
                 image = master_dir / "thumbnails" / f"{concept['name']}.png"
                 image_provider(path, {"shot_id": concept["name"], "image": str(image), "reference": reference,
                                       "prompt": f"{concept['prompt']} {FACELESS_RULES} "
