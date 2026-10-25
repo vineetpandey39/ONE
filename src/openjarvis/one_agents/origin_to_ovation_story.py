@@ -27,6 +27,16 @@ PATTERN_INTERRUPTS = (
     "sound_or_silence_shift", "camera_grammar_change",
 )
 
+MOTION_VOCABULARY = {
+    "slow_push", "slow_pullback", "lateral_drift", "focus_detail",
+    "wide_hold", "vertical_reveal", "prime_ramp",
+}
+TRANSITION_VOCABULARY = {
+    "hard_cut", "match_cut", "measured_dissolve", "dip_to_black",
+    "whip_cut", "sound_bridge",
+}
+SOUND_CUES = {"none", "whoosh", "impact", "silence_drop", "crowd_lift", "location_bed"}
+
 VISUAL_FAMILIES = {
     "establishing_wide", "dynamic_action", "equipment_macro", "environmental_pov",
     "obscured_side_action", "low_angle", "overhead", "reflection", "crowd_reaction",
@@ -69,6 +79,10 @@ def annotate_plan(plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "pattern_interrupt": PATTERN_INTERRUPTS[(chapter_no + within) % len(PATTERN_INTERRUPTS)],
                 "retention_checkpoint": round(progress, 3),
             }
+            director = shot.setdefault("director", {})
+            director.setdefault("transition", "measured_dissolve" if within == 0 else "hard_cut")
+            director.setdefault("sound_cue", "location_bed" if within == 0 else "none")
+            director.setdefault("kinetic_text", "")
             ordinal += 1
     return plan
 
@@ -153,6 +167,26 @@ def validate(plan: list[dict[str, Any]], contract: dict[str, Any]) -> list[str]:
                         and not s.get("motion") and not s.get("overlay")]
         if static_holds:
             errors.append("static still exceeds 7 seconds without motion/overlay: " + ", ".join(map(str, static_holds[:8])))
+        motions = [str(s.get("motion") or "") for s in plan]
+        bad_motion = [s.get("shot_id") for s, motion in zip(plan, motions) if motion not in MOTION_VOCABULARY]
+        if bad_motion:
+            errors.append("motion direction missing/invalid for: " + ", ".join(map(str, bad_motion[:8])))
+        if any(motions[i] == motions[i - 1] for i in range(1, len(motions))):
+            errors.append("adjacent shots repeat the same camera motion")
+        transitions = [str(s.get("director", {}).get("transition") or "") for s in plan]
+        bad_transition = [s.get("shot_id") for s, transition in zip(plan, transitions)
+                          if transition not in TRANSITION_VOCABULARY]
+        if bad_transition:
+            errors.append("transition direction missing/invalid for: " + ", ".join(map(str, bad_transition[:8])))
+        cues = [str(s.get("director", {}).get("sound_cue") or "none") for s in plan]
+        bad_cue = [s.get("shot_id") for s, cue in zip(plan, cues) if cue not in SOUND_CUES]
+        if bad_cue:
+            errors.append("sound cue missing/invalid for: " + ", ".join(map(str, bad_cue[:8])))
+        if cues.count("whoosh") > max(1, len(plan) // 8):
+            errors.append("whoosh is overused; reserve it for motivated transitions")
+        prime = [s for s in plan if s.get("story", {}).get("role") in {"cold_open_payoff", "turning_point", "records_payoff"}]
+        if not any(str(s.get("director", {}).get("kinetic_text") or "").strip() for s in prime):
+            errors.append("prime scenes need at least one factual kinetic-text payoff")
     return errors
 
 

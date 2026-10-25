@@ -8,7 +8,7 @@ import re
 import subprocess
 from pathlib import Path
 
-VERSION = 1
+VERSION = 2
 FPS = 24
 TEMPO = 1.02
 
@@ -93,7 +93,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return ass, srt
 
 
-def _motion_filter(motion: str, frames: int, fade_in: bool, fade_out: bool, size: tuple[int,int]) -> str:
+def _escape_drawtext(value: str) -> str:
+    return value.replace('\\', r'\\').replace("'", r"\'").replace(':', r'\:').replace('%', r'\%').replace(',', r'\,')
+
+
+def _motion_filter(motion: str, frames: int, fade_in: bool, fade_out: bool, size: tuple[int,int],
+                   kinetic_text: str = '') -> str:
     progress = f'on/{max(1,frames-1)}'
     x, y = 'iw/2-iw/zoom/2', 'ih/2-ih/zoom/2'
     if motion == 'slow_pullback':
@@ -104,6 +109,10 @@ def _motion_filter(motion: str, frames: int, fade_in: bool, fade_out: bool, size
         zoom = f'1.025+0.035*{progress}'
     elif motion == 'wide_hold':
         zoom = '1.015'
+    elif motion == 'vertical_reveal':
+        zoom, y = '1.045', f'(ih-ih/zoom)*(1-{progress})'
+    elif motion == 'prime_ramp':
+        zoom = f'1.015+0.085*pow({progress},2)'
     else:
         zoom = f'1.015+0.055*{progress}'
     w,h=size
@@ -116,6 +125,14 @@ def _motion_filter(motion: str, frames: int, fade_in: bool, fade_out: bool, size
     if fade_out:
         fade=min(.22,duration/4)
         filters.append(f'fade=t=out:st={duration-fade:.4f}:d={fade:.4f}')
+    if kinetic_text:
+        text = _escape_drawtext(kinetic_text[:54])
+        start, end = max(.15, duration * .48), max(.35, duration * .90)
+        filters.append(
+            "drawtext=font='Arial':text='" + text + "':fontcolor=white:fontsize=h/15:"
+            "borderw=3:bordercolor=black@0.85:x=(w-text_w)/2:y=h*0.72:"
+            f"enable='between(t,{start:.3f},{end:.3f})'"
+        )
     return ','.join(filters)
 
 
@@ -146,14 +163,18 @@ def _render(root: Path, *, expected_shots: int = 75, size: tuple[int,int] = (192
     for i,s in enumerate(shots):
         frames=round(float(s['end_seconds'])/tempo*FPS)-round(float(s['start_seconds'])/tempo*FPS)
         if frames < 1: raise ValueError('Shot shorter than one frame')
+        director=s.get('director',{})
+        transition=director.get('transition','hard_cut')
+        dissolve=transition in {'measured_dissolve','dip_to_black'}
         signature={'version':VERSION,'image_sha256':_sha(Path(s['image'])),'frames':frames,'motion':s.get('motion','slow_push'),'size':size,
+                   'transition':transition,'sound_cue':director.get('sound_cue','none'),'kinetic_text':director.get('kinetic_text',''),
                    'chapter_start':i==0 or s['chapter']!=shots[i-1]['chapter'], 'chapter_end':i==len(shots)-1 or s['chapter']!=shots[i+1]['chapter']}
         digest=hashlib.sha256(json.dumps(signature,sort_keys=True).encode()).hexdigest()
         clip=cache/f"{s['shot_id']}.mp4"; receipt=clip.with_suffix('.json')
         cached=json.loads(receipt.read_text()) if receipt.exists() else {}
         if not (clip.exists() and cached.get('input_sha256')==digest and cached.get('output_sha256')==_sha(clip)):
             pending=cache/f"{s['shot_id']}.pending.mp4"
-            filters=_motion_filter(signature['motion'],frames,signature['chapter_start'],signature['chapter_end'],size)
+            filters=_motion_filter(signature['motion'],frames,signature['chapter_start'] or dissolve,signature['chapter_end'] or dissolve,size,signature['kinetic_text'])
             _run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',s['image'],'-vf',filters,'-frames:v',str(frames),'-an','-c:v','libx264','-preset','fast','-crf','19','-pix_fmt','yuv420p','-threads','4',str(pending)])
             pending.replace(clip)
             _write(receipt,{'input_sha256':digest,'output_sha256':_sha(clip),'frames':frames})
@@ -190,8 +211,8 @@ def _render(root: Path, *, expected_shots: int = 75, size: tuple[int,int] = (192
     )
     score=score.replace(',', r'\,')
     _run(['ffmpeg','-hide_banner','-loglevel','error','-y','-f','lavfi','-i',f"aevalsrc={score}:s=48000:d={duration}",'-af',f'lowpass=f=1800,highpass=f=45,afade=t=in:d=3,afade=t=out:st={max(0,duration-4)}:d=4','-c:a','pcm_s16le',str(bed)])
-    chapter_starts=[float(s['start_seconds'])/tempo for i,s in enumerate(shots) if i and s['chapter']!=shots[i-1]['chapter']]
-    windows='+'.join(f'if(between(t,{max(0,t-.20):.3f},{t+.24:.3f}),0.007*sin(PI*(t-{max(0,t-.20):.3f})/0.44)^2,0)' for t in chapter_starts) or '0'
+    cue_starts=[float(s['start_seconds'])/tempo for i,s in enumerate(shots) if i and s.get('director',{}).get('sound_cue') in {'whoosh','impact'}]
+    windows='+'.join(f'if(between(t,{max(0,t-.20):.3f},{t+.24:.3f}),0.007*sin(PI*(t-{max(0,t-.20):.3f})/0.44)^2,0)' for t in cue_starts) or '0'
     # Narration is nearly continuous, so sidechain compression suppressed the
     # score for the entire film.  Keep the music at a consistent documentary
     # level (about 11 dB below the voice) and let the final loudness pass
@@ -213,7 +234,7 @@ def _render(root: Path, *, expected_shots: int = 75, size: tuple[int,int] = (192
     if not -18 <= float(levels['input_i']) <= -14 or float(levels['input_tp']) > -.5:
         raise RuntimeError('Final loudness out of bounds: '+json.dumps(levels))
     pending.replace(final)
-    result={'status':'technical_passed','input_sha256':master_input,'measured_loudness':levels,'editorial_status':'awaiting_review','master':str(final),'master_sha256':_sha(final),'duration_seconds':float(info['format']['duration']), 'shot_count':len(shots),'fps':FPS,'size':list(size),'tempo':tempo,'full_decode':'passed','captions':str(srt),'image_animation':'camera movement over original still scenes','soundtrack':'original synthesized ambient bed and transition noise; voice sidechain ducking','loudness_target_lufs':-16,'true_peak_target_db':-1.5,'input_clip_signatures':identities}
+    result={'status':'technical_passed','input_sha256':master_input,'measured_loudness':levels,'editorial_status':'awaiting_review','master':str(final),'master_sha256':_sha(final),'duration_seconds':float(info['format']['duration']), 'shot_count':len(shots),'fps':FPS,'size':list(size),'tempo':tempo,'full_decode':'passed','captions':str(srt),'image_animation':'camera movement over original still scenes; not character animation','direction_system':'shot-level zoom/pan, motivated transitions, selective sound cues and factual kinetic text','soundtrack':'original synthesized ambient bed and selective transition noise; narration remains primary','loudness_target_lufs':-16,'true_peak_target_db':-1.5,'input_clip_signatures':identities}
     _write(root/'technical-qc.json',result)
     return result
 
