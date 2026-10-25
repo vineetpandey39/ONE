@@ -2,7 +2,41 @@
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
+
+
+def _article_figure_panels(asset):
+    """Expose distinct panels in explicitly captioned official concept montages."""
+    title = str(asset.get('title', ''))
+    if (asset.get('provider') != 'NASA'
+            or not re.search(r'\bconcepts depict\b', title, re.IGNORECASE)):
+        return [asset]
+    try:
+        from PIL import Image
+        source = Path(asset['path'])
+        with Image.open(source) as image:
+            if image.width / image.height < 2.4 or image.height < 240:
+                return [asset]
+            panels = [image.crop((0, 0, image.width // 2, image.height)),
+                      image.crop((image.width // 2, 0, image.width, image.height))]
+            result = []
+            for number, panel in enumerate(panels, 1):
+                path = source.with_name(f"panel-{asset['sha256'][:12]}-{number}.png")
+                panel.save(path, format='PNG')
+                identity = hashlib.sha256(path.read_bytes()).hexdigest()
+                metadata = {**asset.get('metadata', {}),
+                            'title': f'{title} (panel {number} of 2)'}
+                derived = {**asset, 'path': str(path), 'sha256': identity,
+                           'title': metadata['title'], 'metadata': metadata,
+                           'derived_from_sha256': asset['sha256'],
+                           'source_panel': number}
+                path.with_suffix('.receipt.json').write_text(
+                    json.dumps(derived, indent=2), encoding='utf-8')
+                result.append(derived)
+            return result
+    except (KeyError, OSError, ValueError):
+        return [asset]
 
 
 def build_scene_shots(root, science, voice, assets, original, media, editorial, *, image_search=None):
@@ -109,6 +143,7 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
                     figures.extend(article_images(source_url, root / 'sources/article-images'))
                 except (OSError, ValueError):
                     continue
+            figures = [panel for figure in figures for panel in _article_figure_panels(figure)]
             for asset in figures:
                 if len(pictures) >= needed:
                     break
