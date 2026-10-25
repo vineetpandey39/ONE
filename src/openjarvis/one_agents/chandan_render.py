@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+import platform
 import re
 import subprocess
 from pathlib import Path
@@ -97,6 +99,26 @@ def _escape_drawtext(value: str) -> str:
     return value.replace('\\', r'\\').replace("'", r"\'").replace(':', r'\:').replace('%', r'\%').replace(',', r'\,')
 
 
+def _drawtext_fontfile() -> str | None:
+    """Return an existing font path escaped for an ffmpeg filter option."""
+    system = platform.system()
+    if system == 'Windows':
+        fonts = Path(os.environ.get('WINDIR', r'C:\Windows')) / 'Fonts'
+        candidates = [fonts/'arialbd.ttf', fonts/'segoeuib.ttf', fonts/'arial.ttf']
+    elif system == 'Darwin':
+        candidates = [Path('/System/Library/Fonts/Supplemental/Arial Bold.ttf'),
+                      Path('/System/Library/Fonts/Supplemental/Arial.ttf'),
+                      Path('/System/Library/Fonts/Helvetica.ttc')]
+    else:
+        candidates = [Path('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'),
+                      Path('/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf'),
+                      Path('/usr/share/fonts/truetype/freefont/FreeSansBold.ttf')]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.as_posix().replace(':', r'\:').replace("'", r"\'")
+    return None
+
+
 def _motion_filter(motion: str, frames: int, fade_in: bool, fade_out: bool, size: tuple[int,int],
                    kinetic_text: str = '') -> str:
     progress = f'on/{max(1,frames-1)}'
@@ -128,8 +150,11 @@ def _motion_filter(motion: str, frames: int, fade_in: bool, fade_out: bool, size
     if kinetic_text:
         text = _escape_drawtext(kinetic_text[:54])
         start, end = max(.15, duration * .48), max(.35, duration * .90)
+        fontfile = _drawtext_fontfile()
+        if not fontfile:
+            raise RuntimeError('Kinetic text requires an installed Arial, Segoe UI, or compatible font file')
         filters.append(
-            "drawtext=font='Arial':text='" + text + "':fontcolor=white:fontsize=h/15:"
+            "drawtext=fontfile='" + fontfile + "':text='" + text + "':fontcolor=white:fontsize=h/15:"
             "borderw=3:bordercolor=black@0.85:x=(w-text_w)/2:y=h*0.72:"
             f"enable='between(t,{start:.3f},{end:.3f})'"
         )
