@@ -89,7 +89,7 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
         # archive queries can supply when valid licensed clips are short.
         # The assembler adds a restrained pan/zoom, so this remains a moving
         # visual beat rather than a static card.
-        needed = max(1, math.ceil(remaining / 15))
+        needed = 0 if remaining <= 0.5 else math.ceil(remaining / 15)
         # Prefer direct imagery from the commissioned official article before
         # searching an archive. These are original source figures, not captures.
         for asset in media.get(str(number),{}).get('assets',[]):
@@ -150,7 +150,8 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
                 metadata = {'title': asset.get('title', ''),
                             'description': asset.get('caption', '')}
                 matches = (nasa_subject_matches(scene.get('title', ''), metadata)
-                           or nasa_subject_matches(scene.get('media_query', ''), metadata))
+                           or nasa_subject_matches(scene.get('media_query', ''), metadata)
+                           or nasa_subject_matches(scene.get('narration', ''), metadata))
                 if (asset['sha256'] in used or not matches
                         or not nasa_image_is_visible(asset['path'])):
                     continue

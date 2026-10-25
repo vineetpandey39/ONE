@@ -265,10 +265,21 @@ def render(root, tools, *, resolve_settings=None):
             budget=round(segment['seconds']*30)
             fixed=sum(round(t['seconds']*30) for t in templates if 'seconds' in t)
             flexible=[t for t in templates if 'seconds' not in t]
-            if not flexible or budget <= fixed:raise ValueError('Unique shot plan cannot fit measured narration')
+            all_motion = not flexible
+            if all_motion:
+                # A scene may be completely covered by distinct licensed
+                # motion clips. Preserve those clips and absorb only the
+                # sub-frame rounding residual in the final cut.
+                if not templates or abs(budget-fixed)>15:
+                    raise ValueError('All-motion shot plan cannot fit measured narration')
+                fixed=budget
+            elif budget <= fixed:
+                raise ValueError('Unique shot plan cannot fit measured narration')
             remaining=budget-fixed
             for index,t in enumerate(templates):
                 frames=round(t['seconds']*30) if 'seconds' in t else remaining//len(flexible)
+                if all_motion and index == len(templates)-1:
+                    frames += budget-sum(round(row['seconds']*30) for row in templates)
                 if 'seconds' not in t:remaining-=frames;flexible.remove(t)
                 asset=dict(t['asset'])
                 matched=next((a for a in assets['stock'] if a['sha256']==asset['sha256']),None)
