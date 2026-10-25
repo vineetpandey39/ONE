@@ -6,7 +6,8 @@ from pathlib import Path
 
 
 def build_scene_shots(root, science, voice, assets, original, media, editorial, *, image_search=None):
-    from openjarvis.one_agents.space_research import nasa_image,nasa_subject_matches,nasa_image_is_visible
+    from openjarvis.one_agents.space_research import (article_images, nasa_image,
+        nasa_subject_matches, nasa_image_is_visible)
     image_search = image_search or nasa_image
     root = Path(root)
     used = set()
@@ -92,6 +93,33 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
             rows.append(row)
             pictures.append(row)
             used.add(asset['sha256'])
+        # Some newly published NASA articles have exact mission figures that
+        # are not yet discoverable through the NASA Image Library search.
+        # Use those verified article figures before failing coverage.  This is
+        # not a generic web-image fallback: article_images enforces the source
+        # allow-list and stores a source receipt beside every downloaded file.
+        if len(pictures) < needed:
+            commission = json.loads((root / 'commission.json').read_text(encoding='utf-8'))
+            source_urls = list(commission.get('sources') or [])
+            figures = []
+            for source_url in source_urls[:2]:
+                try:
+                    figures.extend(article_images(source_url, root / 'sources/article-images'))
+                except (OSError, ValueError):
+                    continue
+            subject_query = ' '.join([scene.get('media_query', ''), scene.get('title', '')])
+            for asset in figures:
+                if len(pictures) >= needed:
+                    break
+                metadata = {'title': asset.get('title', ''),
+                            'description': asset.get('caption', '')}
+                if (asset['sha256'] in used or not nasa_subject_matches(subject_query, metadata)
+                        or not nasa_image_is_visible(asset['path'])):
+                    continue
+                row = {'asset': {**asset, 'seconds': 3600}, 'kind': 'primary'}
+                rows.append(row)
+                pictures.append(row)
+                used.add(asset['sha256'])
         if len(pictures) < needed:
             raise ValueError(f'Scene {number} lacks distinct relevant imagery; shorten narration or revise its visual brief')
         if pictures:
