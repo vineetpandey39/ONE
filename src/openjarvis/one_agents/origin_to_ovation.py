@@ -319,6 +319,26 @@ def run_stage(job, *, enqueue):
                         or not all(gate.get(k) is True for k in ("identity", "anatomy", "historical_accuracy"))):
                     return {"_blocked": True, "status": "identity_review_required",
                             "blocked_reason": "Every quarantined scene needs a matching passed visual gate"}
+        handedness_contract = path / "runtime" / "post-generation-review-required.json"
+        if handedness_contract.is_file():
+            release_path = path / "runtime" / "handedness-release.json"
+            if not release_path.is_file():
+                return {"_blocked": True, "status": "handedness_review_required",
+                        "blocked_reason": "Throwing-action scenes require hash-bound handedness and anatomy review"}
+            release = read(release_path)
+            required_shots = release.get("required_shots", [])
+            if release.get("status") != "passed" or not required_shots:
+                return {"_blocked": True, "status": "handedness_review_required",
+                        "blocked_reason": "Handedness release is incomplete"}
+            plan_by_id = {shot["shot_id"]: shot for shot in plan}
+            for shot_id in required_shots:
+                shot = plan_by_id.get(shot_id)
+                gate = release.get("shots", {}).get(shot_id, {})
+                if (shot is None or gate.get("image_sha256") != digest(Path(shot["image"]))
+                        or not all(gate.get(key) is True for key in
+                                   ("right_handed", "anatomy", "no_mirror"))):
+                    return {"_blocked": True, "status": "handedness_review_required",
+                            "blocked_reason": f"Shot {shot_id} lacks a matching passed handedness gate"}
         write(path / "runtime" / "active.json", {
             "agent": agent, "job_id": job["id"], "status": "producing_images_single_chat",
             "processed": sum(Path(s["image"]).is_file() for s in plan), "total": len(plan)})
