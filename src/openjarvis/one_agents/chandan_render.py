@@ -8,6 +8,7 @@ import os
 import platform
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 VERSION = 2
@@ -15,8 +16,40 @@ FPS = 24
 TEMPO = 1.02
 
 
+def _ffmpeg_env(args: list[str]) -> dict[str, str] | None:
+    """Give Windows FFmpeg a private Fontconfig root for drawtext/libass.
+
+    The WinGet full build includes Fontconfig-enabled filters but does not ship a
+    default ``fonts.conf``.  Passing ``fontfile=`` is insufficient because both
+    drawtext and the later ASS pass initialise Fontconfig before opening the
+    selected font.  Keep the workaround process-local and deterministic rather
+    than depending on a machine-wide Fontconfig installation.
+    """
+    if platform.system() != 'Windows' or not args or Path(args[0]).name.lower() not in {'ffmpeg', 'ffmpeg.exe', 'ffprobe', 'ffprobe.exe'}:
+        return None
+    root = Path(tempfile.gettempdir()) / 'one-chandan-fontconfig'
+    cache = root / 'cache'
+    config = root / 'fonts.conf'
+    cache.mkdir(parents=True, exist_ok=True)
+    fonts = (Path(os.environ.get('WINDIR', r'C:\Windows')) / 'Fonts').as_posix()
+    if not config.is_file():
+        config.write_text(
+            '<?xml version="1.0"?>\n'
+            '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n'
+            '<fontconfig>\n'
+            f'  <dir>{fonts}</dir>\n'
+            f'  <cachedir>{cache.as_posix()}</cachedir>\n'
+            '  <config><rescan><int>30</int></rescan></config>\n'
+            '</fontconfig>\n', encoding='utf-8')
+    env = os.environ.copy()
+    env['FONTCONFIG_FILE'] = str(config)
+    env['FONTCONFIG_PATH'] = str(root)
+    return env
+
+
 def _run(args: list[str], cwd: Path | None = None) -> str:
-    result = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    result = subprocess.run(args, cwd=cwd, capture_output=True, text=True,
+                            env=_ffmpeg_env(args))
     if result.returncode:
         raise RuntimeError(f"{args[0]} failed: {result.stderr[-6000:]}")
     return result.stdout

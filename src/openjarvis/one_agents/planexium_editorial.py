@@ -163,13 +163,16 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
                 # archive-only density target.  One exact source figure may
                 # carry a twenty-second beat, and later scenes may be the only
                 # relevant home for the remaining figures.
-                if remaining / len(pictures) <= 20:
+                capacity = sum(20 if row['kind'] == 'primary' else 15 for row in pictures)
+                if capacity >= remaining:
                     break
         # A figure taken directly from the commissioned article may hold for
         # up to twenty seconds with the restrained pan/zoom. Archive-search
         # stills retain the tighter fifteen-second density rule.
-        source_figure_hold_ok = (pictures and remaining / len(pictures) <= 20
-                                 and any(row['kind'] == 'primary' for row in pictures))
+        source_figure_hold_ok = (pictures and any(row['kind'] == 'primary' for row in pictures)
+                                 and (sum(20 if row['kind'] == 'primary' else 15
+                                          for row in pictures) >= remaining
+                                      or remaining / len(pictures) <= 20))
         if len(pictures) < needed and not source_figure_hold_ok:
             raise ValueError(f'Scene {number} lacks distinct relevant imagery; shorten narration or revise its visual brief')
         if pictures:
