@@ -11,6 +11,14 @@ import time
 from pathlib import Path
 from urllib.parse import quote_plus
 
+# Raw shot bytes from this editor revision remain valid: the successor only
+# changed post-render QC classification and source-kind accounting.
+COMPATIBLE_CINEMATIC_EDITORS = {
+    '7dbf9a6eab5834248cfd846126f7d180f34af1f70a77fc134f7206fa5f224001',
+    # Same source revision as stored in the Windows checkout with CRLF bytes.
+    '8229278ddfb48147ae3a18bf47a81db69ab0cabfb3d15462f5f5eae4dd7e0888',
+}
+
 
 def check_space_safe_black(master, report):
     """Reject blank spans without treating intentionally dark space as blank."""
@@ -309,9 +317,12 @@ def render(root, tools, *, resolve_settings=None):
         for ordinal,shot in enumerate(shots,1):
             progress(root,'editing_footage',scene=shot['scene'],total_scenes=len(science['scenes']),shot=ordinal,total_shots=len(shots))
             target=directory/f'shot-{ordinal:03d}.mp4';receipt=target.with_suffix('.json')
-            signature=hashlib.sha256(json.dumps({'shot':shot,'editor':sha(Path(__file__)),'native_fusion':bool(resolve_settings),'shared_spec':shared_specs.get(ordinal),'shared_library':shared.library_hash if ordinal in shared_specs else None},sort_keys=True).encode()).hexdigest()
+            recipe={'shot':shot,'native_fusion':bool(resolve_settings),'shared_spec':shared_specs.get(ordinal),'shared_library':shared.library_hash if ordinal in shared_specs else None}
+            signature=hashlib.sha256(json.dumps({**recipe,'editor':sha(Path(__file__))},sort_keys=True).encode()).hexdigest()
+            compatible={hashlib.sha256(json.dumps({**recipe,'editor':editor},sort_keys=True).encode()).hexdigest()
+                        for editor in COMPATIBLE_CINEMATIC_EDITORS}
             prior=json.loads(receipt.read_text(encoding='utf-8')) if receipt.exists() else {}
-            if not (target.exists() and prior.get('signature')==signature and prior.get('sha256')==sha(target)):
+            if not (target.exists() and prior.get('signature') in ({signature}|compatible) and prior.get('sha256')==sha(target)):
                 seconds=shot['frames']/30;duration=float(shot['asset']['seconds']);start=shot['asset'].get('usable_in',0)
                 offset=start+shot['offset']
                 # Blur-fill preserves the original source framing and its creator credit.
