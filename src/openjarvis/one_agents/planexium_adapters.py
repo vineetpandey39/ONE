@@ -282,10 +282,30 @@ class ChatGPTAdapter:
         if brand != "planexium":
             raise ValueError("Wrong channel for this image adapter")
         filename = f"planexium-{self.context.mission_id}-{output.parent.name}.png"
-        steps = _login_steps(self.asset, self.context, self.profile_root) + [{"action": "generate_and_download_chatgpt_image", "args": {
-            "prompt": prompt, "filename": filename, "max_attempts": 2, "as": "image_path"}}]
+        legacy_receipt = output.parent / "provider.json"
+        legacy = json.loads(legacy_receipt.read_text(encoding="utf-8")) if legacy_receipt.exists() else {}
+        # A request hash is part of the durable LAO checkpoint. Resume an old
+        # in-flight/successful request exactly as authored; only the confirmed
+        # pre-artifact timeout repaired here may advance to a versioned request.
+        legacy_error = str(legacy.get("provider_error") or "")
+        repairable_timeout = (legacy.get("terminal_status") == "Failed"
+                              and "Timed out waiting for generated image src" in legacy_error)
+        legacy_request = bool(legacy) and not repairable_timeout
+        marker = f"PLANEXIUM-{self.context.mission_id}-{output.parent.name}"
+        image_args = {"prompt": prompt, "filename": filename, "max_attempts": 2, "as": "image_path"}
+        receipt = legacy_receipt
+        if not legacy_request:
+            image_args.update({
+                "prompt": f"{prompt}\nRequest marker: {marker}",
+                "request_marker": marker,
+                "strict_fresh_turn": True,
+                "stall_timeout_ms": 300000,
+            })
+            receipt = output.parent / "provider-v2.json"
+        steps = _login_steps(self.asset, self.context, self.profile_root) + [
+            {"action": "generate_and_download_chatgpt_image", "args": image_args}]
         with self.lease():
-            out, job = self.draft.run("planexium-original-thumbnail", steps, {}, output.parent / "provider.json")
+            out, job = self.draft.run("planexium-original-thumbnail", steps, {}, receipt)
         source = self.draft.artifact(out, job, filename)
         output.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, output)
