@@ -99,7 +99,9 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
         # not a generic web-image fallback: article_images enforces the source
         # allow-list and stores a source receipt beside every downloaded file.
         if len(pictures) < needed:
-            commission = json.loads((root / 'commission.json').read_text(encoding='utf-8'))
+            commission_path = root / 'commission.json'
+            commission = (json.loads(commission_path.read_text(encoding='utf-8'))
+                          if commission_path.is_file() else {})
             source_urls = list(commission.get('sources') or [])
             figures = []
             for source_url in source_urls[:2]:
@@ -121,6 +123,12 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
                 rows.append(row)
                 pictures.append(row)
                 used.add(asset['sha256'])
+                # Do not consume another commissioned figure using the
+                # archive-only density target.  One exact source figure may
+                # carry a twenty-second beat, and later scenes may be the only
+                # relevant home for the remaining figures.
+                if remaining / len(pictures) <= 20:
+                    break
         # A figure taken directly from the commissioned article may hold for
         # up to twenty seconds with the restrained pan/zoom. Archive-search
         # stills retain the tighter fifteen-second density rule.
