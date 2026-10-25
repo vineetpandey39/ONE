@@ -10433,7 +10433,13 @@ def _run_yatra_visuals(job: dict[str, Any]) -> dict[str, Any]:
                      "Recording official-source browser demos")
     captures = _yatra_record_captures({**payload, 'assetFolder': asset_folder}, video_title or asset_folder)
     if not captures.get("ok"):
-        raise RuntimeError(f"YATRA browser capture failed: {captures}")
+        # Official-page demos are optional evidence inserts. route_visuals
+        # selects OBS only for recordings that actually exist and otherwise
+        # supplies the scene's information card, so an unavailable OBS
+        # websocket must cost the demos, not the already acquired video.
+        # Keep the failed result intact for the production receipt while
+        # making the deliberate degradation explicit.
+        captures = {**captures, "skipped": True, "optional_failure": True}
     stages.set_stage("yatra", stages.EXECUTING,
                      "Drawing the cards, cutting the picture to the voice, checking the result")
     cut = _yatra_cut_video(plan_file, asset_folder)
