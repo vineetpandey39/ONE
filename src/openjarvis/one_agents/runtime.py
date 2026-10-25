@@ -669,9 +669,24 @@ def claim_job(job_id: str | None = None) -> dict[str, Any] | None:
         # A scoped deployment may reserve a job so an older running worker
         # cannot win the claim and execute stale code. Only an exact-id claim
         # can consume that reservation; the normal scheduler ignores it.
-        row = (db.execute("SELECT * FROM jobs WHERE status IN ('queued','reserved') AND id = ?", (job_id,)).fetchone()
+        # PLANEXIUM's pipeline deliberately owns one channel-wide production
+        # lease.  Since the worker can execute several unrelated jobs at once,
+        # claiming a second PLANEXIUM row while the first is running only makes
+        # that second row fail at the lease boundary.  Keep it queued instead;
+        # BEGIN IMMEDIATE makes this admission check and the claim atomic even
+        # when more than one worker process is polling the queue.
+        planexium_available = (
+            "(jobs.agent_id != 'planexium' OR NOT EXISTS ("
+            "SELECT 1 FROM jobs AS active_planexium "
+            "WHERE active_planexium.agent_id = 'planexium' "
+            "AND active_planexium.status = 'running'))"
+        )
+        row = (db.execute(
+                   "SELECT * FROM jobs WHERE status IN ('queued','reserved') AND id = ? AND "
+                   + planexium_available, (job_id,)).fetchone()
                if job_id else db.execute(
-                   "SELECT * FROM jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1").fetchone())
+                   "SELECT * FROM jobs WHERE status = 'queued' AND " + planexium_available
+                   + " ORDER BY created_at LIMIT 1").fetchone())
         if not row:
             return None
         now = _now()
