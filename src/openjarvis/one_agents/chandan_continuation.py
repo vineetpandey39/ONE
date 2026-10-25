@@ -2,6 +2,7 @@
 from pathlib import Path
 import json
 import shutil
+import re
 
 from . import origin_to_ovation as pipeline
 
@@ -50,7 +51,18 @@ def validate_pack(path):
                 or not Path(shot['image']).resolve().is_relative_to(master.resolve())):
             raise ValueError('Shot missing reviewed reference, age, era, source, direction or scoped output')
     sources = pipeline.read(path / 'research/source-register.json')
-    known = {s['claim_id'] for s in sources if str(s.get('url', '')).startswith('https://')}
+    if isinstance(sources, list):
+        known = {s['claim_id'] for s in sources if str(s.get('url', '')).startswith('https://')}
+    elif isinstance(sources, dict) and isinstance(sources.get('sources'), dict):
+        # Rich source registers key records by source ID; their claim binding remains
+        # authoritative in the Markdown ledger that ARES also consumes.
+        registered = sources['sources']
+        if not registered or not all(str(item.get('url', '')).startswith('https://') for item in registered.values()):
+            raise ValueError('Source register contains a missing or non-HTTPS source')
+        ledger_text = (path / 'research/claim-ledger.md').read_text(encoding='utf-8-sig')
+        known = set(re.findall(r'^\|\s*(C\d+)\s*\|.*https://', ledger_text, re.MULTILINE))
+    else:
+        raise ValueError('Unsupported source-register schema')
     if any(set(s['claim_ids']) - known for s in plan):
         raise ValueError('Shot refers to an unknown source claim')
     from .origin_to_ovation_story import build_contract, validate
