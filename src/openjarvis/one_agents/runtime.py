@@ -10721,6 +10721,16 @@ def _job_watchdog_seconds(job: dict[str, Any] | None = None) -> float:
         # Sequential full-video acquisition has its own bounded per-clip waits.
         # Outer watchdog must outlive 12h acquisition + capture/edit stages.
         return max(default, 16 * 3600.0)
+    if job and job.get("agent_id") == "lyra":
+        payload = _json_task(job)
+        if (payload.get("brand") == "sonia_travel_vlogs"
+                and payload.get("stage") == "seo"):
+            # LYRA generates three thumbnail variants sequentially. Each has a
+            # bounded 780s LAO wait, but every status request can itself take
+            # up to 30s and the localization/upload gate still runs afterward.
+            # The generic 45-minute net can therefore abandon healthy work
+            # before its own bounded steps finish (Philippines, 2026-10-25).
+            return max(default, 2 * 3600.0)
     if job and job.get("agent_id") == "chandan":
         # One ChatGPT chat makes 75 frames (its own 6 h provider limit), then narration and render. On 2026-10-22
         # the 45-minute net marked the Virat run failed at 75 minutes; the work finished anyway and handed to ARES.
