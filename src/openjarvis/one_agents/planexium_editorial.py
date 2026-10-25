@@ -107,20 +107,26 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
                     figures.extend(article_images(source_url, root / 'sources/article-images'))
                 except (OSError, ValueError):
                     continue
-            subject_query = ' '.join([scene.get('media_query', ''), scene.get('title', '')])
             for asset in figures:
                 if len(pictures) >= needed:
                     break
                 metadata = {'title': asset.get('title', ''),
                             'description': asset.get('caption', '')}
-                if (asset['sha256'] in used or not nasa_subject_matches(subject_query, metadata)
+                matches = (nasa_subject_matches(scene.get('title', ''), metadata)
+                           or nasa_subject_matches(scene.get('media_query', ''), metadata))
+                if (asset['sha256'] in used or not matches
                         or not nasa_image_is_visible(asset['path'])):
                     continue
                 row = {'asset': {**asset, 'seconds': 3600}, 'kind': 'primary'}
                 rows.append(row)
                 pictures.append(row)
                 used.add(asset['sha256'])
-        if len(pictures) < needed:
+        # A figure taken directly from the commissioned article may hold for
+        # up to twenty seconds with the restrained pan/zoom. Archive-search
+        # stills retain the tighter fifteen-second density rule.
+        source_figure_hold_ok = (pictures and remaining / len(pictures) <= 20
+                                 and any(row['kind'] == 'primary' for row in pictures))
+        if len(pictures) < needed and not source_figure_hold_ok:
             raise ValueError(f'Scene {number} lacks distinct relevant imagery; shorten narration or revise its visual brief')
         if pictures:
             archive_seconds += (remaining / len(pictures)) * sum(
