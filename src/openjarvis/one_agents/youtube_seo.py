@@ -393,7 +393,9 @@ THUMBNAIL_PROMPT = (
 
 
 ORIGINAL_THUMBNAIL_PROMPT = (
-    "Create an original 16:9 YouTube thumbnail background. No supplied portrait or channel host. "
+    "Generate a brand-new 16:9 YouTube thumbnail background from this text brief only. "
+    "This is a fresh text-to-image request, not an image edit: no reference image is expected or required. "
+    "Do not invoke a reference-image, portrait, face-swap, or image-edit workflow. "
     "STORY: {video_title}\nSUBJECT: {destination}\nTRUTHFUL VISUAL: {left_usp}\n"
     "One dominant subject on the right, clear space on the left for later text: {thumbnail_text}. "
     "Do not render text, logos or watermarks. Do not present an artist concept as a real observation "
