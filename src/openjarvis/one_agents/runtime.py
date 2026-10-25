@@ -9774,6 +9774,17 @@ def _yatra_narrate(tool: Any, plan_record: dict[str, Any], asset_folder: str,
     if len(re.findall(r"(?m)^\[\d{1,2}:\d{2}", full_script)) < 2 and len(full_script) > 9500:
         return {"ok": False, "detail": (f"the script is {len(full_script)} characters with no [m:ss-m:ss] cue lines; "
                                         "ElevenLabs refuses more than 10,000 in one request. No credits were spent.")}
+
+    # Reusing a completed narration above is always safe.  A new paid start is
+    # not: once ElevenLabs has explicitly reported exhausted quota, hold every
+    # later start until capacity has been verified and the durable block is
+    # cleared.  This is an external account condition, not a source repair.
+    from openjarvis.one_agents import provider_capacity
+    try:
+        provider_capacity.require_available("elevenlabs")
+    except provider_capacity.ProviderCapacityBlocked as exc:
+        return {"ok": False, "status": "Blocked", "capacity_blocked": True,
+                "detail": str(exc), "script_file": str(script_file)}
     script_file.write_text(full_script, encoding="utf-8")
 
     # The Hinglish lexicon respells Hindi words in Devanagari; an English script has none to respell.
@@ -9814,9 +9825,20 @@ def _yatra_narrate(tool: Any, plan_record: dict[str, Any], asset_folder: str,
     result = {"ok": status == "Successful", "lao_job": narration_job, "status": status,
               "script_file": str(script_file)}
     if status != "Successful":
+        provider_error = str(last_job.get("error_message") or "no error message")
         # Carry LAO's own reason; "requires repair: None" told nobody that ElevenLabs had refused the text.
         result["detail"] = (f"LAO narration {narration_job} ended {status}: "
-                            f"{str(last_job.get('error_message') or 'no error message')[:400]}")
+                            f"{provider_error[:400]}")
+        compact_error = "".join(provider_error.casefold().split())
+        if ('"code":"quota_exceeded"' in compact_error
+                or "exceedsyourquota" in compact_error):
+            provider_capacity.record_block(
+                "elevenlabs",
+                reason="ElevenLabs reported quota_exceeded while generating approved narration",
+                evidence_kind="provider_response",
+                source_job=narration_job,
+            )
+            result["capacity_blocked"] = True
 
     manifest = folder / "narration.segments.json"
     if manifest.exists():
@@ -10107,6 +10129,11 @@ def _run_fabula(job: dict[str, Any]) -> dict[str, Any]:
         stages.set_stage("fabula", stages.EXECUTING, "Validating or producing approved narration and measured scene timings")
         narration = _yatra_narrate(LaoOrchestratorTool(), record, folder, record["video_title"])
         if not narration.get("ok"):
+            if narration.get("capacity_blocked"):
+                return {"agent": "FABULA", "stage": "narration", "_blocked": True,
+                        "status": "provider_capacity_blocked",
+                        "blocked_reason": narration.get("detail"),
+                        "narration": narration, "production_complete": False}
             raise RuntimeError(f"FABULA narration requires repair: {narration.get('detail')}")
         receipt = _YATRA_ASSET_ROOT / folder / "narration" / "fabula-receipt.json"
         receipt.write_text(json.dumps({"agent": "FABULA", "job": job["id"],

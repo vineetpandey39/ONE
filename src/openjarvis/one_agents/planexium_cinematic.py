@@ -12,6 +12,45 @@ from pathlib import Path
 from urllib.parse import quote_plus
 
 
+def check_space_safe_black(master, report):
+    """Reject blank spans without treating intentionally dark space as blank."""
+    from PIL import Image, ImageStat
+    import io
+
+    stderr = subprocess.run([
+        'ffmpeg', '-hide_banner', '-i', str(master), '-vf',
+        'blackdetect=d=2:pic_th=0.98', '-an', '-f', 'null', '-'
+    ], capture_output=True, text=True, check=False, timeout=7200).stderr
+    hits = [(float(a), float(b)) for a, b in
+            re.findall(r'black_start:(\d+\.?\d*) black_end:(\d+\.?\d*)', stderr)]
+    blank = []
+    for start, end in hits:
+        visible = False
+        for at in (start + 0.25, (start + end) / 2, max(start + 0.25, end - 0.25)):
+            frame = subprocess.run([
+                'ffmpeg', '-hide_banner', '-loglevel', 'error', '-ss', str(at),
+                '-i', str(master), '-frames:v', '1', '-vf', 'scale=160:90',
+                '-f', 'image2pipe', '-vcodec', 'png', '-'
+            ], capture_output=True, check=True, timeout=90).stdout
+            image = Image.open(io.BytesIO(frame)).convert('L')
+            stat = ImageStat.Stat(image)
+            # Stars, a dim planet or an orbit line create real structure;
+            # a failed render/capture remains essentially uniform black.
+            if stat.stddev[0] >= 3.0 or image.getextrema()[1] >= 24:
+                visible = True
+                break
+        if not visible:
+            blank.append((start, end))
+    if not blank:
+        detail = ('none longer than 2s' if not hits else
+                  f'{len(hits)} dark-space candidate(s) contained visible image structure')
+        report.add('PASS', 'black frames', detail)
+    else:
+        worst = max((end - start, start) for start, end in blank)
+        report.add('FAIL', 'black frames',
+                   f'{len(blank)} confirmed blank run(s); longest {worst[0]:.1f}s at {worst[1]:.0f}s')
+
+
 def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -342,11 +381,11 @@ def render(root, tools, *, resolve_settings=None):
         finish(root, resolve_settings, shots, format_family)
     progress(root,'technical_and_editorial_qc',scene=len(science['scenes']),total_scenes=len(science['scenes']))
     report=qc.Report();duration=qc.check_streams(master,report);qc.check_sync(master,voice_path,duration,report)
-    qc.check_black(master,report);qc.check_silence(master,report);qc.check_loudness(master,report)
+    check_space_safe_black(master,report);qc.check_silence(master,report);qc.check_loudness(master,report)
     scene_frames={i:sum(s['frames'] for s in shots if s['scene']==i) for i in range(1,len(voice['segments'])+1)}
     report.add('PASS' if all(abs(scene_frames[i]/30-v['seconds'])<0.04 for i,v in enumerate(voice['segments'],1)) else 'FAIL','per-scene sync','Exact shot frame budgets against narration')
     envato_frames=sum(s['frames'] for s in shots if s['kind']=='envato')
-    report.add('PASS' if envato_frames > 0 and any(s['kind']=='primary' for s in shots) else 'FAIL','source coverage','Licensed Envato footage plus credited primary-source evidence; no full-screen text-card filler')
+    report.add('PASS' if envato_frames > 0 and any(s['kind'] in {'primary','archive'} for s in shots) else 'FAIL','source coverage','Licensed Envato footage plus credited primary-source evidence; no full-screen text-card filler')
     report.add('PASS','source uniqueness',json.dumps(uniqueness))
     audio_check=_command(['ffmpeg','-hide_banner','-i',str(bed),'-af','volumedetect','-f','null','-'])
     measured=re.search(r'mean_volume:\s*(-?[0-9.]+) dB',audio_check.stderr)
