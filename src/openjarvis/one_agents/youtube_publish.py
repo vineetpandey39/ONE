@@ -285,6 +285,7 @@ def prepare_gate(package_path: Path) -> dict[str, Any]:
 
     pkg = json.loads(package_path.read_text(encoding="utf-8"))
     blockers += media_metadata_blockers(pkg)
+    blockers += capture_semantic_blockers(root)
     master = Path(str(pkg.get("master") or root / "edit" / "master.mp4"))
     if not master.is_file():
         blockers.append(f"master video not found: {master}")
@@ -371,6 +372,31 @@ def prepare_gate(package_path: Path) -> dict[str, Any]:
     out.write_text(json.dumps(gate, ensure_ascii=False, indent=2), encoding="utf-8")
     gate["path"] = str(out)
     return gate
+
+
+def capture_semantic_blockers(root: Path) -> list[str]:
+    """Require pixel-derived semantic proof before a YATRA master can upload."""
+    capture_dir = Path(root) / "captures"
+    active = [path for path in capture_dir.glob("*-capture.*")
+              if path.is_file() and path.suffix.lower() in {".mkv", ".mp4", ".mov"}]
+    if not active:
+        return []
+    receipt_path = capture_dir / "capture-semantic-qc.json"
+    if not receipt_path.is_file():
+        return ["OBS capture semantic receipt is missing; rerun YATRA capture integrity before upload"]
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return [f"OBS capture semantic receipt is unreadable: {exc}"]
+    if receipt.get("schema") != "yatra-capture-semantic-qc/1" or not receipt.get("ok"):
+        return ["OBS capture semantic QC failed: " + str(receipt.get("detail") or "invalid receipt")]
+    passed = {str(item.get("capture_id") or "") for item in receipt.get("semantic_receipts") or []
+              if item.get("ok")}
+    expected = {re.sub(r"-capture$", "", path.stem) for path in active}
+    missing = sorted(expected - passed)
+    if missing:
+        return ["OBS capture semantic receipt does not cover: " + ", ".join(missing)]
+    return []
 
 
 def approve_and_upload(gate_path: Path, *, synthetic: str, thumbnail: str | None, rechecked_on: str | None,

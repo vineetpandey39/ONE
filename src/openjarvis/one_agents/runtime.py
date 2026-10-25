@@ -11,6 +11,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 import unicodedata
 import uuid
@@ -10016,10 +10017,18 @@ def _yatra_validate_capture_integrity(asset_root: Path) -> dict[str, Any]:
         routes = json.loads(routes_path.read_text(encoding="utf-8")).get("scenes") or {}
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"visual-routes.json is unreadable: {exc}"}
-    capture_ids = sorted({str(row.get("capture_id") or "") for row in routes.values()
-                          if row.get("route") == "obs" and row.get("capture_id")})
     capture_dir = asset_root / "captures"
+    routed_ids = {str(row.get("capture_id") or "") for row in routes.values()
+                  if row.get("route") == "obs" and row.get("capture_id")}
+    active_ids = {re.sub(r"-capture$", "", path.stem)
+                  for path in capture_dir.glob("*-capture.*")
+                  if path.is_file() and path.suffix.lower() in {".mkv", ".mp4", ".mov"}}
+    # Validate preserved captures too, not only the ones selected by the
+    # current director route. A later scene-plan/routing change must not make
+    # an already-recorded maintenance page silently eligible for reuse.
+    capture_ids = sorted(routed_ids | active_ids)
     issues: list[str] = []
+    semantic_receipts: list[dict[str, Any]] = []
     for capture_id in capture_ids:
         candidates = [path for path in capture_dir.glob(f"{capture_id}-capture.*")
                       if path.suffix.lower() in {".mkv", ".mp4", ".mov"} and path.is_file()]
@@ -10054,11 +10063,63 @@ def _yatra_validate_capture_integrity(asset_root: Path) -> dict[str, Any]:
             spans = [float(value) for value in re.findall(r"black_duration:([0-9.]+)", scan.stderr)]
             if any(seconds >= 2.0 for seconds in spans):
                 issues.append(f"{capture_id}: {max(spans):.2f}s full-frame black interval")
+                continue
+            semantic = _yatra_capture_semantic_state(path)
+            semantic_receipts.append({"capture_id": capture_id, **semantic})
+            if not semantic.get("ok"):
+                issues.append(f"{capture_id}: {semantic.get('detail')}")
         except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
             issues.append(f"{capture_id}: capture validation error: {exc}")
-    return {"ok": not issues, "captures": len(capture_ids),
-            "detail": (f"all {len(capture_ids)} routed OBS capture(s) passed integrity checks"
-                       if not issues else "; ".join(issues))}
+    result = {"ok": not issues, "captures": len(capture_ids),
+              "semantic_receipts": semantic_receipts,
+              "detail": (f"all {len(capture_ids)} active OBS capture(s) passed integrity and semantic checks"
+                         if not issues else "; ".join(issues))}
+    receipt = capture_dir / "capture-semantic-qc.json"
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    receipt.write_text(json.dumps({
+        "schema": "yatra-capture-semantic-qc/1",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        **result,
+    }, indent=2, ensure_ascii=False), encoding="utf-8")
+    result["receipt"] = str(receipt)
+    return result
+
+
+_YATRA_INVALID_PAGE_TEXT = (
+    "website under maintenance", "under maintenance", "service unavailable",
+    "temporarily unavailable", "access denied", "bad gateway",
+    "internal server error", "404 not found", "403 forbidden",
+)
+
+
+def _yatra_capture_semantic_state(path: Path) -> dict[str, Any]:
+    """Read the pixels OBS recorded and reject visible terminal/error pages."""
+    from openjarvis.tools import kdp_cover_qc
+
+    with tempfile.TemporaryDirectory(prefix="yatra-capture-semantic-") as temporary:
+        pattern = str(Path(temporary) / "frame-%02d.png")
+        extract = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(path),
+             "-vf", "fps=1/7,scale=1280:-2", "-frames:v", "4", "-y", pattern],
+            capture_output=True, text=True, timeout=180,
+        )
+        if extract.returncode:
+            return {"ok": False, "detail": f"semantic frame extraction failed: {extract.stderr[-300:]}"}
+        frames = sorted(Path(temporary).glob("frame-*.png"))
+        if not frames:
+            return {"ok": False, "detail": "semantic check produced no capture frames"}
+        texts = [kdp_cover_qc.read_text(frame) for frame in frames]
+    normalized = " ".join(" ".join(texts).split()).casefold()
+    blocked = next((phrase for phrase in _YATRA_INVALID_PAGE_TEXT if phrase in normalized), "")
+    if blocked:
+        return {"ok": False, "samples": len(texts),
+                "detail": f"invalid webpage state visible in recording: {blocked!r}"}
+    if not re.search(r"[a-z]{3}", normalized):
+        return {"ok": False, "samples": len(texts),
+                "detail": "OCR found no meaningful webpage text in sampled frames"}
+    return {"ok": True, "samples": len(texts),
+            "text_sha256": hashlib.sha256(normalized.encode("utf-8")).hexdigest(),
+            "detail": "sampled pixels contain readable page text and no maintenance/error state"}
 
 
 def _yatra_upload(tool: Any, asset_folder: str, video_title: str,
