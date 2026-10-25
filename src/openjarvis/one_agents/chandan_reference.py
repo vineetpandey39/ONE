@@ -47,7 +47,9 @@ def run_reference(path, job):
     manifest=read(path/'mission.json');browser=manifest['browser'];brief=read(path/'research/commission-brief.json')
     prompt=reference_prompt(manifest,brief)
     if Path(browser['profile_dir']).resolve()!=(ROOT/'chrome-profile').resolve():raise ValueError('Wrong browser owner')
-    target=path/'production/character-bible/character-reference-v1.png';target.parent.mkdir(parents=True,exist_ok=True)
+    target=Path(manifest.get('character_reference') or path/'production/character-bible/character-reference-v1.png')
+    if not target.resolve().is_relative_to((path/'production/character-bible').resolve()):raise ValueError('Reference escapes mission')
+    target.parent.mkdir(parents=True,exist_ok=True)
     if target.is_file() and browser.get('chat_url'):
         return {'status':'reference_ready_for_editorial_review','reference':str(target),'sha256':digest(target),'reused':True}
     marker='OTO-REFERENCE-'+path.name

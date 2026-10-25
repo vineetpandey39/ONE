@@ -274,6 +274,14 @@ def run_stage(job, *, enqueue):
                         [master_dir / "shot-plan.json", path / "mission.json"])
     if agent == "chandan":
         manifest = read(path / "mission.json")
+        from openjarvis.one_agents.chandan_continuation import PRODUCTION, REGENERATE, run_checkpoint, validate_pack
+        if payload.get("checkpoint") in {PRODUCTION, REGENERATE}:
+            checkpoint_result = run_checkpoint(path, job, payload)
+            if checkpoint_result is not None:
+                return checkpoint_result
+            manifest = read(path / "mission.json")
+        if manifest.get("reference_review_required") and manifest.get("production_phase") != "reference_first":
+            validate_pack(path)
         if payload.get("checkpoint") in {"identity_repair_v3", "identity_exact_request_p12"}:
             from openjarvis.one_agents.chandan_identity_repair import run
             return run(path, job)
