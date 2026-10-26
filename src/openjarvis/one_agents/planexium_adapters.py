@@ -203,12 +203,18 @@ class ChatGPTAdapter:
 
     def _marked_output(self, name, steps, receipt, key, begin, end):
         # A package without a usable output alias can finish successfully with
-        # an empty output_result. Preserve immutable receipts, resume any prior
-        # repair attempts, and create at most one new versioned attempt.
+        # an empty or malformed output_result. Preserve immutable receipts,
+        # resume any prior repair attempts, and create at most one new versioned
+        # attempt.
         out, _ = self.draft.run(name, steps, {}, receipt)
         raw = out.get(key)
         repair_version = 2
-        while raw is None or (isinstance(raw, str) and not raw.strip()):
+        while True:
+            if raw is not None and (not isinstance(raw, str) or raw.strip()):
+                try:
+                    return _marked_json(raw, begin, end)
+                except json.JSONDecodeError:
+                    pass
             repaired = receipt.with_name(
                 f"{receipt.stem}-output-v{repair_version}{receipt.suffix}")
             existed = repaired.is_file()
