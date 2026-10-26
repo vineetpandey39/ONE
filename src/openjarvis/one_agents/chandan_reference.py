@@ -23,7 +23,7 @@ def reference_prompt(manifest, brief):
         if not all(str(u).startswith('https://') for u in stage['source_urls']):raise ValueError('Reference sources must be HTTPS links')
         lines.append(f"Age {stage['age']}, year {stage['year']}, {stage['place']}: {stage['appearance']}; {stage['equipment']}.")
     return (f"Generate a canonical age/body/kit reference sheet for {manifest['subject']}, original photoreal cinematic CGI. "
-            'Do not position the camera behind the athlete. Use lateral full-court views with the human figure small, upper-body side action with the entire head cropped out or blocked by the racket, and hands/racket/footwork/equipment details. Never render frontal heads, facial profiles or expressions. '
+            'CAMERA AXIS IS STRICTLY THE COURT SIDELINE, perpendicular to the player, never behind or diagonal-behind. Use true 90-degree lateral full-court silhouettes with the human figure small, shoulder-to-hand side crops with the entire head outside the frame, and hands/racket/footwork/equipment details. If a face or the back of the torso would be visible, replace that panel with athlete-free court or equipment evidence. Never render frontal heads, facial profiles or expressions. '
             'Never use a rear-body composition and never emphasize the subject’s back, hips, chest, thighs or body shape. Prefer athlete-free equipment and court evidence wherever possible. '
             + ' '.join(lines) + ' ' + FACELESS_RULES + ' Age labels may be small editorial captions. '
             'Illustrative period-appropriate reference, not archival evidence. No invented luxury or poverty. Output the image itself.')
