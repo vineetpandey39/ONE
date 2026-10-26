@@ -42,12 +42,14 @@ FACELESS_RULES = (
     "away from camera, cropped out of frame, or in deep shadow. Recognition comes only from the signature details "
     "given. No logos, crests, sponsor marks, signatures or watermark; the only text allowed is the shirt number "
     "or documented jersey name stated. Never add a modern number/name to an era without evidence. "
-    "Use rear views, over-shoulder views, silhouettes, torso, equipment, hands, feet, environmental POV or "
-    "reflections without facial detail. Side angles are allowed only with the face fully obscured. "
-    "Keep every athlete portrayal dignified: no close or medium rear-body composition and no camera emphasis on "
-    "the back, hips, chest, thighs or body shape; use distant full-body action, neutral upper-torso crops, equipment "
-    "occlusion, court geography and action mechanics instead. "
-    "Cricket anatomy and bat grip physically correct, no extra fingers or twisted wrists.")
+    "Never place the camera behind the athlete. Use true lateral court views, distant silhouettes, head-out-of-frame "
+    "side crops, equipment, hands, feet, environmental POV or reflections without facial detail. Side angles are "
+    "allowed only with the face fully obscured. Keep every athlete portrayal dignified: no rear-body composition "
+    "and no camera emphasis on the back, hips, chest, thighs or body shape; use distant full-body action, neutral "
+    "upper-torso crops, equipment occlusion, court geography and action mechanics instead. Do not render Olympic "
+    "rings, event branding, flags, logos, crests, sponsor marks, venue lettering, scoreboards or readable text. "
+    "Sport-specific anatomy, grip and equipment mechanics must be physically correct; no extra fingers, fused hands "
+    "or twisted wrists, elbows or shoulders.")
 
 
 def visual_specs(chapter: dict[str, Any]) -> list[dict[str, str]]:
