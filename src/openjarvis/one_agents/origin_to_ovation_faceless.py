@@ -61,12 +61,12 @@ def visual_specs(chapter: dict[str, Any]) -> list[dict[str, str]]:
     place = chapter.get("place_detail") or f"historically appropriate setting of {era}"
     chapter_no = int(chapter.get("chapter", chapter.get("chapter_number", 1)))
     requested = chapter.get("coverage")
+    offset = (chapter_no - 1) % len(COVERAGE)
     if requested is not None:
         if len(requested) != 5 or any(kind not in COVERAGE for kind in requested):
             raise ValueError("chapter coverage must contain five valid, distinct visual types")
         kinds = list(requested)
     else:
-        offset = (chapter_no - 1) % len(COVERAGE)
         kinds = [COVERAGE[(offset + i * 3) % len(COVERAGE)] for i in range(5)]
     if len(set(kinds)) != 5:
         raise ValueError("a chapter cannot repeat a visual type")
