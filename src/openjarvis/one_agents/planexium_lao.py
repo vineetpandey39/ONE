@@ -11,9 +11,16 @@ def workflow_zip(name, steps):
     if not name.startswith("planexium-"):
         raise ValueError("Preserved package transport is restricted to PLANEXIUM")
     package_name = name + "-" + uuid.uuid4().hex[:12]
+    outputs = {
+        alias: {}
+        for step in steps
+        if isinstance(step, dict)
+        for alias in [step.get("args", {}).get("as")]
+        if isinstance(alias, str) and alias
+    }
     manifest = {"name": package_name, "version": "1.0.0", "entrypoint": "workflow.yaml",
                 "runtime_type": "browser", "input_schema": {"type": "object", "properties": {}},
-                "output_schema": {"type": "object", "properties": {}}}
+                "output_schema": {"type": "object", "properties": outputs}}
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("package.json", json.dumps(manifest))

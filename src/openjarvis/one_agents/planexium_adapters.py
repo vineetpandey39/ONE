@@ -201,13 +201,27 @@ class ChatGPTAdapter:
     def lease(self):
         return envato_lease(self.provider_lock, self.queue, self.context.mission_id) if self.provider_lock else nullcontext()
 
+    def _marked_output(self, name, steps, receipt, key, begin, end):
+        # Packages created before output aliases were declared can finish
+        # successfully with an empty output_result. Preserve that immutable
+        # receipt and repair it once through the corrected package manifest.
+        repairing_legacy_checkpoint = receipt.is_file()
+        out, _ = self.draft.run(name, steps, {}, receipt)
+        raw = out.get(key)
+        if repairing_legacy_checkpoint and (raw is None or (isinstance(raw, str) and not raw.strip())):
+            repaired = receipt.with_name(f"{receipt.stem}-output-v2{receipt.suffix}")
+            out, _ = self.draft.run(name, steps, {}, repaired)
+            raw = out.get(key)
+        return _marked_json(raw, begin, end)
+
     def write(self, prompt: str) -> dict:
         steps = _login_steps(self.asset, self.context, self.profile_root) + [{"action": "ask_chatgpt", "args": {
             "prompt": prompt, "expected_markers": ["BEGIN_PLANEXIUM_JSON", "END_PLANEXIUM_JSON"],
             "timeout_ms": 240000, "as": "science_script"}}]
+        receipt = self.context.artifact("receipts/writer.json")
         with self.lease():
-            out, _ = self.draft.run("planexium-science-script", steps, {}, self.context.artifact("receipts/writer.json"))
-        return _marked_json(out.get("science_script"), "BEGIN_PLANEXIUM_JSON", "END_PLANEXIUM_JSON")
+            return self._marked_output("planexium-science-script", steps, receipt, "science_script",
+                                       "BEGIN_PLANEXIUM_JSON", "END_PLANEXIUM_JSON")
 
     def direct(self, science, voice):
         from openjarvis.one_agents.planexium_direction import motion_prompt
