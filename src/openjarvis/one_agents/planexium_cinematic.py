@@ -346,7 +346,7 @@ def render(root, tools, *, resolve_settings=None):
     from openjarvis.one_agents.youtube_science_overlays import overlay_kind
     for number,scene in enumerate(science['scenes'],1):
         kind=overlay_kind(scene['narration']) if editorial.get('science_overlays_enabled',True) else None
-        eligible=next((s for s in shots if s['scene']==number and s['kind']!='primary' and s['frames']>=120),None)
+        eligible=next((s for s in shots if s['scene']==number and s['kind'] not in {'primary','authored_scientific_motion'} and s['frames']>=120),None)
         if kind and eligible:
             eligible['science_overlay']=kind
             eligible['callout']=''
@@ -357,7 +357,7 @@ def render(root, tools, *, resolve_settings=None):
             narration_text = scene['narration'].casefold()
             if all(word in narration_text for word in ('mars', 'impact', 'asteroid')):
                 eligible = next((s for s in shots if s['scene']==number and
-                    s['kind']!='primary' and s['frames']>=120 and not s.get('science_overlay')), None)
+                    s['kind'] not in {'primary','authored_scientific_motion'} and s['frames']>=120 and not s.get('science_overlay')), None)
                 if eligible:
                     eligible.update(fusion_diagram='moon_origins', callout='')
                     break

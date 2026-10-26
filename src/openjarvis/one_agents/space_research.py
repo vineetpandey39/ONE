@@ -193,6 +193,8 @@ def discover_topic(recent: set[str], *, read=read_public) -> dict:
 
 def source_identity(asset):
     """Catalogue identity survives re-encoding; hashes still verify file bytes."""
+    if asset.get('asset_type') == 'authored_scientific_motion':
+        return ('authored_scientific_motion', asset.get('source_identity'))
     if asset.get('derived_from_sha256') and asset.get('source_panel'):
         parent = {**asset, 'sha256': asset['derived_from_sha256']}
         parent.pop('derived_from_sha256')

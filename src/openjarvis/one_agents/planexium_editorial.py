@@ -78,14 +78,15 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
         # even when two or three unique licensed clips were available.
         motion_share = remaining / max(1, len(choices))
         for index in choices:
-            asset = assets['stock'][index]
+            authored = assets.get('authored_motion', {}).get(str(index + 1))
+            asset = authored or assets['stock'][index]
             if seen(asset):
                 continue
             seconds = min(20.0, max(5.0, motion_share),
                           float(asset['seconds']) - asset.get('usable_in', 0) - .1)
             if seconds < 2:
                 continue
-            rows.append({'asset': asset, 'kind': 'envato', 'seconds': seconds})
+            rows.append({'asset': asset, 'kind': 'authored_scientific_motion' if authored else 'envato', 'seconds': seconds})
             remaining -= seconds
             remember(asset)
         pictures = [r for r in rows if 'seconds' not in r]
@@ -205,7 +206,10 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
     if not write_outputs:
         return result
     (root / 'edit/visual-mix.json').write_text(json.dumps({'licensed_motion_clips':sum(t['kind']=='envato' for t in flat),
-        'licensed_motion_seconds':round(motion,2),'archive_stills':archive,
+        'licensed_motion_seconds':round(motion,2),
+        'authored_scientific_motion_clips':sum(t['kind']=='authored_scientific_motion' for t in flat),
+        'authored_scientific_motion_seconds':round(sum(t.get('seconds',0) for t in flat if t['kind']=='authored_scientific_motion'),2),
+        'archive_stills':archive,
         'archive_screen_seconds':round(archive_seconds,2),'archive_screen_fraction':round(archive_time_ratio,4),
         'total_assets':len(flat)},indent=2),encoding='utf-8')
     (root / 'edit/resolved-editorial-plan.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
@@ -215,7 +219,7 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
 def apply_director_copy(shots, motion_copy):
     """Two restrained narration-bound beats per scene; preserve evidence footage."""
     for scene_id, phrases in motion_copy.items():
-        eligible = [s for s in shots if s['scene'] == int(scene_id) and s['kind'] != 'primary']
+        eligible = [s for s in shots if s['scene'] == int(scene_id) and s['kind'] not in {'primary', 'authored_scientific_motion'}]
         if not eligible or not phrases:
             continue
         positions = sorted({0, len(eligible) // 2})

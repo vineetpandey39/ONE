@@ -63,8 +63,10 @@ def validate_bundle(root, bundle):
     from openjarvis.one_agents.planexium_editorial import build_scene_shots
     from openjarvis.one_agents.space_research import source_identity, nasa_subject_matches, validate_url, MEDIA_HOSTS
 
+    from openjarvis.one_agents.planexium_authored_motion import SCHEMA as AUTHORED_SCHEMA, validate_accounting
+
     root = Path(root).resolve()
-    if bundle.get("schema") != SCHEMA or bundle.get("mission_id") != root.name:
+    if bundle.get("schema") not in {SCHEMA, AUTHORED_SCHEMA} or bundle.get("mission_id") != root.name:
         raise ValueError("Repair schema or mission mismatch")
     if not bundle.get("reason", "").strip() or bundle.get("base_hashes") != snapshot(root):
         raise ValueError("Repair base changed or reason missing")
@@ -97,19 +99,26 @@ def validate_bundle(root, bundle):
         raise ValueError("Repair changed unrelated plan or music")
     if len(assets["stock"]) != len(original_assets["stock"]):
         raise ValueError("Repair must retain stock slots")
+    motions = validate_accounting(root, bundle, science)
     identities = set()
     for i, asset in enumerate(assets["stock"]):
         if i not in indexes and asset != original_assets["stock"][i]:
             raise ValueError("Repair changed an unrelated asset")
+        if str(i + 1) in motions:
+            if asset != original_assets["stock"][i]:
+                raise ValueError("Superseded stock evidence must remain unchanged")
+            asset = motions[str(i + 1)]
         _asset(root, asset)
         identity = source_identity(asset)
         if identity in identities:
             raise ValueError("Repeated stock source identity")
         identities.add(identity)
-        if not stock_context_matches(plan["stock_requests"][i], asset):
+        if str(i + 1) not in motions and not stock_context_matches(plan["stock_requests"][i], asset):
             raise ValueError("Stock context is not relevant")
         asset.update(probe_stock(Path(asset["path"])))
         asset["usable_in"] = usable_start(asset)
+        if str(i + 1) in motions and (asset["seconds"] < 20.1 or asset["usable_in"] != 0):
+            raise ValueError("Authored illustration requires a complete finite twenty-second cut")
     _asset(root, assets["music"])
     archives = bundle.get("archive_assets", {})
     for key, asset in archives.items():
