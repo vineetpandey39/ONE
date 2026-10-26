@@ -35,6 +35,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from openjarvis.one_agents.helios_repair_coordination import (
+    RepairDeferred, already_dispatched, external_repair_guard, repair_dispatch,
+)
+
 
 Connect = Callable[[], sqlite3.Connection]
 # These workers own durable checkpoints and can safely receive a new queue row
@@ -56,11 +60,16 @@ REPAIR_CIRCUIT_MAX_FAILURES = 2
 # Human-reviewed commits can still change them; this boundary applies only to
 # autonomous HELIOS patches and is deliberately unrelated to the restart gate.
 PROTECTED_CONTROL_PLANE_PATHS = {
+    "src/openjarvis/one_agents/helios_repair_coordination.py",
     "src/openjarvis/one_agents/lao_checkpoint_recovery.py",
     "src/openjarvis/one_agents/floor_watch.py",
     "src/openjarvis/one_agents/helios_self_heal.py",
 }
 CONTROL_PLANE_IMMUTABLE_FUNCTIONS = {
+    "src/openjarvis/one_agents/helios_repair_coordination.py": {
+        "home", "mission", "external_repair_guard", "attempt_key",
+        "repair_dispatch", "already_dispatched",
+    },
     "src/openjarvis/one_agents/helios_self_heal.py": {
         "_allowed_patch_path", "_control_plane_candidate_allowed",
         "_review_control_plane_candidate", "_promote_isolated_repair",
@@ -315,7 +324,7 @@ def _active_for_agent(connect: Connect, agent_id: str, excluding: str) -> str:
     with closing(connect()) as db:
         row = db.execute(
             "SELECT id FROM jobs WHERE agent_id = ? AND id != ? "
-            "AND status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 1",
+            "AND status IN ('queued', 'running', 'reserved') ORDER BY created_at DESC LIMIT 1",
             (agent_id, excluding),
         ).fetchone()
     return str(row["id"]) if row else ""
@@ -386,7 +395,24 @@ def _downstream_for(connect: Connect, origin_job: str) -> str:
     return ""
 
 
-def resume_checkpoint(connect: Connect, job_id: str, *, fresh_code: bool = False) -> str:
+def resume_checkpoint(connect: Connect, job_id: str, *, fresh_code: bool = False,
+                      external_repair_owner: tuple[str, str] | None = None,
+                      repair_revision: str = "") -> str:
+    """Recheck ownership under the operator write lock through enqueue/launch."""
+    previous = _row(connect, job_id)
+    if not previous or previous.get("status") != "failed":
+        return ""
+    try:
+        with external_repair_guard(connect, previous, owner=external_repair_owner):
+            if _active_for_agent(connect, str(previous.get("agent_id") or ""), job_id):
+                return f"{PENDING_PREFIX}checkpoint resume has active work"
+            with repair_dispatch(previous, repair_revision):
+                return _resume_checkpoint_uncoordinated(connect, job_id, fresh_code=fresh_code)
+    except RepairDeferred as exc:
+        return f"{PENDING_PREFIX}{exc}"
+
+
+def _resume_checkpoint_uncoordinated(connect: Connect, job_id: str, *, fresh_code: bool = False) -> str:
     """Queue one checkpoint-safe retry of a failed Floor 12 job."""
     previous = _row(connect, job_id)
     if not previous or previous.get("status") != "failed":
@@ -1056,7 +1082,7 @@ def _repair_test_command(repo: Path) -> list[str]:
             "test_envato_owner_lanes.py", "test_floor_watch_scheduler.py",
             "test_handoff_dedupe.py", "test_job_recovery*.py",
             "test_lao_checkpoint_recovery.py", "test_local_llm.py",
-            "test_media_handoff_contracts.py", "test_provider_capacity.py",
+            "test_media_handoff_contracts.py", "test_helios_repair_coordination.py", "test_provider_capacity.py",
             "test_restart_guard.py", "test_sonia*.py", "test_stage_ownership.py",
             "test_thumbnail*.py", "test_vista*.py", "test_yatra*.py",
             "test_youtube*.py",
@@ -1375,7 +1401,7 @@ def _verified_repair_receipt(
     durable verification receipt, and a repair commit that is still an
     ancestor of the current checkout.
     """
-    def load_valid(path: Path) -> dict[str, Any] | None:
+    def load_candidate(path: Path) -> dict[str, Any] | None:
         try:
             saved = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
@@ -1387,11 +1413,45 @@ def _verified_repair_receipt(
             valid = _git(repo, "cat-file", "-e", f"{revision}^{{commit}}").returncode == 0
         else:
             valid = _git(repo, "merge-base", "--is-ancestor", revision, "HEAD").returncode == 0
+        previous = {"id": str(evidence.get("job_id") or ""),
+                    "agent_id": evidence.get("agent"), "task": evidence.get("task"),
+                    "error": evidence.get("error")}
+        if valid and already_dispatched(previous, revision):
+            return None
         return saved if valid else None
+
+    try:
+        home = Path(os.environ.get("OPENJARVIS_HOME", Path.home() / ".openjarvis"))
+        legacy = json.loads((home / "floor_watch_healed.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        legacy = {}
+    consumed = set()
+    for old_id, entry in legacy.items():
+        if "fresh-code checkpoint retry" not in str((entry or {}).get("action") or ""):
+            continue
+        old = _row(connect, str(old_id))
+        if (not old or old.get("agent_id") != evidence.get("agent")
+                or old.get("task") != evidence.get("task")):
+            continue
+        if str(old.get("error") or "").split("\n\nTraceback", 1)[0] != str(evidence.get("error") or "").split("\n\nTraceback", 1)[0]:
+            continue
+        action = str((entry or {}).get("action") or "")
+        if "repaired and committed " in action:
+            consumed.add(action.split("repaired and committed ", 1)[1].split(";", 1)[0].strip())
+        old_path = receipt_dir / (str(uuid.uuid5(uuid.NAMESPACE_URL, str(old_id))) + ".json")
+        saved = load_candidate(old_path)
+        if saved:
+            consumed.add(str(saved.get("full_commit") or saved.get("commit")))
+
+    def load_valid(path: Path) -> dict[str, Any] | None:
+        saved = load_candidate(path)
+        if saved and ({str(saved.get("full_commit")), str(saved.get("commit"))} & consumed):
+            return None
+        return saved
 
     direct = load_valid(direct_path)
     if direct:
-        return direct
+        return {**direct, "receipt_reused": True}
 
     try:
         home = Path(os.environ.get("OPENJARVIS_HOME", Path.home() / ".openjarvis"))
@@ -1420,6 +1480,13 @@ def heal_failure(connect: Connect, finding: Any) -> str:
     """Repair first; resume only after HELIOS produced a verified commit."""
     evidence = {"agent": finding.agent_id, "job_id": finding.job_id,
                 "summary": finding.summary, **dict(finding.evidence or {})}
+    previous = _row(connect, finding.job_id) or {"id": finding.job_id,
+                "agent_id": finding.agent_id, "task": evidence.get("task", "")}
+    try:
+        with external_repair_guard(connect, previous):
+            pass
+    except RepairDeferred as exc:
+        return f"{PENDING_PREFIX}{exc}"
     evidence = _with_checkpoint_evidence(evidence)
     if _repair_circuit_is_open(evidence):
         saved = _load_repair_circuit(evidence)
@@ -1454,18 +1521,24 @@ def heal_failure(connect: Connect, finding: Any) -> str:
             f"({circuit['failed_rounds']}/{circuit['limit']} failed rounds)"
         )
         return f"{PENDING_PREFIX}{repair.get('reason') or 'no verified repair'}{suffix}"
-    _clear_repair_circuit(evidence)
+    if not repair.get("reused_from_job") and not repair.get("receipt_reused"):
+        _clear_repair_circuit(evidence)
     if _repo_for(evidence) == ENGINE_REPO:
         try:
             from openjarvis.one_agents.lao_checkpoint_recovery import activate_engine, resume_failed
-            activate_engine(revision=str(repair.get("full_commit") or ""))
-            action = resume_failed(connect, _row(connect, finding.job_id),
-                                   reviewed_conversation_url=repair.get("reviewed_conversation_url", ""))
+            with external_repair_guard(connect, previous):
+                with repair_dispatch(previous, str(repair.get("full_commit") or repair.get("commit"))):
+                    activate_engine(revision=str(repair.get("full_commit") or ""))
+                    action = resume_failed(connect, _row(connect, finding.job_id),
+                                           reviewed_conversation_url=repair.get("reviewed_conversation_url", ""))
         except Exception as exc:
             return f"{PENDING_PREFIX}verified engine repair; deployment/resume pending: {exc}"
     else:
         action = resume_checkpoint(
-            connect, finding.job_id, fresh_code=bool(repair.get("reused_from_job")),
+            connect, finding.job_id, fresh_code=True,
+            repair_revision=str(repair.get("full_commit") or repair.get("commit") or ""),
         )
+    if not action or action.startswith(PENDING_PREFIX) or "deferred" in action:
+        return action if action.startswith(PENDING_PREFIX) else f"{PENDING_PREFIX}verified repair; checkpoint resume deferred"
     prefix = f"{repair['cli']} repaired and committed {repair['commit']}"
-    return f"{prefix}; {action}" if action else prefix
+    return f"{PENDING_PREFIX}{prefix}; {action}; business outcome unverified"
