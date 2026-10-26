@@ -133,8 +133,12 @@ def download_music(draft, steps, query, context, *, failure_limit=10):
     new_failures=0
     candidate=1
     while True:
-        receipt=context.artifact('receipts/music.json' if candidate==1
-            else f'receipts/music-candidate-{candidate}.json')
+        # v2 adds the durable Envato authentication gate (left Sign in,
+        # expected Google/FedCM account, then authenticated-session proof).
+        # Keep v1 receipts immutable: LAO correctly refuses to attach a
+        # materially changed workflow to an older request checkpoint.
+        receipt=context.artifact('receipts/music-v2.json' if candidate==1
+            else f'receipts/music-v2-candidate-{candidate}.json')
         resumed=receipt.is_file()
         inputs={'envatoQuery':query,'envatoQueryUrl':quote_plus(query),
             'assetFolder':context.mission_id,'resultIndex':str(candidate),'enablePaidDownload':True}
