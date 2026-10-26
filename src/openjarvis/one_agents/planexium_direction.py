@@ -36,8 +36,12 @@ def _words(number):
 
 def number_is_spoken(number,narration,*,preceding=None):
     def normalize(text):return ' '.join(re.sub(r'[^a-z0-9]+',' ',text.casefold()).split()).replace(' and ',' ')
-    text=' '+normalize(narration)+' '
-    if preceding is None and re.search(r'(?<!\d)'+re.escape(number)+r'(?!\d)',narration):return True
+    # The caller removes grouping commas from an overlay numeral. Apply the
+    # same canonical form to narration so an exact copy such as ``2,000`` is
+    # not mistaken for a newly introduced value.
+    canonical_narration=re.sub(r'(?<=\d),(?=\d{3}(?:\D|$))','',narration)
+    text=' '+normalize(canonical_narration)+' '
+    if preceding is None and re.search(r'(?<!\d)'+re.escape(number)+r'(?!\d)',canonical_narration):return True
     if len(number)>16:return False
     whole,_,fraction=number.partition('.')
     value=int(whole)
