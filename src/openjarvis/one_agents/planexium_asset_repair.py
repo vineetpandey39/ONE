@@ -25,7 +25,14 @@ def snapshot(root):
     root = Path(root)
     paths = [root / name for name in ("science-plan.json", "cinematic-plan.json",
              "media-manifest.json", "narration/narration.segments.json", "edit/cinematic-assets.json")]
-    paths += list((root / "checkpoints").glob("*.json"))
+    checkpoints = list((root / "checkpoints").glob("*.json"))
+    paths += checkpoints
+    for checkpoint in checkpoints:
+        for name, expected in read(checkpoint).get("files", {}).items():
+            path = (root / name).resolve()
+            if not path.is_relative_to(root.resolve()) or digest(path) != expected:
+                raise ValueError("Accepted upstream checkpoint artifact changed")
+            paths.append(path)
     paths += list((root / "cinematic-assets").rglob("acquired/stock-*.json"))
     paths += list((root / "sources").rglob("source-receipt.json"))
     return {str(p.relative_to(root)).replace("\\", "/"): digest(p) for p in paths}
