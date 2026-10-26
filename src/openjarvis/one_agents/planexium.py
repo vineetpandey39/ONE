@@ -597,7 +597,14 @@ def run_job(job: dict) -> dict:
     else:
         if commission.get("auto_discover"):
             recent = {row.get("topic", "") for row in ledger.values()}
-            commission.update(space_research.discover_topic(recent))
+            try:
+                commission.update(space_research.discover_topic(recent))
+            except space_research.NoUnusedTopicError:
+                # Daily commissions carry a curated evergreen topic and
+                # authoritative sources so an exhausted news feed need not
+                # turn a valid production slot into a failed job.
+                if not str(commission.get("topic") or "").strip() or not commission.get("sources"):
+                    raise
         _write(commission_path, commission)
     if job.get("id"):
         from openjarvis.one_agents import runtime

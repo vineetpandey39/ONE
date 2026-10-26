@@ -14,6 +14,10 @@ SOURCE_HOSTS = frozenset({"science.nasa.gov", "www.nasa.gov", "www.esa.int", "ww
 MEDIA_HOSTS = SOURCE_HOSTS | {"images-api.nasa.gov", "images-assets.nasa.gov", "assets.science.nasa.gov"}
 
 
+class NoUnusedTopicError(ValueError):
+    """The official feed has no suitable story that is not already in the ledger."""
+
+
 def validate_url(url: str, hosts=SOURCE_HOSTS) -> str:
     parsed = urlsplit(url)
     if (parsed.scheme != "https" or parsed.hostname not in hosts or parsed.username
@@ -184,7 +188,7 @@ def discover_topic(recent: set[str], *, read=read_public) -> dict:
         validate_url(url)
         return {"topic": title, "sources": [url], "discovery": "NASA official feed",
                 "published_at": item.findtext("pubDate")}
-    raise ValueError("No unused space-science story in the official feed; require a researched commission")
+    raise NoUnusedTopicError("No unused space-science story in the official feed; require a researched commission")
 
 
 def nasa_subject_matches(query, metadata):
