@@ -39,12 +39,18 @@ def _article_figure_panels(asset):
         return [asset]
 
 
-def build_scene_shots(root, science, voice, assets, original, media, editorial, *, image_search=None):
+def build_scene_shots(root, science, voice, assets, original, media, editorial, *, image_search=None, archive_assets=None, article_assets=None, offline=False, write_outputs=True):
     from openjarvis.one_agents.space_research import (article_images, nasa_image,
-        nasa_subject_matches, nasa_image_is_visible)
+        nasa_subject_matches, nasa_image_is_visible, source_identity)
     image_search = image_search or nasa_image
     root = Path(root)
     used = set()
+    used_sources = set()
+    def seen(asset):
+        return asset['sha256'] in used or source_identity(asset) in used_sources
+    def remember(asset):
+        used.add(asset['sha256'])
+        used_sources.add(source_identity(asset))
     result = {}
     primary_cursor = 0.0
     archive_seconds = 0.0
@@ -59,12 +65,12 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
                 rows.append({'asset': original, 'kind': 'primary', 'offset': primary_cursor, 'seconds': seconds})
                 primary_cursor += seconds
                 remaining -= seconds
-        elif not primary_is_video and original['sha256'] not in used:
+        elif not primary_is_video and not seen(original):
             owned = next((a for a in media.get(str(number), {}).get('assets', [])
                           if a.get('sha256') == original['sha256']), None)
             if owned and nasa_subject_matches(scene.get('media_query', ''), owned.get('metadata', {})):
                 rows.append({'asset': original, 'kind': 'primary'})
-                used.add(original['sha256'])
+                remember(original)
         choices = editorial['scene_assets'][str(number)]
         # Budget motion from the scene's original remainder.  Recomputing the
         # share after every clip progressively under-filled later clips and
@@ -73,7 +79,7 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
         motion_share = remaining / max(1, len(choices))
         for index in choices:
             asset = assets['stock'][index]
-            if asset['sha256'] in used:
+            if seen(asset):
                 continue
             seconds = min(20.0, max(5.0, motion_share),
                           float(asset['seconds']) - asset.get('usable_in', 0) - .1)
@@ -81,7 +87,7 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
                 continue
             rows.append({'asset': asset, 'kind': 'envato', 'seconds': seconds})
             remaining -= seconds
-            used.add(asset['sha256'])
+            remember(asset)
         pictures = [r for r in rows if 'seconds' not in r]
         # A still receives a restrained pan/zoom in the cinematic assembler.
         # Fifteen seconds is the upper editorial beat; the previous nine-second
@@ -94,39 +100,43 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
         # searching an archive. These are original source figures, not captures.
         for asset in media.get(str(number),{}).get('assets',[]):
             if len(pictures)>=needed:break
-            if (asset.get('caption') is None or asset['sha256'] in used
+            if (asset.get('caption') is None or seen(asset)
                     or not (asset.get('title','').strip() or asset.get('caption','').strip())):continue
             if not nasa_image_is_visible(asset['path']):continue
             if hashlib.sha256(Path(asset['path']).read_bytes()).hexdigest()!=asset['sha256']:
                 raise ValueError('Official article image changed')
             row={'asset':{**asset,'seconds':3600},'kind':'primary'}
-            rows.append(row);pictures.append(row);used.add(asset['sha256'])
+            rows.append(row);pictures.append(row);remember(asset)
         queries = editorial.get('scene_visuals', {}).get(str(number), [])
         for index, query in enumerate(queries, 1):
             if len(pictures) >= needed:
                 break
             directory = root / f'sources/editorial-{number}-{index}'
             receipt = directory / 'source-receipt.json'
-            asset = json.loads(receipt.read_text(encoding='utf-8')) if receipt.exists() else None
+            asset = (archive_assets or {}).get(f'{number}:{index}')
+            if asset is None:
+                asset = json.loads(receipt.read_text(encoding='utf-8')) if receipt.exists() else None
             if (not asset or not Path(asset['path']).is_file() or (asset.get('provider')=='NASA' and
                     (not nasa_subject_matches(query,asset.get('metadata',{})) or not nasa_image_is_visible(asset['path'])))
-                    or asset.get('editorial_query') != query or asset['sha256'] in used
+                    or asset.get('editorial_query') != query or seen(asset)
                     or not Path(asset['path']).is_file()
                     or hashlib.sha256(Path(asset['path']).read_bytes()).hexdigest() != asset['sha256']):
+                if offline:
+                    continue
                 try:
                     asset = image_search(query, directory, exclude_sha256=used)
                 except ValueError:
                     continue
                 asset['editorial_query'] = query
                 receipt.write_text(json.dumps(asset, indent=2), encoding='utf-8')
-            if asset['sha256'] in used:
+            if seen(asset):
                 continue
             asset = {**asset, 'seconds': 3600,
                      'credit': asset.get('credit', 'NASA') + ' / archival context'}
             row = {'asset': asset, 'kind': 'archive'}
             rows.append(row)
             pictures.append(row)
-            used.add(asset['sha256'])
+            remember(asset)
         # Some newly published NASA articles have exact mission figures that
         # are not yet discoverable through the NASA Image Library search.
         # Use those verified article figures before failing coverage.  This is
@@ -137,13 +147,14 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
             commission = (json.loads(commission_path.read_text(encoding='utf-8'))
                           if commission_path.is_file() else {})
             source_urls = list(commission.get('sources') or [])
-            figures = []
-            for source_url in source_urls[:2]:
-                try:
-                    figures.extend(article_images(source_url, root / 'sources/article-images'))
-                except (OSError, ValueError):
-                    continue
-            figures = [panel for figure in figures for panel in _article_figure_panels(figure)]
+            figures = list(article_assets or [])
+            if not offline:
+                for source_url in source_urls[:2]:
+                    try:
+                        figures.extend(article_images(source_url, root / 'sources/article-images'))
+                    except (OSError, ValueError):
+                        continue
+                figures = [panel for figure in figures for panel in _article_figure_panels(figure)]
             for asset in figures:
                 if len(pictures) >= needed:
                     break
@@ -152,13 +163,13 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
                 matches = (nasa_subject_matches(scene.get('title', ''), metadata)
                            or nasa_subject_matches(scene.get('media_query', ''), metadata)
                            or nasa_subject_matches(scene.get('narration', ''), metadata))
-                if (asset['sha256'] in used or not matches
+                if (seen(asset) or not matches
                         or not nasa_image_is_visible(asset['path'])):
                     continue
                 row = {'asset': {**asset, 'seconds': 3600}, 'kind': 'primary'}
                 rows.append(row)
                 pictures.append(row)
-                used.add(asset['sha256'])
+                remember(asset)
                 # Do not consume another commissioned figure using the
                 # archive-only density target.  One exact source figure may
                 # carry a twenty-second beat, and later scenes may be the only
@@ -191,6 +202,8 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
     archive_time_ratio = archive_seconds / total_seconds if total_seconds else 1.0
     if policy and archive_time_ratio > float(policy.get('archive_shot_ratio_max',0.40)):
         raise ValueError('Visual-density gate: archival stills would dominate the cut')
+    if not write_outputs:
+        return result
     (root / 'edit/visual-mix.json').write_text(json.dumps({'licensed_motion_clips':sum(t['kind']=='envato' for t in flat),
         'licensed_motion_seconds':round(motion,2),'archive_stills':archive,
         'archive_screen_seconds':round(archive_seconds,2),'archive_screen_fraction':round(archive_time_ratio,4),

@@ -191,7 +191,53 @@ def discover_topic(recent: set[str], *, read=read_public) -> dict:
     raise NoUnusedTopicError("No unused space-science story in the official feed; require a researched commission")
 
 
+def source_identity(asset):
+    """Catalogue identity survives re-encoding; hashes still verify file bytes."""
+    if asset.get('derived_from_sha256') and asset.get('source_panel'):
+        return ('panel', asset['derived_from_sha256'], str(asset['source_panel']))
+    if str(asset.get('provider', '')).casefold() == 'nasa' and asset.get('nasa_id'):
+        return ('nasa', str(asset['nasa_id']).casefold())
+    url = asset.get('download_url') or asset.get('source_url')
+    if url:
+        from urllib.parse import parse_qsl
+        parts = urlsplit(str(url))
+        # Retain meaningful query identifiers; discard only presentation options.
+        sizing = {'w', 'h', 'width', 'height', 'fit', 'crop', 'quality', 'q', 'format'}
+        query = tuple(sorted((k, v) for k, v in parse_qsl(parts.query) if k.casefold() not in sizing))
+        return ('url', parts.netloc.casefold(), parts.path, query)
+    return ('sha256', asset.get('sha256'))
+
+
+def depicted_subject_matches(query, metadata):
+    """Do not use mission background text as evidence of the depicted object."""
+    words = set(re.findall(r'[a-z0-9]{2,}', query.casefold()))
+    title = str(metadata.get('title', '')).casefold()
+    description = str(metadata.get('description', '')).casefold()
+    depicted = title + ' ' + re.split(r'[.!?]\s', description, maxsplit=1)[0]
+    title_words = set(re.findall(r'[a-z0-9]{2,}', title))
+    bodies = {'jupiter', 'earth', 'mars', 'venus', 'saturn', 'uranus', 'neptune',
+              'io', 'europa', 'ganymede', 'callisto', 'titan', 'enceladus', 'phobos', 'deimos'}
+    requested = words & bodies
+    named = title_words & bodies
+    if requested and named and not requested & named:
+        return False
+    # A moon may be described as "Jupiter's moon"; that does not depict Jupiter.
+    moons = {'io', 'europa', 'ganymede', 'callisto'}
+    depicted_words = set(re.findall(r'[a-z0-9]{2,}', depicted))
+    if ('jupiter' in words or 'juno' in words) and (depicted_words & moons) - words:
+        if not ('jupiter' in title_words and not title_words & moons):
+            return False
+    if re.search(r'\b(interior|core|cutaway|cross[ -]?section)\b', query.casefold()):
+        if not re.search(r'\b(interior|core|cutaway|cross[ -]?section|internal structure)\b', depicted):
+            return False
+    if words & {'vault', 'shielding'} and not re.search(r'\b(vault|shielding)\b', depicted):
+        return False
+    return True
+
+
 def nasa_subject_matches(query, metadata):
+    if not depicted_subject_matches(query, metadata):
+        return False
     words=set(re.findall(r'[a-z0-9]{3,}',query.casefold()))
     subject_text=' '.join([str(metadata.get('title','')), str(metadata.get('description','')),
                            ' '.join(metadata.get('keywords') or [])]).casefold()

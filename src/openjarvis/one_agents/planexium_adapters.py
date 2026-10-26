@@ -514,6 +514,11 @@ def stock_context_matches(request, metadata):
     if any(str(word).casefold() in text for word in blocked):
         return False
     query = str(request["query"]).casefold()
+    if re.search(r"\b(interior|core|cross[ -]?section)\b", query):
+        if re.search(r"\b(cockpit|cabin|dashboard)\b", text):
+            return False
+        if not re.search(r"\b(interior|core|cross[ -]?section|cutaway|internal structure)\b", text):
+            return False
     atmospheric = (re.search(r"\bjet[ -]?streams?\b", query)
                    or (re.search(r"\batmospher\w*\b", query)
                        and re.search(r"\b(flow|circulation|currents?|winds?)\b", query)))
