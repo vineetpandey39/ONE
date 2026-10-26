@@ -2400,6 +2400,27 @@ def _sonia_brief_repeat(brief: str, prior: list[str], *, window: int = 120) -> s
     return ""
 
 
+def _sonia_brief_headline_error(brief: str) -> str:
+    """Return a deterministic error when HELIOS did not select a story.
+
+    Validate at the evergreen-selection boundary so an incomplete model brief
+    is reselected from the same evidence instead of reaching VISTA and failing
+    after the handoff. Keep this aligned with the explicit headline evidence
+    accepted by ``_vista_spec_from_brief``; never derive a title from a place.
+    """
+    text = str(brief or "")
+    patterns = (
+        r"(?im)^\s*(?:\*\*)?Chosen headline:(?:\*\*)?\s*(\S[^\r\n]*)$",
+        r"(?im)^\s*Chosen from today's scored travel news:\s*(.+?)\s*\(score",
+        r'(?im)^\s*(?:\*\*)?Strongest Truthful Hook:(?:\*\*)?\s*(\S[^\r\n]*)$',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match and match.group(1).strip(' *"'):
+            return ""
+    return "missing explicit Chosen headline field"
+
+
 def _sonia_unique_evergreen_brief(
     brief: str,
     note: str,
@@ -2420,7 +2441,9 @@ def _sonia_unique_evergreen_brief(
         if not current_brief or "COMMISSION: NO" in current_brief.upper():
             return current_brief, current_note, "", attempts
         repeat = _sonia_brief_repeat(current_brief, recent)
-        if not repeat:
+        headline_error = _sonia_brief_headline_error(current_brief)
+        rejection = repeat or headline_error
+        if not rejection:
             return current_brief, current_note, "", attempts
         destination_match = re.search(
             r"(?im)^\s*(?:\*{0,2})destination(?:\s*/\s*topic)?(?:\*{0,2})\s*:\s*(.+?)\s*$",
@@ -2435,14 +2458,20 @@ def _sonia_unique_evergreen_brief(
             "attempt": str(attempt_number),
             "destination": destination,
             "repeated_title": repeat,
+            "contract_error": headline_error,
         })
         if attempt_number >= total:
-            return current_brief, current_note, repeat, attempts
+            return current_brief, current_note, rejection, attempts
+        rejection_context = (
+            "The previous candidate repeated a recent upload "
+            + json.dumps(repeat, ensure_ascii=False)
+            if repeat else
+            "The previous candidate omitted the mandatory explicit Chosen headline field"
+        )
         retry_prompt = (
             prompt
-            + "\n\nCONTENT CALENDAR REJECTION: The previous candidate repeated a recent upload "
-            + json.dumps(repeat, ensure_ascii=False)
-            + ". Select a materially different destination AND topic using ONLY the same supplied evidence. "
+            + "\n\nCANDIDATE REJECTION: " + rejection_context
+            + ". Select a complete, materially different destination AND topic using ONLY the same supplied evidence. "
             + "Do not return any previously rejected destination in this run. Forbidden destinations: "
             + json.dumps(forbidden, ensure_ascii=False)
             + ". Preserve the mandatory explicit Destination/Topic and Chosen headline fields. "
@@ -8471,7 +8500,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                     )
                 if repeat:
                     stages.clear_stage(head_id)
-                    reason = ("evergreen fallback failed the no-repeat gate: " + repeat)
+                    reason = ("evergreen fallback failed the selection contract: " + repeat)
                     return {"agent": head_name, "mode": "blocked", "_blocked": True,
                             "content": f"Sonia Travel Vlogs stopped: {reason}",
                             "blocked_reason": reason, "evidence_count": evidence_count,
