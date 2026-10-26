@@ -6,6 +6,7 @@ import hashlib
 import importlib
 import importlib.util
 import json
+import math
 import os
 import re
 import sqlite3
@@ -10315,10 +10316,34 @@ def _run_yatra(job: dict[str, Any]) -> dict[str, Any]:
             "handed_to": {"agent": "FABULA", "job_id": follow["id"]}}
 
 
+def _yatra_preproduction_timing() -> tuple[float, float, float]:
+    """Shared finite provider budget, poll interval and HTTP timeout for preparation.
+
+    Preserve valid configured values; malformed/non-finite values use defaults.
+    Bounds keep this operation finite even with an accidental excessive setting.
+    They do not alter other LAO operations or any production completion gates.
+    """
+    def bounded(name: str, default: float, lower: float, upper: float) -> float:
+        try:
+            value = float(os.environ.get(name, str(default)))
+        except ValueError:
+            value = default
+        if not math.isfinite(value) or value < lower:
+            value = default
+        return min(value, upper)
+
+    return (
+        bounded("ONE_YATRA_MAX_WAIT_SECONDS", 5400.0, 1.0, 86400.0),
+        bounded("ONE_LAO_POLL_SECONDS", 30.0, 0.0, 300.0),
+        bounded("LAO_TOOL_TIMEOUT_SECONDS", 30.0, 1.0, 300.0),
+    )
+
+
 def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, Any]:
     """Run Sonia Travel Vlogs preproduction in LAO and return its receipt to HELIOS."""
     from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
     payload = _json_task(job)
+    provider_wait, poll_seconds, tool_timeout = _yatra_preproduction_timing()
     if str(payload.get("brand") or "") != "sonia_travel_vlogs":
         raise RuntimeError("YATRA refuses work outside sonia_travel_vlogs")
     trend_brief = str(payload.get("trendBrief") or payload.get("angle") or "").strip()
@@ -10350,7 +10375,7 @@ def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, 
     else:
         language = sonia_language_profile(payload)
         started = tool.execute(
-            action="start", mode="publish", process_name=process_name,
+            action="start", mode="publish", process_name=process_name, timeout=tool_timeout,
             scope="production", confirm_publish=True,
             input_args={
                 "trendBrief": lao_trend_brief,
@@ -10372,17 +10397,17 @@ def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, 
         job_recovery.attach(_connect, job["id"], lao_job_id)
 
     terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
-    deadline = time.time() + float(os.environ.get("ONE_YATRA_MAX_WAIT_SECONDS", "5400"))
+    deadline = time.time() + provider_wait
     status = "Pending"
     last: dict[str, Any] = {}
     while time.time() < deadline:
         stages.set_stage(owner, stages.EXECUTING,
                          f"Building Sonia Travel Vlogs package · LAO {status}",
                          lao_job=lao_job_id, lao_process=process_name)
-        time.sleep(float(os.environ.get("ONE_LAO_POLL_SECONDS", "30")))
+        time.sleep(poll_seconds)
         job_recovery.heartbeat(_connect, job["id"])
         probe = tool.execute(action="status", process_name=process_name,
-                             scope="production", job_id=lao_job_id, include_logs=True)
+                             scope="production", job_id=lao_job_id, include_logs=True, timeout=tool_timeout)
         if not probe.success:
             continue
         last = probe.metadata or {}
@@ -10776,11 +10801,11 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
 def _job_watchdog_seconds(job: dict[str, Any] | None = None) -> float:
     """Outer, additive safety-net timeout for a *whole* job run.
 
-    SCRIBE is the one agent that legitimately blocks for hours — it sits on
+    Some operations legitimately block for hours. SCRIBE sits on
     LAO's KDP factory until the book exists. The default 45-minute net would
     mark a perfectly healthy book run as failed partway through, so that agent
-    gets a window sized to its own LAO wait plus margin. Every other agent
-    keeps the short net.
+    gets a window sized to its own LAO wait plus margin. Scoped production
+    operations below likewise outlive their internal waits; others keep the short net.
 
     This does NOT replace, shorten, or otherwise touch any existing
     per-call timeout inside individual tools/agents (e.g. image/video
@@ -10796,6 +10821,18 @@ def _job_watchdog_seconds(job: dict[str, Any] | None = None) -> float:
         default = max(60.0, float(os.environ.get("ONE_JOB_WATCHDOG_SECONDS", "2700")))
     except ValueError:
         default = 2700.0
+
+    if job and job.get("agent_id") == "fabula":
+        payload = _json_task(job)
+        # Match _run_fabula's preparation dispatch, not narration/checkpoint work.
+        if payload.get("brand") == "sonia_travel_vlogs" and not payload.get("preproduction_job"):
+            provider_wait, poll_seconds, tool_timeout = _yatra_preproduction_timing()
+            # 120s robot preflight plus 480s validation/handoff margin; start
+            # and the final status probe allow seven and nine HTTP calls
+            # (login, five scope lookups, job and logs/artifacts). Intermediate
+            # probes consume the provider budget, rather than adding to it.
+            budget = provider_wait + poll_seconds + 16 * tool_timeout + 600.0
+            return max(default if math.isfinite(default) else 2700.0, budget)
 
     if job and job.get("agent_id") == "echo":
         payload = _json_task(job)
