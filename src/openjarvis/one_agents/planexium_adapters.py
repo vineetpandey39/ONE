@@ -506,6 +506,27 @@ def verified_stock_subject(title, subject, outputs):
         and all(verdict.get(k) is False for k in ("unusable", "uncertain", "contradiction")))
 
 
+def stock_context_matches(request, metadata):
+    """Reject contradictory stock metadata, including old accepted receipts."""
+    text = " ".join(str(metadata.get(key) or "")
+                    for key in ("title", "tags", "description")).casefold()
+    blocked = ["fantasy", "surreal", "alien", *request.get("blocked_keywords", [])]
+    if any(str(word).casefold() in text for word in blocked):
+        return False
+    query = str(request["query"]).casefold()
+    atmospheric = (re.search(r"\bjet[ -]?streams?\b", query)
+                   or (re.search(r"\batmospher\w*\b", query)
+                       and re.search(r"\b(flow|circulation|currents?|winds?)\b", query)))
+    if atmospheric:
+        # "jet" alone also names aircraft; metadata must establish air flow.
+        if re.search(r"\b(aircraft|airplanes?|aeroplanes?|airliners?|airports?|"
+                     r"aviation|fighters?|runways?|cockpits?|flying|flights?)\b", text):
+            return False
+        return bool(re.search(r"\bjet[ -]?streams?\b|\batmospher\w*\b|"
+                              r"\b(winds?|weather|meteorolog\w*|circulation)\b", text))
+    return True
+
+
 class EnvatoAdapter:
     def __init__(self, draft: LaoDraft, workflow: Path, context, queue: Path, provider_lock: Path, *, wait_seconds=0,
                  profile_root=None, failure_limit=10, free_stock=None):
@@ -543,6 +564,7 @@ class EnvatoAdapter:
                     hits = search(key, query)
                 except Exception:
                     continue
+                hits = [hit for hit in hits if stock_context_matches(request, hit)]
                 picked = helper.pixabay_pick(hits, request["subject"], helper.used_ids(output_root, prefix), blocked, 3.0)
                 if not picked:
                     continue
@@ -568,6 +590,8 @@ class EnvatoAdapter:
             if (not path.is_relative_to(self.context.root.resolve()) or not path.is_file()
                     or hashlib.sha256(path.read_bytes()).hexdigest() != row["sha256"]):
                 raise ValueError("Accepted stock checkpoint changed")
+            if not stock_context_matches(request, row):
+                raise ValueError("Accepted stock relevance failed; targeted repair required")
             return row, value["candidate"]
         # Migrate only a real successful download from this mission's old
         # receipts. Verify job inputs, title, file identity and measured format.
@@ -584,7 +608,8 @@ class EnvatoAdapter:
             blocked = ["fantasy", "surreal", "alien", *request.get("blocked_keywords", [])]
             if (job.get("status") != "Successful" or args.get("envatoQuery") != request["query"]
                     or str(args.get("sceneId")) != str(index) or request["subject"].casefold() not in title.casefold()
-                    or any(word.casefold() in title.casefold() for word in blocked)):
+                    or any(word.casefold() in title.casefold() for word in blocked)
+                    or not stock_context_matches(request, {"title": title})):
                 continue
             path = self.context.root / f"scene-{index}" / f"planexium-scene-{index}.mp4"
             if not path.is_file():continue
@@ -692,6 +717,8 @@ class EnvatoAdapter:
                         # Keep its receipt; the next distinct result gets its own job.
 
                 if fallback_row is not None:
+                    if not stock_context_matches(request, fallback_row):
+                        raise ValueError("Free-stock fallback lacks relevant visual context")
                     if fallback_row["sha256"] in hashes:
                         raise ValueError("Free-stock fallback returned a duplicate source")
                     hashes.add(fallback_row["sha256"]); titles.append(fallback_row["title"])
@@ -716,6 +743,8 @@ class EnvatoAdapter:
                     raise ValueError("Provider success lacks a verified selected-asset subject title")
                 if any(str(word).casefold() in title.casefold() for word in inputs["blockedTitleKeywords"]):
                     raise ValueError("Selected asset contains a forbidden visual keyword")
+                if not stock_context_matches(request, {"title": title}):
+                    raise ValueError("Selected asset lacks relevant visual context")
                 titles.append(title)
                 row = {"provider": "Envato", "path": str(path), "job_id": job, "query": query,
                        "title": str(out.get("selected_asset_title") or ""), "catalog_query": catalog_query, "illustrative": True,

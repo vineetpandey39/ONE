@@ -1,0 +1,37 @@
+[
+  {
+    "nasa_id": "PIA14413",
+    "editorial_query": "NASA Juno Jupiter deep jet streams scientific visualization",
+    "metadata": {
+      "center": "JPL",
+      "date_created": "2011-08-03T18:59:31Z",
+      "description": "Three LEGO figurines representing the Roman god Jupiter, his wife Juno and Galileo Galilei are shown here aboard the Juno spacecraft.",
+      "description_508": "Three LEGO figurines representing the Roman god Jupiter, his wife Juno and Galileo Galilei are shown here aboard the Juno spacecraft.",
+      "keywords": [
+        "Juno"
+      ],
+      "media_type": "image",
+      "nasa_id": "PIA14413",
+      "secondary_creator": "NASA/JPL-Caltech/KSC",
+      "title": "LEGO Figurines Aboard Juno"
+    }
+  },
+  {
+    "nasa_id": "PIA21642",
+    "editorial_query": "NASA Jupiter ammonia circulation microwave radiometer map",
+    "metadata": {
+      "center": "JPL",
+      "date_created": "2017-05-25T00:00:00Z",
+      "description": "NASA's Juno spacecraft carries an instrument called the Microwave Radiometer, which examines Jupiter's atmosphere beneath the planet's cloud tops. This image shows the instrument's view of the outer part of Jupiter's atmosphere.  Before Juno began using this instrument, scientists expected the atmosphere to be uniform at depths greater than 60 miles (100 kilometers). But with the Microwave Radiometer, scientists have discovered that the atmosphere has variations down to at least 220 miles (350 kilometers), as deep as the instrument can see.  In the cut-out image to the right, orange signifies high ammonia abundance and blue signifies low ammonia abundance. Jupiter appears to have a band around its equator high in ammonia abundance, with a column shown in orange. This is contrary to scientists' expectations that ammonia would be uniformly mixed.   https://photojournal.jpl.nasa.gov/catalog/PIA21642",
+      "description_508": "NASA's Juno spacecraft carries an instrument called the Microwave Radiometer, which examines Jupiter's atmosphere beneath the planet's cloud tops. This image shows the instrument's view of the outer part of Jupiter's atmosphere.",
+      "keywords": [
+        "Juno",
+        "Jupiter"
+      ],
+      "media_type": "image",
+      "nasa_id": "PIA21642",
+      "secondary_creator": "NASA/JPL-Caltech/SwRI",
+      "title": "Under Jupiter's Cloud Tops"
+    }
+  }
+]

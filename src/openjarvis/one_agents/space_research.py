@@ -200,7 +200,7 @@ def nasa_subject_matches(query, metadata):
         return False
     incidental_words={
         'officials','administrator','director','managers','personnel','ceremony',
-        'portrait','headshot','profile',
+        'portrait','headshot','profile','lego','figurines',
     }
     incidental_phrases={'firing room','control room','press conference','launch countdown'}
     context_words=set(re.findall(r'[a-z0-9]{3,}',subject_text))
@@ -216,11 +216,19 @@ def nasa_subject_matches(query, metadata):
     requested_visual=words & visual_qualifiers
     if requested_visual and not requested_visual & candidate:
         return False
-    specific=words & {'phobos','deimos','mmx','europa','ganymede','titan','enceladus','triton','ceres','bennu','osiris','juno'}
-    if specific:return bool(specific & candidate)
+    specific=words & {'phobos','deimos','europa','ganymede','titan','enceladus','triton','ceres','bennu'}
+    if specific and not specific & candidate:
+        return False
+    # A mission name locates the collection, not the depicted phenomenon.
+    # Require the remaining brief too; allow explicitly mission-only searches.
+    missions = words & {'mmx', 'osiris', 'juno'}
+    if missions and not missions & candidate:
+        return False
     generic={'nasa','jaxa','esa','image','imagery','photo','photograph','picture','archive','space','spacecraft',
              'illustration','illustrative','dramatic','close','observation','view','official','surface','orbiting','from','the'}
-    terms=words-generic
+    terms=words-generic-missions
+    if not terms and missions:
+        return True
     matched=terms & candidate
     # A single incidental word is not enough for a multi-part visual brief.
     # NASA descriptions often mention the ISS, Earth, or a mission in passing
