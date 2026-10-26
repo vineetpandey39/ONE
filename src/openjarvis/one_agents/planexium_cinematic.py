@@ -127,6 +127,21 @@ def reuse_music(library, destination):
     return None
 
 
+def download_music(draft, steps, query, context, *, failure_limit=10):
+    """Advance only past confirmed pre-download failures, preserving receipts."""
+    limit=max(1,int(failure_limit))
+    for candidate in range(1,limit+1):
+        receipt=context.artifact('receipts/music.json' if candidate==1
+            else f'receipts/music-candidate-{candidate}.json')
+        inputs={'envatoQuery':query,'envatoQueryUrl':quote_plus(query),
+            'assetFolder':context.mission_id,'resultIndex':str(candidate),'enablePaidDownload':True}
+        try:
+            return draft.run('planexium-envato-music',steps,inputs,receipt,timeout=10800)
+        except RuntimeError:
+            if candidate==limit or not draft.subject_rejected(receipt):
+                raise
+
+
 def acquire(root, tools):
     import yaml
     from openjarvis.one_agents.planexium import load_config
@@ -157,8 +172,8 @@ def acquire(root, tools):
             if step['action']=='download_file':step['args']['dest_dir']=str(music)
         query=plan['music_query']
         with envato_lease(lock,queue,ctx.mission_id,wait_seconds=3600,on_wait=draft.on_wait):
-            draft.run('planexium-envato-music',steps,{'envatoQuery':query,'envatoQueryUrl':quote_plus(query),
-                'assetFolder':ctx.mission_id,'resultIndex':'1','enablePaidDownload':True},ctx.artifact('receipts/music.json'),timeout=10800)
+            download_music(draft,steps,query,ctx,
+                failure_limit=config.get('stock_policy',{}).get('envato_failure_threshold',10))
         runtime._yatra_unpack_music(music)
         track=picker(music)
         if track is None:raise RuntimeError('Music provider finished without a usable instrumental track')
