@@ -27,7 +27,10 @@ def _marked_json(text: str, begin: str, end: str):
     """Decode a marked JSON response, tolerating prose and markdown fences."""
     text = str(text or "")
     if begin in text:
-        text = text.split(begin, 1)[1]
+        # Browser-backed providers can include the echoed prompt before the
+        # assistant response. The prompt names the same markers, so the most
+        # recent opening marker identifies the response rather than its echo.
+        text = text.rsplit(begin, 1)[1]
     if end in text:
         text = text.split(end, 1)[0]
     text = text.strip().strip("`").strip()
