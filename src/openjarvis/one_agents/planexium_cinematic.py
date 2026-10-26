@@ -376,7 +376,7 @@ def render(root, tools, *, resolve_settings=None):
         for ordinal,shot in enumerate(shots,1):
             progress(root,'editing_footage',scene=shot['scene'],total_scenes=len(science['scenes']),shot=ordinal,total_shots=len(shots))
             target=directory/f'shot-{ordinal:03d}.mp4';receipt=target.with_suffix('.json')
-            recipe={'shot':shot,'native_fusion':bool(resolve_settings),'shared_spec':shared_specs.get(ordinal),'shared_library':shared.library_hash if ordinal in shared_specs else None}
+            recipe={'context_renderer':sha(Path(__file__).with_name('planexium_context.py')),'shot':shot,'native_fusion':bool(resolve_settings),'shared_spec':shared_specs.get(ordinal),'shared_library':shared.library_hash if ordinal in shared_specs else None}
             signature=hashlib.sha256(json.dumps({**recipe,'editor':sha(Path(__file__))},sort_keys=True).encode()).hexdigest()
             compatible={hashlib.sha256(json.dumps({**recipe,'editor':editor},sort_keys=True).encode()).hexdigest()
                         for editor in COMPATIBLE_CINEMATIC_EDITORS}

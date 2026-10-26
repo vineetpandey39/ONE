@@ -4,6 +4,12 @@ import hashlib
 from pathlib import Path
 
 LABELS = {
+    5: (3, "Jupiter cloud tops - illustration"),
+    6: (3, "Jupiter clouds - illustration"),
+    8: (4, "Great Red Spot - illustration"),
+    10: (5, "Juno at Jupiter - illustration"),
+    14: (7, "Jupiter atmosphere - illustration"),
+    20: (10, "Juno at Jupiter - illustration"),
     9: (5, "Cloud-top context - illustration"),
     11: (6, "Jupiter atmosphere - illustration"),
     13: (7, "Jupiter exterior - illustration"),
