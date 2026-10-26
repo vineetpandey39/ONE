@@ -343,10 +343,14 @@ def render(root, tools, *, resolve_settings=None):
     if motion_path.exists():
         from openjarvis.one_agents.planexium_editorial import apply_director_copy
         apply_director_copy(shots,json.loads(motion_path.read_text(encoding='utf-8')))
+    # Keep contextual labels unobscured by director or science overlays.
+    for shot in shots:
+        if shot["asset"].get("contextual_label"):
+            shot["callout"] = ""
     from openjarvis.one_agents.youtube_science_overlays import overlay_kind
     for number,scene in enumerate(science['scenes'],1):
         kind=overlay_kind(scene['narration']) if editorial.get('science_overlays_enabled',True) else None
-        eligible=next((s for s in shots if s['scene']==number and s['kind'] not in {'primary','authored_scientific_motion'} and s['frames']>=120),None)
+        eligible=next((s for s in shots if s['scene']==number and s['kind'] not in {'primary','authored_scientific_motion'} and s['frames']>=120 and not s['asset'].get('contextual_label')),None)
         if kind and eligible:
             eligible['science_overlay']=kind
             eligible['callout']=''
@@ -357,7 +361,7 @@ def render(root, tools, *, resolve_settings=None):
             narration_text = scene['narration'].casefold()
             if all(word in narration_text for word in ('mars', 'impact', 'asteroid')):
                 eligible = next((s for s in shots if s['scene']==number and
-                    s['kind'] not in {'primary','authored_scientific_motion'} and s['frames']>=120 and not s.get('science_overlay')), None)
+                    s['kind'] not in {'primary','authored_scientific_motion'} and s['frames']>=120 and not s['asset'].get('contextual_label') and not s.get('science_overlay')), None)
                 if eligible:
                     eligible.update(fusion_diagram='moon_origins', callout='')
                     break
@@ -386,6 +390,8 @@ def render(root, tools, *, resolve_settings=None):
                     'fps=30,setsar=1,tpad=stop_mode=clone:stop_duration=1,setpts=N/(30*TB)')
                 if shot['kind']=='archive':
                     filters+=",zoompan=z='min(pzoom+0.00015,1.035)':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=1920x1080:fps=30"
+                from openjarvis.one_agents.planexium_context import context_filter
+                filters += context_filter(shot['asset'], directory, ordinal, font)
                 label=source_credit(shot)
                 if label:
                     label_file=directory/f'credit-{ordinal}.txt';label_file.write_text(label,encoding='utf-8')

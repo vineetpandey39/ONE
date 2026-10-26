@@ -24,6 +24,7 @@ def render_signature(root,tools,motion_format,resolve_settings=None):
         from openjarvis.one_agents.planexium_shared_motion import fingerprint
         values['installed_motion_v3']=fingerprint(tools)
         values['cinematic_editor']=digest(Path(__file__).with_name('planexium_cinematic.py'))
+        values['context_labels']=digest(Path(__file__).with_name('planexium_context.py'))
         values['authored_motion']=digest(Path(__file__).with_name('planexium_authored_motion.py'))
         values['editorial_planner']=digest(Path(__file__).with_name('planexium_editorial.py'))
         values['science_overlays']=digest(Path(__file__).with_name('youtube_science_overlays.py'))

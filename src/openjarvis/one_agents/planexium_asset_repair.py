@@ -99,6 +99,8 @@ def validate_bundle(root, bundle):
         raise ValueError("Repair changed unrelated plan or music")
     if len(assets["stock"]) != len(original_assets["stock"]):
         raise ValueError("Repair must retain stock slots")
+    from openjarvis.one_agents.planexium_context import bind_context, validate_context_coverage
+    context_records = bind_context(root, bundle, original_plan, assets)
     motions = validate_accounting(root, bundle, science)
     identities = set()
     for i, asset in enumerate(assets["stock"]):
@@ -144,6 +146,7 @@ def validate_bundle(root, bundle):
     shots = build_scene_shots(root, science, voice, assets, original,
         read(root / "media-manifest.json")["scenes"], plan,
         archive_assets=archives, article_assets=articles, offline=True, write_outputs=False)
+    validate_context_coverage(context_records, shots)
     return {"plan": plan, "assets": assets, "scene_shots": shots}
 
 
