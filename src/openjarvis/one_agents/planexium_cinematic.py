@@ -109,7 +109,12 @@ def reuse_music(library, destination):
         source=Path(item['path'])
         if item.get('provider')!='Envato' or source.suffix.lower() not in {'.wav','.mp3','.m4a'}:
             raise ValueError('Invalid shared instrumental music entry')
-        if not source.is_file() or sha(source)!=item['sha256']:
+        # Shared-library entries are an optimization over the normal provider
+        # workflow.  Storage retention may remove an older mission asset; in
+        # that case try the next entry (or acquire a fresh licensed track).
+        if not source.is_file():
+            continue
+        if sha(source)!=item['sha256']:
             raise ValueError('Shared instrumental music integrity mismatch')
         target=Path(destination)/('shared-'+item['sha256'][:12]+source.suffix.lower())
         if not target.exists():shutil.copy2(source,target)
