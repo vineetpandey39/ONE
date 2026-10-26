@@ -130,16 +130,24 @@ def reuse_music(library, destination):
 def download_music(draft, steps, query, context, *, failure_limit=10):
     """Advance only past confirmed pre-download failures, preserving receipts."""
     limit=max(1,int(failure_limit))
-    for candidate in range(1,limit+1):
+    new_failures=0
+    candidate=1
+    while True:
         receipt=context.artifact('receipts/music.json' if candidate==1
             else f'receipts/music-candidate-{candidate}.json')
+        resumed=receipt.is_file()
         inputs={'envatoQuery':query,'envatoQueryUrl':quote_plus(query),
             'assetFolder':context.mission_id,'resultIndex':str(candidate),'enablePaidDownload':True}
         try:
             return draft.run('planexium-envato-music',steps,inputs,receipt,timeout=10800)
         except RuntimeError:
-            if candidate==limit or not draft.subject_rejected(receipt):
+            if not draft.subject_rejected(receipt):
                 raise
+            if not resumed:
+                new_failures+=1
+                if new_failures==limit:
+                    raise
+            candidate+=1
 
 
 def acquire(root, tools):
