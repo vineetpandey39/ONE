@@ -202,13 +202,12 @@ class ChatGPTAdapter:
         return envato_lease(self.provider_lock, self.queue, self.context.mission_id) if self.provider_lock else nullcontext()
 
     def _marked_output(self, name, steps, receipt, key, begin, end):
-        # Packages created before output aliases were declared can finish
-        # successfully with an empty output_result. Preserve that immutable
-        # receipt and repair it once through the corrected package manifest.
-        repairing_legacy_checkpoint = receipt.is_file()
+        # A package without a usable output alias can finish successfully with
+        # an empty output_result. Preserve its immutable receipt and repair it
+        # once through the corrected package manifest.
         out, _ = self.draft.run(name, steps, {}, receipt)
         raw = out.get(key)
-        if repairing_legacy_checkpoint and (raw is None or (isinstance(raw, str) and not raw.strip())):
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
             repaired = receipt.with_name(f"{receipt.stem}-output-v2{receipt.suffix}")
             out, _ = self.draft.run(name, steps, {}, repaired)
             raw = out.get(key)
