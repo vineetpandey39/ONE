@@ -203,14 +203,22 @@ class ChatGPTAdapter:
 
     def _marked_output(self, name, steps, receipt, key, begin, end):
         # A package without a usable output alias can finish successfully with
-        # an empty output_result. Preserve its immutable receipt and repair it
-        # once through the corrected package manifest.
+        # an empty output_result. Preserve immutable receipts, resume any prior
+        # repair attempts, and create at most one new versioned attempt.
         out, _ = self.draft.run(name, steps, {}, receipt)
         raw = out.get(key)
-        if raw is None or (isinstance(raw, str) and not raw.strip()):
-            repaired = receipt.with_name(f"{receipt.stem}-output-v2{receipt.suffix}")
+        repair_version = 2
+        while raw is None or (isinstance(raw, str) and not raw.strip()):
+            repaired = receipt.with_name(
+                f"{receipt.stem}-output-v{repair_version}{receipt.suffix}")
+            existed = repaired.is_file()
             out, _ = self.draft.run(name, steps, {}, repaired)
             raw = out.get(key)
+            if not existed:
+                break
+            repair_version += 1
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            raise ValueError(f"PLANEXIUM provider returned no usable {key} output")
         return _marked_json(raw, begin, end)
 
     def write(self, prompt: str) -> dict:
