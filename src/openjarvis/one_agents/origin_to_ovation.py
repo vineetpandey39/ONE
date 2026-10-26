@@ -141,8 +141,8 @@ def image_provider(path, shot):
             "request_marker": "OTO-" + path.name + "-" + shot["shot_id"],
             "reference_image_path": shot["reference"],
             "reference_settle_seconds": 12,
-            "filename": output.name, "max_attempts": 2, "allow_fresh_chat_recovery": False, "strict_fresh_turn": True,
-            "stall_timeout_ms": 240000, "as": "image_path"}},
+            "filename": output.name, "max_attempts": 3, "allow_fresh_chat_recovery": False, "strict_fresh_turn": True,
+            "stall_timeout_ms": 480000, "as": "image_path"}},
     ]
     result, provider_job = provider.run(
         f"Origin to Ovation - {manifest['subject']} - {shot['shot_id']}", steps, {},
