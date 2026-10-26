@@ -430,6 +430,8 @@ class Pipeline:
         if resolve_settings and not renderer_config.get("legacy_parent_request"):
             from openjarvis.one_agents import planexium_resolve
             render_request["resolve"] = {"settings": resolve_settings, "adapter": _hash(Path(planexium_resolve.__file__))}
+        if (root / "asset-repair.json").exists():
+            render_request["asset_repair"] = _hash(root / "asset-repair.json")
         master = self.stage("render", render_request, cut)
         return self.package(science, voice, evidence, master)
 

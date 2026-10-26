@@ -13,7 +13,7 @@ def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
 
 def render_signature(root,tools,motion_format,resolve_settings=None):
     from openjarvis.one_agents.youtube_motion import library_hash
-    files=['science-plan.json','media-manifest.json','narration/narration.segments.json','motion-copy.json','visual-repair.json','cinematic-plan.json']
+    files=['science-plan.json','media-manifest.json','narration/narration.segments.json','motion-copy.json','visual-repair.json','cinematic-plan.json','asset-repair.json']
     values={name:digest(root/name) for name in files if (root/name).is_file()}
     values.update(library=library_hash(),renderer=digest(Path(__file__).with_name('planexium_render.py')),
                   tools=str(tools.resolve()),motion_format=motion_format)

@@ -1,0 +1,74 @@
+[
+  {
+    "nasa_id": "PIA00023",
+    "editorial_query": "NASA Jupiter full disk Cassini true color image",
+    "metadata": {
+      "center": "JPL",
+      "date_created": "1996-01-29T11:11:29Z",
+      "description": "This full-disk image of Jupiter satellite Io was made from several frames taken by NASA Voyager 1 on Mar. 4, 1979, as the spacecraft neared the satellite. ",
+      "description_508": "This full-disk image of Jupiter satellite Io was made from several frames taken by NASA Voyager 1 on Mar. 4, 1979, as the spacecraft neared the satellite. ",
+      "keywords": [
+        "Io",
+        "Voyager"
+      ],
+      "media_type": "image",
+      "nasa_id": "PIA00023",
+      "secondary_creator": "NASA/JPL",
+      "title": "Io - Full Disk"
+    }
+  },
+  {
+    "nasa_id": "PIA26434",
+    "editorial_query": "NASA Jupiter interior metallic hydrogen cutaway diagram",
+    "metadata": {
+      "center": "JPL",
+      "date_created": "2024-09-10T00:00:00Z",
+      "description": "Jupiter's moon Europa is smaller than Earth's moon yet may contain more than twice as much liquid water as all of Earth's oceans combined. Scientists believe that under its icy surface, Europa features a global saltwater ocean, perhaps 40 to 100 miles (60 to 150 kilometers) deep. Further inward, a rocky mantle and metallic core are likely. Europa's interior structure will be studied in detail by NASA's Europa Clipper spacecraft, which will orbit Jupiter and perform dozens of flybys of the moon.  Europa Clipper's three main science objectives are to determine the thickness of the moon's icy shell and its interactions with the ocean below, to investigate its composition, and to characterize its geology. The mission's detailed exploration of Europa will help scientists better understand the astrobiological potential for habitable worlds beyond our planet.  https://photojournal.jpl.nasa.gov/catalog/PIA26434",
+      "description_508": "Jupiter's moon Europa is smaller than Earth's moon yet may contain more than twice as much liquid water as all of Earth's oceans combined.",
+      "keywords": [
+        "Europa Clipper",
+        "Europa"
+      ],
+      "media_type": "image",
+      "nasa_id": "PIA26434",
+      "secondary_creator": "NASA/JPL-Caltech",
+      "title": "Europa's Mysterious Interior (Artist's Concept)"
+    }
+  },
+  {
+    "nasa_id": "PIA26485",
+    "editorial_query": "NASA Juno spacecraft Jupiter artist concept",
+    "metadata": {
+      "center": "JPL",
+      "date_created": "2024-12-12T00:00:00Z",
+      "description": "Lava islands within Loki Patera on Jupiter's moon Io are depicted in an artist's concept that's based on data from the Jovian Infrared Auroral Mapper (JIRAM) instrument about NASA's Juno spacecraft.  https://photojournal.jpl.nasa.gov/catalog/PIA26485",
+      "description_508": "Lava islands within Loki Patera on Jupiter's moon Io are depicted in an artist's concept that's based on data from the JIRAM instrument about NASA's Juno spacecraft.",
+      "keywords": [
+        "Juno",
+        "Io"
+      ],
+      "media_type": "image",
+      "nasa_id": "PIA26485",
+      "secondary_creator": "NASA/JPL-Caltech/SwRI/ASI/INAF/Alessandro Mura",
+      "title": "A View of Loki (Artist's Concept)"
+    }
+  },
+  {
+    "nasa_id": "PIA19639",
+    "editorial_query": "NASA Juno gravity measurements Jupiter interior model",
+    "metadata": {
+      "center": "JPL",
+      "date_created": "2015-07-07T18:15:02Z",
+      "description": "This artist's rendering shows NASA's Juno spacecraft making one of its close passes over Jupiter.  Launched in 2011, the Juno spacecraft will arrive at Jupiter in 2016 to study the giant planet from an elliptical, polar orbit. Juno will repeatedly dive between the planet and its intense belts of charged particle radiation, traveling from pole to pole in about an hour, and coming within 5,000 kilometers (about 3,000 miles) of the cloud tops at closest approach.  Juno's primary goal is to improve our understanding of Jupiter's formation and evolution. The spacecraft will spend a little over a year investigating the planet's origins, interior structure, deep atmosphere and magnetosphere. Juno's study of Jupiter will help us to understand the history of our own solar system and provide new insight into how planetary systems form and develop in our galaxy and beyond.  http://photojournal.jpl.nasa.gov/catalog/PIA19639",
+      "description_508": "This artist rendering shows NASA Juno spacecraft making one of its close passes over Jupiter. Launched in 2011, the Juno spacecraft will arrive at Jupiter in 2016 to study the giant planet from an elliptical, polar orbit.",
+      "keywords": [
+        "Juno",
+        "artist concept"
+      ],
+      "media_type": "image",
+      "nasa_id": "PIA19639",
+      "secondary_creator": "NASA/JPL-Caltech",
+      "title": "Juno Arrival at Jupiter Artist Concept"
+    }
+  }
+]

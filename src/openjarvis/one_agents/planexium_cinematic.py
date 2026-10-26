@@ -265,7 +265,14 @@ def render(root, tools, *, resolve_settings=None):
     science=json.loads((root/'science-plan.json').read_text(encoding='utf-8'))
     progress(root,'acquiring_footage_and_music',scene=0,total_scenes=len(science['scenes']))
     editorial=json.loads((root/'cinematic-plan.json').read_text(encoding='utf-8'))
-    assets=acquire(root,tools)
+    from openjarvis.one_agents.planexium_asset_repair import load_active
+    local_repair = load_active(root)
+    if local_repair:
+        editorial = local_repair['plan']
+        editorial['scene_shots'] = local_repair['scene_shots']
+        assets = local_repair['assets']
+    else:
+        assets=acquire(root,tools)
     for asset in assets['stock']:
         asset['usable_in']=usable_start(asset)
     voice_path=root/'narration/narration.segments.json';voice=json.loads(voice_path.read_text(encoding='utf-8'))
@@ -273,7 +280,9 @@ def render(root, tools, *, resolve_settings=None):
     source=next((a['source_video'] for row in media.values() for a in row.get('assets',[]) if a.get('source_video')),None)
     original=root/'sources/cinematic-original.mp4'
     from openjarvis.one_agents.planexium_obs import probe_source
-    if source:
+    if local_repair:
+        original_info={'seconds':0};credit='Local verified repair'
+    elif source:
         original.parent.mkdir(exist_ok=True)
         if not original.exists():original.write_bytes(space_research.read_public(source['video_url'],limit=250_000_000))
         original_info=probe_source(original)
@@ -284,7 +293,8 @@ def render(root, tools, *, resolve_settings=None):
         image=next((a for row in media.values() for a in row.get('assets',[]) if Path(a['path']).suffix.lower() in {'.jpg','.png','.jpeg'}),None)
         if image is None:image=space_research.nasa_image(science['video_title'],root/'sources/cinematic-primary')
         original=Path(image['path']);original_info={'seconds':3600};credit=image.get('credit','NASA archive imagery')
-    editorial=json.loads((root/'cinematic-plan.json').read_text(encoding='utf-8'))
+    if not local_repair:
+        editorial=json.loads((root/'cinematic-plan.json').read_text(encoding='utf-8'))
     primary_offsets=None if editorial.get('revision')=='retention-v1' else {i:0 for i,s in enumerate(science['scenes'],1) if s.get('visual_kind') in {'obs','image'}}
     if not editorial.get('scene_shots'):
         from openjarvis.one_agents.planexium_editorial import build_scene_shots
