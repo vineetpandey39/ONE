@@ -1417,7 +1417,7 @@ def _verified_repair_receipt(
                     "agent_id": evidence.get("agent"), "task": evidence.get("task"),
                     "error": evidence.get("error")}
         if valid and already_dispatched(previous, revision):
-            return None
+            return {**saved, "consumed": True}
         return saved if valid else None
 
     try:
@@ -1446,7 +1446,7 @@ def _verified_repair_receipt(
     def load_valid(path: Path) -> dict[str, Any] | None:
         saved = load_candidate(path)
         if saved and ({str(saved.get("full_commit")), str(saved.get("commit"))} & consumed):
-            return None
+            return {**saved, "consumed": True}
         return saved
 
     direct = load_valid(direct_path)
@@ -1504,6 +1504,10 @@ def heal_failure(connect: Connect, finding: Any) -> str:
     repo = _repo_for(evidence)
     if repo:
         repair = _verified_repair_receipt(connect, evidence, repo, receipt_dir, receipt_path)
+    if repair and repair.get("consumed"):
+        return (f"{PENDING_PREFIX}verified repair already dispatched for this failure; "
+                "changed diagnosis or independently verified replacement repair required; "
+                "no model providers invoked")
     if repair is None:
         repair = repair_with_cli(evidence)
         if repair.get("ok"):
