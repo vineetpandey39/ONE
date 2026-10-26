@@ -532,6 +532,25 @@ def stock_context_matches(request, metadata):
     return True
 
 
+def preserve_selected_envato_panel(steps):
+    """Escape dismisses today's selected-item modal, including its download controls.
+
+    Remove only the inherited post-selection bubble-dismissal step. Keep every
+    subject, resolution, duplicate and download gate; never change shared YAML.
+    """
+    import copy
+    result = []
+    selected = False
+    for step in steps:
+        if step.get("args", {}).get("as") == "selected_asset_ready":
+            selected = True
+        if (selected and step.get("action") == "press"
+                and step.get("args", {}).get("key") == "Escape"):
+            continue
+        result.append(copy.deepcopy(step))
+    return result
+
+
 class EnvatoAdapter:
     def __init__(self, draft: LaoDraft, workflow: Path, context, queue: Path, provider_lock: Path, *, wait_seconds=0,
                  profile_root=None, failure_limit=10, free_stock=None):
@@ -633,8 +652,8 @@ class EnvatoAdapter:
         if brand != "planexium" or Path(output_root) != self.context.root:
             raise ValueError("Envato channel output identity mismatch")
         workflow = yaml.safe_load(self.workflow.read_text(encoding="utf-8"))
-        # Use the latest accepted selectors/actions, not a stale copied workflow.
-        steps = workflow["steps"]
+        # Keep all installed validation gates, without dismissing the selected item.
+        steps = preserve_selected_envato_panel(workflow["steps"])
         requires_context = any(s.get("action") == "assert_destination_subject" for s in steps)
         for step in steps:
             if step.get("action") == "open_browser":
