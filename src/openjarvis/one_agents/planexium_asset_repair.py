@@ -83,6 +83,10 @@ def validate_bundle(root, bundle):
     indexes = {i for n in scenes for i in original_plan["scene_assets"][str(n)]}
     comparison = copy.deepcopy(plan)
     for n in scenes:
+        queries = plan["scene_visuals"][str(n)]
+        if not isinstance(queries, list) or not 1 <= len(queries) <= 3 or any(
+                not isinstance(q, str) or not q.strip() for q in queries):
+            raise ValueError("Repair must retain the bounded one-to-three archive briefs")
         comparison["scene_visuals"][str(n)] = original_plan["scene_visuals"][str(n)]
     for i in indexes:
         if not set(original_plan["stock_requests"][i].get("blocked_keywords", [])).issubset(

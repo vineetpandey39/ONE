@@ -233,10 +233,12 @@ def shot_plan(science, voice, stock, original, *, mapping=None, primary_offsets=
 
 def validate_unique_timeline(shots):
     """Reject replayed frames and stock cycling before any encoding occurs."""
+    from openjarvis.one_agents.space_research import source_identity
     used = {}
     for shot in shots:
         asset = shot['asset']
-        identity = asset.get('sha256') or str(Path(asset['path']).resolve())
+        identity = (source_identity(asset) if asset.get('sha256') or asset.get('download_url')
+                    or asset.get('source_url') else ('path', str(Path(asset['path']).resolve())))
         start = float(asset.get('usable_in', 0)) + float(shot['offset'])
         end = start + shot['frames'] / 30
         image = Path(asset['path']).suffix.lower() in {'.jpg', '.jpeg', '.png'}

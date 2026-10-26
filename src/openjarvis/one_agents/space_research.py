@@ -194,7 +194,10 @@ def discover_topic(recent: set[str], *, read=read_public) -> dict:
 def source_identity(asset):
     """Catalogue identity survives re-encoding; hashes still verify file bytes."""
     if asset.get('derived_from_sha256') and asset.get('source_panel'):
-        return ('panel', asset['derived_from_sha256'], str(asset['source_panel']))
+        parent = {**asset, 'sha256': asset['derived_from_sha256']}
+        parent.pop('derived_from_sha256')
+        parent.pop('source_panel')
+        return ('panel', source_identity(parent), str(asset['source_panel']))
     if str(asset.get('provider', '')).casefold() == 'nasa' and asset.get('nasa_id'):
         return ('nasa', str(asset['nasa_id']).casefold())
     url = asset.get('download_url') or asset.get('source_url')
@@ -263,8 +266,8 @@ def nasa_subject_matches(query, metadata):
     if requested_visual and not requested_visual & candidate:
         return False
     specific=words & {'phobos','deimos','europa','ganymede','titan','enceladus','triton','ceres','bennu'}
-    if specific and not specific & candidate:
-        return False
+    if specific:
+        return bool(specific & candidate)
     # A mission name locates the collection, not the depicted phenomenon.
     # Require the remaining brief too; allow explicitly mission-only searches.
     missions = words & {'mmx', 'osiris', 'juno'}
