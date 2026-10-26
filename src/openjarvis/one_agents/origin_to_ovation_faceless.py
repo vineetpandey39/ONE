@@ -44,6 +44,9 @@ FACELESS_RULES = (
     "or documented jersey name stated. Never add a modern number/name to an era without evidence. "
     "Use rear views, over-shoulder views, silhouettes, torso, equipment, hands, feet, environmental POV or "
     "reflections without facial detail. Side angles are allowed only with the face fully obscured. "
+    "Keep every athlete portrayal dignified: no close or medium rear-body composition and no camera emphasis on "
+    "the back, hips, chest, thighs or body shape; use distant full-body action, neutral upper-torso crops, equipment "
+    "occlusion, court geography and action mechanics instead. "
     "Cricket anatomy and bat grip physically correct, no extra fingers or twisted wrists.")
 
 

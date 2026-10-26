@@ -23,7 +23,8 @@ def reference_prompt(manifest, brief):
         if not all(str(u).startswith('https://') for u in stage['source_urls']):raise ValueError('Reference sources must be HTTPS links')
         lines.append(f"Age {stage['age']}, year {stage['year']}, {stage['place']}: {stage['appearance']}; {stage['equipment']}.")
     return (f"Generate a canonical age/body/kit reference sheet for {manifest['subject']}, original photoreal cinematic CGI. "
-            'Use ONLY rear, over-shoulder with face hidden, and torso/equipment views. Never render frontal heads, facial profiles or expressions. '
+            'Use dignified distant full-court silhouettes, neutral upper-torso over-shoulder crops, upper-body side action with the face blocked, and hands/racket/footwork/equipment details. Never render frontal heads, facial profiles or expressions. '
+            'Never use a close or medium rear-body composition and never emphasize the subject’s back, hips, chest, thighs or body shape. '
             + ' '.join(lines) + ' ' + FACELESS_RULES + ' Age labels may be small editorial captions. '
             'Illustrative period-appropriate reference, not archival evidence. No invented luxury or poverty. Output the image itself.')
 
