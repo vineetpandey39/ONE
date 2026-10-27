@@ -499,11 +499,16 @@ class Pipeline:
                 end = segment["start"] + segment["seconds"] * (j + 1) / len(groups)
                 subtitles.append(f"{index}\n{_stamp(start,srt=True)} --> {_stamp(end,srt=True)}\n{' '.join(group)}\n")
                 index += 1
+        from openjarvis.one_agents.planexium_caption_alignment import reviewed_cues
+        aligned = reviewed_cues(root, voice)
+        if aligned is not None:
+            subtitles = [f"{i}\n{_stamp(cue['start'],srt=True)} --> {_stamp(cue['end'],srt=True)}\n{cue['text']}\n"
+                         for i, cue in enumerate(aligned, 1)]
         caption = self.context.artifact("edit/subtitles.srt")
         caption.write_text("\n".join(subtitles), encoding="utf-8")
         package.update(master=master["master"], caption=str(caption), source_evidence=str(self.context.artifact("evidence.json")),
                        human_science_review_required=True, human_rights_review_required=True,
-                       subtitle_word_timing="estimated within measured narration segments", public_publish_authorized=False)
+                       subtitle_word_timing=("reviewed local ASR cue boundaries; verbatim narration; not forced word alignment" if aligned is not None else "estimated within measured narration segments"), public_publish_authorized=False)
         if (root/'edit/resolve-receipt.json').exists():
             package['resolve_project'] = str(root/'edit/resolve-project.drp')
             package['resolve_render_receipt'] = str(root/'edit/resolve-receipt.json')
