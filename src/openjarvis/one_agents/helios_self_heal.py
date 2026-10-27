@@ -68,7 +68,8 @@ PROTECTED_CONTROL_PLANE_PATHS = {
 CONTROL_PLANE_IMMUTABLE_FUNCTIONS = {
     "src/openjarvis/one_agents/helios_repair_coordination.py": {
         "home", "mission", "external_repair_guard", "attempt_key",
-        "repair_dispatch", "already_dispatched",
+        "repair_dispatch", "already_dispatched", "_stamp", "newer_attempt",
+        "_checked_evidence", "_private_delivery", "terminal_receipt",
     },
     "src/openjarvis/one_agents/helios_self_heal.py": {
         "_allowed_patch_path", "_control_plane_candidate_allowed",
