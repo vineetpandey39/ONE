@@ -16,7 +16,7 @@ def digest(path):
 
 def validate(root, manifest):
     root = Path(root).resolve()
-    if manifest.get('schema') != 1 or manifest.get('mission_id') != root.name:
+    if manifest.get('schema') not in (1, 2) or manifest.get('mission_id') != root.name:
         raise ValueError('Completed thumbnail mission/schema mismatch')
     if manifest.get('brand') != 'planexium' or manifest.get('selection') != 'owner_selected_completed_output':
         raise ValueError('Explicit Planexium owner selection required')
@@ -35,8 +35,17 @@ def validate(root, manifest):
     for key in ('depicted_subject_pass', 'cyclone_count_pass', 'composition_pass', 'rights_provenance_pass'):
         if review.get(key) is not True:
             raise ValueError('Completed thumbnail scientific review incomplete: ' + key)
-    if review.get('provenance_type') != 'generated_illustration' or manifest.get('visible_label') != 'ILLUSTRATION':
-        raise ValueError('Generated science artwork must be visibly labeled')
+    if review.get('provenance_type') != 'generated_illustration':
+        raise ValueError('Generated artwork provenance must remain truthful')
+    if manifest.get('visible_label') != 'ILLUSTRATION':
+        previous = root / 'repairs/completed-thumbnail-v1.json'
+        if (manifest.get('schema') != 2 or manifest.get('visible_label') != ''
+                or not manifest.get('label_removal_authorization')
+                or not previous.is_file() or digest(previous) != manifest.get('previous_admission_sha256')):
+            raise ValueError('Thumbnail-only label removal requires explicit versioned owner authorization')
+        old = json.loads(previous.read_text())
+        if old['source'] != manifest['source'] or old['review'] != manifest['review']:
+            raise ValueError('Label-only revision cannot change image or scientific review')
     with Image.open(manifest['source']['path']) as image:
         if image.width < 1280 or image.height < 720 or abs(image.width / image.height - 16 / 9) > .02:
             raise ValueError('Completed image must be genuine HD landscape; no upscale admission')
@@ -46,7 +55,7 @@ def validate(root, manifest):
 def admit(root, manifest):
     root = Path(root)
     validate(root, manifest)
-    target = root / 'repairs/completed-thumbnail-v1.json'
+    target = root / ('repairs/completed-thumbnail-v2.json' if manifest.get('schema') == 2 else 'repairs/completed-thumbnail-v1.json')
     text = json.dumps(manifest, sort_keys=True, indent=2)
     if target.exists():
         if target.read_text() != text:
@@ -59,7 +68,7 @@ def admit(root, manifest):
 
 
 def render_selected(context, package):
-    path = context.root / 'repairs/completed-thumbnail-v1.json'
+    path = selection_path(context.root)
     if not path.exists():
         return None
     manifest = validate(context.root, json.loads(path.read_text()))
@@ -68,7 +77,7 @@ def render_selected(context, package):
     from openjarvis.one_agents.thumbnail_compose import compose, _font
     from openjarvis.one_agents.ares_thumbnail import score_thumbnail
     variant = package['thumbnail']['variants'][0]
-    folder = context.artifact('thumbnail/owner-selected')
+    folder = context.artifact('thumbnail/owner-selected-v2' if manifest['schema'] == 2 else 'thumbnail/owner-selected')
     folder.mkdir(parents=True, exist_ok=True)
     receipt = compose(Path(manifest['source']['path']), variant['text'], folder / 'composed.png', text_zone=.46)
     if not receipt.get('qc', {}).get('ok'):
@@ -77,15 +86,16 @@ def render_selected(context, package):
     # lower-left headline. Keep final bytes within the uploader's existing cap.
     image = Image.open(receipt['path']).convert('RGB')
     draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((32, 24, 336, 76), radius=8, fill=(0, 0, 0))
-    draw.text((46, 30), 'ILLUSTRATION', font=_font(32), fill='white')
-    final = context.artifact('thumbnail/final.jpg')
+    if manifest['visible_label']:
+        draw.rounded_rectangle((32, 24, 336, 76), radius=8, fill=(0, 0, 0))
+        draw.text((46, 30), manifest['visible_label'], font=_font(32), fill='white')
+    final = context.artifact('thumbnail/final-v2.jpg' if manifest['schema'] == 2 else 'thumbnail/final.jpg')
     image.save(final, quality=94, optimize=True)
     if final.stat().st_size > 2 * 1024 * 1024:
         raise ValueError('Selected thumbnail exceeds existing byte limit')
-    receipt.update(path=str(final), sha256=digest(final), variant='owner-selected',
+    receipt.update(path=str(final), sha256=digest(final), variant=variant['name'],
                    text=variant['text'], creative=variant, generator='existing_owner_completed_chatgpt_output',
-                   portrait_used=False, provenance=manifest['provenance'], visible_label='ILLUSTRATION')
+                   portrait_used=False, provenance=manifest['provenance'], visible_label=manifest['visible_label'])
     score = score_thumbnail(final, receipt['qc'], variant, portrait=False)
     score.update(not_actual_ctr=True, score_purpose='design_readiness_only')
     receipt['preupload_score'] = score
@@ -94,15 +104,20 @@ def render_selected(context, package):
               'winner_status': 'explicit_owner_selection', 'portrait_used': False,
               'generator': receipt['generator'], 'selection': 'owner_selected_completed_output',
               'experiment_performed': False, 'new_generation': False,
-              'admission_sha256': digest(path), 'visible_label': 'ILLUSTRATION'}
-    context.artifact('thumbnail/owner-selection-receipt.json').write_text(json.dumps(result, indent=2))
+              'admission_sha256': digest(path), 'visible_label': manifest['visible_label']}
+    context.artifact('thumbnail/owner-selection-v2-receipt.json' if manifest['schema'] == 2 else 'thumbnail/owner-selection-receipt.json').write_text(json.dumps(result, indent=2))
     context.artifact('thumbnail/thumbnail-experiment.json').write_text(json.dumps(result, indent=2))
     return result
 
 
 def selection_request(root):
-    path = Path(root) / 'repairs/completed-thumbnail-v1.json'
+    path = selection_path(root)
     if not path.exists():
         return {}
     validate(root, json.loads(path.read_text()))
     return {'variant_count': 1, 'selection': 'owner_selected_completed_output', 'admission_sha256': digest(path)}
+
+
+def selection_path(root):
+    newer = Path(root) / 'repairs/completed-thumbnail-v2.json'
+    return newer if newer.exists() else Path(root) / 'repairs/completed-thumbnail-v1.json'

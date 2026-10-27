@@ -450,8 +450,14 @@ class Pipeline:
                 value=json.loads(audit.read_text(encoding='utf-8'))
                 files += [Path(p) for p in sorted({s['asset']['path'] for s in value['shots']} | {value['music']['path']})]
             return result,files
+        reviewed_inputs = {}
+        for name in ('completed-thumbnail-v1.json', 'completed-thumbnail-v2.json', 'caption-alignment-v1.json'):
+            path = self.context.root / 'repairs' / name
+            if path.exists():
+                reviewed_inputs[name] = _hash(path)
         return self.stage("package", {"science":science,"voice":voice,"evidence":evidence,
-            "master_sha256":_hash(Path(master["master"])),"channel":asdict(self.context.channel),"version":3},build)
+            "master_sha256":_hash(Path(master["master"])),"channel":asdict(self.context.channel),"version":3,
+            **({'reviewed_inputs': reviewed_inputs} if reviewed_inputs else {})},build)
 
     def _package(self, science, voice, evidence, master):
         root = self.context.root
