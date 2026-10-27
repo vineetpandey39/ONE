@@ -395,6 +395,16 @@ def _downstream_for(connect: Connect, origin_job: str) -> str:
     return ""
 
 
+def _planexium_seo_retry(previous):
+    """Only the existing Planexium local-SEO handoff, never arbitrary ARES work."""
+    try:
+        payload = json.loads(str(previous.get("task") or "{}"))
+    except (TypeError, ValueError):
+        return False
+    return (previous.get("agent_id") == "ares" and payload.get("brand") == "planexium"
+            and payload.get("stage") == "seo" and bool(payload.get("mission_id")))
+
+
 def resume_checkpoint(connect: Connect, job_id: str, *, fresh_code: bool = False,
                       external_repair_owner: tuple[str, str] | None = None,
                       repair_revision: str = "") -> str:
@@ -402,6 +412,8 @@ def resume_checkpoint(connect: Connect, job_id: str, *, fresh_code: bool = False
     previous = _row(connect, job_id)
     if not previous or previous.get("status") != "failed":
         return ""
+    if previous.get("agent_id") == "ares" and (not _planexium_seo_retry(previous) or external_repair_owner is None):
+        return f"{PENDING_PREFIX}ARES recovery requires explicit Planexium SEO scope and rightful owner"
     try:
         with external_repair_guard(connect, previous, owner=external_repair_owner):
             if _active_for_agent(connect, str(previous.get("agent_id") or ""), job_id):
@@ -418,7 +430,7 @@ def _resume_checkpoint_uncoordinated(connect: Connect, job_id: str, *, fresh_cod
     if not previous or previous.get("status") != "failed":
         return ""
     agent = str(previous.get("agent_id") or "").lower()
-    if agent not in FLOOR12_AGENTS:
+    if agent not in FLOOR12_AGENTS and not _planexium_seo_retry(previous):
         return ""
     active = _active_for_agent(connect, agent, job_id)
     if active:
@@ -484,7 +496,7 @@ def _resume_checkpoint_uncoordinated(connect: Connect, job_id: str, *, fresh_cod
         except Exception:  # no complete receipt means no safe paid retry
             return ""
 
-    if agent not in SAFE_RETRY_AGENTS:
+    if agent not in SAFE_RETRY_AGENTS and not _planexium_seo_retry(previous):
         return ""  # HELIOS discovery and FABULA voice are not blind-retry safe
 
     new_id = _queue_copy(connect, previous, reserved=fresh_code)
