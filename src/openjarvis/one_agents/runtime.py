@@ -7448,6 +7448,22 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "reel": "reel",
     }.get(content_type, "post")
 
+    grounding_ref = None
+    if content_type == "reel" and not discovery_mode:
+        from openjarvis.one_agents.iris_grounding import bind_regular_brief
+        binding, digest, raw = bind_regular_brief(
+            brief, _compact_media_evidence(media_evidence), predicted_location)
+        evidence_dir = _home() / "agent_outputs"
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        evidence_path = evidence_dir / f"{job['id']}.grounding-{digest}.json"
+        evidence_path.write_bytes(raw)
+        grounding_ref = {"path": str(evidence_path), "sha256": digest}
+        if not binding["accepted"]:
+            stages.clear_stage("ia")
+            return {"agent": "IRIS", "mode": "blocked", "_blocked": True,
+                    "content": brief, "blocked_reason": "; ".join(binding["errors"]),
+                    "grounding": grounding_ref, "handed_to": None}
+
     output_dir = _home() / "agent_outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{job['id']}.md"
@@ -7476,6 +7492,7 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         "output": str(output_path),
         "vault_note": remembered.get("path"),
         "prior_reels_considered": len(already),
+        "grounding": grounding_ref,
     }
 
     # Event-age check (Sanjeevani trend_discovery.first_report_age, carried on
@@ -7648,6 +7665,7 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         enqueue=lambda: enqueue_job(
             "muse",
             json.dumps({"brief_path": str(output_path), "priority": priority,
+                        "grounding": grounding_ref,
                         "region": region, "angle": angle, "origin_job": job["id"],
                         "content_type": content_type, "topic": task,
                         "publish_target": publish_target,
