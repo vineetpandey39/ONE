@@ -216,14 +216,16 @@ def _run_job(job):
         raise ValueError("ARES requires explicit PLANEXIUM SEO handoff")
     ctx = context_for(payload["mission_id"], load_config())
     root = ctx.root
-    package_path = root/"seo/youtube-seo-package.json"
+    from openjarvis.one_agents.planexium_seo_revision import resolve as reviewed_input
+    reviewed = reviewed_input(root)
+    package_path = root/reviewed['package']['path'] if reviewed else root/"seo/youtube-seo-package.json"
     package = json.loads(package_path.read_text(encoding="utf-8"))
     gate_path = root/"review-gate.json"
     gate = json.loads(gate_path.read_text(encoding="utf-8"))
     if digest(package["master"]) != gate["master_sha256"]:
         raise ValueError("Master differs from reviewed video")
     science = json.loads((root/"science-plan.json").read_text(encoding="utf-8"))
-    revision = payload.get("revision", "")
+    revision = reviewed['revision'] if reviewed else payload.get("revision", "")
     if revision and not re.fullmatch(r"[a-z0-9-]{1,40}", revision):
         raise ValueError("Invalid SEO revision")
     seo_dir = root/"seo"/revision if revision else root/"seo"
@@ -253,6 +255,9 @@ def _run_job(job):
     if result.get("thumbnail_path"):
         # The reviewed and uploaded thumbnail is the one ARES paired with its title.
         gate["thumbnail_sha256"] = digest(result["thumbnail_path"])
+    if reviewed:
+        gate['independent_review_pending'] = True
+        gate['reviewed_input_sha256'] = digest(root/'repairs/reviewed-seo-input-v1.json')
     _write(gate_path, gate)
     checkpoint = root/"checkpoints/package.json"
     if checkpoint.exists():
@@ -280,6 +285,9 @@ def _run_job(job):
     # With the Chairman's standing approval (2026-10-22) the finished package goes straight to ECHO for a private
     # upload on Planexium's own channel; without it, nothing changes and the video waits for review.
     from openjarvis.one_agents.planexium import standing_private_approval
+    if reviewed:
+        out['independent_review_pending'] = True
+        return out
     if standing_private_approval(load_config()) is not None:
         from openjarvis.one_agents.runtime import enqueue_job
         echo = enqueue_job("echo", json.dumps({"brand": "planexium", "stage": "private_upload",

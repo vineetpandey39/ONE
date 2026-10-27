@@ -838,6 +838,8 @@ def stage_private(payload: dict, *, approval_db: Path | None = None, adapter=Non
         if not gate_path.exists():
             raise PermissionError("A standing private upload needs the mission's review gate")
         gate = json.loads(gate_path.read_text(encoding="utf-8"))
+        if gate.get("independent_review_pending"):
+            raise PermissionError("Owner-reviewed SEO revision awaits independent acceptance before ECHO")
         if gate.get("status") != "awaiting_human_review" or gate.get("seo_audit_passed") is not True:
             raise PermissionError("The review gate has not passed ARES's SEO audit")
         approved = {**gate, "brand": "planexium", "channel_id": channel, "scope": "private_upload",
