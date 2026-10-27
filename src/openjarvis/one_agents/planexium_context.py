@@ -10,6 +10,7 @@ LABELS = {
     10: (5, "Juno at Jupiter - illustration"),
     14: (7, "Jupiter atmosphere - illustration"),
     20: (10, "Juno at Jupiter - illustration"),
+    19: (10, "Generic probe - not Juno"),
     9: (5, "Cloud-top context - illustration"),
     11: (6, "Jupiter atmosphere - illustration"),
     13: (7, "Jupiter exterior - illustration"),
@@ -22,6 +23,8 @@ ARCHIVE_LABELS = {
 }
 
 def bind_archive_context(root, bundle, archives):
+    if any(a.get("contextual_label") or a.get("contextual_role") for a in archives.values()):
+        raise ValueError("Archive context labels must originate in bound review records")
     records = bundle.get("archive_contextual_labels", {})
     if records and Path(root).name != MISSION:
         raise ValueError("Archive context amendment is mission scoped")
