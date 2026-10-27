@@ -18,6 +18,7 @@ A model failure is a diagnostic failure, not permission to bypass the gates.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import ast
 import json
 import os
@@ -35,6 +36,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+# runtime reloads this module before each HELIOS watch. Refresh its small
+# coordination dependency too, or a committed guard remains cached indefinitely.
+from openjarvis.one_agents import helios_repair_coordination
+importlib.reload(helios_repair_coordination)
 from openjarvis.one_agents.helios_repair_coordination import (
     RepairDeferred, already_dispatched, external_repair_guard, repair_dispatch,
 )

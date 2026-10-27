@@ -152,6 +152,9 @@ def newer_attempt(connect, previous):
     created = _stamp(previous.get("created_at"))
     if created is None:
         return ""
+    # A reused physical row can fail again after a later-created attempt.
+    # Its latest failure must not be hidden by that older outcome.
+    cutoff = max(created, _stamp(previous.get("updated_at")) or created)
     with closing(connect()) as db:
         rows = db.execute("SELECT * FROM jobs WHERE agent_id=? AND id!=? "
                           "AND created_at>? AND mode!='watch' ORDER BY created_at DESC",
@@ -159,7 +162,7 @@ def newer_attempt(connect, previous):
     for raw in rows:
         row = dict(raw)
         later = _stamp(row.get("created_at"))
-        if later is None or later <= created:
+        if later is None or later <= cutoff:
             continue
         if mission(row) != mission(previous):
             continue
