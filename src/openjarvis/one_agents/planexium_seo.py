@@ -9,6 +9,24 @@ from openjarvis.one_agents.youtube_channels import PLANEXIUM
 from openjarvis.one_agents.youtube_seo import description_audit, ollama_json, _valid_tags
 
 
+def _ares_chat_json(model, prompt, payload, **kwargs):
+    """Keep bounded server failure evidence without logging the request or retrying."""
+    import io
+    import urllib.error
+    from openjarvis.one_agents import local_llm
+    try:
+        return local_llm.chat_json(model, prompt, payload, **kwargs)
+    except urllib.error.HTTPError as exc:
+        # HTTPError.__str__ omits its response body. Runtime records that string,
+        # which previously lost the distinction between allocation and parser
+        # failures. Preserve a readable bounded body for classification too.
+        body = exc.read(8192)
+        detail = body.decode("utf-8", errors="replace")
+        reason = f"ARES model {model}: {exc.reason}; server response: {detail[:1200]}"
+        raise urllib.error.HTTPError(exc.url, exc.code, reason, exc.headers,
+                                     io.BytesIO(body)) from exc
+
+
 def ares_json(prompt, payload):
     """Use the stronger installed local model for scientific editorial wording."""
     from openjarvis.one_agents import local_llm
@@ -17,7 +35,7 @@ def ares_json(prompt, payload):
     for model in ("qwen3:8b", "qwen3.5:9b"):
         if model in available:
             try:
-                return local_llm.chat_json(model, prompt, payload, temperature=0.1, num_ctx=8192, timeout=900)
+                return _ares_chat_json(model, prompt, payload, temperature=0.1, num_ctx=8192, timeout=900)
             except Exception as exc:  # one unhealthy local model must not strand the finished video
                 last = exc
                 # Allocation failure is not improved by loading another larger
@@ -31,7 +49,7 @@ def ares_json(prompt, payload):
                         size = len(prompt) + len(json.dumps(payload, ensure_ascii=False))
                         if "ministral-3:3b" not in available or size > 8000:
                             raise RuntimeError("ARES local memory allocation blocked; compact recovery cannot preserve this full request") from exc
-                        return local_llm.chat_json("ministral-3:3b", prompt, payload,
+                        return _ares_chat_json("ministral-3:3b", prompt, payload,
                                                    temperature=0.1, num_ctx=4096, timeout=900)
     # The ordinary SEO ladder can use another installed CPU model. Preserve
     # the final error only when no fallback model can produce valid JSON.
