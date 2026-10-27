@@ -158,6 +158,14 @@ if (-not $env:LAO_KDP_BROWSER_PROFILE) {
 # register when one is on the shelf, so this setting stops mattering by itself
 # the day the first batch lands.
 if (-not $env:ONE_KDP_ASSIGN_FREE_ISBN) { $env:ONE_KDP_ASSIGN_FREE_ISBN = 'true' }
+
+# local_llm.py defaults to 8 threads. This machine's i5-13600KF reports 20, and
+# llama-server logs "n_threads = 8 ... / 20" on every load, so more than half
+# the CPU sat idle during research. Measured on 2026-10-27 with qwen3.5:9b at
+# num_ctx 16384, num_gpu 0, two runs each: 9.30 tok/s at 8 threads, 10.01 at
+# 14 - only +7.6%, because a 9B model on CPU is bound by memory bandwidth, not
+# by compute. Worth taking, but it is not the reason research takes minutes.
+if (-not $env:ONE_LLM_THREADS) { $env:ONE_LLM_THREADS = '14' }
 if (-not $env:PADDLE_PDX_CACHE_HOME) { $env:PADDLE_PDX_CACHE_HOME = Join-Path $modelCacheRoot "paddlex" }
 if (-not $env:HF_HOME) { $env:HF_HOME = Join-Path $modelCacheRoot "huggingface" }
 if (-not $env:TORCH_HOME) { $env:TORCH_HOME = Join-Path $modelCacheRoot "torch" }
