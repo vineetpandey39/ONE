@@ -99,7 +99,7 @@ def validate_bundle(root, bundle):
         raise ValueError("Repair changed unrelated plan or music")
     if len(assets["stock"]) != len(original_assets["stock"]):
         raise ValueError("Repair must retain stock slots")
-    from openjarvis.one_agents.planexium_context import bind_context, validate_context_coverage
+    from openjarvis.one_agents.planexium_context import bind_context, bind_archive_context, validate_context_coverage
     context_records = bind_context(root, bundle, original_plan, assets)
     motions = validate_accounting(root, bundle, science)
     identities = set()
@@ -122,7 +122,8 @@ def validate_bundle(root, bundle):
         if str(i + 1) in motions and (asset["seconds"] < 20.1 or asset["usable_in"] != 0):
             raise ValueError("Authored illustration requires a complete finite twenty-second cut")
     _asset(root, assets["music"])
-    archives = bundle.get("archive_assets", {})
+    archives = copy.deepcopy(bundle.get("archive_assets", {}))
+    archive_records = bind_archive_context(root, bundle, archives)
     for key, asset in archives.items():
         n, index = (int(v) for v in key.split(":"))
         if n not in scenes or not 1 <= index <= len(plan["scene_visuals"][str(n)]):
@@ -147,6 +148,7 @@ def validate_bundle(root, bundle):
         read(root / "media-manifest.json")["scenes"], plan,
         archive_assets=archives, article_assets=articles, offline=True, write_outputs=False)
     validate_context_coverage(context_records, shots)
+    validate_context_coverage({k: {**v, "scene": 9} for k, v in archive_records.items() if k == "9:1"}, shots)
     return {"plan": plan, "assets": assets, "scene_shots": shots}
 
 

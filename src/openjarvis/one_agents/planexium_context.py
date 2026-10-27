@@ -16,6 +16,36 @@ LABELS = {
     15: (8, "Exterior view - illustration"),
 }
 MISSION = "daily-20261026"
+ARCHIVE_LABELS = {
+    "3:1": ("PIA02865", "727 nm cloud-depth view", "scientific_observation"),
+    "9:1": ("PIA22949", "Cloud tops - core not visible", "archival_context"),
+}
+
+def bind_archive_context(root, bundle, archives):
+    records = bundle.get("archive_contextual_labels", {})
+    if records and Path(root).name != MISSION:
+        raise ValueError("Archive context amendment is mission scoped")
+    if set(records) - set(ARCHIVE_LABELS):
+        raise ValueError("Unapproved archive context slot")
+    science_hash = hashlib.sha256((Path(root)/"science-plan.json").read_bytes()).hexdigest()
+    for key, record in records.items():
+        nasa_id, label, role = ARCHIVE_LABELS[key]
+        asset = archives.get(key, {})
+        if (int(key.split(":")[0]) not in bundle["scenes"]
+                or asset.get("nasa_id") != nasa_id or record.get("label") != label
+                or record.get("asset_sha256") != asset.get("sha256")
+                or record.get("science_sha256") != science_hash
+                or not record.get("not_evidence_of", "").strip()):
+            raise ValueError("Archive context identity or limitation mismatch")
+        asset.update(contextual_label=label, contextual_role=role)
+        if key == "9:1":
+            # The explicit authored slots, validated separately, retain the core coverage.
+            expected = {bundle["assets"].get("authored_motion", {}).get(str(slot), {}).get("sha256")
+                        for slot in (17, 18)}
+            if None in expected or set(record.get("phenomenon_evidence", [])) != expected:
+                raise ValueError("Cloud-top context cannot replace both authored core sequences")
+    return records
+
 
 def bind_context(root, bundle, original_plan, assets):
     """Validate explicit reviewed rebriefs, without accepting lexical matching as review."""
@@ -61,7 +91,7 @@ def validate_context_coverage(records, scene_shots):
     """Referenced evidence must actually be scheduled, distinct from contextual clips."""
     for record in records.values():
         row = scene_shots.get(str(record["scene"]), [])
-        available = {s["asset"]["sha256"] for s in row if not s["asset"].get("contextual_label")}
+        available = {s["asset"]["sha256"] for s in row if not s["asset"].get("contextual_label") or s["asset"].get("contextual_role") == "scientific_observation"}
         if not set(record["phenomenon_evidence"]).issubset(available):
             raise ValueError("Context phenomenon evidence is absent from the scene timeline")
 
@@ -69,7 +99,7 @@ def context_filter(asset, directory, ordinal, font):
     label = asset.get("contextual_label")
     if not label:
         return ""
-    if label not in {row[1] for row in LABELS.values()}:
+    if label not in ({row[1] for row in LABELS.values()} | {row[1] for row in ARCHIVE_LABELS.values()}):
         raise ValueError("Unvalidated context label")
     path = Path(directory)/f"context-{ordinal}.txt"
     path.write_text(label, encoding="utf-8")
