@@ -232,6 +232,11 @@ class ProductionServices:
         from openjarvis.one_agents.ares_thumbnail import score_thumbnail
 
         self.context.channel.validate_record(package)
+        if package.get("brand") == "planexium":
+            from openjarvis.one_agents.planexium_completed_thumbnail import render_selected
+            selected = render_selected(self.context, package)
+            if selected is not None:
+                return selected
         supplied = package["thumbnail"].get("variants") or []
         if not supplied:
             raise ValueError("Thumbnail experiment requires an authored hook")

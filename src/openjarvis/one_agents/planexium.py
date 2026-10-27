@@ -480,8 +480,10 @@ class Pipeline:
             result = self.services.thumbnail_experiment(package, generate=self.image)
             return result, [Path(result["path"]), self.context.artifact("thumbnail/thumbnail-experiment.json"),
                             *[Path(row["path"]) for row in result["variants"]]]
+        from openjarvis.one_agents.planexium_completed_thumbnail import selection_request
         thumb = self.stage("thumbnail", {"title": science["video_title"], "brief": package["thumbnail"],
-                                         "experiment_version": 1, "variant_count": 3}, thumbnail)
+                                         "experiment_version": 1, "variant_count": 3,
+                                         **selection_request(root)}, thumbnail)
         package["thumbnail_path"] = thumb["path"]
         package["thumbnail"]["variants"] = [row["creative"] for row in thumb["variants"]]
         package["thumbnail_experiment"] = {"winner": thumb["winner"], "winner_score": thumb["winner_score"],

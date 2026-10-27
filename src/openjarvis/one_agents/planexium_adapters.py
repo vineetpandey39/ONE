@@ -332,12 +332,7 @@ class ChatGPTAdapter:
                 "stall_timeout_ms": 300000,
             })
             receipt = output.parent / "provider-v2.json"
-        from openjarvis.one_agents.planexium_thumbnail_reference import reference_request
-        reference = reference_request(self.context.root, output, prompt, image_args)
-        uploads = []
-        if reference is not None:
-            uploads, image_args, receipt = reference
-        steps = _login_steps(self.asset, self.context, self.profile_root) + uploads + [
+        steps = _login_steps(self.asset, self.context, self.profile_root) + [
             {"action": "generate_and_download_chatgpt_image", "args": image_args}]
         with self.lease():
             out, job = self.draft.run("planexium-original-thumbnail", steps, {}, receipt)
