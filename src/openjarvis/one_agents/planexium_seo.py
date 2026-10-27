@@ -20,6 +20,19 @@ def ares_json(prompt, payload):
                 return local_llm.chat_json(model, prompt, payload, temperature=0.1, num_ctx=8192, timeout=900)
             except Exception as exc:  # one unhealthy local model must not strand the finished video
                 last = exc
+                # Allocation failure is not improved by loading another larger
+                # model. Try one installed smaller CPU model with less KV cache;
+                # preserve the full input and all downstream factual/SEO gates.
+                import urllib.error
+                if isinstance(exc, urllib.error.HTTPError):
+                    detail = exc.read().decode("utf-8", errors="replace").casefold()
+                    allocation = any(term in detail for term in ("out of memory", "out-of-memory", "failed to allocate", "unable to allocate"))
+                    if allocation:
+                        size = len(prompt) + len(json.dumps(payload, ensure_ascii=False))
+                        if "ministral-3:3b" not in available or size > 8000:
+                            raise RuntimeError("ARES local memory allocation blocked; compact recovery cannot preserve this full request") from exc
+                        return local_llm.chat_json("ministral-3:3b", prompt, payload,
+                                                   temperature=0.1, num_ctx=4096, timeout=900)
     # The ordinary SEO ladder can use another installed CPU model. Preserve
     # the final error only when no fallback model can produce valid JSON.
     try:
