@@ -28,6 +28,34 @@ def bind_regular_brief(brief, evidence, predicted_location):
             errors.append(field + ": missing or unknown evidence citation")
     place = core(marker("PLACE"))
     predicted = core(str((predicted_location or {}).get("name") or ""))
+    # PLACE is an optional fresh-incident field, not a switch for checking
+    # the editorial claims. Extract explicit landmark names independently.
+    # This is a bounded lexical check, not general named-entity recognition.
+    landmark = re.compile(
+        r"\b(?:[A-Z][\w'-]*\s+){1,5}"
+        r"(?:Market|Bazaar|Temple|Fort|Palace|Lake|River|Ghat|Mahal|Mosque|"
+        r"Church|Monastery|Bridge|Park|Beach|Station|Dam|Memorial)\b")
+    def named_core(value):
+        value = re.sub(r"^(?:(?:Compare|Contrast|Explore|Visit|Historic|The)\s+)+", "", value)
+        return core(value)
+    names = {named_core(m.group()) for field in citations
+             for m in landmark.finditer(marker(field))}
+    # Also recognize the prediction and evidence-named landmarks regardless
+    # of capitalization in the generated prose.
+    names.update(named_core(m.group()) for item in items
+                 for m in landmark.finditer(str(item.get("title") or "")))
+    names.update(x for x in (place, predicted) if x)
+    for field, refs in citations.items():
+        line = marker(field).casefold()
+        mentioned = {name for name in names if re.search(
+            r"(?<!\w)" + re.escape(name) + r"(?!\w)", line)}
+        headlines = " ".join(str(by_id.get(ref, {}).get("title") or "")
+                             for ref in refs).casefold()
+        for name in sorted(mentioned):
+            if not re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", headlines):
+                errors.append(field + ": cited headlines do not support " + name)
+        if mentioned and (not predicted or predicted not in mentioned):
+            errors.append(field + ": named claims lack the predicted manifest subject")
     if place:
         if not predicted or place != predicted:
             errors.append("PLACE differs from predicted manifest subject or prediction unavailable")
