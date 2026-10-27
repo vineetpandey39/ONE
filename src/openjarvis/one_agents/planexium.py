@@ -817,6 +817,12 @@ def stage_private(payload: dict, *, approval_db: Path | None = None, adapter=Non
     """Only an existing OLYMPUS decision bound to this exact package authorizes staging."""
     config = load_config()
     context = context_for(payload["mission_id"], config)
+    correction = context.artifact("repairs/private-correction-v1.json")
+    if correction.exists():
+        if not payload.get("correction_sha256"):
+            raise PermissionError("Existing private draft has a reviewed correction; new upload is forbidden")
+        from openjarvis.one_agents.planexium_private_correction import execute
+        return execute(context.root, payload["correction_sha256"])
     path = context.artifact("seo/youtube-seo-package.json")
     gate_path = context.artifact("review-gate.json")
     if gate_path.exists():
