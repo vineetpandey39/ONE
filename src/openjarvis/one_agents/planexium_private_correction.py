@@ -215,3 +215,62 @@ def verify_applied(root,manifest,package,remote):
                     disclosure_decision=manifest['disclosure']['decision'],disclosure_receipt=str(root/'repairs/private-correction-v1.json'))
         _write(root/'review-gate.json',gate)
         return result
+
+
+def validate_final_review(manifest, package, review):
+    require(review.get('pixel_review_accepted') is True and review.get('metadata_matches') is True and
+            review.get('caption_matches') is True, 'Independent correction review incomplete')
+    require(review.get('package_sha256') == manifest['package_sha256'] and
+            review.get('source_thumbnail_sha256') == manifest['assets']['thumbnail_path']['sha256'],
+            'Independent review package/media mismatch')
+    video=review['video']
+    require(video['id']==manifest['video_id'] and video['snippet']['channelId']==manifest['channel_id'] and
+            video['status']['privacyStatus']=='private' and
+            video['processingDetails']['processingStatus']=='succeeded', 'Independent remote identity mismatch')
+    require(metadata_matches(video['snippet'],package),'Independent reviewed metadata mismatch')
+    require(digest(review['remote_thumbnail_path'])==review['thumbnail']['download_sha256'], 'Reviewed thumbnail pixels changed')
+
+
+def accept_verified_correction(root, *, review_path, review_sha256, external_repair_owner):
+    """Finalize local receipts only after owned, hash-bound independent readback."""
+    from . import runtime,helios_repair_coordination as coord
+    from .planexium import _write,load_config,_channel_uploader
+    from .youtube_production import resource_lease
+    root=Path(root).resolve()
+    require(external_repair_owner is not None,'External mission owner required')
+    with runtime._connect() as db:
+        previous=dict(db.execute('SELECT * FROM jobs WHERE id=?',(external_repair_owner[0].removeprefix('runtime:'),)).fetchone())
+    with coord.external_repair_guard(runtime._connect,previous,owner=external_repair_owner):
+      require(coord.mission(previous)==('planexium',root.name),'Wrong mission owner')
+      with resource_lease(root.parent/'.leases','planexium-private-correction'):
+        path=root/'repairs/private-correction-v1.json';manifest=read(path);package=validate(root,manifest,digest(path))
+        require(digest(review_path)==review_sha256,'Independent final review changed')
+        review=read(review_path);validate_final_review(manifest,package,review)
+        output=root/'repairs/private-correction-v1'
+        require(read(output/'result.json')['metadata_verified'] is True,'ECHO reconciliation incomplete')
+        remote=Remote(_channel_uploader(load_config(),root/'upload-ledger.json'))
+        fresh=remote.video(manifest['video_id']);track,caption=remote.captions(manifest['video_id'])
+        validate_final_review(manifest,package,{**review,'video':fresh})
+        require(canonical_captions(caption)==canonical_captions(Path(package['caption']).read_text(encoding='utf-8-sig')),'Current captions changed')
+        thumb=max(fresh['snippet']['thumbnails'].values(),key=lambda x:x.get('width',0)*x.get('height',0))
+        with urllib.request.urlopen(urllib.request.Request(thumb['url'],headers={'Cache-Control':'no-cache'}),timeout=30)as response: pixels=response.read()
+        require(hashlib.sha256(pixels).hexdigest()==review['thumbnail']['download_sha256'],'Current thumbnail differs from reviewed pixels')
+        result=dict(video_id=manifest['video_id'],package_sha256=manifest['package_sha256'],privacy='private',processing='succeeded',
+                    independent_review_sha256=review_sha256,thumbnail_pixel_sha256=review['thumbnail']['download_sha256'],
+                    caption_id=track['id'],caption_matches=True,disclosure_decision=manifest['disclosure']['decision'],
+                    disclosure_readback=fresh['status'].get('containsSyntheticMedia'),new_upload=False,published=False)
+        _write(output/'accepted.json',result)
+        gate=read(root/'review-gate.json');gate.update(independent_review_pending=False,private_correction_pending=False,
+            private_upload_complete=True,private_video_id=manifest['video_id'],private_correction_receipt=str(output/'accepted.json'))
+        _write(root/'review-gate.json',gate)
+        health=read(root/'production-health.json');health.update(status='uploaded_private',current_stage='review',
+            uploaded=True,production_complete=True,private_video_id=manifest['video_id'],published=False,
+            public_publish_authorized=False,blocked_reason=None,error_class=None,private_correction_receipt=str(output/'accepted.json'))
+        _write(root/'production-health.json',health)
+        # Preserve the original upload ledger entry. Append the correction,
+        # rather than rewriting its original package/title/time provenance.
+        ledger=read(root/'upload-ledger.json');entry=ledger[manifest['assets']['master']['sha256']]
+        corrections=entry.setdefault('corrections',[])
+        if not any(x.get('package_sha256')==manifest['package_sha256']for x in corrections):corrections.append(result)
+        _write(root/'upload-ledger.json',ledger)
+        return result
