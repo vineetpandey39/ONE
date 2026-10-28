@@ -9360,6 +9360,11 @@ _YATRA_TOOLS = Path(r"C:\Users\pc\Documents\LAO")
 # them to its own folder on this machine -- which robot took the job is not
 # known in advance, so all three are searched.
 _YATRA_ROBOT_ARTIFACTS = (
+    # The recovered Windows robot now runs from ONE's durable worker tree.
+    # Keep the legacy Claude session root as a read-compatible fallback for
+    # jobs created before that recovery; collectors must follow the robot that
+    # actually executed the job instead of assuming one historical checkout.
+    Path(r"E:\ONE-Suite\lao-robot\worker"),
     Path(r"C:\Users\pc\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude"
          r"\local-agent-mode-sessions\cb3dc5b9-a76c-45ff-bbcf-b330fe30c84a"
          r"\21738b93-8e02-4c20-a83c-0abb35d85c72\local_374e1c90-a56c-4744-840b-8f0118a3547a"
