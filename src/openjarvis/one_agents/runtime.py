@@ -10225,6 +10225,47 @@ def _yatra_upload(tool: Any, asset_folder: str, video_title: str,
             "visibility": "private draft", "channel": _SONIA_CHANNEL}
 
 
+def _narration_bound_reviewed_plan(
+    source_record: dict[str, Any], repair_file: Path, reviewed_path: Path, narration_dir: Path,
+) -> dict[str, Any] | None:
+    """Return an already-approved plan only when paid narration proves its identity.
+
+    A later recovery may normalize or repair the immutable LAO artifact after a
+    targeted editorial sidecar has already produced ``production-plan.json``.
+    Reapplying the sidecar then fails its original byte hash even though the
+    approved plan and paid narration remain intact.  Never update the sidecar
+    hash to force a pass: accept the saved plan only when its repair receipt,
+    title, 20-segment manifest, and exact stripped script all agree.
+    """
+    manifest_path = narration_dir / "narration.segments.json"
+    script_path = narration_dir / "script.txt"
+    if not (reviewed_path.is_file() and manifest_path.is_file() and script_path.is_file()):
+        return None
+    try:
+        repair = json.loads(repair_file.read_text(encoding="utf-8"))
+        existing = json.loads(reviewed_path.read_text(encoding="utf-8"))[0]
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, KeyError, IndexError, TypeError):
+        return None
+    approval = existing.get("editorial_repair") or {}
+    base_sha = str(repair.get("base_sha256") or "").lower()
+    if (not base_sha
+            or str(repair.get("status") or "") != "approved_for_voice"
+            or str(approval.get("status") or "") != "approved_for_voice"
+            or str(approval.get("source_sha256") or "").lower() != base_sha
+            or existing.get("video_title") != source_record.get("video_title")):
+        return None
+    script = str(existing.get("full_script") or "").strip()
+    script_sha = hashlib.sha256(script.encode("utf-8")).hexdigest()
+    segments = manifest.get("segments") or []
+    if (str(manifest.get("script_sha256") or "").lower() != script_sha
+            or len(segments) != _YATRA_EXPECTED_SCENES
+            or script_path.read_text(encoding="utf-8").strip() != script):
+        return None
+    _validate_yatra_contract(existing, _YATRA_EXPECTED_SCENES)
+    return existing
+
+
 def _travel_checkpoint(payload: dict[str, Any]) -> tuple[Path, dict[str, Any], str, str]:
     """Only resume a known LAO checkpoint, never an arbitrary external file."""
     if payload.get("brand") != "sonia_travel_vlogs":
@@ -10239,13 +10280,22 @@ def _travel_checkpoint(payload: dict[str, Any]) -> tuple[Path, dict[str, Any], s
     repair_file = asset_root / "targeted-repair.json"
     if repair_file.is_file():
         from openjarvis.one_agents.yatra_repair import apply_targeted_repair
-        repaired = apply_targeted_repair(source, repair_file)
-        if repaired["editorial_repair"]["status"] != "approved_for_voice":
-            raise RuntimeError("Targeted YATRA repair is structurally ready but not approved for Sonia voice credits")
-        _validate_yatra_contract(repaired, _YATRA_EXPECTED_SCENES)
         reviewed_path = asset_root / "production-plan.json"
         existing = json.loads(reviewed_path.read_text(encoding="utf-8"))[0] if reviewed_path.is_file() else None
         narration_dir = asset_root / "narration"
+        try:
+            repaired = apply_targeted_repair(source, repair_file)
+        except RuntimeError as exc:
+            if str(exc) != "Editorial repair does not match its frozen LAO checkpoint":
+                raise
+            repaired = _narration_bound_reviewed_plan(
+                record, repair_file, reviewed_path, narration_dir,
+            )
+            if repaired is None:
+                raise
+        if repaired["editorial_repair"]["status"] != "approved_for_voice":
+            raise RuntimeError("Targeted YATRA repair is structurally ready but not approved for Sonia voice credits")
+        _validate_yatra_contract(repaired, _YATRA_EXPECTED_SCENES)
         if (narration_dir / "narration.segments.json").exists() and (
                 existing is None or existing.get("full_script") != repaired.get("full_script")):
             raise RuntimeError("Cannot revise a YATRA script after narration exists")
