@@ -112,10 +112,19 @@ def apply_targeted_repair(source: Path, repair_file: Path) -> dict[str, Any]:
         capture_plan = capture_plan.replace(old, new)
     if repair.get("capture_url_overrides"):
         record["browser_capture_plan"] = capture_plan
+    audit = []
+    if repair.get("cue_overrides"):
+        cue_ids = ",".join(sorted(repair["cue_overrides"], key=lambda value: int(value)))
+        audit.append(f"timed cue overrides {cue_ids}")
+    if opening:
+        audit.append("reviewed scene-1 stock/map beat replacement")
+    if map_overrides:
+        audit.append("opening-map fields " + ",".join(sorted(map_overrides)))
+    if repair.get("capture_url_overrides"):
+        audit.append("same-host capture URL replacements")
     record["quality_gate"] = str(record.get("quality_gate") or "") + (
-        "\nTARGETED_REPAIR: destination-first 30s; eight unique three-second scenic shots; "
-        "maps 6-12s; cues 11 and 14 now add source/effective-date verification. "
-        "Original REWRITE verdict retained for human/editorial audit; no automatic factual approval."
+        "\nTARGETED_REPAIR: " + "; ".join(audit or ["checkpoint-bound metadata review"]) + ". "
+        "Original REWRITE verdict retained for audit; approval is recorded separately in the repair receipt."
     )
     record["editorial_repair"] = {"source_sha256": repair["base_sha256"], "status": repair["status"]}
     return record
