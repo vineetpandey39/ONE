@@ -9494,6 +9494,15 @@ def _yatra_editorial_hold(record: dict[str, Any]) -> bool:
     return bool(re.search(r"(?im)^\s*final_verdict\s*:\s*REWRITE\s*$", gate))
 
 
+def _normalize_yatra_json_block(value: Any) -> Any:
+    """Remove only ChatGPT's rendered JSON language label from JSON fields."""
+    if not isinstance(value, str):
+        return value
+    cleaned = re.sub(r"^\s*(?:```json\s*|json\s+)", "", value,
+                     flags=re.IGNORECASE).strip()
+    return cleaned.removesuffix("```").strip()
+
+
 def _yatra_motion_manifest(asset_root: Path) -> Path:
     """Prepare cached H.264 proxies for ProRes 10-bit inputs before Motion V3.
 
@@ -10464,10 +10473,13 @@ def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, 
     # copy of it, so the language travels with the video rather than with whichever job payload happens to carry it.
     # The cue lines are normalised here too, before any copy of the plan exists.
     normalized = normalize_script_cues(plan_record.get("full_script") or "")
+    normalized_map = _normalize_yatra_json_block(plan_record.get("opening_map_spec"))
     if (plan_record.get("language") != sonia_language_profile(payload)["key"]
-            or normalized != (plan_record.get("full_script") or "")):
+            or normalized != (plan_record.get("full_script") or "")
+            or normalized_map != plan_record.get("opening_map_spec")):
         plan_record["language"] = sonia_language_profile(payload)["key"]
         plan_record["full_script"] = normalized
+        plan_record["opening_map_spec"] = normalized_map
         plan_file.write_text(json.dumps(plan_records, ensure_ascii=False, indent=2), encoding="utf-8")
     contract = _validate_yatra_contract(plan_record, _YATRA_EXPECTED_SCENES)
     video_title = str(plan_record.get("video_title") or "").strip()

@@ -97,7 +97,11 @@ def apply_targeted_repair(source: Path, repair_file: Path) -> dict[str, Any]:
         allowed = {"focus_place", "context_place", "context_label", "wide_headline", "close_headline"}
         if set(map_overrides) - allowed:
             raise RuntimeError("Editorial repair tried to change map identity or map-shot count")
-        map_spec = json.loads(record["opening_map_spec"])
+        raw_map = record["opening_map_spec"]
+        if isinstance(raw_map, str):
+            raw_map = re.sub(r"^\s*(?:```json\s*|json\s+)", "", raw_map,
+                             flags=re.IGNORECASE).strip().removesuffix("```").strip()
+        map_spec = json.loads(raw_map) if isinstance(raw_map, str) else dict(raw_map)
         map_spec.update(map_overrides)
         record["opening_map_spec"] = json.dumps(map_spec, ensure_ascii=False, separators=(",", ":"))
     capture_plan = str(record.get("browser_capture_plan") or "")
