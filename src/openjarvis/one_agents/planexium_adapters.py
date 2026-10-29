@@ -593,6 +593,12 @@ class EnvatoAdapter:
                 if not picked:
                     continue
                 hit, subject_named = picked
+                # The fallback is a provider change, not a relevance waiver.
+                # A generic control room, for example, cannot satisfy a
+                # telescope brief merely because the search query mentioned
+                # telescopes.
+                if not subject_named:
+                    continue
                 path = download(hit, folder, output_root, query, subject_named)
                 measured = probe_stock(path)
                 return {"provider": name, "path": str(path), "job_id": None, "query": request["query"],

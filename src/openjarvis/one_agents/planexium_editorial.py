@@ -80,6 +80,11 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
         for index in choices:
             authored = assets.get('authored_motion', {}).get(str(index + 1))
             asset = authored or assets['stock'][index]
+            # A free-stock search result can be contextually plausible while
+            # still lacking the requested visible subject.  Keep its receipt
+            # for audit, but never put that generic footage on the timeline.
+            if not authored and asset.get('subject_evidence') is False:
+                continue
             if seen(asset):
                 continue
             seconds = min(20.0, max(5.0, motion_share),
