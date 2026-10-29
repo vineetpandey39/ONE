@@ -278,16 +278,33 @@ def prepare_gate(package_path: Path) -> dict[str, Any]:
     warnings: list[str] = []
     blockers: list[str] = []
 
+    editorial_hold = root / "seo" / "editorial-hold.json"
+    hold_open = False
+    if editorial_hold.is_file():
+        try:
+            hold = json.loads(editorial_hold.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            blockers.append(f"editorial hold is unreadable: {exc}")
+            hold_open = True
+        else:
+            if str(hold.get("status") or "open").lower() != "resolved":
+                hold_open = True
+                reasons = [str(item).strip() for item in (hold.get("blockers") or []) if str(item).strip()]
+                blockers.extend("editorial hold: " + item for item in (reasons or ["unresolved review"]))
+
     requested_locales = required_locales(json.loads(package_path.read_text(encoding="utf-8")))
-    try:
-        added, failed = ensure_localizations(package_path, requested_locales)
-        if added:
-            warnings.append(f"{len(added)} localizations ({', '.join(added)}) were machine-translated just now: "
-                            "review before going public")
-        if failed:
-            warnings.append("not localized: " + "; ".join(f"{k} ({v})" for k, v in failed.items()))
-    except Exception as exc:  # noqa: BLE001 - a missing translation must not hide the other checks
-        warnings.append(f"localization not prepared: {type(exc).__name__}: {str(exc)[:160]}")
+    if hold_open:
+        warnings.append("localization skipped while editorial hold is open")
+    else:
+        try:
+            added, failed = ensure_localizations(package_path, requested_locales)
+            if added:
+                warnings.append(f"{len(added)} localizations ({', '.join(added)}) were machine-translated just now: "
+                                "review before going public")
+            if failed:
+                warnings.append("not localized: " + "; ".join(f"{k} ({v})" for k, v in failed.items()))
+        except Exception as exc:  # noqa: BLE001 - a missing translation must not hide the other checks
+            warnings.append(f"localization not prepared: {type(exc).__name__}: {str(exc)[:160]}")
 
     pkg = json.loads(package_path.read_text(encoding="utf-8"))
     blockers += media_metadata_blockers(pkg)
@@ -316,16 +333,6 @@ def prepare_gate(package_path: Path) -> dict[str, Any]:
         blockers.append("YouTube credential is not healthy: " + token["reason"])
 
     thumb_dir = root / "thumbnail"
-    editorial_hold = root / "seo" / "editorial-hold.json"
-    if editorial_hold.is_file():
-        try:
-            hold = json.loads(editorial_hold.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            blockers.append(f"editorial hold is unreadable: {exc}")
-        else:
-            if str(hold.get("status") or "open").lower() != "resolved":
-                reasons = [str(item).strip() for item in (hold.get("blockers") or []) if str(item).strip()]
-                blockers.extend("editorial hold: " + item for item in (reasons or ["unresolved review"]))
     # ARES promotes exactly one experiment winner. Offering every intermediate
     # variant let autopilot select by filename instead of by the scored decision.
     canonical = thumb_dir / "final.png"
