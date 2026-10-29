@@ -666,7 +666,7 @@ def finish_segmented(root, settings, shots, family):
         seed = next((row for row in seeds if int(row.get("scene", -1)) == scene), None)
         if seed:
             source = Path(seed["output"])
-            if not segment_seed_valid(seed, picture, comp_path, start, count):
+            if not segment_seed_valid(seed, prepared, comp_path, start, count):
                 raise RuntimeError(f"Resolve seed lineage mismatch for scene {scene}; no implicit rerender")
             validate_output(source, count, require_audio=False)
             shutil.copy2(source, output)
