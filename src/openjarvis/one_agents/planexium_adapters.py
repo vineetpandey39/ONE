@@ -335,9 +335,15 @@ class ChatGPTAdapter:
         v2 = json.loads(receipt.read_text(encoding="utf-8")) if receipt.exists() else {}
         repair_path = self.context.artifact("thumbnail-reference-repair.json")
         repair = json.loads(repair_path.read_text(encoding="utf-8")) if repair_path.exists() else {}
-        if (v2.get("terminal_status") == "Failed"
-                and repair.get("provider_job_id") == v2.get("job_id")
-                and repair.get("finding") == "reference_required_no_image_generated"):
+        repair_jobs = set(repair.get("provider_job_ids") or [])
+        if repair.get("provider_job_id"):
+            repair_jobs.add(repair["provider_job_id"])
+        current_failure_proved = (v2.get("terminal_status") == "Failed"
+                                  and v2.get("job_id") in repair_jobs)
+        mission_reference_mode = (repair.get("scope") == "mission_thumbnail_variants"
+                                  and len(repair_jobs) >= 2)
+        if (repair.get("finding") == "reference_required_no_image_generated"
+                and (current_failure_proved or mission_reference_mode)):
             # The retained provider screenshot/receipt proves text-only image
             # generation refused and requested the authentic observation.
             # Attach the mission's already verified official NASA/Webb image;

@@ -37,10 +37,16 @@ def repair_thumbnail_hooks(value, science):
     for concept in value.get('concepts') or []:
         original = str(concept.get('text') or '')
         compact = _compact_thumbnail_hook(original)
+        # Keep the authored question but prefer the episode's literal,
+        # phone-readable subject when CONDITIONS would fall below the bounded
+        # compositor size.  This is not a generic synonym: it is admitted only
+        # when the episode titles themselves explicitly promise the universe.
+        if compact.upper() == 'EARLY CONDITIONS?' and 'universe' in episode:
+            compact = 'EARLY UNIVERSE?'
         if compact != original:
             concept['text'] = compact
             concept['text_repair'] = {'from': original, 'to': compact,
-                                      'policy': 'remove display filler and keep at most three literal words'}
+                                      'policy': 'phone-readable literal episode promise, at most three words'}
         else:
             concept['text'] = original
         hook = set(re.findall(r'[a-z0-9]+', original.casefold())) - generic
