@@ -101,13 +101,13 @@ def probe(path):
     return json.loads(result.stdout)
 
 
-def validate_output(path, frames):
+def validate_output(path, frames, *, require_audio=True):
     data = probe(path)
     video = next(s for s in data["streams"] if s["codec_type"] == "video")
     audio = next((s for s in data["streams"] if s["codec_type"] == "audio"), None)
     if ((video["width"], video["height"]) != (1920, 1080)
             or video["avg_frame_rate"] != "30/1"
-            or int(video["nb_frames"]) != frames or audio is None
+            or int(video["nb_frames"]) != frames or (require_audio and audio is None)
             or abs(float(data["format"]["duration"]) - frames / 30) > .15):
         raise RuntimeError("Resolve output failed resolution/frame/audio/duration validation")
     return data
@@ -123,7 +123,7 @@ LAYOUTS = {
 }
 
 
-def composition(picture, frames, shots, family):
+def composition(picture, frames, shots, family, *, allow_identity=False):
     """Native titles plus a narration-bound, qualitative moon-origin diagram."""
     if family not in LAYOUTS or frames < 1:
         raise ValueError("Known weekday format and positive frame budget required")
@@ -232,11 +232,34 @@ def composition(picture, frames, shots, family):
             inp("EffectMask", source=prefix+"RuleMask", mask=True)])
         merge(prefix+"Rule", fade)
         beats.append({"start_frame": start, "frames": count, "text": text, "format": family})
-    if not beats:
+    if not beats and not allow_identity:
         raise ValueError("No eligible director beats for native Fusion; no fake success")
     node("MediaOut1", "MediaOut", [inp("Index", 0), inp("Input", source=last)])
     return (f"Composition{{GlobalStart=0,GlobalEnd={frames-1},RenderStart=0,RenderEnd={frames-1},"
             "Tools=ordered(){"+ "\n".join(nodes) + "}}"), beats
+
+
+def scene_partitions(shots, frames):
+    """Return exact, gap-free scene ranges in the global picture timebase."""
+    ordered = sorted(shots, key=lambda row: int(row["start_frame"]))
+    if not ordered or int(ordered[0]["start_frame"]) != 0:
+        raise ValueError("Segmented Resolve requires picture coverage from frame zero")
+    partitions = []
+    cursor = 0
+    for scene in sorted({int(row["scene"]) for row in ordered}):
+        rows = [row for row in ordered if int(row["scene"]) == scene]
+        start = int(rows[0]["start_frame"])
+        if start != cursor:
+            raise ValueError("Segmented Resolve scene ranges contain a gap or overlap")
+        for row in rows:
+            if int(row["start_frame"]) != cursor:
+                raise ValueError("Segmented Resolve shots are not contiguous")
+            cursor += int(row["frames"])
+        partitions.append({"scene": scene, "start_frame": start,
+                           "frames": cursor-start, "shots": rows})
+    if cursor != int(frames):
+        raise ValueError("Segmented Resolve ranges do not cover the measured picture")
+    return partitions
 
 
 @contextmanager
@@ -352,11 +375,14 @@ async def execute(request, client):
         await client.call("render", "set_format_and_codec", format="mp4", codec="H264")
         timeline = await client.call("timeline", "get_current")
         timeline_start = int(timeline["start_frame"])
+        segment_start = int(request.get("segment_start_frame") or 0)
+        segment_frames = int(request.get("segment_frames") or request["frames"])
         await client.call("render", "set_settings", settings={
-            "SelectAllFrames": False, "MarkIn": timeline_start,
-            "MarkOut": timeline_start+request["frames"]-1,
-            "ExportAudio": True, "ExportVideo": True,
-            "TargetDir": str(directory), "CustomName": "resolve-master"})
+            "SelectAllFrames": False, "MarkIn": timeline_start+segment_start,
+            "MarkOut": timeline_start+segment_start+segment_frames-1,
+            "ExportAudio": bool(request.get("export_audio", True)), "ExportVideo": True,
+            "TargetDir": str(directory),
+            "CustomName": str(request.get("custom_name") or "resolve-master")})
         state["phase"] = "submitting"; write(state_path, state)
         state["job_id"] = (await client.call("render", "add_job"))["job_id"]
         state["phase"] = "queued"; write(state_path, state)
@@ -410,6 +436,18 @@ async def execute(request, client):
     state["phase"] = "rendered"; write(state_path, state)
 
 
+async def release_owned(request, client):
+    """Save and release only the project named by this segment request."""
+    current = await client.call("project_manager", "get_current")
+    if current.get("name") != request["project"]:
+        raise RuntimeError("Resolve segment release refused an unexpected current project")
+    await client.call("project_manager", "save")
+    closed = await client.call("project_manager", "close")
+    if closed.get("success") is False:
+        raise RuntimeError("Resolve did not verify the owned segment project close")
+    await client.call("resolve_control", "quit")
+
+
 async def worker(request):
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
@@ -435,6 +473,8 @@ async def worker(request):
                         raise RuntimeError("Another Resolve project is open; leave it untouched")
                 else:
                     await execute(request, client)
+                    if request.get("release_after"):
+                        await release_owned(request, client)
 
 
 def preflight(root, settings):
