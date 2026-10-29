@@ -141,12 +141,31 @@ def repair_envato_account_chooser(steps):
     for step in steps:
         args = step.get('args', {}) if isinstance(step, dict) else {}
         if step.get('action') == 'click_first' and args.get('as') == 'envato_expected_account_selected':
-            step.pop('when', None)
+            # This is the same condition that resolves envato_credential.
+            # It therefore runs after a failed auth probe (including false
+            # FedCM success) but never expands an empty username in an already
+            # authenticated session.
+            step['when'] = '{{not_envato_music_session_after_reload}}'
             args['timeout_ms'] = 15000
             step['optional'] = True
             repaired = True
     if not repaired:
         raise ValueError('Envato workflow lacks the expected-account chooser fallback')
+    return steps
+
+
+def preserve_envato_download_modal(steps):
+    """Remove the pre-download Escape that closes Envato's item modal.
+
+    Playwright's download action targets the page DOM and is not obstructed by
+    Chrome's toolbar download bubble.  Escape, however, reaches the webpage
+    and closes the asset-detail modal, removing the button that was just
+    validated.  Keep all popup cleanup after a completed download instead.
+    """
+    for index, step in enumerate(steps):
+        if (step.get('action') == 'press' and step.get('args', {}).get('key') == 'Escape'
+                and any(row.get('action') == 'download_file' for row in steps[index + 1:index + 2])):
+            return steps[:index] + steps[index + 1:]
     return steps
 
 
@@ -160,11 +179,13 @@ def download_music(draft, steps, query, context, *, failure_limit=10):
         # expected Google/FedCM account, then authenticated-session proof).
         # Keep v1 receipts immutable: LAO correctly refuses to attach a
         # materially changed workflow to an older request checkpoint.
-        # v3 makes the expected Google account DOM click an unconditional
-        # optional safety pass.  v2 failed before any paid download while its
-        # FedCM action incorrectly reported success with the chooser open.
-        receipt=context.artifact('receipts/music-v3.json' if candidate==1
-            else f'receipts/music-v3-candidate-{candidate}.json')
+        # v5 scopes the expected-account click to the signed-out path, so an
+        # already authenticated session never expands an empty credential.
+        # It also removes the pre-download Escape that closed Envato's item
+        # modal after the Download button had already passed validation.  Both
+        # v2 and v3 failed before a paid download began.
+        receipt=context.artifact('receipts/music-v5.json' if candidate==1
+            else f'receipts/music-v5-candidate-{candidate}.json')
         resumed=receipt.is_file()
         inputs={'envatoQuery':query,'envatoQueryUrl':quote_plus(query),
             'assetFolder':context.mission_id,'resultIndex':str(candidate),'enablePaidDownload':True}
@@ -204,7 +225,8 @@ def acquire(root, tools):
         track=reuse_music(config.get('music_library',[]),music)
     if track is None:
         workflow=yaml.safe_load((lao/'yatra-music/workflow.yaml').read_text(encoding='utf-8'))
-        steps=repair_envato_account_chooser(workflow['steps'])
+        steps=preserve_envato_download_modal(
+            repair_envato_account_chooser(workflow['steps']))
         for step in steps:
             if step['action']=='open_browser':step['args'].update(provider_browser(ctx,'envato',profile_root=Path(config['browser_root'])))
             if step['action']=='download_file':step['args']['dest_dir']=str(music)
