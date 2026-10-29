@@ -332,6 +332,31 @@ class ChatGPTAdapter:
                 "stall_timeout_ms": 300000,
             })
             receipt = output.parent / "provider-v2.json"
+        v2 = json.loads(receipt.read_text(encoding="utf-8")) if receipt.exists() else {}
+        repair_path = self.context.artifact("thumbnail-reference-repair.json")
+        repair = json.loads(repair_path.read_text(encoding="utf-8")) if repair_path.exists() else {}
+        if (v2.get("terminal_status") == "Failed"
+                and repair.get("provider_job_id") == v2.get("job_id")
+                and repair.get("finding") == "reference_required_no_image_generated"):
+            # The retained provider screenshot/receipt proves text-only image
+            # generation refused and requested the authentic observation.
+            # Attach the mission's already verified official NASA/Webb image;
+            # this is a changed dependency and uses a new durable receipt.
+            manifest_path = self.context.artifact("media-manifest.json")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            official = next((asset for scene in manifest.get("scenes", {}).values()
+                for asset in scene.get("assets", [])
+                if asset.get("provider") == "NASA" and Path(asset.get("path", "")).is_file()), None)
+            if not official:
+                raise RuntimeError("Thumbnail reference recovery requires a verified official mission image")
+            reference = Path(official["path"])
+            actual = hashlib.sha256(reference.read_bytes()).hexdigest()
+            if actual != official.get("sha256"):
+                raise ValueError("Official thumbnail reference changed after evidence sealing")
+            if actual != repair.get("reference_sha256"):
+                raise ValueError("Thumbnail repair receipt names a different official reference")
+            image_args["reference_image_path"] = str(reference)
+            receipt = output.parent / "provider-v3.json"
         steps = _login_steps(self.asset, self.context, self.profile_root) + [
             {"action": "generate_and_download_chatgpt_image", "args": image_args}]
         with self.lease():
