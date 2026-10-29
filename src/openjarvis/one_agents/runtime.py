@@ -6077,6 +6077,11 @@ def _sonia_seo_package(payload: dict[str, Any]) -> dict[str, Any]:
             existing = json.loads(out.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             existing = {}
+    if payload.get("resume_packaging_only") and existing:
+        package = youtube_seo.repair_description_hashtags(existing)
+        out.write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
+        package["path"] = str(out)
+        return package
     package = youtube_seo.build_package(
         record, master=master, plan_path=plan_path,
         portrait_library=_YATRA_ASSET_ROOT / "_channel-assets" / "sonia-portraits")

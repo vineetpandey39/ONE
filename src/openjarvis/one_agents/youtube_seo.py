@@ -38,6 +38,38 @@ TRAVEL_PLAYLIST_URL = SONIA.playlist_url
 CHANNEL_SUBSCRIBE_URL = SONIA.subscribe_url
 
 
+def fallback_hashtags(title: str, channel: ChannelProfile = SONIA) -> list[str]:
+    """Three truthful deterministic hashtags when the wording model is unavailable."""
+    title_words = re.findall(r"[A-Za-z0-9]+", _title_head(title))[:3]
+    title_tag = "#" + "".join(word[:1].upper() + word[1:] for word in title_words)
+    if not re.fullmatch(r"#[A-Za-z][A-Za-z0-9]{1,29}", title_tag):
+        title_tag = "#TravelUpdate" if channel == SONIA else "#VideoGuide"
+    channel_tag = "#" + re.sub(r"[^A-Za-z0-9]", "", channel.display_name)
+    if not re.fullmatch(r"#[A-Za-z][A-Za-z0-9]{1,29}", channel_tag):
+        channel_tag = "#TravelGuide" if channel == SONIA else "#YouTubeGuide"
+    result = list(dict.fromkeys([
+        title_tag, "#TravelGuide" if channel == SONIA else "#Explained", channel_tag,
+    ]))
+    while len(result) < 3:
+        result.append("#TravelTips" if channel == SONIA else "#WatchNow")
+    return result[:3]
+
+
+def repair_description_hashtags(package: dict[str, Any], channel: ChannelProfile = SONIA) -> dict[str, Any]:
+    """Repair only the hashtag line and its audit; preserve every other saved field."""
+    description = str(package.get("description") or "")
+    if len(re.findall(r"(?<!\w)#\w+", description)) != 3:
+        lines = [line for line in description.splitlines()
+                 if not re.fullmatch(r"\s*(?:#[A-Za-z][A-Za-z0-9_]{1,39}\s*)+", line)]
+        description = "\n".join(lines).rstrip() + "\n\n" + " ".join(
+            fallback_hashtags(str(package.get("recommended_title") or ""), channel))
+        package["description"] = description[:5000]
+    package["description_audit"] = description_audit(
+        str(package.get("description") or ""), str(package.get("primary_query") or ""),
+        list(package.get("tags") or []), channel)
+    return package
+
+
 def llm_options(temperature: float, num_ctx: int) -> dict:
     return local_llm.options(temperature, num_ctx)
 
@@ -246,27 +278,14 @@ def metadata_from_model(record: dict, packaging: dict, llm: LLM | None,
     title = record.get("video_title") or ""
     fallback_words = [w for w in re.findall(r"[A-Za-z]{4,}", _title_head(title))
                       if w.lower() not in {"what", "this", "that", "with", "from", "your", "before", "check", "need"}][:6]
-    title_tag_words = re.findall(r"[A-Za-z0-9]+", _title_head(title))[:3]
-    title_tag = "#" + "".join(word[:1].upper() + word[1:] for word in title_tag_words)
-    if not re.fullmatch(r"#[A-Za-z][A-Za-z0-9]{1,29}", title_tag):
-        title_tag = "#TravelUpdate" if channel == SONIA else "#VideoGuide"
-    channel_tag = "#" + re.sub(r"[^A-Za-z0-9]", "", channel.display_name)
-    if not re.fullmatch(r"#[A-Za-z][A-Za-z0-9]{1,29}", channel_tag):
-        channel_tag = "#TravelGuide" if channel == SONIA else "#YouTubeGuide"
-    fallback_hashtags = list(dict.fromkeys([
-        title_tag,
-        "#TravelGuide" if channel == SONIA else "#Explained",
-        channel_tag,
-    ]))
-    while len(fallback_hashtags) < 3:
-        fallback_hashtags.append("#TravelTips" if channel == SONIA else "#WatchNow")
+    fallback_hashes = fallback_hashtags(title, channel)
     fallback = {
         "destination": "", "intro": [packaging.get("core_promise") or title,
                                      "Watch for the practical context, key distinctions, and the details worth checking before you plan."],
         "description_points": [],
         "tags": [_cut_words(_title_head(title).lower(), 45)] + [w.lower() for w in fallback_words] + [channel.display_name.lower()],
         "primary_query": title.split("|")[0].strip(), "secondary_queries": [],
-        "hashtags": fallback_hashtags[:3], "comment": "",
+        "hashtags": fallback_hashes[:3], "comment": "",
         "thumbnail_variants": [],
     }
     if channel != SONIA:
