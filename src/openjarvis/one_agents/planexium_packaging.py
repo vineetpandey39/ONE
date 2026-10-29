@@ -71,7 +71,10 @@ def readable_thumbnail_hook(text):
     # Keep hooks phone-readable without banning normal topic words such as
     # SUNRISES, ASTRONAUT or JUPITER. The previous six-character ceiling made
     # valid episode-specific hooks fail after a successful 20-minute render.
-    if not 1 <= len(words) <= 3 or any(len(word) > 10 for word in words):
+    # Twelve characters still fits a two/three-word 16:9 hook and admits
+    # episode-defining science terms such as METALLICITY and CONDITIONS?.
+    # Reject truly long prose tokens rather than blocking factual vocabulary.
+    if not 1 <= len(words) <= 3 or any(len(word) > 12 for word in words):
         raise ValueError('Thumbnail hook needs one to three short readable words')
     return ' '.join(words)
 
