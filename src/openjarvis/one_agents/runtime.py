@@ -6070,10 +6070,21 @@ def _sonia_seo_package(payload: dict[str, Any]) -> dict[str, Any]:
     if not plan_path.is_file() or not master.is_file():
         raise RuntimeError("ARES needs YATRA's production plan and verified master")
     record = (json.loads(plan_path.read_text(encoding="utf-8")) or [{}])[0]
+    out = root / "seo" / "youtube-seo-package.json"
+    existing: dict[str, Any] = {}
+    if out.is_file():
+        try:
+            existing = json.loads(out.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            existing = {}
     package = youtube_seo.build_package(
         record, master=master, plan_path=plan_path,
         portrait_library=_YATRA_ASSET_ROOT / "_channel-assets" / "sonia-portraits")
-    out = root / "seo" / "youtube-seo-package.json"
+    # Packaging retries must not throw away translations already paid for or
+    # completed before a provider timeout. The rebuilt English package remains
+    # authoritative; only independently keyed completed locale payloads survive.
+    if isinstance(existing.get("localizations"), dict):
+        package["localizations"] = existing["localizations"]
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
     package["path"] = str(out)
@@ -6261,9 +6272,15 @@ def _run_lyra(job: dict[str, Any]) -> dict[str, Any]:
         try:
             from openjarvis.one_agents import ares_thumbnail
             from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
-            package["thumbnail_receipt"] = ares_thumbnail.make_thumbnail_experiment(
-                Path(package["path"]), tool=LaoOrchestratorTool(),
-                artifact_roots=_YATRA_ROBOT_ARTIFACTS, max_wait_seconds=780)
+            if payload.get("resume_packaging_only"):
+                package["thumbnail_receipt"] = {
+                    "ok": False, "stage": "preserved_editorial_hold",
+                    "error": "thumbnail generation skipped on packaging-only resume",
+                }
+            else:
+                package["thumbnail_receipt"] = ares_thumbnail.make_thumbnail_experiment(
+                    Path(package["path"]), tool=LaoOrchestratorTool(),
+                    artifact_roots=_YATRA_ROBOT_ARTIFACTS, max_wait_seconds=780)
         except Exception as exc:  # noqa: BLE001 - gate records the missing thumbnail
             package["thumbnail_receipt"] = {
                 "ok": False, "stage": "error",
