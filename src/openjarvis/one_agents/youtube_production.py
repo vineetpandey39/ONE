@@ -214,10 +214,16 @@ class ProductionServices:
         base = Path(generated["path"]).resolve()
         if not base.is_relative_to(folder.resolve()) or not base.is_file():
             raise ValueError("Image adapter must return the requested channel-local artifact")
+        # PLANEXIUM has no host portrait lane, so its factual science terms may
+        # use the compositor's full supported half-width.  Keeping the travel
+        # channel's narrower portrait-safe lane here made ordinary terms such
+        # as "METALLICITY" fail only after the expensive provider image had
+        # completed.
         receipt = compose(base, chosen["text"], folder / "final.png",
                           primary=tuple(chosen.get("primary_colour", [255, 255, 255])),
                           accent=tuple(chosen.get("accent_colour", [255, 214, 0])),
-                          text_zone=0.46 if channel.brand == "planexium" else 0.38)
+                          text_zone=0.50 if channel.brand == "planexium" else 0.38,
+                          min_font=84 if channel.brand == "planexium" else 96)
         if not receipt.get("qc", {}).get("ok"):
             raise RuntimeError("Original thumbnail failed composition QC")
         receipt.update(brand=channel.brand, mission_id=self.context.mission_id,

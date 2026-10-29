@@ -110,7 +110,8 @@ def _low_detail_y(img: Image.Image, block_h: int, side: str,
 
 def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] = WHITE,
             accent: tuple[int, int, int] = ACCENT, side: str = "left",
-            vertical_anchor: str = "bottom", text_zone: float = TEXT_ZONE) -> dict[str, Any]:
+            vertical_anchor: str = "bottom", text_zone: float = TEXT_ZONE,
+            min_font: int = MIN_FONT) -> dict[str, Any]:
     """Set the hook on `side` ('left' when Sonia is on the right, 'right' when she is on the left)."""
     if side not in ("left", "right"):
         raise ValueError("side must be 'left' or 'right'")
@@ -118,6 +119,8 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
         raise ValueError("vertical_anchor must be top, middle, bottom or adaptive")
     if not 0.30 <= text_zone <= 0.50:
         raise ValueError("text_zone must be between 0.30 and 0.50")
+    if not 84 <= min_font <= MIN_FONT:
+        raise ValueError("minimum thumbnail font must remain between 84 and 96 pixels")
     max_text_width = int(SIZE[0] * text_zone) - MARGIN
     words = text.upper().split()
     if not 1 <= len(words) <= 3:
@@ -128,7 +131,7 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
     img = _cover(Image.open(base).convert("RGB"))
     draw = ImageDraw.Draw(img)
     chosen = None
-    for size in range(190, MIN_FONT - 1, -6):
+    for size in range(190, min_font - 1, -6):
         font, stroke = _font(size), max(6, size // 12)
         lines = _wrap(words, font, draw, stroke, max_text_width)
         if not lines or len(lines) > 3:
@@ -185,7 +188,8 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
     qc = {"size": list(SIZE), "font_size": size, "lines": lines, "side": side,
           "text_left_edge": left_edge, "text_right_edge": right_edge,
           "inside_text_zone": inside, "inside_left_zone": inside,  # old name, read by older receipts and scoring
-          "readable": size >= MIN_FONT,
+          "readable": size >= min_font,
+          "minimum_font_size": min_font,
           "protected_usp_zone": [round(SIZE[0] * USP_ZONE[0]), round(SIZE[0] * USP_ZONE[1])],
           "text_clear_of_usp": inside,
           "text_zone": text_zone,
