@@ -531,6 +531,7 @@ def approve_and_upload(gate_path: Path, *, synthetic: str, thumbnail: str | None
         gate_path.write_text(json.dumps(gate, ensure_ascii=False, indent=2), encoding="utf-8")
         raise
     gate.update(status="uploaded_private", video_id=report.get("video_id"), studio_url=report.get("studio_url"),
+                delivery_verification=report.get("delivery_verification"),
                 approved_by=approver.strip(), approval_rationale=rationale.strip(), synthetic_disclosure=synthetic,
                 thumbnail_used=thumbnail, rechecked_on=rechecked_on, standing_policy=standing_policy,
                 subtitle=str(subtitle), subtitle_language=language,

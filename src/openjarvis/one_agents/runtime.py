@@ -6485,6 +6485,39 @@ def _echo_missing_languages(uploader: Any) -> list[dict[str, Any]]:
     return results
 
 
+def _require_private_delivery_receipt(uploader: Any, package: Path, master: Path,
+                                      upload_report: dict[str, Any]) -> tuple[dict[str, Any], Path]:
+    """Bind ECHO's local master to a freshly verified PRIVATE YouTube resource."""
+    video_id = str(upload_report.get("video_id") or upload_report.get("already_uploaded_as") or "")
+    if not video_id:
+        raise RuntimeError("YouTube upload report has no video id for remote delivery verification")
+    delivery = uploader.verify_private_delivery(video_id)
+    expected_channel = str(getattr(uploader, "EXPECTED_CHANNEL_ID", ""))
+    if (not delivery.get("verified") or delivery.get("video_id") != video_id
+            or delivery.get("privacy_status") != "private"
+            or delivery.get("processing_status") != "succeeded"
+            or (expected_channel and delivery.get("channel_id") != expected_channel)):
+        raise RuntimeError("YouTube remote delivery did not verify as processed PRIVATE on Sonia's channel")
+    with master.open("rb") as master_handle:
+        master_sha256 = hashlib.file_digest(master_handle, "sha256").hexdigest()
+    with package.open("rb") as package_handle:
+        package_sha256 = hashlib.file_digest(package_handle, "sha256").hexdigest()
+    receipt = package.with_name("api-private-delivery-verification.json")
+    body = {
+        "schema": "sonia-agent-private-delivery/1",
+        "master": str(master),
+        "master_sha256": master_sha256,
+        "package": str(package),
+        "package_sha256": package_sha256,
+        "delivery": delivery,
+    }
+    temporary = receipt.with_suffix(receipt.suffix + ".tmp")
+    temporary.write_text(json.dumps(body, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temporary, receipt)
+    return {**upload_report, "delivery_verification": delivery,
+            "delivery_receipt": str(receipt)}, receipt
+
+
 def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
     """Finish Sonia's private YouTube draft after LYRA returns its package to HELIOS."""
     payload = _json_task(job)
@@ -6548,6 +6581,9 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
             )
             upload_report = {**upload_report, "thumbnail_set": "youtube_studio_persistent_session",
                              "studio_thumbnail": thumbnail_report}
+            upload_report, delivery_receipt = _require_private_delivery_receipt(
+                uploader, package, master, upload_report
+            )
             stages.set_stage("echo", stages.CARRYING_TO_HEAD,
                              "Taking VISTA's verified private upload back to HELIOS")
             _require_active_job(job, "report VISTA private upload completion to HELIOS")
@@ -6567,6 +6603,7 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
             return {"agent": "ECHO", "stage": "vista_short_publish", "status": "uploaded_private",
                     "video_id": upload_report.get("video_id"), "studio_url": upload_report.get("studio_url"),
                     "master": str(master), "thumbnail": str(thumbnail), "subtitles": str(caption),
+                    "delivery_receipt": str(delivery_receipt),
                     "content": f"VISTA Short uploaded privately: "
                                f"{upload_report.get('studio_url') or upload_report.get('video_id')}",
                     "handed_to": {"agent": "HELIOS", "job_id": report["id"]}}
@@ -6637,6 +6674,11 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
         gate = youtube_publish.autopilot_upload(package)
         if gate.get("status") not in ("uploaded_private", "already_uploaded"):
             raise RuntimeError("private upload gate did not complete: " + str(gate.get("status")))
+        master = Path(str(gate.get("master") or ""))
+        if not master.is_file():
+            raise RuntimeError("private upload gate has no readable master for delivery binding")
+        uploader = youtube_publish._load("youtube_api_upload")
+        gate, delivery_receipt = _require_private_delivery_receipt(uploader, package, master, gate)
         stages.set_stage("echo", stages.EXECUTING,
                          "Adding subtitles, requested languages and the channel comment")
         result = youtube_distribution.complete(package)
@@ -6649,9 +6691,12 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
         _require_active_job(job, "report distribution completion to HELIOS")
         report = enqueue_job("helios", json.dumps({**payload, "stage": "distribution_complete",
             "format": "youtube_private_draft", "worker": "echo", "distribution": result,
+            "delivery_verification": gate["delivery_verification"],
+            "delivery_receipt": str(delivery_receipt),
             "storage_cleanup": storage, "published": False, "output": str(package)}), mode="report", tier="fast",
             dedupe_key=f"travel:{payload.get('lao_job')}:distribution-report")
-        return {"agent": "ECHO", **result, "storage_cleanup": storage,
+        return {"agent": "ECHO", **result, "delivery_verification": gate["delivery_verification"],
+                "delivery_receipt": str(delivery_receipt), "storage_cleanup": storage,
                 "handed_to": {"agent": "HELIOS", "job_id": report["id"]}}
     finally:
         stages.clear_stage("echo")
