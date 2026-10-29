@@ -86,6 +86,15 @@ def load_policy() -> dict[str, Any]:
 
 
 EDIT_TOOLS_DIR = Path(os.environ.get("YATRA_EDIT_DIR") or r"C:\Users\pc\Documents\LAO\yatra-edit")
+VISTA_RUNS_ROOT = Path(os.environ.get("VISTA_RUNS_ROOT") or r"C:\Users\pc\Documents\LAO\vista\runs")
+
+
+def _is_vista_package(gate: dict[str, Any]) -> bool:
+    """Identify VISTA-owned uploads without changing any other floor's cleanup policy."""
+    try:
+        return Path(str(gate.get("package") or "")).resolve().is_relative_to(VISTA_RUNS_ROOT.resolve())
+    except (OSError, ValueError):
+        return False
 
 
 def cleanup_after_upload(gate: dict[str, Any]) -> dict[str, Any]:
@@ -95,6 +104,11 @@ def cleanup_after_upload(gate: dict[str, Any]) -> dict[str, Any]:
     FAIL, every path stays inside the video folder) and keeps the final video, narration, thumbnail and SEO. Intermediates
     go at once, the Envato clips after the policy's stock_retention_days; earlier finished videos whose retention
     has now ended are swept in the same pass."""
+    if _is_vista_package(gate):
+        return {
+            "skipped": "automatic cleanup disabled for VISTA mission; explicit cleanup authorization required",
+            "scope": "vista",
+        }
     try:
         path = EDIT_TOOLS_DIR / "yatra_cleanup.py"
         if not path.is_file():
