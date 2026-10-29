@@ -266,7 +266,7 @@ class ChatGPTAdapter:
             'Also include packaging: {claim_ids:[supported claim IDs],focus_scene:1-based scene number,viewer_question:string,description_opening:two source-grounded sentences that explain the hook,titles:[three titles],concepts:[three objects with name,text,left_usp,composition,visual_direction]}. '
             'Choose the strongest unusual visual or scientific question in THIS episode, not a generic ISS/planet illustration. '
             'Titles and thumbnail text must complement rather than repeat each other; create specific curiosity that the narration actually resolves. '
-            'Thumbnail text MUST be 1-3 words. Author three genuinely different subjects/compositions: phenomenon close-up, contextual relationship, and a distinct explanation question. '
+            'Thumbnail text 1-4 words. Author three genuinely different subjects/compositions: phenomenon close-up, contextual relationship, and a distinct explanation question. '
             'Every thumbnail text must contain at least one literal non-generic word from a proposed title or the focus scene screen_text, so title and image promise visibly match. '
             'Color, crop and styling alone are not different concepts. Do not invent events, findings, scale, urgency or audience CTR predictions. '
             'Order concepts and titles by editorial preference, provisional until audience testing. '
