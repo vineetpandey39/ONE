@@ -74,6 +74,11 @@ def _write(path: Path, value) -> None:
     temporary.replace(path)
 
 
+def _merge_unfinished_resolve_policy(saved, current):
+    """Keep mission identity while applying the active unfinished-render policy."""
+    return {**(saved or {}), **current}
+
+
 def manual_upload_result(context: ProductionContext) -> dict | None:
     path = context.artifact('manual-upload.json')
     if not path.exists():
@@ -389,6 +394,18 @@ class Pipeline:
         renderer_path = root / "render-backend.json"
         if renderer_path.exists():
             renderer_config = json.loads(renderer_path.read_text(encoding="utf-8"))
+            # A checkpoint pins the backend, not obsolete safety policy. Before
+            # Resolve has a completion receipt, merge the current policy so a
+            # resumed mission cannot bypass segmentation or capacity guards.
+            current_resolve = self.config.get("resolve")
+            resolve_receipt = root / "edit" / "resolve-receipt.json"
+            if (renderer_config.get("backend") == "resolve_fusion"
+                    and isinstance(current_resolve, dict)
+                    and not resolve_receipt.exists()):
+                merged = _merge_unfinished_resolve_policy(renderer_config.get("resolve"), current_resolve)
+                if merged != renderer_config.get("resolve"):
+                    renderer_config["resolve"] = merged
+                    _write(renderer_path, renderer_config)
         else:
             renderer_config = ({"backend": "legacy"} if (root/"checkpoints/render.json").exists()
                 else {"backend": self.config.get("render_backend", "legacy"),
