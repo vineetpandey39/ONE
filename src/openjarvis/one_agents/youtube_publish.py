@@ -389,12 +389,14 @@ def capture_semantic_blockers(root: Path) -> list[str]:
               if path.is_file() and path.suffix.lower() in {".mkv", ".mp4", ".mov"}]
     plan_path = root / "obs-capture-plan.json"
     planned: set[str] = set()
+    planned_rows: dict[str, dict[str, Any]] = {}
     if plan_path.is_file():
         try:
             plan = json.loads(plan_path.read_text(encoding="utf-8"))
-            planned = {str(row.get("captureId") or row.get("capture_id") or "")
-                       for row in (plan.get("recipes") or [])
-                       if row.get("captureId") or row.get("capture_id")}
+            planned_rows = {str(row.get("captureId") or row.get("capture_id") or ""): row
+                            for row in (plan.get("recipes") or [])
+                            if row.get("captureId") or row.get("capture_id")}
+            planned = set(planned_rows)
         except (OSError, ValueError) as exc:
             return [f"OBS capture plan is unreadable: {exc}"]
     active_by_id = {re.sub(r"-capture$", "", path.stem): path for path in active}
@@ -427,7 +429,18 @@ def capture_semantic_blockers(root: Path) -> list[str]:
             stale.append(capture_id)
             continue
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        if row.get("media_sha256") != digest or row.get("media_size") != path.stat().st_size:
+        recipe = planned_rows.get(capture_id) or {}
+        evidence = recipe.get("semanticEvidence") or recipe.get("semantic_evidence") or {}
+        contract = {
+            "capture_id": capture_id,
+            "source_url": str(recipe.get("sourceUrl") or ""),
+            "topic": str(recipe.get("topic") or ""),
+            "semantic_evidence": evidence,
+        }
+        contract_digest = hashlib.sha256(json.dumps(
+            contract, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+        if (row.get("media_sha256") != digest or row.get("media_size") != path.stat().st_size
+                or row.get("semantic_contract_sha256") != contract_digest):
             stale.append(capture_id)
     if stale:
         return ["OBS capture semantic receipt is stale for: " + ", ".join(stale)]

@@ -10109,13 +10109,17 @@ def _yatra_validate_capture_integrity(asset_root: Path) -> dict[str, Any]:
                   for path in capture_dir.glob("*-capture.*")
                   if path.is_file() and path.suffix.lower() in {".mkv", ".mp4", ".mov"}}
     planned_ids: set[str] = set()
+    planned_recipes: dict[str, dict[str, Any]] = {}
     plan_path = asset_root / "obs-capture-plan.json"
     if plan_path.is_file():
         try:
             plan = json.loads(plan_path.read_text(encoding="utf-8"))
-            planned_ids = {str(row.get("captureId") or row.get("capture_id") or "")
-                           for row in (plan.get("recipes") or [])
-                           if row.get("captureId") or row.get("capture_id")}
+            planned_recipes = {
+                str(row.get("captureId") or row.get("capture_id") or ""): row
+                for row in (plan.get("recipes") or [])
+                if row.get("captureId") or row.get("capture_id")
+            }
+            planned_ids = set(planned_recipes)
         except (OSError, ValueError) as exc:
             return {"ok": False, "detail": f"obs-capture-plan.json is unreadable: {exc}"}
     # Validate preserved captures too, not only the ones selected by the
@@ -10159,11 +10163,25 @@ def _yatra_validate_capture_integrity(asset_root: Path) -> dict[str, Any]:
             if any(seconds >= 2.0 for seconds in spans):
                 issues.append(f"{capture_id}: {max(spans):.2f}s full-frame black interval")
                 continue
-            semantic = _yatra_capture_semantic_state(path)
+            evidence = (planned_recipes.get(capture_id, {}).get("semanticEvidence")
+                        or planned_recipes.get(capture_id, {}).get("semantic_evidence") or {})
+            contract = {
+                "capture_id": capture_id,
+                "source_url": str(planned_recipes.get(capture_id, {}).get("sourceUrl") or ""),
+                "topic": str(planned_recipes.get(capture_id, {}).get("topic") or ""),
+                "semantic_evidence": evidence,
+            }
+            semantic = _yatra_capture_semantic_state(
+                path,
+                required_any=evidence.get("requiredAny") or evidence.get("required_any") or (),
+                required_all=evidence.get("requiredAll") or evidence.get("required_all") or (),
+            )
             semantic_receipts.append({
                 "capture_id": capture_id,
                 "media_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                 "media_size": path.stat().st_size,
+                "semantic_contract_sha256": hashlib.sha256(json.dumps(
+                    contract, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest(),
                 **semantic,
             })
             if not semantic.get("ok"):
@@ -10189,10 +10207,33 @@ _YATRA_INVALID_PAGE_TEXT = (
     "website under maintenance", "under maintenance", "service unavailable",
     "temporarily unavailable", "access denied", "bad gateway",
     "internal server error", "404 not found", "403 forbidden",
+    "verify you are human", "checking your browser", "security verification",
+    "cloudflare ray id",
 )
 
 
-def _yatra_capture_semantic_state(path: Path) -> dict[str, Any]:
+def _yatra_capture_semantic_verdict(normalized: str, *, required_any: Any = (),
+                                    required_all: Any = ()) -> dict[str, Any]:
+    """Judge OCR text without confusing a readable homepage for claim evidence."""
+    normalized = " ".join(str(normalized or "").split()).casefold()
+    blocked = next((phrase for phrase in _YATRA_INVALID_PAGE_TEXT if phrase in normalized), "")
+    if blocked:
+        return {"ok": False, "detail": f"invalid webpage state visible in recording: {blocked!r}"}
+    if not re.search(r"[a-z]{3}", normalized):
+        return {"ok": False, "detail": "OCR found no meaningful webpage text in sampled frames"}
+    any_terms = [" ".join(str(term).split()).casefold() for term in required_any if str(term).strip()]
+    all_terms = [" ".join(str(term).split()).casefold() for term in required_all if str(term).strip()]
+    missing_all = [term for term in all_terms if term not in normalized]
+    if missing_all:
+        return {"ok": False, "detail": "approved evidence text missing: " + ", ".join(missing_all)}
+    if any_terms and not any(term in normalized for term in any_terms):
+        return {"ok": False, "detail": "recording shows a readable page but not the approved topic evidence (expected one of: "
+                + ", ".join(any_terms) + ")"}
+    return {"ok": True, "detail": "sampled pixels contain approved topic evidence and no challenge/error state"}
+
+
+def _yatra_capture_semantic_state(path: Path, *, required_any: Any = (),
+                                  required_all: Any = ()) -> dict[str, Any]:
     """Read the pixels OBS recorded and reject visible terminal/error pages."""
     from openjarvis.tools import kdp_cover_qc
 
@@ -10210,16 +10251,10 @@ def _yatra_capture_semantic_state(path: Path) -> dict[str, Any]:
             return {"ok": False, "detail": "semantic check produced no capture frames"}
         texts = [kdp_cover_qc.read_text(frame) for frame in frames]
     normalized = " ".join(" ".join(texts).split()).casefold()
-    blocked = next((phrase for phrase in _YATRA_INVALID_PAGE_TEXT if phrase in normalized), "")
-    if blocked:
-        return {"ok": False, "samples": len(texts),
-                "detail": f"invalid webpage state visible in recording: {blocked!r}"}
-    if not re.search(r"[a-z]{3}", normalized):
-        return {"ok": False, "samples": len(texts),
-                "detail": "OCR found no meaningful webpage text in sampled frames"}
-    return {"ok": True, "samples": len(texts),
-            "text_sha256": hashlib.sha256(normalized.encode("utf-8")).hexdigest(),
-            "detail": "sampled pixels contain readable page text and no maintenance/error state"}
+    verdict = _yatra_capture_semantic_verdict(
+        normalized, required_any=required_any, required_all=required_all)
+    return {**verdict, "samples": len(texts),
+            "text_sha256": hashlib.sha256(normalized.encode("utf-8")).hexdigest()}
 
 
 def _yatra_upload(tool: Any, asset_folder: str, video_title: str,
