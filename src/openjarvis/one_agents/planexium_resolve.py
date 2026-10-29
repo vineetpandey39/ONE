@@ -134,6 +134,31 @@ def validate_output(path, frames, *, require_audio=True):
     return data
 
 
+def prepare_cfr_source(picture, prepared, frames):
+    """Make frame ordinal equal presentation time before Fusion Loader reads it."""
+    picture, prepared = Path(picture), Path(prepared)
+    receipt_path = prepared.with_suffix(".source.json")
+    signature = hashlib.sha256(json.dumps({"source":sha(picture), "frames":int(frames),
+        "filter":"setpts=N/(30*TB)", "codec":"libx264-crf16"}, sort_keys=True).encode()).hexdigest()
+    prior = json.loads(receipt_path.read_text()) if receipt_path.exists() else {}
+    if prepared.exists() and prior.get("signature") == signature and prior.get("sha256") == sha(prepared):
+        validate_output(prepared, frames, require_audio=False)
+        return prepared
+    temporary = prepared.with_name(f".{prepared.stem}.{uuid.uuid4().hex}.mp4")
+    try:
+        subprocess.run(["ffmpeg","-y","-v","error","-i",str(picture),"-map","0:v:0","-an",
+            "-vf","setpts=N/(30*TB)","-frames:v",str(frames),"-c:v","libx264","-preset","fast",
+            "-crf","16","-pix_fmt","yuv420p","-r","30","-fps_mode","cfr",
+            "-movflags","+faststart",str(temporary)], check=True)
+        validate_output(temporary, frames, require_audio=False)
+        os.replace(temporary, prepared)
+        write(receipt_path, {"schema":"planexium-cfr-source-v1", "signature":signature,
+              "sha256":sha(prepared), "source_sha256":sha(picture), "frames":frames, "fps":"30/1"})
+        return prepared
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 # These are typography layouts, not asserted scientific geometry.
 LAYOUTS = {
     "travel-dossier": (.28, .22, .043, (.51, .83, .89)),
@@ -473,6 +498,18 @@ async def release_owned(request, client):
     if closed.get("success") is False:
         raise RuntimeError("Resolve did not verify the owned segment project close")
     await client.call("resolve_control", "quit")
+    await asyncio.to_thread(wait_for_resolve_exit)
+
+
+def wait_for_resolve_exit(timeout=90):
+    """Do not let a following segment race an acknowledged-but-live Resolve."""
+    import psutil
+    deadline = time.monotonic()+timeout
+    while any((process.info.get("name") or "").casefold() == "resolve.exe"
+              for process in psutil.process_iter(["name"])):
+        if time.monotonic() > deadline:
+            raise RuntimeError("Resolve quit was acknowledged but process exit was not verified")
+        time.sleep(.5)
 
 
 async def release_owned_if_idle(request, client):
@@ -485,6 +522,7 @@ async def release_owned_if_idle(request, client):
     await client.call("project_manager", "save")
     await client.call("project_manager", "close")
     await client.call("resolve_control", "quit")
+    await asyncio.to_thread(wait_for_resolve_exit)
     return True
 
 
@@ -589,10 +627,7 @@ def finish_segmented(root, settings, shots, family):
         sort_keys=True).encode()).hexdigest()
     base = Path(settings["segmented_work_root"])/signature[:20]
     base.mkdir(parents=True, exist_ok=True)
-    prepared = base/"prepared.mp4"
-    if not prepared.exists(): shutil.copy2(picture, prepared)
-    if sha(prepared) != sha(picture):
-        raise RuntimeError("Segmented Resolve staging integrity mismatch")
+    prepared = prepare_cfr_source(picture, base/"prepared.mp4", frames)
     outputs, all_beats, receipts = [], [], []
     for part in partitions:
         scene, start, count = part["scene"], part["start_frame"], part["frames"]
@@ -685,11 +720,7 @@ def finish(root, settings, shots, family):
         "family": family, "code": sha(__file__), "server": sha(server)}, sort_keys=True).encode()).hexdigest()
     directory = Path(settings["work_root"])/signature[:20]
     directory.mkdir(parents=True, exist_ok=True)
-    prepared = directory/"prepared.mp4"
-    if not prepared.exists():
-        shutil.copy2(picture, prepared)
-    if sha(prepared) != sha(picture):
-        raise RuntimeError("Resolve staging integrity mismatch")
+    prepared = prepare_cfr_source(picture, directory/"prepared.mp4", frames)
     comp, beats = composition(prepared, frames, shots, family)
     comp_path = directory/"PLANEXIUM.comp"
     comp_path.write_text(comp, encoding="utf-8")
