@@ -56,6 +56,35 @@ def _asset(root, asset):
         raise ValueError("Repair asset hash mismatch")
 
 
+def _validate_article_regions(articles, media):
+    """Derived commissioned-image regions must be real, unique and disjoint."""
+    parents = {asset.get("sha256") for scene in media.values()
+               for asset in scene.get("assets", []) if asset.get("sha256")}
+    regions = {}
+    for asset in articles:
+        parent = asset.get("derived_from_sha256")
+        if not parent:
+            continue
+        if parent not in parents:
+            raise ValueError("Article detail parent is not accepted mission evidence")
+        crop = asset.get("crop_coordinates") or {}
+        try:
+            rectangle = tuple(int(crop[key]) for key in ("x", "y", "width", "height"))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Article detail needs integer crop coordinates") from exc
+        if min(rectangle) < 0 or rectangle[2] <= 0 or rectangle[3] <= 0:
+            raise ValueError("Article detail crop coordinates are invalid")
+        rows = regions.setdefault(parent, [])
+        if any(asset.get("source_panel") == other[0] for other in rows):
+            raise ValueError("Article detail panel identity is duplicated")
+        x, y, width, height = rectangle
+        for _panel, (ox, oy, owidth, oheight) in rows:
+            if x < ox + owidth and ox < x + width and y < oy + oheight and oy < y + height:
+                raise ValueError("Article detail regions overlap")
+        rows.append((asset.get("source_panel"), rectangle))
+    return set(regions)
+
+
 def validate_bundle(root, bundle):
     """All-scene preflight with existing gates, without network or output writes."""
     from openjarvis.one_agents.planexium_adapters import probe_stock, stock_context_matches
@@ -136,6 +165,8 @@ def validate_bundle(root, bundle):
             raise ValueError("Archive replacement lacks relevant NASA provenance")
         validate_url(asset["download_url"], MEDIA_HOSTS)
     articles = bundle.get("article_assets", [])
+    media_manifest = read(root / "media-manifest.json")["scenes"]
+    derived_parents = _validate_article_regions(articles, media_manifest)
     for asset in articles:
         _asset(root, asset)
         if asset.get("provider") != "NASA" or not asset.get("credit"):
@@ -147,8 +178,11 @@ def validate_bundle(root, bundle):
     # It prevents the renderer from fetching an unrelated primary image.
     original = {"path": str(root / "unused-primary.jpg"), "sha256": "unused", "seconds": 0}
     shots = build_scene_shots(root, science, voice, assets, original,
-        read(root / "media-manifest.json")["scenes"], plan,
+        media_manifest, plan,
         archive_assets=archives, article_assets=articles, offline=True, write_outputs=False)
+    if any(row["asset"].get("sha256") in derived_parents
+           for scene in shots.values() for row in scene):
+        raise ValueError("Full article source cannot repeat beside its derived detail regions")
     validate_context_coverage(context_records, shots)
     validate_context_coverage({k: {**v, "scene": 9} for k, v in archive_records.items() if k == "9:1"}, shots)
     return {"plan": plan, "assets": assets, "scene_shots": shots}

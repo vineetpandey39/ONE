@@ -55,6 +55,8 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
     primary_cursor = 0.0
     archive_seconds = 0.0
     primary_is_video = Path(original['path']).suffix.lower() not in {'.jpg', '.jpeg', '.png'}
+    derived_article_parents = {asset.get('derived_from_sha256') for asset in (article_assets or [])
+                               if asset.get('derived_from_sha256')}
     for number, (scene, segment) in enumerate(zip(science['scenes'], voice['segments'], strict=True), 1):
         rows = []
         remaining = float(segment['seconds'])
@@ -106,7 +108,8 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
         # searching an archive. These are original source figures, not captures.
         for asset in media.get(str(number),{}).get('assets',[]):
             if len(pictures)>=needed:break
-            if (asset.get('caption') is None or seen(asset)
+            if (asset.get('sha256') in derived_article_parents
+                    or asset.get('caption') is None or seen(asset)
                     or not (asset.get('title','').strip() or asset.get('caption','').strip())):continue
             if not nasa_image_is_visible(asset['path']):continue
             if hashlib.sha256(Path(asset['path']).read_bytes()).hexdigest()!=asset['sha256']:
