@@ -12,6 +12,7 @@ rationale. The upload itself is always private; going public stays a Studio clic
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -376,10 +377,25 @@ def prepare_gate(package_path: Path) -> dict[str, Any]:
 
 def capture_semantic_blockers(root: Path) -> list[str]:
     """Require pixel-derived semantic proof before a YATRA master can upload."""
+    root = Path(root)
     capture_dir = Path(root) / "captures"
     active = [path for path in capture_dir.glob("*-capture.*")
               if path.is_file() and path.suffix.lower() in {".mkv", ".mp4", ".mov"}]
-    if not active:
+    plan_path = root / "obs-capture-plan.json"
+    planned: set[str] = set()
+    if plan_path.is_file():
+        try:
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            planned = {str(row.get("captureId") or row.get("capture_id") or "")
+                       for row in (plan.get("recipes") or [])
+                       if row.get("captureId") or row.get("capture_id")}
+        except (OSError, ValueError) as exc:
+            return [f"OBS capture plan is unreadable: {exc}"]
+    active_by_id = {re.sub(r"-capture$", "", path.stem): path for path in active}
+    missing_recordings = sorted(planned - set(active_by_id))
+    if missing_recordings:
+        return ["OBS capture plan has no recording for: " + ", ".join(missing_recordings)]
+    if not active and not planned:
         return []
     receipt_path = capture_dir / "capture-semantic-qc.json"
     if not receipt_path.is_file():
@@ -390,12 +406,25 @@ def capture_semantic_blockers(root: Path) -> list[str]:
         return [f"OBS capture semantic receipt is unreadable: {exc}"]
     if receipt.get("schema") != "yatra-capture-semantic-qc/1" or not receipt.get("ok"):
         return ["OBS capture semantic QC failed: " + str(receipt.get("detail") or "invalid receipt")]
-    passed = {str(item.get("capture_id") or "") for item in receipt.get("semantic_receipts") or []
-              if item.get("ok")}
-    expected = {re.sub(r"-capture$", "", path.stem) for path in active}
+    passed_rows = {str(item.get("capture_id") or ""): item
+                   for item in receipt.get("semantic_receipts") or [] if item.get("ok")}
+    expected = set(active_by_id) | planned
+    passed = set(passed_rows)
     missing = sorted(expected - passed)
     if missing:
         return ["OBS capture semantic receipt does not cover: " + ", ".join(missing)]
+    stale: list[str] = []
+    for capture_id in sorted(expected):
+        path = active_by_id.get(capture_id)
+        row = passed_rows.get(capture_id) or {}
+        if not path:
+            stale.append(capture_id)
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if row.get("media_sha256") != digest or row.get("media_size") != path.stat().st_size:
+            stale.append(capture_id)
+    if stale:
+        return ["OBS capture semantic receipt is stale for: " + ", ".join(stale)]
     return []
 
 

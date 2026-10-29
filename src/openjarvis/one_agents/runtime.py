@@ -10085,10 +10085,20 @@ def _yatra_validate_capture_integrity(asset_root: Path) -> dict[str, Any]:
     active_ids = {re.sub(r"-capture$", "", path.stem)
                   for path in capture_dir.glob("*-capture.*")
                   if path.is_file() and path.suffix.lower() in {".mkv", ".mp4", ".mov"}}
+    planned_ids: set[str] = set()
+    plan_path = asset_root / "obs-capture-plan.json"
+    if plan_path.is_file():
+        try:
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            planned_ids = {str(row.get("captureId") or row.get("capture_id") or "")
+                           for row in (plan.get("recipes") or [])
+                           if row.get("captureId") or row.get("capture_id")}
+        except (OSError, ValueError) as exc:
+            return {"ok": False, "detail": f"obs-capture-plan.json is unreadable: {exc}"}
     # Validate preserved captures too, not only the ones selected by the
     # current director route. A later scene-plan/routing change must not make
     # an already-recorded maintenance page silently eligible for reuse.
-    capture_ids = sorted(routed_ids | active_ids)
+    capture_ids = sorted(routed_ids | active_ids | planned_ids)
     issues: list[str] = []
     semantic_receipts: list[dict[str, Any]] = []
     for capture_id in capture_ids:
@@ -10127,7 +10137,12 @@ def _yatra_validate_capture_integrity(asset_root: Path) -> dict[str, Any]:
                 issues.append(f"{capture_id}: {max(spans):.2f}s full-frame black interval")
                 continue
             semantic = _yatra_capture_semantic_state(path)
-            semantic_receipts.append({"capture_id": capture_id, **semantic})
+            semantic_receipts.append({
+                "capture_id": capture_id,
+                "media_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "media_size": path.stat().st_size,
+                **semantic,
+            })
             if not semantic.get("ok"):
                 issues.append(f"{capture_id}: {semantic.get('detail')}")
         except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
