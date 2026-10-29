@@ -140,6 +140,8 @@ def validate_bundle(root, bundle):
         _asset(root, asset)
         if asset.get("provider") != "NASA" or not asset.get("credit"):
             raise ValueError("Article replacement lacks provenance")
+        if asset.get("editorial_scene") not in scenes:
+            raise ValueError("Article replacement needs an explicit repaired-scene binding")
         validate_url(asset["download_url"], MEDIA_HOSTS)
     # The placeholder is never selected: existing scene media owns no such hash.
     # It prevents the renderer from fetching an unrelated primary image.

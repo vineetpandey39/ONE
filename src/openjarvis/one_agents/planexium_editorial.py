@@ -164,6 +164,12 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
             for asset in figures:
                 if len(pictures) >= needed:
                     break
+                # A reviewed repair may bind a commissioned/article figure to
+                # the one scene whose narration establishes its meaning.  Do
+                # not let a globally available N159 detail or operations-room
+                # photo get consumed by an earlier, merely lexical match.
+                if asset.get('editorial_scene') not in (None, number):
+                    continue
                 metadata = {'title': asset.get('title', ''),
                             'description': asset.get('caption', '')}
                 matches = (nasa_subject_matches(scene.get('title', ''), metadata)
