@@ -316,6 +316,16 @@ def prepare_gate(package_path: Path) -> dict[str, Any]:
         blockers.append("YouTube credential is not healthy: " + token["reason"])
 
     thumb_dir = root / "thumbnail"
+    editorial_hold = root / "seo" / "editorial-hold.json"
+    if editorial_hold.is_file():
+        try:
+            hold = json.loads(editorial_hold.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            blockers.append(f"editorial hold is unreadable: {exc}")
+        else:
+            if str(hold.get("status") or "open").lower() != "resolved":
+                reasons = [str(item).strip() for item in (hold.get("blockers") or []) if str(item).strip()]
+                blockers.extend("editorial hold: " + item for item in (reasons or ["unresolved review"]))
     # ARES promotes exactly one experiment winner. Offering every intermediate
     # variant let autopilot select by filename instead of by the scored decision.
     canonical = thumb_dir / "final.png"
@@ -330,6 +340,9 @@ def prepare_gate(package_path: Path) -> dict[str, Any]:
         except (OSError, json.JSONDecodeError):
             receipt = {}
         if receipt.get("source") == "editorial_approval":
+            if receipt.get("ok") is not True:
+                blockers.append("editorial-approved thumbnail was superseded; exact selected asset is required")
+                thumbnails = []
             expected = str(receipt.get("sha256") or "")
             actual = hashlib.sha256(canonical.read_bytes()).hexdigest()
             if not expected or expected != actual or Path(str(receipt.get("path") or "")).resolve() != canonical.resolve():

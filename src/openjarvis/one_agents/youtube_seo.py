@@ -246,12 +246,27 @@ def metadata_from_model(record: dict, packaging: dict, llm: LLM | None,
     title = record.get("video_title") or ""
     fallback_words = [w for w in re.findall(r"[A-Za-z]{4,}", _title_head(title))
                       if w.lower() not in {"what", "this", "that", "with", "from", "your", "before", "check", "need"}][:6]
+    title_tag_words = re.findall(r"[A-Za-z0-9]+", _title_head(title))[:3]
+    title_tag = "#" + "".join(word[:1].upper() + word[1:] for word in title_tag_words)
+    if not re.fullmatch(r"#[A-Za-z][A-Za-z0-9]{1,29}", title_tag):
+        title_tag = "#TravelUpdate" if channel == SONIA else "#VideoGuide"
+    channel_tag = "#" + re.sub(r"[^A-Za-z0-9]", "", channel.display_name)
+    if not re.fullmatch(r"#[A-Za-z][A-Za-z0-9]{1,29}", channel_tag):
+        channel_tag = "#TravelGuide" if channel == SONIA else "#YouTubeGuide"
+    fallback_hashtags = list(dict.fromkeys([
+        title_tag,
+        "#TravelGuide" if channel == SONIA else "#Explained",
+        channel_tag,
+    ]))
+    while len(fallback_hashtags) < 3:
+        fallback_hashtags.append("#TravelTips" if channel == SONIA else "#WatchNow")
     fallback = {
         "destination": "", "intro": [packaging.get("core_promise") or title,
                                      "Watch for the practical context, key distinctions, and the details worth checking before you plan."],
         "description_points": [],
         "tags": [_cut_words(_title_head(title).lower(), 45)] + [w.lower() for w in fallback_words] + [channel.display_name.lower()],
-        "primary_query": title.split("|")[0].strip(), "secondary_queries": [], "hashtags": [], "comment": "",
+        "primary_query": title.split("|")[0].strip(), "secondary_queries": [],
+        "hashtags": fallback_hashtags[:3], "comment": "",
         "thumbnail_variants": [],
     }
     if channel != SONIA:
