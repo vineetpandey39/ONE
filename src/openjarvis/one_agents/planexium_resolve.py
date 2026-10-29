@@ -64,6 +64,37 @@ def isolated_environment(settings):
     return env
 
 
+def capacity_state(request, directory):
+    """Measure system/pagefile and render-destination capacity independently."""
+    system_path = Path(request.get("system_reserve_path") or directory)
+    destination_path = Path(request.get("destination_reserve_path") or directory)
+    system = shutil.disk_usage(system_path)
+    destination = shutil.disk_usage(destination_path)
+    destination_floor = max(
+        int(request.get("destination_minimum_free_bytes") or 0),
+        int(destination.total * float(request.get("destination_minimum_free_fraction") or 0)),
+    ) + int(request.get("estimated_remaining_output_bytes") or 0)
+    return {
+        "system_path": str(system_path), "system_free_bytes": system.free,
+        "system_minimum_free_bytes": int(request.get("minimum_free_bytes") or 0),
+        "destination_path": str(destination_path),
+        "destination_free_bytes": destination.free,
+        "destination_minimum_free_bytes": destination_floor,
+    }
+
+
+def capacity_block(state, *, start_headroom=0):
+    required = state["system_minimum_free_bytes"] + int(start_headroom)
+    if required and state["system_free_bytes"] < required:
+        return (f"system/pagefile reserve: {state['system_free_bytes']} free bytes is below "
+                f"{required} required")
+    if (state["destination_minimum_free_bytes"]
+            and state["destination_free_bytes"] < state["destination_minimum_free_bytes"]):
+        return (f"render destination reserve: {state['destination_free_bytes']} free bytes is below "
+                f"{state['destination_minimum_free_bytes']} required")
+    return ""
+
+
 def probe(path):
     result = subprocess.run(["ffprobe", "-v", "error", "-show_streams",
         "-show_format", "-of", "json", str(path)], check=True, capture_output=True, text=True)
@@ -329,13 +360,14 @@ async def execute(request, client):
         state["phase"] = "submitting"; write(state_path, state)
         state["job_id"] = (await client.call("render", "add_job"))["job_id"]
         state["phase"] = "queued"; write(state_path, state)
-    reserve = int(request.get("minimum_free_bytes") or 0)
     start_headroom = int(request.get("start_headroom_bytes") or 0)
-    available = shutil.disk_usage(directory).free
-    if reserve and available < reserve + start_headroom:
-        raise RuntimeError(
-            f"Resolve capacity hold: {available} free bytes is below "
-            f"{reserve + start_headroom} required before render start")
+    try:
+        capacity = capacity_state(request, directory)
+    except OSError as exc:
+        raise RuntimeError("Resolve capacity hold before render start: capacity telemetry unavailable") from exc
+    blocked = capacity_block(capacity, start_headroom=start_headroom)
+    if blocked:
+        raise RuntimeError(f"Resolve capacity hold before render start: {blocked}")
     status = await client.call("render", "get_job_status", job_id=state["job_id"])
     if status["JobStatus"] in {"Ready", "Cancelled"}:
         await client.call("render", "start", job_ids=[state["job_id"]], interactive=False)
@@ -348,15 +380,19 @@ async def execute(request, client):
             break
         if status["JobStatus"] not in {"Rendering", "Ready"}:
             raise RuntimeError("Resolve job failed/stopped; retained its exact job ID")
-        available = shutil.disk_usage(directory).free
-        if reserve and available < reserve:
+        try:
+            capacity = capacity_state(request, directory)
+            blocked = capacity_block(capacity)
+        except OSError as exc:
+            capacity = {"telemetry_error": type(exc).__name__}
+            blocked = "capacity telemetry unavailable during owned render"
+        if blocked:
             await client.call("render", "stop")
             stopped = await client.call("render", "is_rendering")
             saved = await client.call("project_manager", "save")
             write(directory / "capacity-hold.json", {
                 "schema": "planexium-resolve-capacity-hold-v1",
-                "job_id": state["job_id"], "free_bytes": available,
-                "minimum_free_bytes": reserve,
+                "job_id": state["job_id"], **capacity, "reason": blocked,
                 "rendering_after_stop": stopped["rendering"],
                 "project_saved": bool(saved.get("success")),
             })
@@ -364,7 +400,7 @@ async def execute(request, client):
                 raise RuntimeError("Resolve capacity hold could not verify a safe stop")
             if not saved.get("success"):
                 raise RuntimeError("Resolve capacity hold could not verify the owned project save")
-            raise RuntimeError("Resolve capacity hold stopped the owned render below disk reserve")
+            raise RuntimeError(f"Resolve capacity hold stopped the owned render: {blocked}")
         if time.monotonic() > deadline:
             raise TimeoutError("Resolve job still in flight; resume this job, never duplicate it")
         await asyncio.sleep(5)
@@ -441,7 +477,12 @@ def finish(root, settings, shots, family):
         "frames": frames, "project": "PLANEXIUM_"+signature[:20], "server": str(server),
         "python": str(python), "timeout": settings.get("timeout", 14400),
         "minimum_free_bytes": settings.get("minimum_free_bytes", 0),
-        "start_headroom_bytes": settings.get("start_headroom_bytes", 0)}
+        "start_headroom_bytes": settings.get("start_headroom_bytes", 0),
+        "system_reserve_path": settings.get("system_reserve_path", "C:/"),
+        "destination_reserve_path": settings.get("destination_reserve_path", str(directory)),
+        "destination_minimum_free_bytes": settings.get("destination_minimum_free_bytes", 0),
+        "destination_minimum_free_fraction": settings.get("destination_minimum_free_fraction", 0),
+        "estimated_remaining_output_bytes": max(picture.stat().st_size * 4, 1_073_741_824)}
     if settings.get("bridge_config"):
         request["bridge_config"]=settings["bridge_config"]
     if settings.get("autostart"):

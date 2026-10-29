@@ -40,6 +40,9 @@
     "timeout": 14400,
     "minimum_free_bytes": 57982058496,
     "start_headroom_bytes": 34359738368,
+    "system_reserve_path": "C:/",
+    "destination_minimum_free_bytes": 21474836480,
+    "destination_minimum_free_fraction": 0.1,
     "bridge_config": "C:/Users/pc/.config/davinci-resolve-mcp/bridge.json",
     "autostart": {
       "enabled": true,
