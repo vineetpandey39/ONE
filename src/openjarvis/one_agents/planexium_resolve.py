@@ -479,13 +479,22 @@ async def release_owned(request, client):
 
 def wait_for_resolve_exit(timeout=90):
     """Do not let a following segment race an acknowledged-but-live Resolve."""
-    import psutil
     deadline = time.monotonic()+timeout
-    while any((process.info.get("name") or "").casefold() == "resolve.exe"
-              for process in psutil.process_iter(["name"])):
+    while _resolve_process_running():
         if time.monotonic() > deadline:
             raise RuntimeError("Resolve quit was acknowledged but process exit was not verified")
         time.sleep(.5)
+
+
+def _resolve_process_running():
+    """Dependency-free Windows process probe for the isolated MCP environment."""
+    result = subprocess.run(
+        ["tasklist", "/FI", "IMAGENAME eq Resolve.exe", "/FO", "CSV", "/NH"],
+        capture_output=True, text=True, timeout=15, check=False)
+    if result.returncode:
+        raise RuntimeError("Could not verify whether Resolve exited")
+    return any(line.strip().casefold().startswith('"resolve.exe"')
+               for line in result.stdout.splitlines())
 
 
 async def release_owned_if_idle(request, client):
@@ -584,7 +593,7 @@ def _video_signature(path):
 def segment_seed_valid(seed, picture, composition_path, start, frames):
     source = Path(seed.get("output") or "")
     proof_comp = source.with_name("PLANEXIUM.comp")
-    proof_picture = source.with_name("prepared.mp4")
+    proof_picture = Path(seed.get("source") or source.with_name("prepared.mp4"))
     composition_matches = seed.get("composition_sha256") == sha(composition_path)
     if (not composition_matches and proof_comp.is_file() and proof_picture.is_file()
             and seed.get("composition_sha256") == sha(proof_comp)
@@ -663,6 +672,20 @@ def finish_segmented(root, settings, shots, family):
         comp, beats = composition(prepared, frames, part["shots"], family, allow_identity=True)
         comp_path = directory/"PLANEXIUM.comp"
         comp_path.write_text(comp, encoding="utf-8")
+        owner_path = directory/"owner.json"
+        owner = json.loads(owner_path.read_text()) if owner_path.exists() else {}
+        if output.exists() and owner.get("phase") == "rendered" and owner.get("job_id"):
+            # The render may have completed and exported before a release probe
+            # failed. Admit it only after the same exact technical validation;
+            # never submit a duplicate Resolve job for a completed segment.
+            validate_output(output, count, require_audio=False)
+            row = {"schema":"planexium-resolve-segment-v1", "signature":signature,
+                   "scene":scene, "start_frame":start, "frames":count,
+                   "sha256":sha(output), "beats":beats, "identity":not bool(beats),
+                   "job_id":owner["job_id"], "recovered_completed_output":True}
+            write(receipt_path, row)
+            outputs.append(output); all_beats.extend(beats); receipts.append(row)
+            continue
         seed = next((row for row in seeds if int(row.get("scene", -1)) == scene), None)
         if seed:
             source = Path(seed["output"])
