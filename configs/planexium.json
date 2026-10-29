@@ -34,12 +34,18 @@
     "fallback_providers": ["Pexels", "Pixabay"]
   },
   "resolve": {
+    "segmented": true,
+    "segmented_work_root": "F:/PLANEXIUM-agent/segments",
     "server": "C:\\Users\\pc\\Documents\\Codex\\2026-10-16\\mission-planexium-floor-12-architecture-discovery\\work\\resolve-mcp\\src\\server.py",
     "python": "C:\\Users\\pc\\Documents\\Codex\\2026-10-16\\mission-planexium-floor-12-architecture-discovery\\work\\resolve-mcp\\venv\\Scripts\\python.exe",
     "work_root": "C:/Users/pc/Movies/PLANEXIUM-agent",
     "timeout": 14400,
     "minimum_free_bytes": 57982058496,
     "start_headroom_bytes": 34359738368,
+    "segmented_start_headroom_bytes": 8589934592,
+    "minimum_commit_headroom_bytes": 8589934592,
+    "segmented_output_reserve_bytes": 6442450944,
+    "final_copy_reserve_bytes": 3221225472,
     "system_reserve_path": "C:/",
     "destination_minimum_free_bytes": 21474836480,
     "destination_minimum_free_fraction": 0.1,

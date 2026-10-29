@@ -74,13 +74,30 @@ def capacity_state(request, directory):
         int(request.get("destination_minimum_free_bytes") or 0),
         int(destination.total * float(request.get("destination_minimum_free_fraction") or 0)),
     ) + int(request.get("estimated_remaining_output_bytes") or 0)
-    return {
+    state = {
         "system_path": str(system_path), "system_free_bytes": system.free,
         "system_minimum_free_bytes": int(request.get("minimum_free_bytes") or 0),
         "destination_path": str(destination_path),
         "destination_free_bytes": destination.free,
         "destination_minimum_free_bytes": destination_floor,
     }
+    minimum_commit = int(request.get("minimum_commit_headroom_bytes") or 0)
+    if minimum_commit:
+        import ctypes
+        from ctypes import wintypes
+        class PerformanceInformation(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD)] + [(name, ctypes.c_size_t) for name in (
+                "CommitTotal", "CommitLimit", "CommitPeak", "PhysicalTotal",
+                "PhysicalAvailable", "SystemCache", "KernelTotal", "KernelPaged",
+                "KernelNonpaged", "PageSize")] + [(name, wintypes.DWORD) for name in (
+                "HandleCount", "ProcessCount", "ThreadCount")]
+        info = PerformanceInformation()
+        info.cb = ctypes.sizeof(info)
+        if not ctypes.windll.psapi.GetPerformanceInfo(ctypes.byref(info), info.cb):
+            raise OSError("GetPerformanceInfo failed")
+        state.update(commit_free_bytes=(info.CommitLimit-info.CommitTotal)*info.PageSize,
+                     minimum_commit_headroom_bytes=minimum_commit)
+    return state
 
 
 def capacity_block(state, *, start_headroom=0):
@@ -92,6 +109,10 @@ def capacity_block(state, *, start_headroom=0):
             and state["destination_free_bytes"] < state["destination_minimum_free_bytes"]):
         return (f"render destination reserve: {state['destination_free_bytes']} free bytes is below "
                 f"{state['destination_minimum_free_bytes']} required")
+    if (state.get("minimum_commit_headroom_bytes")
+            and state.get("commit_free_bytes", 0) < state["minimum_commit_headroom_bytes"]):
+        return (f"system commit reserve: {state.get('commit_free_bytes', 0)} free bytes is below "
+                f"{state['minimum_commit_headroom_bytes']} required")
     return ""
 
 
@@ -448,6 +469,19 @@ async def release_owned(request, client):
     await client.call("resolve_control", "quit")
 
 
+async def release_owned_if_idle(request, client):
+    """Best-effort failure cleanup; never close an active or foreign project."""
+    current = await client.call("project_manager", "get_current")
+    if current.get("name") != request["project"]:
+        return False
+    if (await client.call("render", "is_rendering"))["rendering"]:
+        return False
+    await client.call("project_manager", "save")
+    await client.call("project_manager", "close")
+    await client.call("resolve_control", "quit")
+    return True
+
+
 async def worker(request):
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
@@ -472,7 +506,19 @@ async def worker(request):
                     if current.get("name") and not current["name"].startswith("PLANEXIUM_"):
                         raise RuntimeError("Another Resolve project is open; leave it untouched")
                 else:
-                    await execute(request, client)
+                    try:
+                        await execute(request, client)
+                    except BaseException:
+                        if request.get("release_after"):
+                            try:
+                                released = await release_owned_if_idle(request, client)
+                                write(Path(request["directory"])/"release.json",
+                                      {"released_after_failure":released})
+                            except Exception as release_error:
+                                write(Path(request["directory"])/"release.json",
+                                      {"released_after_failure":False,
+                                       "error":type(release_error).__name__})
+                        raise
                     if request.get("release_after"):
                         await release_owned(request, client)
 
@@ -491,8 +537,135 @@ def preflight(root, settings):
         raise RuntimeError("Resolve startup/preflight blocked; inspect startup-health.json and resume the mission")
 
 
+def _run_segment_worker(python, request_path, log_path, progress_path, root, scene):
+    request = json.loads(Path(request_path).read_text(encoding="utf-8"))
+    with Path(log_path).open("a", encoding="utf-8") as log:
+        child = subprocess.Popen([str(python), str(Path(__file__).resolve()), str(request_path)],
+                                 stdout=log, stderr=subprocess.STDOUT,
+                                 env=isolated_environment(request))
+        while child.poll() is None:
+            detail_path = Path(request["directory"])/"progress.json"
+            detail = json.loads(detail_path.read_text()) if detail_path.exists() else {"status":"connecting"}
+            write(progress_path, {"status":"resolve_fusion_segment", "scene":scene,
+                "detail":f"Resolve/Fusion scene {scene}: {detail['status']} ({detail.get('percent',0)}%)"})
+            time.sleep(3)
+        if child.returncode:
+            raise RuntimeError(f"Resolve/Fusion scene {scene} blocked; exact segment receipt retained")
+
+
+def _video_signature(path):
+    video = next(s for s in probe(path)["streams"] if s["codec_type"] == "video")
+    return {key: video.get(key) for key in (
+        "codec_name", "codec_tag_string", "profile", "width", "height", "pix_fmt", "level",
+        "avg_frame_rate", "time_base", "color_range", "color_space", "color_transfer",
+        "color_primaries", "extradata_size")}
+
+
+def finish_segmented(root, settings, shots, family):
+    """Render scene-filtered Fusion projects sequentially, then mux audio once."""
+    required = ("minimum_free_bytes", "system_reserve_path",
+                "destination_minimum_free_bytes", "destination_minimum_free_fraction",
+                "minimum_commit_headroom_bytes", "segmented_work_root",
+                "segmented_output_reserve_bytes", "final_copy_reserve_bytes")
+    missing = [key for key in required if settings.get(key) in (None, "")]
+    if missing:
+        raise RuntimeError("Segmented Resolve guard configuration is incomplete: "+", ".join(missing))
+    root, work = Path(root), Path(root)/"edit"
+    picture, soundtrack = work/"master.mp4", work/"soundtrack.m4a"
+    data = probe(picture)
+    frames = int(next(s for s in data["streams"] if s["codec_type"] == "video")["nb_frames"])
+    partitions = scene_partitions(shots, frames)
+    server, python = Path(settings["server"]), Path(settings["python"])
+    if not server.is_file() or not python.is_file() or not soundtrack.is_file():
+        raise RuntimeError("Segmented Resolve inputs are incomplete; no fallback")
+    signature = hashlib.sha256(json.dumps({"picture":sha(picture), "shots":shots,
+        "family":family, "code":sha(__file__), "server":sha(server), "mode":"scene-filtered-v1"},
+        sort_keys=True).encode()).hexdigest()
+    base = Path(settings["segmented_work_root"])/signature[:20]
+    base.mkdir(parents=True, exist_ok=True)
+    prepared = base/"prepared.mp4"
+    if not prepared.exists(): shutil.copy2(picture, prepared)
+    if sha(prepared) != sha(picture):
+        raise RuntimeError("Segmented Resolve staging integrity mismatch")
+    outputs, all_beats, receipts = [], [], []
+    for part in partitions:
+        scene, start, count = part["scene"], part["start_frame"], part["frames"]
+        directory = base/f"scene-{scene:02d}"
+        directory.mkdir(parents=True, exist_ok=True)
+        output = directory/f"scene-{scene:02d}.mp4"
+        receipt_path = directory/"segment-receipt.json"
+        prior = json.loads(receipt_path.read_text()) if receipt_path.exists() else {}
+        if (output.exists() and prior.get("signature") == signature
+                and prior.get("sha256") == sha(output) and prior.get("frames") == count):
+            outputs.append(output); all_beats.extend(prior.get("beats") or []); receipts.append(prior)
+            continue
+        comp, beats = composition(prepared, frames, part["shots"], family, allow_identity=True)
+        comp_path = directory/"PLANEXIUM.comp"
+        comp_path.write_text(comp, encoding="utf-8")
+        request = {"directory":str(directory), "picture":str(prepared),
+            "composition":str(comp_path), "frames":frames, "segment_start_frame":start,
+            "segment_frames":count, "custom_name":output.stem, "export_audio":False,
+            "release_after":True, "project":f"PLANEXIUM_{signature[:12]}_S{scene:02d}",
+            "server":str(server), "python":str(python), "timeout":settings.get("timeout",14400),
+            "minimum_free_bytes":settings["minimum_free_bytes"],
+            "start_headroom_bytes":settings.get("segmented_start_headroom_bytes",
+                                                  settings.get("start_headroom_bytes",0)),
+            "minimum_commit_headroom_bytes":settings["minimum_commit_headroom_bytes"],
+            "system_reserve_path":settings["system_reserve_path"],
+            "destination_reserve_path":str(base),
+            "destination_minimum_free_bytes":settings["destination_minimum_free_bytes"],
+            "destination_minimum_free_fraction":settings["destination_minimum_free_fraction"],
+            "estimated_remaining_output_bytes":max(
+                int(picture.stat().st_size*count/frames*2),
+                int(settings["segmented_output_reserve_bytes"]))}
+        for optional in ("bridge_config", "autostart", "work_root"):
+            if settings.get(optional) is not None: request[optional] = settings[optional]
+        request_path = directory/"request.json"; write(request_path, request)
+        _run_segment_worker(python, request_path, work/"resolve-segmented.log",
+                            work/"render-progress.json", root, scene)
+        validate_output(output, count, require_audio=False)
+        row = {"schema":"planexium-resolve-segment-v1", "signature":signature,
+               "scene":scene, "start_frame":start, "frames":count, "sha256":sha(output),
+               "beats":beats, "identity":not bool(beats),
+               "job_id":json.loads((directory/"owner.json").read_text())["job_id"]}
+        write(receipt_path, row)
+        outputs.append(output); all_beats.extend(beats); receipts.append(row)
+    signatures = [_video_signature(path) for path in outputs]
+    if len({json.dumps(row, sort_keys=True) for row in signatures}) != 1:
+        raise RuntimeError("Resolve segments are not stream-copy compatible; retained without re-encode")
+    assembly_need = picture.stat().st_size*2 + int(settings["segmented_output_reserve_bytes"])
+    if shutil.disk_usage(base).free < assembly_need:
+        raise RuntimeError("Segmented Resolve assembly capacity hold; segment outputs retained")
+    listing = base/"concat.txt"
+    listing.write_text("\n".join("file '"+p.as_posix().replace("'","'\\''")+"'" for p in outputs),
+                       encoding="utf-8")
+    video = base/"segmented-video.mp4"
+    subprocess.run(["ffmpeg","-y","-v","error","-f","concat","-safe","0","-i",str(listing),
+                    "-c","copy",str(video)], check=True)
+    validate_output(video, frames, require_audio=False)
+    assembled = base/"resolve-master.mp4"
+    subprocess.run(["ffmpeg","-y","-v","error","-i",str(video),"-i",str(soundtrack),
+                    "-map","0:v:0","-map","1:a:0","-c","copy","-frames:v",str(frames),
+                    "-movflags","+faststart",str(assembled)], check=True)
+    validate_output(assembled, frames)
+    final_need = assembled.stat().st_size + int(settings["final_copy_reserve_bytes"])
+    if shutil.disk_usage(work).free < final_need:
+        raise RuntimeError("Segmented Resolve final-copy capacity hold; assembled master retained")
+    destination = work/"resolve-master.mp4"; shutil.copy2(assembled, destination)
+    destination.replace(picture)
+    receipt_dir = work/"resolve-segments"; receipt_dir.mkdir(exist_ok=True)
+    for path in base.glob("scene-*/project.drp"):
+        shutil.copy2(path, receipt_dir/f"{path.parent.name}.drp")
+    write(work/"resolve-receipt.json", {"backend":"resolve_fusion_segmented",
+        "signature":signature, "master_sha256":sha(picture), "frames":frames,
+        "segments":receipts, "native_fusion_beats":all_beats,
+        "weekday_format":family, "public_publish_authorized":False})
+
+
 def finish(root, settings, shots, family):
     """Called inside the existing owned render child, before final whole-file QC."""
+    if settings.get("segmented"):
+        return finish_segmented(root, settings, shots, family)
     root = Path(root)
     work = root/"edit"
     picture = work/"master.mp4"
