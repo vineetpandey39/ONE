@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import time
@@ -582,11 +583,41 @@ def _video_signature(path):
 
 def segment_seed_valid(seed, picture, composition_path, start, frames):
     source = Path(seed.get("output") or "")
+    proof_comp = source.with_name("PLANEXIUM.comp")
+    proof_picture = source.with_name("prepared.mp4")
+    composition_matches = seed.get("composition_sha256") == sha(composition_path)
+    if (not composition_matches and proof_comp.is_file() and proof_picture.is_file()
+            and seed.get("composition_sha256") == sha(proof_comp)
+            and seed.get("source_sha256") == sha(proof_picture)):
+        composition_matches = (_canonical_seed_comp(proof_comp, proof_picture)
+                               == _canonical_seed_comp(composition_path, picture))
     return (seed.get("source_sha256") == sha(picture)
         and int(seed.get("start_frame", -1)) == int(start)
         and int(seed.get("frames", -1)) == int(frames)
-        and seed.get("composition_sha256") == sha(composition_path)
+        and composition_matches
         and source.is_file() and seed.get("output_sha256") == sha(source))
+
+
+def _canonical_seed_comp(comp_path, picture_path):
+    text = Path(comp_path).read_text(encoding="utf-8").replace("\r\n", "\n")
+    source = Path(picture_path).as_posix()
+    if source not in text:
+        raise ValueError("Composition does not bind its verified source picture")
+    text = text.replace(source, "VERIFIED_SOURCE")
+    # Preserve graph topology with a one-to-one definition-order mapping. Only
+    # tool definitions and SourceOp references are rewritten; free text,
+    # expressions and timing numbers remain byte-significant.
+    token = r'(?:Beat\d+(?:RuleMask|Mask|Plate|Text|Rule)|Merge\d+)'
+    definitions = re.findall(rf'({token})=', text)
+    if len(definitions) != len(set(definitions)):
+        raise ValueError("Composition contains duplicate tool identifiers")
+    mapping = {name: f"Tool{index:03d}" for index, name in enumerate(definitions)}
+    references = re.findall(rf'SourceOp="({token})"', text)
+    if any(name not in mapping for name in references):
+        raise ValueError("Composition contains an unresolved SourceOp reference")
+    text = re.sub(rf'({token})=', lambda m: mapping[m.group(1)] + "=", text)
+    return re.sub(rf'SourceOp="({token})"',
+                  lambda m: f'SourceOp="{mapping[m.group(1)]}"', text)
 
 
 def finish_segmented(root, settings, shots, family):
