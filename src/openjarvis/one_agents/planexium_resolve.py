@@ -352,14 +352,18 @@ async def execute(request, client):
         if reserve and available < reserve:
             await client.call("render", "stop")
             stopped = await client.call("render", "is_rendering")
+            saved = await client.call("project_manager", "save")
             write(directory / "capacity-hold.json", {
                 "schema": "planexium-resolve-capacity-hold-v1",
                 "job_id": state["job_id"], "free_bytes": available,
                 "minimum_free_bytes": reserve,
                 "rendering_after_stop": stopped["rendering"],
+                "project_saved": bool(saved.get("success")),
             })
             if stopped["rendering"]:
                 raise RuntimeError("Resolve capacity hold could not verify a safe stop")
+            if not saved.get("success"):
+                raise RuntimeError("Resolve capacity hold could not verify the owned project save")
             raise RuntimeError("Resolve capacity hold stopped the owned render below disk reserve")
         if time.monotonic() > deadline:
             raise TimeoutError("Resolve job still in flight; resume this job, never duplicate it")
