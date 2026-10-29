@@ -1,13 +1,12 @@
-"""Finish Sonia on a thumbnail background: clear skin and a glow outline around her, before the hook is set.
+"""Finish Sonia on a thumbnail background with identity-safe natural skin cleanup.
 
-The Chairman's standard (2026-10-09): her face must not show acne, and she must stand out from the background with
-an outline glow. ChatGPT copies spots from the reference photo and gives only a faint rim light, so both are done
-here, deterministically and identity-safe:
+The channel standard: temporary acne should be softened without changing Sonia's identity. ChatGPT may copy spots
+from the reference photo, so compact blemish cleanup is done here deterministically and identity-safely:
 
   - clear skin: inside each detected face, an edge-preserving smoothing is blended in. Spots and uneven texture
     soften, while eyes, brows, lips and the face's outline (strong edges) stay as they are;
-  - glow outline: her silhouette (an ISNet matte, run with the onnxruntime already installed) is dilated into a
-    white rim with a soft glow behind it.
+  - no automatic glow: the old silhouette glow could become a white veil around Sonia or her hand. Subject
+    separation now belongs to the generated lighting and composition, never a post-process white layer.
 
 Each step is skipped, and says so, when its model or detector is missing: a thumbnail is never refused for a retouch.
 """
@@ -248,15 +247,12 @@ def outline_glow(image: Image.Image, mask: Image.Image, *, spread: int = 34, str
 
 
 def retouch(base: Path, out: Path) -> dict[str, Any]:
-    """Clear skin, then the glow outline. Returns what was done; the output always exists."""
+    """Clear compact blemishes and lightly balance the face; never add a white glow or face-wide blur."""
     image = Image.open(base).convert("RGB")
     found = faces(image)
     image, face_count = clear_skin(image)
     image = brighten_under_eyes(image, found[0] if found else None)
     image = natural_face_finish(image, found[0] if found else None)
-    mask = subject_mask(image)
-    if mask is not None and mask.getbbox():
-        image = outline_glow(image, mask, face=found[0] if found else None)
     out.parent.mkdir(parents=True, exist_ok=True)
     image.save(out, "PNG", optimize=True)
     return {
@@ -264,5 +260,5 @@ def retouch(base: Path, out: Path) -> dict[str, Any]:
         "skin_cleared_faces": face_count,
         "face_lighting": bool(found),
         "natural_makeup": bool(found),
-        "glow": mask is not None and bool(mask.getbbox()),
+        "glow": False,
     }

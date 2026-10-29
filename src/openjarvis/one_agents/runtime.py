@@ -6317,6 +6317,29 @@ def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
     if payload.get("brand") == "origin_to_ovation":
         from openjarvis.one_agents.origin_to_ovation import run_stage
         return run_stage(job, enqueue=enqueue_job)
+    if (payload.get("brand") == "sonia_travel_vlogs"
+            and payload.get("stage") == "thumbnail_editorial_approval"):
+        from openjarvis.one_agents.ares_thumbnail import promote_editorial_approval
+
+        root = Path(str(payload.get("asset_root") or ""))
+        source = Path(str(payload.get("thumbnail") or ""))
+        if not root.is_dir() or not source.is_file():
+            raise RuntimeError("ARES received an incomplete editorial-thumbnail approval")
+        stages.worker_confirms_receipt("ares", "Received the user's approved Sonia thumbnail")
+        try:
+            stages.set_stage("ares", stages.EXECUTING,
+                             "Normalising and hash-binding the approved thumbnail for ECHO")
+            receipt = promote_editorial_approval(
+                root, source, approved_by=str(payload.get("approved_by") or "user"),
+                note=str(payload.get("note") or ""),
+            )
+            stages.set_stage("ares", stages.CARRYING_TO_HEAD,
+                             "Approved thumbnail is bound to the normal ECHO upload path")
+            return {"agent": "ARES", "stage": "thumbnail_editorial_approval",
+                    "status": "approved", "thumbnail": receipt["path"],
+                    "thumbnail_sha256": receipt["sha256"], "published": False}
+        finally:
+            stages.clear_stage("ares")
     # LinkedIn Authority: the one channel Floor 3 owns (Chairman, 2026-10-13).
     _task_text = str(job.get("task") or "")
     _li = floors_bridge.load("floor_03_growth", "linkedin_authority")

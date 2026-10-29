@@ -19,6 +19,9 @@ from openjarvis.one_agents import thumbnail_compose, thumbnail_retouch
 PROCESS = "Sonia YATRA - Thumbnail"
 TERMINAL = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
+UNSAFE_STANDALONE_ROUTE_CLAIMS = {
+    "DIRECT", "DIRECT FLIGHT", "NONSTOP", "NON STOP", "NON-STOP", "NEW ROUTE",
+}
 
 EXPERIMENT_FORMATS = (
     {"name": "Single hero", "sonia_expression": "genuinely surprised, raised brows, alert eyes",
@@ -293,13 +296,102 @@ def experiment_variants(thumb: dict[str, Any]) -> list[dict[str, Any]]:
     """
     supplied = thumb.get("variants") or []
     anchor = supplied[0] if supplied else {}
+    # A short claim word can outscore the truthful route because it is larger.
+    # Prefer a supplied neutral origin/destination hook whenever another
+    # direction says only DIRECT/NONSTOP/NEW ROUTE.  The route is already part
+    # of the approved package; this does not infer or invent geography.
+    neutral_route = next((str(v.get("text") or "").strip() for v in supplied
+                          if "→" in str(v.get("text") or "")
+                          or " TO " in str(v.get("text") or "").upper()), "")
     variants = []
     for index, fmt in enumerate(EXPERIMENT_FORMATS):
         source = supplied[index] if index < len(supplied) else anchor
+        text = str(source.get("text") or anchor.get("text") or thumb.get("text") or "WORTH IT?").strip()
+        if neutral_route and text.upper() in UNSAFE_STANDALONE_ROUTE_CLAIMS:
+            text = neutral_route
         variants.append({**source, **fmt,
                          "left_usp": source.get("left_usp") or anchor.get("left_usp") or "destination context",
-                         "text": source.get("text") or anchor.get("text") or thumb.get("text") or "WORTH IT?"})
+                         "text": text})
     return variants
+
+
+def promote_editorial_approval(root: Path, source: Path, *, approved_by: str,
+                               note: str = "") -> dict[str, Any]:
+    """Make a user's chosen thumbnail the hash-bound canonical ARES winner.
+
+    The source stays in the video's thumbnail folder.  ARES normalises it to
+    YouTube's 1280x720 and under-2-MiB contract, writes final.png atomically,
+    and replaces the automatic receipt with an explicit editorial receipt.
+    ECHO therefore uploads the approved pixels through the normal agent path;
+    no operator-side file swap is needed.
+    """
+    from PIL import Image, ImageOps
+
+    root = Path(root).resolve()
+    source = Path(source).resolve()
+    thumb_dir = (root / "thumbnail").resolve()
+    if source.parent != thumb_dir or source.suffix.lower() not in IMAGE_SUFFIXES or not source.is_file():
+        raise RuntimeError("ARES editorial thumbnail must be an existing image in this video's thumbnail folder")
+    image = ImageOps.fit(ImageOps.exif_transpose(Image.open(source)).convert("RGB"),
+                         (1280, 720), method=Image.Resampling.LANCZOS)
+    staged = thumb_dir / "final.editorial.tmp.png"
+    image.save(staged, "PNG", optimize=True, compress_level=9)
+    if staged.stat().st_size >= 2 * 1024 * 1024:
+        # Palette reduction is deterministic and keeps a real PNG while
+        # satisfying YouTube's thumbnail size limit.
+        image.quantize(colors=256, method=Image.Quantize.MAXCOVERAGE).save(
+            staged, "PNG", optimize=True, compress_level=9
+        )
+    if staged.stat().st_size >= 2 * 1024 * 1024:
+        staged.unlink(missing_ok=True)
+        raise RuntimeError("ARES could not normalise the approved thumbnail below YouTube's 2 MiB limit")
+    final = thumb_dir / "final.png"
+    os.replace(staged, final)
+    digest = hashlib.sha256(final.read_bytes()).hexdigest()
+    try:
+        automatic = json.loads((thumb_dir / "thumbnail-receipt.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        automatic = {}
+    receipt = {
+        "schema": "sonia-thumbnail-editorial-approval/1",
+        "ok": True,
+        "source": "editorial_approval",
+        "path": str(final),
+        "sha256": digest,
+        "bytes": final.stat().st_size,
+        "size": [1280, 720],
+        "approved_by": str(approved_by or "user"),
+        "note": str(note or "")[:500],
+        "selected_source": str(source),
+        "automatic_winner": automatic.get("winner"),
+        "selection": "explicit user editorial approval; ECHO must upload this hash-bound canonical thumbnail",
+        "variants": [{"ok": True, "source": "editorial_approval", "path": str(final), "sha256": digest}],
+    }
+    for name in ("editorial-approval-receipt.json", "thumbnail-experiment.json", "thumbnail-receipt.json"):
+        path = thumb_dir / name
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, path)
+    return receipt
+
+
+def valid_editorial_approval(root: Path) -> dict[str, Any] | None:
+    """Return the bound editorial winner only while its canonical pixels are unchanged."""
+    root = Path(root)
+    receipt_path = root / "thumbnail" / "editorial-approval-receipt.json"
+    final = root / "thumbnail" / "final.png"
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if (receipt.get("schema") != "sonia-thumbnail-editorial-approval/1"
+            or receipt.get("source") != "editorial_approval" or not final.is_file()):
+        return None
+    if Path(str(receipt.get("path") or "")).resolve() != final.resolve():
+        return None
+    if str(receipt.get("sha256") or "") != hashlib.sha256(final.read_bytes()).hexdigest():
+        return None
+    return receipt
 
 
 def score_thumbnail(path: Path, qc: dict[str, Any], variant: dict[str, Any], *, portrait: bool = True) -> dict[str, Any]:
@@ -483,6 +575,12 @@ def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: 
     from openjarvis.one_agents.youtube_channels import SONIA
 
     SONIA.validate_record(pkg)
+    approved = valid_editorial_approval(package_path.parent.parent)
+    if approved:
+        # A user-approved winner is a completed ARES decision. Resuming LYRA
+        # must reuse it, not spend another image generation or overwrite it
+        # with an automatic score winner.
+        return approved
     variants = experiment_variants(pkg["thumbnail"])
     pkg["thumbnail"]["variants"] = variants
     package_path.write_text(json.dumps(pkg, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -324,6 +324,12 @@ def prepare_gate(package_path: Path) -> dict[str, Any]:
             receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             receipt = {}
+        if receipt.get("source") == "editorial_approval":
+            expected = str(receipt.get("sha256") or "")
+            actual = hashlib.sha256(canonical.read_bytes()).hexdigest()
+            if not expected or expected != actual or Path(str(receipt.get("path") or "")).resolve() != canonical.resolve():
+                blockers.append("editorial-approved thumbnail changed after ARES hash binding")
+                thumbnails = []
         sources = {str(v.get("source") or "") for v in receipt.get("variants") or [] if v.get("ok")}
         if sources and sources <= {"local_fallback"}:
             blockers.append("thumbnail is a local fallback: every ChatGPT variant failed "
