@@ -262,10 +262,15 @@ $oneAgent = if ($env:ONE_AGENT) { $env:ONE_AGENT } else { "react" }
 # now a stale backup -- visible in its own log -- instead of an offline ONE.
 # Set ONE_SYNC_ON_START=false to skip them entirely.
 if (($env:ONE_SYNC_ON_START -ne "false")) {
+    $privateSyncPause = Join-Path $oneRoot ".one-private-sync-paused"
     foreach ($syncPair in @(
         @{ Script = "sync-one-github.ps1";  Log = "one-sync-github.log" },
         @{ Script = "sync-one-private.ps1"; Log = "one-sync-private.log" }
     )) {
+        if ($syncPair.Script -eq "sync-one-private.ps1" -and
+                (Test-Path -LiteralPath $privateSyncPause)) {
+            continue
+        }
         $syncScript = Join-Path $oneRoot $syncPair.Script
         if (-not (Test-Path $syncScript)) { continue }
         try {
