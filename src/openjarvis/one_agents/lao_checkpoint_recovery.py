@@ -18,6 +18,33 @@ ENGINE_REPO = Path(r"C:\Users\pc\Documents\LAO\chatgpt-stream-repair")
 WORKER_ROOT = Path(r"C:\Users\pc\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\local-agent-mode-sessions\cb3dc5b9-a76c-45ff-bbcf-b330fe30c84a\21738b93-8e02-4c20-a83c-0abb35d85c72\local_374e1c90-a56c-4744-840b-8f0118a3547a\outputs\lao-platform\robot-worker")
 
 
+def _activate_engine_support() -> None:
+    """Atomically restore reviewed sibling modules required by workflow_engine."""
+    source = ENGINE_REPO / "obs_ws.py"
+    target = WORKER_ROOT / "obs_ws.py"
+    if not source.is_file():
+        raise RuntimeError("Reviewed LAO OBS support module is missing")
+    payload = source.read_bytes()
+    compile(payload, str(source), "exec")
+    if target.is_file() and target.read_bytes() == payload:
+        return
+    if target.is_file():
+        current = target.read_bytes()
+        backup = target.with_name("obs_ws.backup-" + hashlib.sha256(current).hexdigest()[:16] + ".py")
+        if not backup.exists():
+            backup.write_bytes(current)
+    fd, temporary = tempfile.mkstemp(prefix="obs-ws-deploy-", suffix=".py", dir=WORKER_ROOT)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def client():
     from openjarvis.tools.lao_orchestrator import _LaoClient, DEFAULT_LAO_BASE_URL
     result = _LaoClient(os.environ.get("LAO_BASE_URL", DEFAULT_LAO_BASE_URL),
@@ -212,6 +239,7 @@ def activate_engine(*, revision: str = ""):
     compile(expected, source_label, "exec")
     current = target.read_bytes()
     if current == expected:
+        _activate_engine_support()
         return hashlib.sha256(expected).hexdigest()
     revisions = subprocess.run(["git", "log", "--all", "--format=%H", "--", "workflow_engine.py"],
                                cwd=ENGINE_REPO, capture_output=True, text=True, check=True).stdout.splitlines()
@@ -233,6 +261,7 @@ def activate_engine(*, revision: str = ""):
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+    _activate_engine_support()
     return hashlib.sha256(target.read_bytes()).hexdigest()
 
 
