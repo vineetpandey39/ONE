@@ -2,6 +2,28 @@
 import re
 
 
+_THUMBNAIL_FILLER = {
+    'A', 'AN', 'THE', 'AND', 'OR', 'BUT', 'HOW', 'WHY', 'WHAT', 'WHERE',
+    'WHEN', 'WHO', 'DOES', 'DO', 'IS', 'ARE', 'THIS', 'THAT', 'IN', 'ON',
+    'OF', 'TO', 'FOR', 'WITH',
+}
+
+
+def _compact_thumbnail_hook(text):
+    """Reduce a model-authored hook to the validator's three-word contract.
+
+    Editorial generation is probabilistic, so a harmless fourth connective
+    must not abort an otherwise valid production.  Only display filler is
+    removed; the remaining words retain their original order and wording.
+    """
+    words = str(text or '').upper().split()
+    if len(words) <= 3:
+        return str(text or '')
+    content = [word for word in words if re.sub(r'[^A-Z0-9]', '', word) not in _THUMBNAIL_FILLER]
+    compact = content[:3]
+    return ' '.join(compact) if compact else ' '.join(words[:3])
+
+
 def repair_thumbnail_hooks(value, science):
     """Repair only a generic hook, using literal episode words already present in its own concept brief."""
     if not isinstance(value, dict):
@@ -14,6 +36,13 @@ def repair_thumbnail_hooks(value, science):
     eligible = episode - generic
     for concept in value.get('concepts') or []:
         original = str(concept.get('text') or '')
+        compact = _compact_thumbnail_hook(original)
+        if compact != original:
+            concept['text'] = compact
+            concept['text_repair'] = {'from': original, 'to': compact,
+                                      'policy': 'remove display filler and keep at most three literal words'}
+        else:
+            concept['text'] = original
         hook = set(re.findall(r'[a-z0-9]+', original.casefold())) - generic
         if hook & eligible:
             continue
