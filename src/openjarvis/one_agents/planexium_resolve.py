@@ -134,31 +134,6 @@ def validate_output(path, frames, *, require_audio=True):
     return data
 
 
-def prepare_cfr_source(picture, prepared, frames):
-    """Make frame ordinal equal presentation time before Fusion Loader reads it."""
-    picture, prepared = Path(picture), Path(prepared)
-    receipt_path = prepared.with_suffix(".source.json")
-    signature = hashlib.sha256(json.dumps({"source":sha(picture), "frames":int(frames),
-        "filter":"setpts=N/(30*TB)", "codec":"libx264-crf16"}, sort_keys=True).encode()).hexdigest()
-    prior = json.loads(receipt_path.read_text()) if receipt_path.exists() else {}
-    if prepared.exists() and prior.get("signature") == signature and prior.get("sha256") == sha(prepared):
-        validate_output(prepared, frames, require_audio=False)
-        return prepared
-    temporary = prepared.with_name(f".{prepared.stem}.{uuid.uuid4().hex}.mp4")
-    try:
-        subprocess.run(["ffmpeg","-y","-v","error","-i",str(picture),"-map","0:v:0","-an",
-            "-vf","setpts=N/(30*TB)","-frames:v",str(frames),"-c:v","libx264","-preset","fast",
-            "-crf","16","-pix_fmt","yuv420p","-r","30","-fps_mode","cfr",
-            "-movflags","+faststart",str(temporary)], check=True)
-        validate_output(temporary, frames, require_audio=False)
-        os.replace(temporary, prepared)
-        write(receipt_path, {"schema":"planexium-cfr-source-v1", "signature":signature,
-              "sha256":sha(prepared), "source_sha256":sha(picture), "frames":frames, "fps":"30/1"})
-        return prepared
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
 # These are typography layouts, not asserted scientific geometry.
 LAYOUTS = {
     "travel-dossier": (.28, .22, .043, (.51, .83, .89)),
@@ -605,6 +580,15 @@ def _video_signature(path):
         "color_primaries", "extradata_size")}
 
 
+def segment_seed_valid(seed, picture, composition_path, start, frames):
+    source = Path(seed.get("output") or "")
+    return (seed.get("source_sha256") == sha(picture)
+        and int(seed.get("start_frame", -1)) == int(start)
+        and int(seed.get("frames", -1)) == int(frames)
+        and seed.get("composition_sha256") == sha(composition_path)
+        and source.is_file() and seed.get("output_sha256") == sha(source))
+
+
 def finish_segmented(root, settings, shots, family):
     """Render scene-filtered Fusion projects sequentially, then mux audio once."""
     required = ("minimum_free_bytes", "system_reserve_path",
@@ -627,7 +611,12 @@ def finish_segmented(root, settings, shots, family):
         sort_keys=True).encode()).hexdigest()
     base = Path(settings["segmented_work_root"])/signature[:20]
     base.mkdir(parents=True, exist_ok=True)
-    prepared = prepare_cfr_source(picture, base/"prepared.mp4", frames)
+    prepared = base/"prepared.mp4"
+    if not prepared.exists(): shutil.copy2(picture, prepared)
+    if sha(prepared) != sha(picture):
+        raise RuntimeError("Segmented Resolve staging integrity mismatch")
+    seed_path = work/"resolve-segment-seeds.json"
+    seeds = json.loads(seed_path.read_text(encoding="utf-8")).get("segments", []) if seed_path.exists() else []
     outputs, all_beats, receipts = [], [], []
     for part in partitions:
         scene, start, count = part["scene"], part["start_frame"], part["frames"]
@@ -643,6 +632,20 @@ def finish_segmented(root, settings, shots, family):
         comp, beats = composition(prepared, frames, part["shots"], family, allow_identity=True)
         comp_path = directory/"PLANEXIUM.comp"
         comp_path.write_text(comp, encoding="utf-8")
+        seed = next((row for row in seeds if int(row.get("scene", -1)) == scene), None)
+        if seed:
+            source = Path(seed["output"])
+            if not segment_seed_valid(seed, picture, comp_path, start, count):
+                raise RuntimeError(f"Resolve seed lineage mismatch for scene {scene}; no implicit rerender")
+            validate_output(source, count, require_audio=False)
+            shutil.copy2(source, output)
+            row = {"schema":"planexium-resolve-segment-v1", "signature":signature,
+                   "scene":scene, "start_frame":start, "frames":count, "sha256":sha(output),
+                   "beats":beats, "identity":not bool(beats), "seeded":True,
+                   "seed_receipt":str(seed_path)}
+            write(receipt_path, row)
+            outputs.append(output); all_beats.extend(beats); receipts.append(row)
+            continue
         request = {"directory":str(directory), "picture":str(prepared),
             "composition":str(comp_path), "frames":frames, "segment_start_frame":start,
             "segment_frames":count, "custom_name":output.stem, "export_audio":False,
@@ -720,7 +723,11 @@ def finish(root, settings, shots, family):
         "family": family, "code": sha(__file__), "server": sha(server)}, sort_keys=True).encode()).hexdigest()
     directory = Path(settings["work_root"])/signature[:20]
     directory.mkdir(parents=True, exist_ok=True)
-    prepared = prepare_cfr_source(picture, directory/"prepared.mp4", frames)
+    prepared = directory/"prepared.mp4"
+    if not prepared.exists():
+        shutil.copy2(picture, prepared)
+    if sha(prepared) != sha(picture):
+        raise RuntimeError("Resolve staging integrity mismatch")
     comp, beats = composition(prepared, frames, shots, family)
     comp_path = directory/"PLANEXIUM.comp"
     comp_path.write_text(comp, encoding="utf-8")

@@ -34,7 +34,7 @@
     "fallback_providers": ["Pexels", "Pixabay"]
   },
   "resolve": {
-    "segmented": false,
+    "segmented": true,
     "segmented_work_root": "F:/PLANEXIUM-agent/segments",
     "server": "C:\\Users\\pc\\Documents\\Codex\\2026-10-16\\mission-planexium-floor-12-architecture-discovery\\work\\resolve-mcp\\src\\server.py",
     "python": "C:\\Users\\pc\\Documents\\Codex\\2026-10-16\\mission-planexium-floor-12-architecture-discovery\\work\\resolve-mcp\\venv\\Scripts\\python.exe",
