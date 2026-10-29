@@ -222,7 +222,7 @@ class ProductionServices:
         receipt = compose(base, chosen["text"], folder / "final.png",
                           primary=tuple(chosen.get("primary_colour", [255, 255, 255])),
                           accent=tuple(chosen.get("accent_colour", [255, 214, 0])),
-                          text_zone=0.50 if channel.brand == "planexium" else 0.38,
+                          text_zone=0.52 if channel.brand == "planexium" else 0.38,
                           min_font=84 if channel.brand == "planexium" else 96)
         if not receipt.get("qc", {}).get("ok"):
             raise RuntimeError("Original thumbnail failed composition QC")
