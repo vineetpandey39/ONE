@@ -329,8 +329,15 @@ async def execute(request, client):
         state["phase"] = "submitting"; write(state_path, state)
         state["job_id"] = (await client.call("render", "add_job"))["job_id"]
         state["phase"] = "queued"; write(state_path, state)
+    reserve = int(request.get("minimum_free_bytes") or 0)
+    start_headroom = int(request.get("start_headroom_bytes") or 0)
+    available = shutil.disk_usage(directory).free
+    if reserve and available < reserve + start_headroom:
+        raise RuntimeError(
+            f"Resolve capacity hold: {available} free bytes is below "
+            f"{reserve + start_headroom} required before render start")
     status = await client.call("render", "get_job_status", job_id=state["job_id"])
-    if status["JobStatus"] == "Ready":
+    if status["JobStatus"] in {"Ready", "Cancelled"}:
         await client.call("render", "start", job_ids=[state["job_id"]], interactive=False)
     deadline = time.monotonic()+request.get("timeout", 14400)
     while True:
@@ -341,6 +348,19 @@ async def execute(request, client):
             break
         if status["JobStatus"] not in {"Rendering", "Ready"}:
             raise RuntimeError("Resolve job failed/stopped; retained its exact job ID")
+        available = shutil.disk_usage(directory).free
+        if reserve and available < reserve:
+            await client.call("render", "stop")
+            stopped = await client.call("render", "is_rendering")
+            write(directory / "capacity-hold.json", {
+                "schema": "planexium-resolve-capacity-hold-v1",
+                "job_id": state["job_id"], "free_bytes": available,
+                "minimum_free_bytes": reserve,
+                "rendering_after_stop": stopped["rendering"],
+            })
+            if stopped["rendering"]:
+                raise RuntimeError("Resolve capacity hold could not verify a safe stop")
+            raise RuntimeError("Resolve capacity hold stopped the owned render below disk reserve")
         if time.monotonic() > deadline:
             raise TimeoutError("Resolve job still in flight; resume this job, never duplicate it")
         await asyncio.sleep(5)
@@ -415,7 +435,9 @@ def finish(root, settings, shots, family):
     comp_path.write_text(comp, encoding="utf-8")
     request = {"directory": str(directory), "picture": str(prepared), "composition": str(comp_path),
         "frames": frames, "project": "PLANEXIUM_"+signature[:20], "server": str(server),
-        "python": str(python), "timeout": settings.get("timeout", 14400)}
+        "python": str(python), "timeout": settings.get("timeout", 14400),
+        "minimum_free_bytes": settings.get("minimum_free_bytes", 0),
+        "start_headroom_bytes": settings.get("start_headroom_bytes", 0)}
     if settings.get("bridge_config"):
         request["bridge_config"]=settings["bridge_config"]
     if settings.get("autostart"):

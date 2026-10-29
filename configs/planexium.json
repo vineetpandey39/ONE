@@ -38,6 +38,8 @@
     "python": "C:\\Users\\pc\\Documents\\Codex\\2026-10-16\\mission-planexium-floor-12-architecture-discovery\\work\\resolve-mcp\\venv\\Scripts\\python.exe",
     "work_root": "C:/Users/pc/Movies/PLANEXIUM-agent",
     "timeout": 14400,
+    "minimum_free_bytes": 57982058496,
+    "start_headroom_bytes": 34359738368,
     "bridge_config": "C:/Users/pc/.config/davinci-resolve-mcp/bridge.json",
     "autostart": {
       "enabled": true,
