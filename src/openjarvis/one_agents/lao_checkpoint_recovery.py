@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 ENGINE_REPO = Path(r"C:\Users\pc\Documents\LAO\chatgpt-stream-repair")
-WORKER_ROOT = Path(r"C:\Users\pc\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\local-agent-mode-sessions\cb3dc5b9-a76c-45ff-bbcf-b330fe30c84a\21738b93-8e02-4c20-a83c-0abb35d85c72\local_374e1c90-a56c-4744-840b-8f0118a3547a\outputs\lao-platform\robot-worker")
+WORKER_ROOT = Path(os.environ.get("LAO_WORKER_ROOT") or r"E:\ONE-Suite\lao-robot\worker")
 
 
 def _activate_engine_support() -> None:
