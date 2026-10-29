@@ -283,6 +283,12 @@ def scene_partitions(shots, frames):
     return partitions
 
 
+def resolve_lock_path(request):
+    """All PLANEXIUM Resolve modes share one machine-level ownership lock."""
+    explicit = request.get("machine_lock_path")
+    return Path(explicit) if explicit else Path(request["directory"]).parent/"resolve.lock"
+
+
 @contextmanager
 def machine_lock(path):
     """OS releases this lock even if a worker dies. Never delete another lease."""
@@ -489,7 +495,7 @@ async def worker(request):
     params = StdioServerParameters(command=request["python"], args=[str(server)],
         cwd=str(server.parent.parent),
         env=isolated_environment(request))
-    with machine_lock(Path(request["directory"]).parent/"resolve.lock"):
+    with machine_lock(resolve_lock_path(request)):
         # This module is also executed as a file by the isolated MCP Python.
         if __package__:
             from .planexium_resolve_startup import ensure_ready
@@ -606,6 +612,7 @@ def finish_segmented(root, settings, shots, family):
             "composition":str(comp_path), "frames":frames, "segment_start_frame":start,
             "segment_frames":count, "custom_name":output.stem, "export_audio":False,
             "release_after":True, "project":f"PLANEXIUM_{signature[:12]}_S{scene:02d}",
+            "machine_lock_path":str(Path(settings["work_root"])/"resolve.lock"),
             "server":str(server), "python":str(python), "timeout":settings.get("timeout",14400),
             "minimum_free_bytes":settings["minimum_free_bytes"],
             "start_headroom_bytes":settings.get("segmented_start_headroom_bytes",
