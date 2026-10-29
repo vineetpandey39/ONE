@@ -127,6 +127,29 @@ def reuse_music(library, destination):
     return None
 
 
+def repair_envato_account_chooser(steps):
+    """Do not trust FedCM trigger success as proof that the web chooser closed.
+
+    Chrome can accept the Continue-with-Google trigger while leaving Google's
+    normal account chooser open.  The shared workflow used to skip its DOM
+    account click in that state and then wait a minute for Envato selectors
+    that could never appear.  A short optional expected-account click is safe
+    both ways: it selects the already-vault-bound account when the chooser is
+    visible and is a no-op after a genuine FedCM redirect.
+    """
+    repaired = False
+    for step in steps:
+        args = step.get('args', {}) if isinstance(step, dict) else {}
+        if step.get('action') == 'click_first' and args.get('as') == 'envato_expected_account_selected':
+            step.pop('when', None)
+            args['timeout_ms'] = 15000
+            step['optional'] = True
+            repaired = True
+    if not repaired:
+        raise ValueError('Envato workflow lacks the expected-account chooser fallback')
+    return steps
+
+
 def download_music(draft, steps, query, context, *, failure_limit=10):
     """Advance only past confirmed pre-download failures, preserving receipts."""
     limit=max(1,int(failure_limit))
@@ -137,8 +160,11 @@ def download_music(draft, steps, query, context, *, failure_limit=10):
         # expected Google/FedCM account, then authenticated-session proof).
         # Keep v1 receipts immutable: LAO correctly refuses to attach a
         # materially changed workflow to an older request checkpoint.
-        receipt=context.artifact('receipts/music-v2.json' if candidate==1
-            else f'receipts/music-v2-candidate-{candidate}.json')
+        # v3 makes the expected Google account DOM click an unconditional
+        # optional safety pass.  v2 failed before any paid download while its
+        # FedCM action incorrectly reported success with the chooser open.
+        receipt=context.artifact('receipts/music-v3.json' if candidate==1
+            else f'receipts/music-v3-candidate-{candidate}.json')
         resumed=receipt.is_file()
         inputs={'envatoQuery':query,'envatoQueryUrl':quote_plus(query),
             'assetFolder':context.mission_id,'resultIndex':str(candidate),'enablePaidDownload':True}
@@ -178,7 +204,7 @@ def acquire(root, tools):
         track=reuse_music(config.get('music_library',[]),music)
     if track is None:
         workflow=yaml.safe_load((lao/'yatra-music/workflow.yaml').read_text(encoding='utf-8'))
-        steps=workflow['steps']
+        steps=repair_envato_account_chooser(workflow['steps'])
         for step in steps:
             if step['action']=='open_browser':step['args'].update(provider_browser(ctx,'envato',profile_root=Path(config['browser_root'])))
             if step['action']=='download_file':step['args']['dest_dir']=str(music)
