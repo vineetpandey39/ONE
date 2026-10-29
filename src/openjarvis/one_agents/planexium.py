@@ -642,6 +642,25 @@ def run_job(job: dict) -> dict:
         from openjarvis.one_agents import runtime
         register_checkpoint_owner(str(job["id"]), context, runtime._connect)
     from openjarvis.one_agents.planexium_adapters import BUILD_SHA as ADAPTER_BUILD
+    if payload.get("resume_stage") == "package":
+        expected_master = str(payload.get("expected_master_sha256") or "")
+        render_receipt = json.loads(context.artifact("checkpoints/render.json").read_text(encoding="utf-8"))
+        master = context.artifact("edit/master.mp4")
+        qc_path = context.artifact("edit/qc-report.json")
+        sealed = render_receipt.get("files", {})
+        if (not re.fullmatch(r"[0-9a-f]{64}", expected_master)
+                or sealed.get("edit\\master.mp4") != expected_master
+                or _hash(master) != expected_master
+                or sealed.get("edit\\qc-report.json") != _hash(qc_path)):
+            raise ValueError("Package recovery requires the unchanged sealed render and QC artifacts")
+        qc = json.loads(qc_path.read_text(encoding="utf-8"))
+        if not isinstance(qc, list) or any(row.get("level") == "FAIL" for row in qc):
+            raise ValueError("Package recovery refuses a master whose sealed QC is not passing")
+        load = lambda relative: json.loads(context.artifact(relative).read_text(encoding="utf-8"))
+        return bound_pipeline(context, {**config, "_agent_job_id": job.get("id"),
+            "_production_build": {"pipeline": BUILD_SHA, "adapters": ADAPTER_BUILD}}).package(
+                load("science-plan.json"), load("narration/narration.segments.json"),
+                load("evidence.json"), {"master": str(master)})
     draft_path = context.artifact("script-draft.json")
     # A draft may be created before its writer has finished. Treat an empty
     # checkpoint as absent so the pipeline can use its normal writer path.

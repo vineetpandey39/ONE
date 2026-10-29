@@ -143,6 +143,10 @@ def validate_packaging(value, science):
 
 
 def apply_packaging(package, strategy, science):
+    # Cached editorial plans may predate a compositor-safe repair. Apply the
+    # same grounded normalization at packaging time so a thumbnail-only fix
+    # never mutates the render checkpoint or invalidates a verified master.
+    strategy = repair_thumbnail_hooks(strategy, science)
     strategy = validate_packaging(strategy, science)
     package['recommended_title'] = strategy['titles'][0]
     package['title_variants'] = strategy['titles']
