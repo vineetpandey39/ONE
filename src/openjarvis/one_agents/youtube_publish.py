@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import importlib.util
 import json
 import os
@@ -246,7 +247,11 @@ def ensure_localizations(package_path: Path, locales: tuple[str, ...] = REQUIRED
             return
         for attempt in (1, 2):
             try:
-                translated = localize.translate_package(pkg, locale)
+                translate_package = localize.translate_package
+                if "deadline" in inspect.signature(translate_package).parameters:
+                    translated = translate_package(pkg, locale, deadline=started + budget)
+                else:  # compatibility with older installed packages and narrow test doubles
+                    translated = translate_package(pkg, locale)
                 with lock:
                     fresh = json.loads(package_path.read_text(encoding="utf-8"))
                     fresh.setdefault("localizations", {})[locale] = translated
