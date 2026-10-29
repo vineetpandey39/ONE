@@ -60,6 +60,21 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
     for number, (scene, segment) in enumerate(zip(science['scenes'], voice['segments'], strict=True), 1):
         rows = []
         remaining = float(segment['seconds'])
+        # A reviewed commissioned figure may be explicitly bound to the scene
+        # opening when the narration identifies that exact image.  This keeps
+        # the evidence on screen at the claim instead of after generic motion.
+        opening_figures = [asset for asset in (article_assets or [])
+                           if asset.get('editorial_scene') == number
+                           and asset.get('timeline_position') == 'open']
+        if len(opening_figures) > 1:
+            raise ValueError(f'Scene {number} has multiple commissioned opening figures')
+        if opening_figures:
+            asset = opening_figures[0]
+            row = {'asset': {**asset, 'seconds': 3600}, 'kind': 'primary',
+                   'seconds': min(20.0, remaining)}
+            rows.append(row)
+            remaining -= row['seconds']
+            remember(asset)
         # Reserve the primary source for scenes explicitly describing it.
         if scene.get('visual_kind') == 'obs' and primary_is_video:
             seconds = min(8.0, remaining / 3, float(original['seconds']) - primary_cursor)
@@ -172,6 +187,8 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
                 # not let a globally available N159 detail or operations-room
                 # photo get consumed by an earlier, merely lexical match.
                 if asset.get('editorial_scene') not in (None, number):
+                    continue
+                if asset.get('timeline_position') == 'open':
                     continue
                 metadata = {'title': asset.get('title', ''),
                             'description': asset.get('caption', '')}

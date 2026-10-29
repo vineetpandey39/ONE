@@ -56,9 +56,11 @@ def _asset(root, asset):
         raise ValueError("Repair asset hash mismatch")
 
 
-def _validate_article_regions(articles, media):
-    """Derived commissioned-image regions must be real, unique and disjoint."""
-    parents = {asset.get("sha256") for scene in media.values()
+def _validate_article_regions(root, articles, media):
+    """Derived regions must be bounded, lossless crops of accepted evidence."""
+    from PIL import Image, ImageChops
+
+    parents = {asset.get("sha256"): asset for scene in media.values()
                for asset in scene.get("assets", []) if asset.get("sha256")}
     regions = {}
     for asset in articles:
@@ -74,6 +76,22 @@ def _validate_article_regions(articles, media):
             raise ValueError("Article detail needs integer crop coordinates") from exc
         if min(rectangle) < 0 or rectangle[2] <= 0 or rectangle[3] <= 0:
             raise ValueError("Article detail crop coordinates are invalid")
+        parent_path = Path(parents[parent]["path"]).resolve()
+        child_path = Path(asset["path"]).resolve()
+        if (not parent_path.is_relative_to(Path(root).resolve())
+                or not child_path.is_relative_to(Path(root).resolve())):
+            raise ValueError("Article detail derivation must stay inside its mission")
+        try:
+            with Image.open(parent_path) as parent_image, Image.open(child_path) as child_image:
+                x, y, width, height = rectangle
+                if x + width > parent_image.width or y + height > parent_image.height:
+                    raise ValueError("Article detail crop exceeds parent bounds")
+                expected = parent_image.convert("RGB").crop((x, y, x + width, y + height))
+                actual = child_image.convert("RGB")
+                if actual.size != expected.size or ImageChops.difference(actual, expected).getbbox():
+                    raise ValueError("Article detail is not the declared lossless parent crop")
+        except OSError as exc:
+            raise ValueError("Article detail derivation image is unreadable") from exc
         rows = regions.setdefault(parent, [])
         if any(asset.get("source_panel") == other[0] for other in rows):
             raise ValueError("Article detail panel identity is duplicated")
@@ -166,13 +184,15 @@ def validate_bundle(root, bundle):
         validate_url(asset["download_url"], MEDIA_HOSTS)
     articles = bundle.get("article_assets", [])
     media_manifest = read(root / "media-manifest.json")["scenes"]
-    derived_parents = _validate_article_regions(articles, media_manifest)
+    derived_parents = _validate_article_regions(root, articles, media_manifest)
     for asset in articles:
         _asset(root, asset)
         if asset.get("provider") != "NASA" or not asset.get("credit"):
             raise ValueError("Article replacement lacks provenance")
         if asset.get("editorial_scene") not in scenes:
             raise ValueError("Article replacement needs an explicit repaired-scene binding")
+        if asset.get("timeline_position") not in (None, "open"):
+            raise ValueError("Article replacement has an unsupported timeline position")
         validate_url(asset["download_url"], MEDIA_HOSTS)
     # The placeholder is never selected: existing scene media owns no such hash.
     # It prevents the renderer from fetching an unrelated primary image.
