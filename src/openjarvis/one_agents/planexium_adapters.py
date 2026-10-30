@@ -16,7 +16,7 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-ENVATO_RECEIPT_REVISION = "v6"
+ENVATO_RECEIPT_REVISION = "v7"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -729,7 +729,13 @@ class EnvatoAdapter:
                           "fallbackQuery": query, "videoTitle": request["title"], "downloadFormat": "1080P",
                           "assetFolder": mission_id, "resultIndex": str(first_candidate),
                           "requiredTitleKeyword": stock_context(request) if requires_context else request["subject"],
-                          "alternateTitleKeyword": request["subject"], "locationMatch": False, "subjectMatch": True,
+                          # Envato commonly catalogs geological pillars in the
+                          # plural. Keep the independent sandstone destination
+                          # AND-gate, while avoiding a singular/plural false
+                          # rejection in already-running legacy robot workers.
+                          "alternateTitleKeyword": ({"pillar": "pillars"}.get(
+                              str(request["subject"]).casefold(), request["subject"])),
+                          "locationMatch": False, "subjectMatch": True,
                           "regionalContext": False, "regionalContextLabel": "", "orientation": "Horizontal",
                           "requiredResolution": "1920 x 1080", "previouslyDownloadedTitles": list(titles),
                           "blockedTitleKeywords": ["fantasy", "surreal", "alien", *request.get("blocked_keywords", [])], "enablePaidDownload": True,
@@ -759,7 +765,7 @@ class EnvatoAdapter:
                     inputs["envatoQuery"] = catalog_query
                     inputs["envatoQueryUrl"] = quote_plus(catalog_query)
                     inputs["resultIndex"] = str(candidate - first_candidate - max(1, self.failure_limit // 2) + 1 if fallback else candidate)
-                    # v6 binds the receipt namespace to the concrete-subject
+                    # v7 binds the receipt namespace to the concrete-subject
                     # policy and PLANEXIUM's isolated persistent Envato
                     # session.  Older failed jobs were launched with a
                     # materially different brief; trying to attach it to the
