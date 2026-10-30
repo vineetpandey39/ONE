@@ -759,8 +759,9 @@ class EnvatoAdapter:
                     inputs["envatoQuery"] = catalog_query
                     inputs["envatoQueryUrl"] = quote_plus(catalog_query)
                     inputs["resultIndex"] = str(candidate - first_candidate - max(1, self.failure_limit // 2) + 1 if fallback else candidate)
-                    # v5 binds the receipt namespace to the concrete-subject
-                    # policy above.  A v3 failed job was launched with a
+                    # v6 binds the receipt namespace to the concrete-subject
+                    # policy and PLANEXIUM's isolated persistent Envato
+                    # session.  Older failed jobs were launched with a
                     # materially different brief; trying to attach it to the
                     # repaired request correctly trips LaoDraft's hash gate,
                     # but must not strand the mission forever.  Accepted
