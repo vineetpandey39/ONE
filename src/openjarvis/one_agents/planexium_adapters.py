@@ -16,6 +16,8 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
+ENVATO_RECEIPT_REVISION = "v6"
+
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
 
@@ -384,13 +386,20 @@ def busy_floor(queue: Path) -> bool:
 
 @contextmanager
 def envato_lease(path: Path, queue: Path, mission: str, *, wait_seconds=0, on_wait=None):
-    """Honor the existing VISTA/YATRA provider lock format, without stale deletion."""
+    """Lease the configured provider session without overlapping its owner.
+
+    The legacy ``.envato-provider.lock`` is shared with YATRA/VISTA and must
+    still honor their queue occupancy.  PLANEXIUM's explicitly named lock is
+    paired with its own Chrome profile/CDP port, so unrelated channel jobs do
+    not serialize it.  Either lock remains exclusive within its own session.
+    """
     owner = f"PLANEXIUM {os.getpid()} {mission}"
     deadline = time.monotonic() + wait_seconds
+    shared_legacy_session = path.name == ".envato-provider.lock"
     while True:
         resumed = path.exists() and path.read_text(encoding="utf-8") == owner
         if resumed:break
-        if busy_floor(queue) or path.exists():
+        if (shared_legacy_session and busy_floor(queue)) or path.exists():
             if not wait_seconds:
                 raise RuntimeError("Shared production busy or provider leased; defer Envato")
             if time.monotonic() >= deadline:
@@ -756,8 +765,9 @@ class EnvatoAdapter:
                     # repaired request correctly trips LaoDraft's hash gate,
                     # but must not strand the mission forever.  Accepted
                     # downloads remain in acquired/ and are still reused.
-                    receipt = self.context.artifact(f"receipts/envato-v5-{index}.json" if candidate == first_candidate
-                        else f"receipts/envato-v5-{index}-candidate-{candidate}.json")
+                    receipt = self.context.artifact(
+                        f"receipts/envato-{ENVATO_RECEIPT_REVISION}-{index}.json" if candidate == first_candidate
+                        else f"receipts/envato-{ENVATO_RECEIPT_REVISION}-{index}-candidate-{candidate}.json")
                     try:
                         out, job = self.draft.run("planexium-envato", asset_steps, inputs, receipt, timeout=10800)
                         query_positions[query] = candidate
@@ -765,7 +775,7 @@ class EnvatoAdapter:
                     except RuntimeError:
                         if getattr(self.draft, "transient_pre_download_failure", lambda _receipt: False)(receipt):
                             retry_receipt = self.context.artifact(
-                                f"receipts/envato-v5-{index}-candidate-{candidate}-browser-retry.json")
+                                f"receipts/envato-{ENVATO_RECEIPT_REVISION}-{index}-candidate-{candidate}-browser-retry.json")
                             out, job = self.draft.run("planexium-envato", asset_steps, inputs, retry_receipt, timeout=10800)
                             query_positions[query] = candidate
                             break

@@ -18,7 +18,7 @@
   "lao_folder_id": null,
   "artifact_roots": [],
   "browser_root": "C:/Users/pc/.lao/browser-sessions",
-  "provider_lock": "C:/Users/pc/Downloads/YATRA/.envato-provider.lock",
+  "provider_lock": "C:/Users/pc/.lao/browser-session-leases/.planexium-envato-provider.lock",
   "editing_mode": "footage_first",
   "render_backend": "resolve_fusion",
   "episode_policy": {
