@@ -118,7 +118,15 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
         # archive queries can supply when valid licensed clips are short.
         # The assembler adds a restrained pan/zoom, so this remains a moving
         # visual beat rather than a static card.
-        needed = 0 if remaining <= 0.5 else math.ceil(remaining / 15)
+        # Explicitly illustrative graphic scenes also carry kinetic director
+        # copy.  In that narrow case a relevant verified still can sustain a
+        # slightly longer (22.5s) animated pan/zoom beat without becoming a
+        # static slideshow.  Keep the normal fifteen-second density ceiling
+        # for observational and ordinary archive-led scenes.
+        illustrative_graphic = (scene.get('visual_kind') == 'graphic'
+                                and scene.get('illustrative') is True)
+        archive_hold = 22.5 if illustrative_graphic else 15
+        needed = 0 if remaining <= 0.5 else math.ceil(remaining / archive_hold)
         # Prefer direct imagery from the commissioned official article before
         # searching an archive. These are original source figures, not captures.
         for asset in media.get(str(number),{}).get('assets',[]):
