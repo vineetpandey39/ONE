@@ -6,6 +6,12 @@ import re
 from pathlib import Path
 
 
+def archive_hold_seconds(scene):
+    """Bound an animated still beat without relaxing ordinary archive density."""
+    return 22.5 if (scene.get('visual_kind') == 'graphic'
+                    and scene.get('illustrative') is True) else 15
+
+
 def _article_figure_panels(asset):
     """Expose distinct panels in explicitly captioned official concept montages."""
     title = str(asset.get('title', ''))
@@ -123,9 +129,7 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
         # slightly longer (22.5s) animated pan/zoom beat without becoming a
         # static slideshow.  Keep the normal fifteen-second density ceiling
         # for observational and ordinary archive-led scenes.
-        illustrative_graphic = (scene.get('visual_kind') == 'graphic'
-                                and scene.get('illustrative') is True)
-        archive_hold = 22.5 if illustrative_graphic else 15
+        archive_hold = archive_hold_seconds(scene)
         needed = 0 if remaining <= 0.5 else math.ceil(remaining / archive_hold)
         # Prefer direct imagery from the commissioned official article before
         # searching an archive. These are original source figures, not captures.

@@ -377,7 +377,11 @@ def render(root, tools, *, resolve_settings=None):
                 matched=next((a for a in assets['stock'] if a['sha256']==asset['sha256']),None)
                 if matched:asset['usable_in']=matched.get('usable_in',0)
                 if sha(asset['path'])!=asset['sha256']:raise ValueError('Editorial asset bytes changed')
-                frame_limit = 450 if t['kind'] == 'archive' else 600
+                if t['kind'] == 'archive':
+                    from openjarvis.one_agents.planexium_editorial import archive_hold_seconds
+                    frame_limit = round(archive_hold_seconds(science['scenes'][number-1]) * 30)
+                else:
+                    frame_limit = 600
                 if frames<=0 or frames>frame_limit:
                     raise ValueError('Shot exceeds its bounded editorial beat; supply more distinct visuals')
                 shots.append({'scene':number,'shot':index+1,'frames':frames,'start_frame':cursor,
