@@ -263,6 +263,7 @@ class ChatGPTAdapter:
             'instead of astronaut costumes in cities or fantasy Mars colonies. Put costume, comedy, humor and urban '
             'in blocked_keywords for astronaut training briefs. Never imply that generic footage is the actual crew. '
             'Also include scene_assets: an object mapping EVERY 1-based scene number string to 0-3 relevant ZERO-based stock_requests indexes; use an empty list only when official evidence imagery is essential. Each stock index belongs to at most one scene. '
+            'Budget footage against narration density: a closing observational scene longer than 80 words needs at least two licensed clips, and a conceptual/graphic scene longer than 80 words needs three, unless it is explicitly covered by multiple distinct official figures. '
             'Also include scene_visuals mapping EVERY scene number to 1-3 DIFFERENT concise NASA archive image search queries, each directly relevant to that scene narration. NASA imagery is supporting evidence and must not dominate the cut. Avoid multiple near-identical views. '
             'Assign every stock index exactly once and do not reuse it across scenes: choose the most relevant scene for each clip. '
             'Also include packaging: {claim_ids:[supported claim IDs],focus_scene:1-based scene number,viewer_question:string,description_opening:two source-grounded sentences that explain the hook,titles:[three titles],concepts:[three objects with name,text,left_usp,composition,visual_direction]}. '
