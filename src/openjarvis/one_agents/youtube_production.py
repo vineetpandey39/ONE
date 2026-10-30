@@ -19,6 +19,24 @@ from openjarvis.one_agents.youtube_channels import ProductionContext
 Adapter = Callable[..., dict[str, Any]]
 
 
+def _lao_robot_config() -> Path:
+    """Return a durable LAO worker config, never a disposable agent-session copy."""
+    explicit = os.environ.get("LAO_ROBOT_CONFIG", "").strip()
+    candidates = [Path(explicit)] if explicit else []
+    one_root = Path(__file__).resolve().parents[4]
+    candidates.extend((one_root / "lao-robot" / "worker").glob("config*.json"))
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            config = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if config.get("robot_token") and config.get("orchestrator_url"):
+            return candidate
+    raise RuntimeError("A durable LAO robot config was not found")
+
+
 class ExistingPrivateUploader:
     """Reuse the installed uploader in a private module instance per channel.
 
@@ -78,6 +96,11 @@ class ExistingPrivateUploader:
         module.ASSET = self.credential_asset
         module.EXPECTED_CHANNEL_ID = self.channel_id
         module.LEDGER = ledger
+        # The installed Sonia uploader predates ONE's durable worker directory
+        # and its default still points into a deleted Claude session. Bind this
+        # isolated module instance to the active durable worker before it asks
+        # LAO to resolve the channel credential. Sonia's module is untouched.
+        module.ROBOT_CONFIG = _lao_robot_config()
         package_path = master.parent / "channel-upload-package.json"
         package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
         result = module.run(
