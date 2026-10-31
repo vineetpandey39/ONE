@@ -325,7 +325,18 @@ class ChatGPTAdapter:
                               and "Timed out waiting for generated image src" in legacy_error)
         legacy_request = bool(legacy) and not repairable_timeout
         marker = f"PLANEXIUM-{self.context.mission_id}-{output.parent.name}"
-        image_args = {"prompt": prompt, "filename": filename, "max_attempts": 2, "as": "image_path"}
+        image_args = {
+            "prompt": prompt,
+            "filename": filename,
+            # Match the proven Imagine India recovery contract: a timeout
+            # must submit a short fresh-image request, not merely poll the
+            # same empty assistant turn again.
+            "max_attempts": 4,
+            "always_nudge_fresh_image": True,
+            "allow_fresh_chat_recovery": True,
+            "retry_backoff_seconds": 15,
+            "as": "image_path",
+        }
         receipt = legacy_receipt
         if not legacy_request:
             image_args.update({
@@ -336,6 +347,15 @@ class ChatGPTAdapter:
             })
             receipt = output.parent / "provider-v2.json"
         v2 = json.loads(receipt.read_text(encoding="utf-8")) if receipt.exists() else {}
+        v2_error = str(v2.get("provider_error") or "")
+        if (receipt.name == "provider-v2.json"
+                and v2.get("terminal_status") == "Failed"
+                and ("Timed out waiting for generated image src" in v2_error
+                     or "awaiting_fresh_assistant_turn" in v2_error)):
+            # The failed receipt remains immutable evidence.  The changed
+            # retry contract above must get its own durable LAO job instead
+            # of replaying the terminal provider-v2 checkpoint forever.
+            receipt = output.parent / "provider-v3.json"
         repair_path = self.context.artifact("thumbnail-reference-repair.json")
         repair = json.loads(repair_path.read_text(encoding="utf-8")) if repair_path.exists() else {}
         repair_jobs = set(repair.get("provider_job_ids") or [])
@@ -365,7 +385,10 @@ class ChatGPTAdapter:
             if actual != repair.get("reference_sha256"):
                 raise ValueError("Thumbnail repair receipt names a different official reference")
             image_args["reference_image_path"] = str(reference)
-            receipt = output.parent / "provider-v3.json"
+            version = 3
+            while (output.parent / f"provider-v{version}.json").exists():
+                version += 1
+            receipt = output.parent / f"provider-v{version}.json"
         steps = _login_steps(self.asset, self.context, self.profile_root) + [
             {"action": "generate_and_download_chatgpt_image", "args": image_args}]
         with self.lease():
