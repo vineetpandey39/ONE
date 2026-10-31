@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-from openjarvis.one_agents import local_llm
+from openjarvis.one_agents import local_llm, youtube_shopping
 from openjarvis.one_agents.youtube_channels import ChannelProfile, SONIA
 
 
@@ -554,7 +554,7 @@ def build_package(record: dict[str, Any], *, master: Path, plan_path: Path, port
     ranked_tags = _ranked_tags(meta, title, packaging, channel)
     if channel.thumbnail_mode == "original":
         variants = [{k: v for k, v in row.items() if k != "sonia_expression"} for row in variants]
-    return {
+    package = {
         "schema_version": "1.1", "owner": "ARES" if channel == SONIA else "LYRA", "brand": channel.brand,
         "handoff": "IRIS -> ARES -> IRIS upload gate" if channel == SONIA else "HELIOS -> LYRA -> ECHO approval gate", "master": str(master),
         "recommended_title": title, "title_variants": title_variants,
@@ -591,3 +591,6 @@ def build_package(record: dict[str, Any], *, master: Path, plan_path: Path, port
         "keyword_stuffing_allowed": False, "public_publish_authorized": False,
         "generation": {"chapters": label_source, "chapter_timing": timing, "metadata": meta_source, "models": local_llm.ladder("short") if llm is ollama_json else None},
     }
+    return youtube_shopping.attach_to_package(
+        package, script=record.get("full_script", ""), owner="LYRA", content_format="youtube_long"
+    )

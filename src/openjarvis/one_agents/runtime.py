@@ -30,7 +30,7 @@ from openjarvis.one_agents import (
 
 
 AGENTS: dict[str, dict[str, str]] = {
-    "helios": {"name": "HELIOS", "role": "Multi-channel YouTube commissioning, resource coordination and delivery reconciliation head", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "head"},
+    "helios": {"name": "HELIOS", "role": "Multi-channel YouTube commissioning, resource coordination, monetization governance and delivery reconciliation head", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "head"},
     "zeus": {"name": "ZEUS", "role": "Cross-division orchestration, escalation, and resource-allocation operator", "floor_id": "11", "floor_name": "ONE-JARVIS Executive Command", "division": "executive"},
     "athena": {"name": "ATHENA", "role": "Opportunity discovery, research, and scoring operator", "floor_id": "10", "floor_name": "Venture & Opportunity Lab", "division": "venture_lab"},
     "jobhunt": {"name": "DAEDALUS", "role": "Micro-SaaS and AI product build/QA operator", "floor_id": "9", "floor_name": "Micro-SaaS & AI Product Factory", "division": "micro_saas"},
@@ -72,7 +72,7 @@ AGENTS: dict[str, dict[str, str]] = {
     "yatra": {"name": "YATRA", "role": "Sonia Travel Vlogs Envato acquisition, OBS capture and video assembly worker", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
     "fabula": {"name": "FABULA", "role": "YouTube narration production and approved voice checkpoint worker", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
     "lyra": {"name": "LYRA", "role": "YouTube SEO, metadata and thumbnail experiment packaging specialist", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
-    "echo": {"name": "ECHO", "role": "YouTube subtitles, localization, comments and governed upload completion worker", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
+    "echo": {"name": "ECHO", "role": "YouTube subtitles, localization, relevant Shopping attachment, comments and governed upload completion worker", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
     "vista": {"name": "VISTA", "role": "YouTube vertical short-form production worker; consumes HELIOS research and produces governed Shorts", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
     "ares": {"name": "ARES", "role": "SEO, social, and cross-floor distribution operator", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth"},
     "alfa": {"name": "ALFA", "role": "Pricing, funnels, and revenue-attribution operator", "floor_id": "2", "floor_name": "Commerce & Monetization", "division": "commerce"},
@@ -6732,6 +6732,15 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
             raise RuntimeError("private upload gate has no readable master for delivery binding")
         uploader = youtube_publish._load("youtube_api_upload")
         gate, delivery_receipt = _require_private_delivery_receipt(uploader, package, master, gate)
+        from openjarvis.one_agents import youtube_studio_shopping
+        shopping_report = youtube_studio_shopping.apply_package(
+            str(gate.get("video_id") or gate.get("already_uploaded_as") or ""), package
+        )
+        from openjarvis.one_agents import sonia_monetization
+        monetization_scorecard = sonia_monetization.record(
+            package, video_id=str(gate.get("video_id") or gate.get("already_uploaded_as") or ""),
+            shopping=shopping_report,
+        )
         stages.set_stage("echo", stages.EXECUTING,
                          "Adding subtitles, requested languages and the channel comment")
         result = youtube_distribution.complete(package)
@@ -6746,9 +6755,13 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
             "format": "youtube_private_draft", "worker": "echo", "distribution": result,
             "delivery_verification": gate["delivery_verification"],
             "delivery_receipt": str(delivery_receipt),
+            "shopping": shopping_report,
+            "monetization_scorecard": str(monetization_scorecard),
             "storage_cleanup": storage, "published": False, "output": str(package)}), mode="report", tier="fast",
             dedupe_key=f"travel:{payload.get('lao_job')}:distribution-report")
         return {"agent": "ECHO", **result, "delivery_verification": gate["delivery_verification"],
+                "shopping": shopping_report,
+                "monetization_scorecard": str(monetization_scorecard),
                 "delivery_receipt": str(delivery_receipt), "storage_cleanup": storage,
                 "handed_to": {"agent": "HELIOS", "job_id": report["id"]}}
     finally:
