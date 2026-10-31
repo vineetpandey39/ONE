@@ -4193,6 +4193,14 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     duplicate = _find_kdp_topic_duplicate(angle, topic_history)
     if duplicate:
         stages.clear_stage("hermes")
+        # The brief went into the vault a few hundred lines above, before this
+        # gate could run, and prior_titles reads that folder back as the
+        # floor's commissioning history. Unmarked, a refused candidate becomes
+        # a prior commission and refuses the next one: on 2026-10-31 the 23:07
+        # run was turned down for duplicating the 11:00 run, which had itself
+        # been turned down and never became a book.
+        memory.mark_refused(str(result.get("vault_note") or ""),
+                            "duplicate of a prior KDP topic")
         _publishing_event(
             job, agent="HERMES", event_type="duplicate_rejected",
             stage="topic_uniqueness_gate",
@@ -4222,6 +4230,11 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
                 "phase": "audit", "title_id": job["id"],
                 "brief_path": str(output_path), "kdp_mode": kdp_mode,
                 "region": region, "angle": angle, "origin_job": job["id"],
+                # Carried so a refusal in the later commission job can mark the
+                # note the research job left in the vault. Without it that note
+                # keeps counting as a prior commission and refuses the next
+                # candidate.
+                "vault_note": result.get("vault_note"),
                 "mission_id": mission_id, "objective": task,
                 "select_active": False,
                 "wide_requested": kdp_mode == "nonfiction",
@@ -4254,6 +4267,8 @@ def _hermes_commission(job: dict[str, Any], payload: dict[str, Any]) -> dict[str
     duplicate = _find_kdp_topic_duplicate(angle, history)
     if duplicate:
         stages.clear_stage("hermes")
+        memory.mark_refused(str(payload.get("vault_note") or ""),
+                            "duplicate of a prior KDP topic, refused before SCRIBE")
         _publishing_event(
             job, agent="HERMES", event_type="duplicate_rejected",
             stage="topic_uniqueness_gate",

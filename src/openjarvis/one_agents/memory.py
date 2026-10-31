@@ -111,11 +111,48 @@ def recall(query: str, limit: int = 6) -> list[dict[str, Any]]:
         return []
 
 
+# Written into a note whose commission was refused. The note stays - what was
+# attempted and why it was turned down is worth keeping - but it stops counting
+# as something this floor has published.
+REFUSED_MARKER = "COMMISSIONED: no"
+
+
+def mark_refused(note_path: str, reason: str) -> bool:
+    """Record that this commissioning note never became a commission.
+
+    HERMES writes its brief to the vault before the uniqueness and catalogue
+    gates run, so a refused candidate leaves a note that looks exactly like an
+    accepted one. prior_titles then reads it back as a prior commission, and on
+    2026-10-31 that closed the loop: the 23:07 run was refused for duplicating
+    the 11:00 run, which had itself been refused and never became a book.
+    Every refusal permanently narrowed the space for the next one - inside a
+    narrow authority lane, a ratchet that runs out within a few attempts.
+    """
+    from pathlib import Path
+
+    try:
+        path = Path(note_path)
+        if not path.is_file():
+            return False
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if REFUSED_MARKER in text:
+            return True
+        path.write_text(
+            text.rstrip() + f"\n\n{REFUSED_MARKER} — {reason}\n", encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
 def prior_titles(floor_id: str, floor_name: str, limit: int = 25) -> list[str]:
     """Titles this floor has already commissioned, newest first.
 
     Used to stop an agent proposing the same book twice — reading its own
     history is what makes the vault memory rather than a log.
+
+    A note marked REFUSED_MARKER is skipped. It records an attempt, not a
+    commission, and counting attempts as history is what let one refusal cause
+    the next.
     """
     try:
         status = obsidian_status()
@@ -127,12 +164,24 @@ def prior_titles(floor_id: str, floor_name: str, limit: int = 25) -> list[str]:
         if not folder.is_dir():
             return []
         notes = sorted(folder.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
-        titles: list[str] = []
-        for note in notes[:limit]:
+        # Refused notes are dropped before the window is taken, not after, so
+        # `limit` still means "the newest N commissions". Filtering afterwards
+        # would quietly shrink the real history every time a candidate was
+        # turned down. For a floor that never marks anything refused this is
+        # the same list as before.
+        kept: list[str] = []
+        for note in notes:
             try:
                 text = note.read_text(encoding="utf-8", errors="ignore")
             except OSError:
                 continue
+            if REFUSED_MARKER in text:
+                continue
+            kept.append(text)
+            if len(kept) >= limit:
+                break
+        titles: list[str] = []
+        for text in kept:
             match = re.search(r"^ANGLE:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
             if match:
                 titles.append(match.group(1).strip())
