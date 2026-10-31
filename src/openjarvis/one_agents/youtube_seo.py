@@ -545,6 +545,9 @@ def build_package(record: dict[str, Any], *, master: Path, plan_path: Path, port
     for v in variants:
         v["text"] = v["text"] or " ".join(title.split("|")[0].upper().split()[:3])
     destination = meta["destination"] or title.split("|")[0].strip()
+    # Styling is a reviewed operator request, not something the SEO model may infer. In particular the premium
+    # black dual-colour treatment is opt-in so consecutive videos do not silently converge on the same template.
+    requested_thumbnail_style = str(record.get("thumbnail_style") or "").strip()
     title_variants = [t for t in dict.fromkeys(
         [title] + [packaging.get(k, "") for k in ("title_a_searchable", "title_b_intriguing", "title_c_hybrid")]) if t][:4]
 
@@ -565,6 +568,7 @@ def build_package(record: dict[str, Any], *, master: Path, plan_path: Path, port
             **({"portrait_library": str(portrait_library)} if channel.thumbnail_mode == "portrait" else {}),
             "required_layout": f"{channel.display_name if channel != SONIA else 'Sonia'} close-up on right 32-34%; hook on left 0-38%; unobstructed story USP in centre 38-66%" if channel.thumbnail_mode == "portrait" else "One truthful focal subject on right; clear text area on left",
             "text": variants[0]["text"], "max_words": 3, "variants": variants,
+            **({"requested_style": requested_thumbnail_style} if requested_thumbnail_style else {}),
             "quality_gates": ["1280x720", "16:9", "under 2 MB export", "recognizable at 10% size",
                               "text readable at mobile size", *(["face intact"] if channel.thumbnail_mode == "portrait" else ["no portrait reference", "truthful illustration"])],
             "chatgpt_prompt_template": (THUMBNAIL_PROMPT.replace("Sonia Travel Vlogs", channel.display_name).replace("Sonia", channel.display_name)
