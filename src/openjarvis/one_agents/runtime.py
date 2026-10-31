@@ -8259,7 +8259,12 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         # Re-attaching to an existing LAO job remains allowed above; this gate
         # applies only before a new paid Leonardo start.
         from openjarvis.one_agents import provider_capacity
-        provider_capacity.require_available("leonardo")
+        # The static Before/After package uses ChatGPT images plus local composition and Meta publishing; its LAO
+        # process has no Leonardo credential or Kling step. A Leonardo capacity block used to stop this independent
+        # workflow before LAO created a job, so the 13:00 post failed every day at 5% even though its own providers
+        # were healthy. Keep the paid-provider gate for reel/spotlight/news-hook workflows that actually consume it.
+        if not is_before_after:
+            provider_capacity.require_available("leonardo")
         # LAO integration wiring (governance approval
         # 61c59bc2-15ae-4deb-bc2f-c65a984bcbb8, decided_by=olympus) was tried
         # 2026-09-13 and REVERTED the same day: live verification showed it
