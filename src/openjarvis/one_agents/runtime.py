@@ -10282,14 +10282,21 @@ _YATRA_INVALID_PAGE_TEXT = (
 def _yatra_capture_semantic_verdict(normalized: str, *, required_any: Any = (),
                                     required_all: Any = ()) -> dict[str, Any]:
     """Judge OCR text without confusing a readable homepage for claim evidence."""
-    normalized = " ".join(str(normalized or "").split()).casefold()
+    def semantic_text(value: Any) -> str:
+        # OCR and old JSON readers can turn an en dash into '-' or U+FFFD.
+        # Punctuation is not evidence; the surrounding words are.  Normalize
+        # it without weakening the required wording or accepting partial words.
+        decomposed = unicodedata.normalize("NFKD", str(value or "")).casefold()
+        return " ".join(re.sub(r"[^\w]+", " ", decomposed, flags=re.UNICODE).split())
+
+    normalized = semantic_text(normalized)
     blocked = next((phrase for phrase in _YATRA_INVALID_PAGE_TEXT if phrase in normalized), "")
     if blocked:
         return {"ok": False, "detail": f"invalid webpage state visible in recording: {blocked!r}"}
     if not re.search(r"[a-z]{3}", normalized):
         return {"ok": False, "detail": "OCR found no meaningful webpage text in sampled frames"}
-    any_terms = [" ".join(str(term).split()).casefold() for term in required_any if str(term).strip()]
-    all_terms = [" ".join(str(term).split()).casefold() for term in required_all if str(term).strip()]
+    any_terms = [semantic_text(term) for term in required_any if str(term).strip()]
+    all_terms = [semantic_text(term) for term in required_all if str(term).strip()]
     missing_all = [term for term in all_terms if term not in normalized]
     if missing_all:
         return {"ok": False, "detail": "approved evidence text missing: " + ", ".join(missing_all)}
