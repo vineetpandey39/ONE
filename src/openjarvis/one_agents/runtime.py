@@ -8400,7 +8400,20 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         style = str((out.get("before_after_format_result") or {}).get("before_after_style") or "")
         title = f"{location_name} before/after ({style})" if (location_name and style) else (location_name or headline or "")
         run_dir = str((out.get("composite_image_path") or {}).get("path") or "")
-        published = str((out.get("meta_publish_result") or {}).get("status") or "") == "published"
+        meta_publish = out.get("meta_publish_result") or {}
+        meta_results = meta_publish.get("results") or {}
+        meta_warnings = meta_results.get("warnings") or {}
+        # This package is a dual-delivery agent.  The engine historically
+        # returned top-level ``published`` when either Facebook *or*
+        # Instagram succeeded, which let a partial delivery masquerade as a
+        # fully completed daily post.  Require verified provider results for
+        # both destinations and surface any provider warning as a failure.
+        published = bool(
+            str(meta_publish.get("status") or "") == "published"
+            and meta_results.get("facebook")
+            and meta_results.get("instagram")
+            and not meta_warnings
+        )
     elif is_trend_spotlight:
         # imagineindia-trend-spotlight has no location catalogue -- title is
         # always the researched headline, never a place name.
