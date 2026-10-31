@@ -148,12 +148,87 @@ def validate_packet(run_dir: str | Path) -> SubmissionPacket:
 
 
 def profile_dir() -> Path:
+    """The one Chrome profile this publisher signs in as.
+
+    It used to default to Documents\\LAO\\browser-profiles\\kdp-publisher while
+    open_session's other route attached to whatever Chrome was listening on
+    9321 - and that Chrome is started by LAO from the kdp-factory binding, a
+    different profile entirely. So the publisher had two identities and picked
+    between them on whether a browser happened to be running: sign in, publish
+    once, and the next run takes the other route and asks again. Measured on
+    2026-10-31, both profiles held a full set of Amazon sign-in cookies
+    (at-main, sess-at-main, session-id, ubid-main, x-main) - the operator had
+    signed in twice, once per identity, which is what this bug feels like from
+    the outside.
+
+    Now the default is the profile the 9321 binding already names, so both
+    routes reach the same browser. The launch route only runs when nothing is
+    listening on 9321, so it cannot collide with LAO's own Chrome over the
+    single-instance lock on a user-data-dir.
+    """
     path = Path(os.environ.get(
         "LAO_KDP_BROWSER_PROFILE",
-        str(Path.home() / "Documents" / "LAO" / "browser-profiles" / "kdp-publisher"),
+        str(Path.home() / ".lao" / "browser-sessions" / "kdp-factory"),
     )).expanduser().resolve()
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+# The markers an Amazon session is made of. Presence plus a future expiry is
+# what "a sign-in is stored here" looks like on disk; nothing here reads a
+# cookie's value, which is encrypted by Chrome anyway.
+_AMAZON_SESSION_COOKIES = ("at-main", "sess-at-main", "session-id", "ubid-main", "x-main")
+
+
+def stored_login(profile: Path | None = None) -> bool:
+    """Does this profile hold an unexpired Amazon sign-in, without launching it?
+
+    login_ready() can only see a Chrome that is already serving CDP, so when
+    the operator signs in and then closes the browser there is nothing left to
+    answer "yes" and a held job waits forever. Reading the profile's own cookie
+    store answers the same question with no browser at all.
+
+    A stale cookie that Amazon has since invalidated reads as a sign-in here.
+    That costs one resumed attempt, which hits the challenge and holds again -
+    the behaviour that already exists. The alternative, today, is a hold that
+    never clears.
+    """
+    import shutil
+    import sqlite3
+    import tempfile
+
+    store = (profile or profile_dir()) / "Default" / "Network" / "Cookies"
+    if not store.is_file():
+        return False
+    # Chrome keeps the file locked while it runs, so this works on a copy.
+    try:
+        scratch = Path(tempfile.mkdtemp()) / "cookies.db"
+        shutil.copy2(store, scratch)
+    except OSError:
+        return False
+    try:
+        db = sqlite3.connect(scratch)
+        try:
+            # Chrome stores expiry in microseconds since 1601-01-01; a session
+            # cookie is 0 and is not durable evidence of anything.
+            epoch_1601 = 11644473600_000_000
+            now = int(datetime.now(timezone.utc).timestamp() * 1_000_000) + epoch_1601
+            placeholders = ",".join("?" for _ in _AMAZON_SESSION_COOKIES)
+            found = db.execute(
+                f"SELECT DISTINCT name FROM cookies WHERE name IN ({placeholders}) "
+                "AND host_key LIKE '%amazon%' AND expires_utc > ?",
+                (*_AMAZON_SESSION_COOKIES, now),
+            ).fetchall()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return False
+    finally:
+        scratch.unlink(missing_ok=True)
+    # at-main is the one that actually carries the authenticated identity;
+    # session-id alone is handed to anyone who loads the page.
+    names = {row[0] for row in found}
+    return "at-main" in names and len(names) >= 3
 
 
 def state_path(packet: SubmissionPacket) -> Path:
