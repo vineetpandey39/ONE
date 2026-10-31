@@ -9623,6 +9623,14 @@ def _validate_yatra_contract(record: dict[str, Any], expected_scenes: int | None
                  if float(scene.get("seconds") or 0) <= 0]
     expected_ids = [str(i) for i in range(1, expected_scenes + 1)]
     problems = []
+    from openjarvis.one_agents import youtube_shopping
+    try:
+        shopping_binding = youtube_shopping.validate_script_binding(
+            script, record.get("shopping_contract")
+        )
+    except ValueError as exc:
+        shopping_binding = {"bound": False, "error": str(exc)}
+        problems.append(f"shopping script binding failed: {exc}")
     if cue_count != expected_scenes:
         problems.append(f"narration has {cue_count}/{expected_scenes} timed cues")
     if ids != expected_ids:
@@ -9671,7 +9679,8 @@ def _validate_yatra_contract(record: dict[str, Any], expected_scenes: int | None
         raise RuntimeError("YATRA preproduction contract is incomplete; narration was not started and no voice "
                            "credits were spent. " + "; ".join(problems))
     return {"scene_count": len(scenes), "cue_count": cue_count,
-            "query_count": len(scenes) - len(missing_queries)}
+            "query_count": len(scenes) - len(missing_queries),
+            "shopping_binding": shopping_binding}
 
 
 def _yatra_editorial_hold(record: dict[str, Any]) -> bool:
@@ -10664,6 +10673,21 @@ def _yatra_preproduction_timing() -> tuple[float, float, float]:
     )
 
 
+def _sonia_catalog_probe_video_id() -> str:
+    """Newest known Sonia video used only to open Studio's read-only product picker."""
+    ledger_path = Path(os.environ.get(
+        "ONE_SONIA_UPLOAD_LEDGER", r"C:\Users\pc\Documents\LAO\yatra-upload\upload-ledger.json"))
+    try:
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    rows = list(ledger.values()) if isinstance(ledger, dict) else list(ledger or [])
+    rows.sort(key=lambda row: str((row or {}).get("uploaded_at") or ""), reverse=True)
+    return next((str(row.get("video_id") or row.get("already_uploaded_as") or "")
+                 for row in rows if re.fullmatch(r"[A-Za-z0-9_-]{11}",
+                     str((row or {}).get("video_id") or (row or {}).get("already_uploaded_as") or ""))), "")
+
+
 def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, Any]:
     """Run Sonia Travel Vlogs preproduction in LAO and return its receipt to HELIOS."""
     from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
@@ -10695,9 +10719,28 @@ def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, 
     tool = LaoOrchestratorTool()
     process_name = "Sonia YATRA - Preproduction"
     resume_id = job_recovery.resume_target(job)
+    shopping_contract: dict[str, Any] | None = None
     if resume_id:
         lao_job_id = resume_id
     else:
+        # Product discovery happens before ChatGPT writes the script. It is
+        # read-only against the newest known Sonia video and is deliberately
+        # fail-open: catalog/login trouble leaves the established production
+        # path unchanged. A successful exact selection becomes a hard script
+        # contract and is checked before FABULA can spend voice credits.
+        from openjarvis.one_agents import youtube_shopping, youtube_studio_shopping
+        intent = youtube_shopping.topic_intent(trend_brief)
+        probe_video_id = _sonia_catalog_probe_video_id()
+        if intent and probe_video_id:
+            try:
+                catalog = youtube_studio_shopping.discover_exact_product(
+                    intent["search_query"], probe_video_id)
+                if catalog:
+                    shopping_contract = youtube_shopping.exact_contract(intent, catalog)
+                    lao_trend_brief += ("\n\nSHOPPING SCRIPT CONTRACT (mandatory only because an exact live catalog "
+                                        "product was selected):\n" + shopping_contract["writer_instruction"])
+            except Exception:
+                shopping_contract = None
         language = sonia_language_profile(payload)
         started = tool.execute(
             action="start", mode="publish", process_name=process_name, timeout=tool_timeout,
@@ -10767,9 +10810,12 @@ def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, 
     # The cue lines are normalised here too, before any copy of the plan exists.
     normalized = normalize_script_cues(plan_record.get("full_script") or "")
     normalized_map = _normalize_yatra_json_block(plan_record.get("opening_map_spec"))
+    if shopping_contract:
+        plan_record["shopping_contract"] = shopping_contract
     if (plan_record.get("language") != sonia_language_profile(payload)["key"]
             or normalized != (plan_record.get("full_script") or "")
-            or normalized_map != plan_record.get("opening_map_spec")):
+            or normalized_map != plan_record.get("opening_map_spec")
+            or shopping_contract is not None):
         plan_record["language"] = sonia_language_profile(payload)["key"]
         plan_record["full_script"] = normalized
         plan_record["opening_map_spec"] = normalized_map

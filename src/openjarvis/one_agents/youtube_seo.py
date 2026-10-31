@@ -592,5 +592,6 @@ def build_package(record: dict[str, Any], *, master: Path, plan_path: Path, port
         "generation": {"chapters": label_source, "chapter_timing": timing, "metadata": meta_source, "models": local_llm.ladder("short") if llm is ollama_json else None},
     }
     return youtube_shopping.attach_to_package(
-        package, script=record.get("full_script", ""), owner="LYRA", content_format="youtube_long"
+        package, script=record.get("full_script", ""), owner="LYRA", content_format="youtube_long",
+        contract=record.get("shopping_contract"),
     )

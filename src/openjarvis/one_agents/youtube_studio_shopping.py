@@ -30,6 +30,15 @@ def result_matches(query: str, product_title: str) -> bool:
     return len(wanted & found) >= min(2, max(1, len(wanted)))
 
 
+def exact_result_matches(candidate: dict[str, Any], catalog_text: str) -> bool:
+    exact = re.sub(r"[^a-z0-9]+", " ", str(candidate.get("catalog_title") or "").lower()).strip()
+    merchant = re.sub(r"[^a-z0-9]+", " ", str(candidate.get("merchant") or "").lower()).strip()
+    haystack = re.sub(r"[^a-z0-9]+", " ", catalog_text.lower()).strip()
+    if exact:
+        return exact in haystack and (not merchant or merchant in haystack)
+    return result_matches(str(candidate.get("search_query") or ""), catalog_text)
+
+
 def _browser_helper() -> Any:
     path = SONIA_BROWSER_DIR / "sonia_chrome.py"
     spec = importlib.util.spec_from_file_location("sonia_chrome_for_shopping", path)
@@ -37,6 +46,51 @@ def _browser_helper() -> Any:
         raise RuntimeError(f"Sonia browser helper unavailable: {path}")
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
     return module
+
+
+def _catalog_identity(text: str) -> dict[str, str] | None:
+    lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines() if line.strip()]
+    lines = [line for line in lines if line.lower() not in {"tag", "untag"}]
+    if not lines:
+        return None
+    merchant = next((line for line in lines[1:] if re.search(
+        r"amazon india|flipkart|myntra|shopsy", line, re.I)), "")
+    if not merchant:
+        return None
+    return {"title": lines[0], "merchant": merchant}
+
+
+def discover_exact_product(query: str, probe_video_id: str) -> dict[str, str] | None:
+    """Read the live affiliate catalog without saving anything on the probe video."""
+    launcher = _browser_helper()
+    state = launcher.ensure()
+    if str(state).startswith("failed"):
+        raise RuntimeError(f"Sonia persistent Chrome is unavailable: {state}")
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.connect_over_cdp(
+            f"http://127.0.0.1:{launcher.PORT}", timeout=20_000)
+        if not browser.contexts:
+            raise RuntimeError("Sonia persistent Chrome has no browser context")
+        page = browser.contexts[0].new_page(); page.set_default_timeout(30_000)
+        try:
+            page.goto(f"https://studio.youtube.com/video/{probe_video_id}/edit", wait_until="domcontentloaded")
+            page.locator(f'a[href*="/channel/{SONIA_CHANNEL_ID}"]').first.wait_for(timeout=30_000)
+            page.get_by_role("button", name="Products", exact=True).click(timeout=15_000)
+            page.get_by_role("button", name="Edit products", exact=True).click(timeout=15_000)
+            dialog = page.get_by_role("dialog")
+            search = dialog.get_by_role("searchbox")
+            if not search.count(): search = dialog.locator('input[type="search"],input[placeholder*="Search" i]').first
+            search.fill(query); page.wait_for_timeout(1800)
+            rows = dialog.locator("ycp-product-list-item,tp-yt-paper-item,[role=listitem]")
+            for index in range(min(rows.count(), 8)):
+                identity = _catalog_identity(rows.nth(index).inner_text())
+                if identity and result_matches(query, identity["title"]):
+                    return identity
+            return None
+        finally:
+            # No Tag/Done/Save action is permitted in discovery.
+            page.close()
 
 
 def apply_plan(video_id: str, plan: dict[str, Any], *, receipt_path: Path) -> dict[str, Any]:
@@ -77,7 +131,7 @@ def apply_plan(video_id: str, plan: dict[str, Any], *, receipt_path: Path) -> di
                 rows = dialog.locator("ycp-product-list-item,tp-yt-paper-item,[role=listitem]")
                 for index in range(min(rows.count(), 8)):
                     row = rows.nth(index); catalog_text = re.sub(r"\s+", " ", row.inner_text()).strip()
-                    if result_matches(query, catalog_text):
+                    if exact_result_matches(candidate, catalog_text):
                         row.get_by_role("button", name="Tag", exact=True).click()
                         selected.append({"category": candidate.get("category"), "query": query,
                                          "catalog_text": catalog_text[:240]}); break
