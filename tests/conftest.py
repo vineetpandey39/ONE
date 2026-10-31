@@ -30,31 +30,6 @@ from openjarvis.core.registry import (
 
 
 @pytest.fixture(autouse=True)
-def _isolate_openjarvis_home(tmp_path_factory, monkeypatch) -> None:
-    """No test may read or write the live ONE state.
-
-    OPENJARVIS_HOME is a user environment variable on this machine pointing at
-    E:\\ONE-Suite\\data, which holds the real agent_queue.db and
-    agent_stages.json. Both runtime._home() and stages._home() resolve through
-    it, so a plain `pytest` run reaches production unless every individual test
-    remembers to redirect it.
-
-    On 2026-10-31 one did not. test_kdp_login_hold's challenge test patches
-    _govern, _run_imprimatur and _publishing_event but not stages, so
-    set_stage() wrote a real scribe bubble into the live file - and the company
-    building then spent hours showing "A Real Book: KDP login required;
-    publishing progress saved. Resume after sign-in." against a pytest tmp
-    directory, for a fixture title, with nothing publishing at all. The job
-    queue escaped only because most tests happen to monkeypatch
-    runtime._connect.
-
-    Thirteen test modules already set this themselves. This makes it true for
-    all of them, including the ones written next year.
-    """
-    monkeypatch.setenv("OPENJARVIS_HOME", str(tmp_path_factory.mktemp("openjarvis_home")))
-
-
-@pytest.fixture(autouse=True)
 def _clean_registries() -> None:
     """Ensure each test starts with empty registries and a fresh event bus."""
     ModelRegistry.clear()
