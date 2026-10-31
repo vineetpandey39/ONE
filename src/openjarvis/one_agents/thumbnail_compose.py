@@ -6,6 +6,8 @@ Returns a QC dict the gate can read.
 """
 from __future__ import annotations
 
+import colorsys
+import math
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +28,43 @@ MAX_TEXT_WIDTH = int(SIZE[0] * TEXT_ZONE) - MARGIN
 MIN_FONT = 96
 MAX_BYTES = 2 * 1024 * 1024
 WHITE, ACCENT, OUTLINE = (255, 255, 255), (255, 214, 0), (0, 0, 0)
+PLANEXIUM_ACCENTS = (
+    (70, 220, 255),   # electric cyan
+    (255, 92, 184),   # cosmic magenta
+    (152, 255, 112),  # aurora green
+    (255, 148, 70),   # solar orange
+    (190, 150, 255),  # ultraviolet
+    ACCENT,
+)
+
+
+def adaptive_science_accent(base: Path, recent: list[tuple[int, int, int]] | None = None) -> tuple[int, int, int]:
+    """Choose a vivid complementary accent and avoid repeating recent channel colours."""
+    image = Image.open(base).convert("RGB").resize((160, 90), Image.Resampling.LANCZOS)
+    x = y = weight_sum = 0.0
+    for red, green, blue in image.getdata():
+        hue, saturation, value = colorsys.rgb_to_hsv(red / 255, green / 255, blue / 255)
+        weight = saturation * (0.25 + value)
+        if weight < 0.12:
+            continue
+        angle = hue * 2 * math.pi
+        x += math.cos(angle) * weight
+        y += math.sin(angle) * weight
+        weight_sum += weight
+    dominant = ((math.atan2(y, x) / (2 * math.pi)) % 1.0) if weight_sum else 0.58
+    recent = recent or []
+
+    def circular_distance(a: float, b: float) -> float:
+        delta = abs(a - b)
+        return min(delta, 1.0 - delta)
+
+    def score(candidate: tuple[int, int, int]) -> float:
+        hue, saturation, value = colorsys.rgb_to_hsv(*(channel / 255 for channel in candidate))
+        complementary = circular_distance(hue, dominant)
+        repeated = sum(1 for old in recent[-6:] if sum((old[i] - candidate[i]) ** 2 for i in range(3)) ** 0.5 < 75)
+        return complementary * 3.0 + saturation * 0.5 + value * 0.2 - repeated * 1.25
+
+    return max(PLANEXIUM_ACCENTS, key=score)
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont:
@@ -111,7 +150,7 @@ def _low_detail_y(img: Image.Image, block_h: int, side: str,
 def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] = WHITE,
             accent: tuple[int, int, int] = ACCENT, side: str = "left",
             vertical_anchor: str = "bottom", text_zone: float = TEXT_ZONE,
-            min_font: int = MIN_FONT) -> dict[str, Any]:
+            min_font: int = MIN_FONT, max_words: int = 3) -> dict[str, Any]:
     """Set the hook on `side` ('left' when Sonia is on the right, 'right' when she is on the left)."""
     if side not in ("left", "right"):
         raise ValueError("side must be 'left' or 'right'")
@@ -123,8 +162,10 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
         raise ValueError("minimum thumbnail font must remain between 84 and 96 pixels")
     max_text_width = int(SIZE[0] * text_zone) - MARGIN
     words = text.upper().split()
-    if not 1 <= len(words) <= 3:
-        raise ValueError("thumbnail text must be 1 to 3 words")
+    if max_words not in (3, 4):
+        raise ValueError("thumbnail max_words must be 3 or 4")
+    if not 1 <= len(words) <= max_words:
+        raise ValueError(f"thumbnail text must be 1 to {max_words} words")
     # Preserve the story pixels. Readability comes from the heavy outline and
     # local shadow, not from darkening the entire side (which used to hide the
     # very aircraft/landmark the thumbnail was selling).
@@ -189,6 +230,7 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
         img.save(final, "JPEG", quality=90, optimize=True)
     inside = (right_edge <= SIZE[0] * text_zone) if side == "left" else (left_edge >= SIZE[0] * (1 - text_zone))
     qc = {"size": list(SIZE), "font_size": size, "lines": lines, "side": side,
+          "primary_colour": list(primary), "accent_colour": list(accent),
           "text_left_edge": left_edge, "text_right_edge": right_edge,
           "inside_text_zone": inside, "inside_left_zone": inside,  # old name, read by older receipts and scoring
           "readable": size >= min_font,

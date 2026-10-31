@@ -201,7 +201,7 @@ class ProductionServices:
         its contract accepts prompt/output and returns a downloaded local path.
         Failure remains failure: no Sonia portrait or local portrait fallback.
         """
-        from openjarvis.one_agents.thumbnail_compose import compose
+        from openjarvis.one_agents.thumbnail_compose import adaptive_science_accent, compose
 
         channel = self.context.channel
         channel.validate_record(package)
@@ -242,11 +242,25 @@ class ProductionServices:
         # channel's narrower portrait-safe lane here made ordinary terms such
         # as "METALLICITY" fail only after the expensive provider image had
         # completed.
+        accent = tuple(chosen.get("accent_colour", [255, 214, 0]))
+        if channel.brand == "planexium" and "accent_colour" not in chosen:
+            recent = []
+            media_root = self.context.media_root / channel.brand
+            for old_receipt in sorted(media_root.glob("daily-*/thumbnail/variant-*/receipt.json"), reverse=True)[:6]:
+                try:
+                    stored = json.loads(old_receipt.read_text(encoding="utf-8"))
+                    colour = stored.get("qc", {}).get("accent_colour")
+                    if isinstance(colour, list) and len(colour) == 3:
+                        recent.append(tuple(int(value) for value in colour))
+                except (OSError, ValueError, TypeError):
+                    continue
+            accent = adaptive_science_accent(base, recent)
         receipt = compose(base, chosen["text"], folder / "final.png",
                           primary=tuple(chosen.get("primary_colour", [255, 255, 255])),
-                          accent=tuple(chosen.get("accent_colour", [255, 214, 0])),
+                          accent=accent,
                           text_zone=0.52 if channel.brand == "planexium" else 0.38,
-                          min_font=84 if channel.brand == "planexium" else 96)
+                          min_font=84 if channel.brand == "planexium" else 96,
+                          max_words=4 if channel.brand == "planexium" else 3)
         if not receipt.get("qc", {}).get("ok"):
             raise RuntimeError("Original thumbnail failed composition QC")
         receipt.update(brand=channel.brand, mission_id=self.context.mission_id,
