@@ -39,8 +39,11 @@ PLANEXIUM_ACCENTS = (
 
 
 def adaptive_science_accent(base: Path, recent: list[tuple[int, int, int]] | None = None) -> tuple[int, int, int]:
-    """Choose a vivid complementary accent and avoid repeating recent channel colours."""
+    """Choose the most legible accent; hue variety is deliberately secondary."""
     image = Image.open(base).convert("RGB").resize((160, 90), Image.Resampling.LANCZOS)
+    # PLANEXIUM currently sets copy in the left lane. Its real luminance is a
+    # better predictor of phone-size visibility than colour-wheel distance.
+    lane_luminance = ImageStat.Stat(image.crop((0, 0, 84, 90)).convert("L")).median[0] / 255
     x = y = weight_sum = 0.0
     for red, green, blue in image.getdata():
         hue, saturation, value = colorsys.rgb_to_hsv(red / 255, green / 255, blue / 255)
@@ -62,7 +65,14 @@ def adaptive_science_accent(base: Path, recent: list[tuple[int, int, int]] | Non
         hue, saturation, value = colorsys.rgb_to_hsv(*(channel / 255 for channel in candidate))
         complementary = circular_distance(hue, dominant)
         repeated = sum(1 for old in recent[-6:] if sum((old[i] - candidate[i]) ** 2 for i in range(3)) ** 0.5 < 75)
-        return complementary * 3.0 + saturation * 0.5 + value * 0.2 - repeated * 1.25
+        def linear(channel: int) -> float:
+            value = channel / 255
+            return value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+        accent_luminance = sum(weight * linear(channel) for weight, channel in
+                               zip((0.2126, 0.7152, 0.0722), candidate))
+        bright, dark = max(accent_luminance, lane_luminance), min(accent_luminance, lane_luminance)
+        contrast = (bright + 0.05) / (dark + 0.05)
+        return contrast + complementary * 0.4 + saturation * 0.15 - repeated * 0.15
 
     return max(PLANEXIUM_ACCENTS, key=score)
 
