@@ -94,6 +94,52 @@ $floorsWorkerErrorLogFile = Join-Path $oneRoot "one-floors-worker-error.log"
 $sanjeevaniLogFile = Join-Path $oneRoot "sanjeevani-server.log"
 $sanjeevaniErrorLogFile = Join-Path $oneRoot "sanjeevani-server-error.log"
 
+function Save-LogHistory {
+    <#
+      Keep the previous run's output before Start-Process overwrites it, and
+      hand back the same path so this can wrap a redirect argument in place.
+
+      Start-Process has no append mode: -RedirectStandardOutput and
+      -RedirectStandardError always truncate. Every restart therefore erased
+      whatever the dying process had just said. On 2026-10-31 a 30-minute
+      HERMES book commission was orphaned by a worker that stopped for reasons
+      nobody can now establish - the next restart, 52 minutes later, had
+      already overwritten one-worker-error.log, and the surviving file held a
+      single urllib3 warning. Not sleep (no Kernel-Power events), not this
+      script's own reload (its gate defers while a job is running), not a
+      watchdog (none of them touch one_agent_worker): the evidence simply no
+      longer existed.
+
+      The live log still belongs to the current run, which keeps it readable.
+      The history file is append-only and capped, because an unbounded log on
+      this machine is its own outage - see the sfx stem that filled C:.
+    #>
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    try {
+        if (Test-Path -LiteralPath $Path) {
+            $existing = Get-Item -LiteralPath $Path
+            if ($existing.Length -gt 0) {
+                $history = [System.IO.Path]::ChangeExtension($Path, $null) + 'history.log'
+                # Trim from the front rather than deleting: the oldest crash is
+                # the one least likely to still matter.
+                if ((Test-Path -LiteralPath $history) -and (Get-Item -LiteralPath $history).Length -gt 8MB) {
+                    $keep = Get-Content -LiteralPath $history -Tail 2000 -ErrorAction SilentlyContinue
+                    Set-Content -LiteralPath $history -Value $keep -Encoding utf8
+                }
+                Add-Content -LiteralPath $history -Encoding utf8 -Value @(
+                    ''
+                    "===== $(Get-Date -Format o)  rotated before restart: $(Split-Path $Path -Leaf) ====="
+                    (Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue)
+                )
+            }
+        }
+    } catch {
+        # Never let bookkeeping stop ONE from starting.
+    }
+    return $Path
+}
+
 $env:OPENJARVIS_HOME = $dataRoot
 $sourcePythonPath = Join-Path $sourceRoot "src"
 $sitePackagesPath = Join-Path $sourceRoot ".venv\Lib\site-packages"
@@ -233,8 +279,8 @@ if (Test-Path $sanjeevaniServer) {
             $sanjeevaniProcess = Start-Process -FilePath $pythonExe `
                 -ArgumentList @($sanjeevaniServer, "--host", "127.0.0.1", "--port", "38501", "--no-browser") `
                 -WorkingDirectory $sanjeevaniRoot `
-                -RedirectStandardOutput $sanjeevaniLogFile `
-                -RedirectStandardError $sanjeevaniErrorLogFile `
+                -RedirectStandardOutput (Save-LogHistory $sanjeevaniLogFile) `
+                -RedirectStandardError (Save-LogHistory $sanjeevaniErrorLogFile) `
                 -WindowStyle Hidden `
                 -PassThru
             Set-Content -Path $sanjeevaniPidFile -Value $sanjeevaniProcess.Id
@@ -277,8 +323,8 @@ if (($env:ONE_SYNC_ON_START -ne "false")) {
             Start-Process -FilePath "powershell.exe" `
                 -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $syncScript) `
                 -WorkingDirectory $oneRoot `
-                -RedirectStandardOutput (Join-Path $oneRoot $syncPair.Log) `
-                -RedirectStandardError (Join-Path $oneRoot ($syncPair.Log -replace '\.log$', '-error.log')) `
+                -RedirectStandardOutput (Save-LogHistory (Join-Path $oneRoot $syncPair.Log)) `
+                -RedirectStandardError (Save-LogHistory (Join-Path $oneRoot ($syncPair.Log -replace '\.log$', '-error.log'))) `
                 -WindowStyle Hidden | Out-Null
         } catch {
             Write-Host "ONE $($syncPair.Script) could not be launched: $($_.Exception.Message)" -ForegroundColor DarkYellow
@@ -325,8 +371,8 @@ if (($env:ONE_FLUX_AUTOSTART -eq "true") -or ($env:ONE_IMAGE_PROVIDER -eq "flux"
                 $flux = Start-Process -FilePath $pythonExe `
                     -ArgumentList @("-m", "uvicorn", "scripts.one_flux_server:app", "--host", "127.0.0.1", "--port", "8188") `
                     -WorkingDirectory $sourceRoot `
-                    -RedirectStandardOutput (Join-Path $oneRoot "one-flux.log") `
-                    -RedirectStandardError (Join-Path $oneRoot "one-flux-error.log") `
+                    -RedirectStandardOutput (Save-LogHistory (Join-Path $oneRoot "one-flux.log")) `
+                    -RedirectStandardError (Save-LogHistory (Join-Path $oneRoot "one-flux-error.log")) `
                     -WindowStyle Hidden `
                     -PassThru
                 Set-Content -Path $fluxPidFile -Value $flux.Id
@@ -356,8 +402,8 @@ if (-not $running) {
     $process = Start-Process -FilePath $pythonExe `
         -ArgumentList @("-m", "openjarvis.cli", "serve", "--host", "127.0.0.1", "--port", "8000", "--engine", $oneEngine, "--model", $oneModel, "--agent", $oneAgent) `
         -WorkingDirectory $sourceRoot `
-        -RedirectStandardOutput $logFile `
-        -RedirectStandardError $errorLogFile `
+        -RedirectStandardOutput (Save-LogHistory $logFile) `
+        -RedirectStandardError (Save-LogHistory $errorLogFile) `
         -WindowStyle Hidden `
         -PassThru
     Set-Content -Path $pidFile -Value $process.Id
@@ -435,8 +481,8 @@ if (-not $workerRunning) {
     $worker = Start-Process -FilePath $pythonExe `
         -ArgumentList @((Join-Path $sourceRoot "scripts\one_agent_worker.py")) `
         -WorkingDirectory $sourceRoot `
-        -RedirectStandardOutput $workerLogFile `
-        -RedirectStandardError $workerErrorLogFile `
+        -RedirectStandardOutput (Save-LogHistory $workerLogFile) `
+        -RedirectStandardError (Save-LogHistory $workerErrorLogFile) `
         -WindowStyle Hidden `
         -PassThru
     Set-Content -Path $workerPidFile -Value $worker.Id
@@ -463,8 +509,8 @@ if (Test-Path $companyServer) {
             $company = Start-Process -FilePath $pythonExe `
                 -ArgumentList @($companyServer, "8200") `
                 -WorkingDirectory $companyRoot `
-                -RedirectStandardOutput (Join-Path $oneRoot "one-company.log") `
-                -RedirectStandardError (Join-Path $oneRoot "one-company-error.log") `
+                -RedirectStandardOutput (Save-LogHistory (Join-Path $oneRoot "one-company.log")) `
+                -RedirectStandardError (Save-LogHistory (Join-Path $oneRoot "one-company-error.log")) `
                 -WindowStyle Hidden `
                 -PassThru
             Set-Content -Path $companyPidFile -Value $company.Id
@@ -498,8 +544,8 @@ if (Test-Path $floorsWorkerScript) {
             $floorsWorker = Start-Process -FilePath $pythonExe `
                 -ArgumentList @($floorsWorkerScript, "run", "--watch") `
                 -WorkingDirectory (Join-Path $companyRoot "floors\_work") `
-                -RedirectStandardOutput $floorsWorkerLogFile `
-                -RedirectStandardError $floorsWorkerErrorLogFile `
+                -RedirectStandardOutput (Save-LogHistory $floorsWorkerLogFile) `
+                -RedirectStandardError (Save-LogHistory $floorsWorkerErrorLogFile) `
                 -WindowStyle Hidden `
                 -PassThru
             Set-Content -Path $floorsWorkerPidFile -Value $floorsWorker.Id
