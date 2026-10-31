@@ -7,6 +7,9 @@ import httpx
 import yaml
 
 
+_ACTIVE_JOB_STATUSES = {"Pending", "Assigned", "Running", "InProgress", "Queued", "Claimed"}
+
+
 def workflow_zip(name, steps):
     if not name.startswith("planexium-"):
         raise ValueError("Preserved package transport is restricted to PLANEXIUM")
@@ -79,6 +82,16 @@ def run_preserved_workflow(client, payload):
             "input_defaults": {}, "required_assets": [], "priority": 100,
             "retry_policy": {"max_attempts": 1, "backoff_seconds": 0}, "timeout_seconds": 10800})
     elif str(process.get("package_version_id")) != str(version["id"]):
+        active_job = _find_in_scopes(
+            client,
+            "/jobs",
+            lambda row: str(row.get("process_id")) == str(process["id"])
+            and row.get("status") in _ACTIVE_JOB_STATUSES,
+        )
+        if active_job:
+            raise RuntimeError(
+                f"LAO process '{process_name}' still has an active job; refusing to repoint its package version"
+            )
         process_payload = {
             "name": process_name,
             "folder_id": folder_id,
