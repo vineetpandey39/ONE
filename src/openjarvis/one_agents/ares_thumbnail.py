@@ -22,6 +22,18 @@ IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 UNSAFE_STANDALONE_ROUTE_CLAIMS = {
     "DIRECT", "DIRECT FLIGHT", "NONSTOP", "NON STOP", "NON-STOP", "NEW ROUTE",
 }
+DEFAULT_THUMBNAIL_STYLE = "editorial_destination"
+BLACK_DUAL_COLOUR_STYLE = "black_dual_colour"
+THUMBNAIL_STYLE_ALIASES = {
+    "": DEFAULT_THUMBNAIL_STYLE,
+    "default": DEFAULT_THUMBNAIL_STYLE,
+    "editorial": DEFAULT_THUMBNAIL_STYLE,
+    "editorial_destination": DEFAULT_THUMBNAIL_STYLE,
+    "black": BLACK_DUAL_COLOUR_STYLE,
+    "black_background": BLACK_DUAL_COLOUR_STYLE,
+    "black_dual_color": BLACK_DUAL_COLOUR_STYLE,
+    "black_dual_colour": BLACK_DUAL_COLOUR_STYLE,
+}
 
 EXPERIMENT_FORMATS = (
     {"name": "Single hero", "sonia_expression": "genuinely surprised, raised brows, alert eyes",
@@ -233,7 +245,7 @@ def reference_sheet(portrait: Path, library: Path, out: Path) -> dict[str, Any]:
 
 
 def thumbnail_history(asset_root: Path, exclude: Path | None = None) -> list[dict[str, Any]]:
-    """Earlier videos' thumbnails, most recent first: {"layout", "portrait"} from their receipts."""
+    """Earlier thumbnails, newest first, including the winning direction and requested style."""
     rows = []
     for folder in asset_root.iterdir() if asset_root.is_dir() else []:
         if not folder.is_dir() or folder.name.startswith("_") or (exclude and folder.resolve() == exclude.resolve()):
@@ -245,8 +257,12 @@ def thumbnail_history(asset_root: Path, exclude: Path | None = None) -> list[dic
                     data = json.loads(receipt.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     continue
-                rows.append((receipt.stat().st_mtime, {"layout": data.get("layout") or "right",
-                                                        "portrait": data.get("portrait") or ""}))
+                rows.append((receipt.stat().st_mtime, {
+                    "layout": data.get("layout") or "right",
+                    "portrait": data.get("portrait") or "",
+                    "direction": data.get("winner") or data.get("variant") or "",
+                    "style": data.get("style") or DEFAULT_THUMBNAIL_STYLE,
+                }))
                 break
     return [row for _, row in sorted(rows, key=lambda r: r[0], reverse=True)]
 
@@ -276,6 +292,34 @@ def layout_prompt(template_text: str, layout: str) -> str:
     for old, new in LAYOUT_SWAPS:
         template_text = template_text.replace(old, new)
     return template_text
+
+
+def requested_thumbnail_style(thumb: dict[str, Any]) -> str:
+    """Resolve an explicit thumbnail style; black is never an automatic default."""
+    requested = str(thumb.get("requested_style") or "").strip().casefold().replace("-", "_").replace(" ", "_")
+    if requested not in THUMBNAIL_STYLE_ALIASES:
+        raise RuntimeError(f"Unsupported thumbnail requested_style: {requested}")
+    return THUMBNAIL_STYLE_ALIASES[requested]
+
+
+def style_prompt(style: str, recent: list[dict[str, Any]]) -> str:
+    """Provider direction for the selected style while keeping premium black layouts opt-in."""
+    if style == BLACK_DUAL_COLOUR_STYLE:
+        return (
+            "\n\nEXPLICIT USER STYLE: Use a predominantly matte-black background with one restrained warm/orange "
+            "story light on the left and one restrained cool/blue separation light on Sonia at the right. "
+            "Keep the route or destination proof large and simple, preserve the clean text lane, and avoid "
+            "turning the frame into a full scenic collage. This premium black dual-colour treatment was "
+            "explicitly requested for this video."
+        )
+    recent_styles = [str(row.get("style") or "") for row in recent[:2]]
+    return (
+        "\n\nSTYLE POLICY: Use a topic-led editorial destination background. Do not use the matte-black "
+        "dual-colour treatment unless requested_style=black_dual_colour is explicitly present in the approved "
+        "thumbnail package. Make the story object, lighting geometry and depth arrangement visibly different "
+        "from the two most recent thumbnails; changing only hook text, feathering or accent colour is not enough. "
+        f"Recent style receipts: {recent_styles or ['none']}."
+    )
 
 
 def _find_artifact(roots: Iterable[Path], lao_job: str, filename: str) -> Path | None:
@@ -453,12 +497,14 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
     try:
         history = thumbnail_history(root.parent, exclude=root)
         layout = layout or next_layout(history)
+        style = requested_thumbnail_style(thumb)
         portrait = portrait or pick_portrait(Path(thumb["portrait_library"]), pkg.get("recommended_title", ""),
                                              [h["portrait"] for h in history])
         text_side = "left" if layout == "right" else "right"
         prompt = layout_prompt(thumb["chatgpt_prompt_template"], layout).format(
             video_title=pkg["recommended_title"], destination=pkg.get("destination") or "the destination",
             left_usp=variant["left_usp"], sonia_expression=variant["sonia_expression"], thumbnail_text=variant["text"])
+        prompt += style_prompt(style, history)
         # What may change is listed apart from what may not. The identity clause
         # used to be the tail of a sentence whose verb was "Change the pose,
         # gesture and expression ... while preserving Sonia's identity, face
@@ -501,7 +547,7 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
                                                   side=text_side)
             receipt = {"ok": composed["qc"]["ok"], "path": composed["path"], "qc": composed["qc"],
                        "base": str(base), "portrait": str(portrait), "variant": variant["name"], "layout": layout,
-                       "text": variant["text"], "source": "local_fallback", "fallback_reason": reason}
+                       "style": style, "text": variant["text"], "source": "local_fallback", "fallback_reason": reason}
             (out_dir / "thumbnail-receipt.json").write_text(
                 json.dumps(receipt, indent=2, ensure_ascii=False), encoding="utf-8")
             return receipt
@@ -541,7 +587,7 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
         return result
     base = out_dir / filename
     shutil.copyfile(found, base)
-    # The Chairman's finish (2026-10-09): clear skin and a white glow outline around Sonia, on every thumbnail.
+    # Identity-safe finish: compact blemish cleanup and natural face balance; never a post-process white glow.
     try:
         finish = thumbnail_retouch.retouch(base, out_dir / f"variant-{variant_index + 1}-retouched.png")
     except Exception as exc:  # noqa: BLE001 - a retouch problem never costs the thumbnail
@@ -558,7 +604,7 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
         return {"ok": False, "stage": "compose", "lao_job": lao_job, "base": str(base), "error": str(exc)}
     receipt = {"ok": composed["qc"]["ok"], "path": composed["path"], "qc": composed["qc"], "base": str(base),
                "lao_job": lao_job, "portrait": str(portrait), "variant": variant["name"], "text": variant["text"],
-               "layout": layout, "retouch": finish}
+               "layout": layout, "style": style, "retouch": finish}
     # A per-variant receipt must not overwrite the experiment decision.  The
     # old shared receipt always described variant 3, even when variant 1/2 won.
     (out_dir / f"variant-{variant_index + 1}-receipt.json").write_text(
@@ -586,6 +632,7 @@ def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: 
     package_path.write_text(json.dumps(pkg, ensure_ascii=False, indent=2), encoding="utf-8")
     root = package_path.parent.parent
     history = thumbnail_history(root.parent, exclude=root)
+    style = requested_thumbnail_style(pkg["thumbnail"])
     # Sonia's channel identity is now fixed: host on the right, short hook on
     # the left, and the truthful story USP protected in the centre. Variety
     # comes from portrait, expression and art direction—not mirrored hierarchy.
@@ -610,21 +657,27 @@ def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: 
     # QC-passed candidate; use fallback only when generation produced none.
     if generated:
         eligible = generated
+    # Mechanical scoring used to select the same high-contrast composition repeatedly. Prefer a direction that did
+    # not win either of the last two videos whenever one passed the same QC and source gates.
+    recent_directions = {str(row.get("direction") or "") for row in history[:2] if row.get("direction")}
+    fresh = [row for row in eligible if str(row.get("variant") or "") not in recent_directions]
+    if fresh:
+        eligible = fresh
     if not eligible:
         # Never leave an older or failed final.png for the gate to upload.
         stale = root / "thumbnail" / "final.png"
         if stale.is_file():
             stale.replace(stale.with_name("final.rejected.png"))
-        receipt = {"ok": False, "stage": "experiment", "variants": results, "layout": layout,
+        receipt = {"ok": False, "stage": "experiment", "variants": results, "layout": layout, "style": style,
                    "portrait": str(portrait), "error": "none of the three thumbnail variants passed QC"}
     else:
         winner = max(eligible, key=lambda r: r["preupload_score"]["score"])
         final = root / "thumbnail" / "final.png"
         shutil.copyfile(winner["path"], final)
-        receipt = {"ok": True, "path": str(final), "winner": winner["variant"], "layout": layout,
+        receipt = {"ok": True, "path": str(final), "winner": winner["variant"], "layout": layout, "style": style,
                    "portrait": str(portrait),
                    "winner_score": winner["preupload_score"], "variants": results,
-                   "selection": "highest transparent pre-upload score; actual CTR requires YouTube Test & Compare"}
+                   "selection": "fresh recent direction, then highest transparent pre-upload score; actual CTR requires YouTube Test & Compare"}
         from openjarvis.one_agents import youtube_thumbnail_ab
         receipt["native_ab_test"] = youtube_thumbnail_ab.build_plan(
             root, receipt, visibility="private", content_format=str(pkg.get("content_format") or "long_form"))
