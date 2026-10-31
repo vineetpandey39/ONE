@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -21,11 +22,11 @@ _RULES = (
 
 _TOPIC_RULES = (
     ("universal_travel_adapter", ("socket", "plug type", "voltage", "charging abroad")),
+    ("cabin_bag", ("cabin baggage", "hand baggage", "carry-on allowance")),
     ("luggage_scale", ("baggage allowance", "baggage limit", "excess baggage", "luggage weight")),
     ("packing_cubes", ("packing guide", "packing list", "what to pack")),
     ("power_bank", ("battery rule", "power bank rule", "charging on flight")),
     ("neck_pillow", ("overnight flight", "long haul", "long-haul")),
-    ("cabin_bag", ("cabin baggage", "hand baggage", "carry-on allowance")),
     ("rain_cover", ("monsoon travel", "heavy rain", "rainy season")),
 )
 
@@ -82,13 +83,16 @@ def exact_contract(intent: dict[str, str], catalog: dict[str, str]) -> dict[str,
     merchant = re.sub(r"\s+", " ", str(catalog.get("merchant") or "")).strip()
     if not title or not merchant:
         raise ValueError("Exact Shopping contract requires catalog title and merchant")
+    spoken_title = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode("ascii").strip()
+    if not spoken_title:
+        raise ValueError("Catalog product has no narration-safe title")
     product = {"category": intent["category"], "search_query": intent["search_query"],
                "topic_evidence": intent["topic_evidence"], "catalog_title": title,
-               "merchant": merchant, "catalog_fingerprint": hashlib.sha256(
+               "spoken_title": spoken_title, "merchant": merchant, "catalog_fingerprint": hashlib.sha256(
                    f"{title}\n{merchant}".encode("utf-8")).hexdigest()}
     return {"schema": "sonia-shopping-script-contract/1", "status": "exact_product_locked",
             "product": product,
-            "writer_instruction": (f"Mention the exact product name '{title}' naturally once because it is "
+            "writer_instruction": (f"Mention the exact product name '{spoken_title}' naturally once because it is "
                                    f"directly useful to this topic. Do not claim Sonia used or endorses it."),
             "no_product_fallback": "continue the normal video without Shopping"}
 
@@ -98,7 +102,7 @@ def validate_script_binding(script: Any, contract: dict[str, Any] | None) -> dic
     if not contract:
         return {"bound": False, "reason": "no shopping contract; legacy/non-shopping path"}
     product = dict(contract.get("product") or {})
-    exact = re.sub(r"\s+", " ", str(product.get("catalog_title") or "")).strip()
+    exact = re.sub(r"\s+", " ", str(product.get("spoken_title") or product.get("catalog_title") or "")).strip()
     spoken = re.sub(r"[^a-z0-9]+", " ", _text(script or "").lower()).strip()
     wanted = re.sub(r"[^a-z0-9]+", " ", exact.lower()).strip()
     if contract.get("status") != "exact_product_locked" or not wanted:
@@ -126,6 +130,7 @@ def attach_to_package(package: dict[str, Any], *, script: Any, owner: str,
                        "max_tags": 1 if content_format == "youtube_short" else 3},
             "candidates": [{"category": product["category"], "search_query": product["search_query"],
                             "required": False, "catalog_title": product["catalog_title"],
+                            "spoken_title": product["spoken_title"],
                             "merchant": product["merchant"],
                             "catalog_fingerprint": product["catalog_fingerprint"],
                             "evidence": {"source": "pre_script_catalog_contract",
@@ -133,8 +138,16 @@ def attach_to_package(package: dict[str, Any], *, script: Any, owner: str,
                                          "snippet": product["topic_evidence"]}}],
         }
     else:
-        package["shopping"] = build_plan(script=script, title=str(package.get("recommended_title") or ""),
-                                         content_format=content_format, owner=owner)
+        detected = build_plan(script=script, title=str(package.get("recommended_title") or ""),
+                              content_format=content_format, owner=owner)
+        package["shopping"] = {
+            **detected,
+            "status": "skipped_no_exact_catalog_contract",
+            "eligibility": "none",
+            "candidates": [],
+            "detected_unbound_categories": [row["category"] for row in detected["candidates"]],
+            "skip_reason": "A spoken category without a pre-script exact catalog lock is not taggable",
+        }
     return package
 
 

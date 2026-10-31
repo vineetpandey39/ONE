@@ -97,9 +97,17 @@ def apply_plan(video_id: str, plan: dict[str, Any], *, receipt_path: Path) -> di
     digest = plan_hash(plan)
     try: old = json.loads(receipt_path.read_text(encoding="utf-8"))
     except (OSError, ValueError): old = {}
-    terminal = {"attached_verified", "skipped_no_relevant_product", "skipped_no_catalog_match"}
+    terminal = {"attached_verified", "skipped_no_relevant_product", "skipped_no_catalog_match",
+                "skipped_no_exact_catalog_contract"}
     if old.get("video_id") == video_id and old.get("plan_sha256") == digest and old.get("status") in terminal:
         return {**old, "resumed": True}
+    if plan.get("status") == "skipped_no_relevant_product":
+        return _save(receipt_path, {"status": "skipped_no_relevant_product", "video_id": video_id,
+                                    "plan_sha256": digest, "selected": []})
+    if (plan.get("status") != "planned_exact"
+            or not (plan.get("policy") or {}).get("exact_catalog_match_required")):
+        return _save(receipt_path, {"status": "skipped_no_exact_catalog_contract", "video_id": video_id,
+                                    "plan_sha256": digest, "selected": []})
     candidates = list(plan.get("candidates") or [])
     if not candidates:
         return _save(receipt_path, {"status": "skipped_no_relevant_product", "video_id": video_id,

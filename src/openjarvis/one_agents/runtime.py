@@ -6959,11 +6959,24 @@ def _vista_spec_from_brief(brief: str, slot: str, lane: str, hook: str) -> dict[
         "posture": "upright three-quarter portrait on the right, shoulders visible",
         "outfit_colour": "bright red",
     })
+    shopping_contract = None
+    from openjarvis.one_agents import youtube_shopping, youtube_studio_shopping
+    intent = youtube_shopping.topic_intent(text)
+    probe_video_id = _sonia_catalog_probe_video_id()
+    if intent and probe_video_id:
+        try:
+            catalog = youtube_studio_shopping.discover_exact_product(
+                intent["search_query"], probe_video_id)
+            if catalog:
+                shopping_contract = youtube_shopping.exact_contract(intent, catalog)
+        except Exception:
+            shopping_contract = None
     return {"slug": f"{slug_seed or 'travel-update'}-{slot}", "slot": slot,
             "angle": lane, "hook": hook, "slot_contract": contract.group(1).strip() if contract else "",
             "story": {"headline": headline, "destination": destination[:80], "search_terms": search_terms,
                       "source_urls": urls[:12]},
             "script_source": "vista_writer_required",
+            **({"shopping_contract": shopping_contract} if shopping_contract else {}),
             "sources": urls[:12],
             # The headline is written by VISTA's writer with the script; everything else about the look is IRIS's.
             "thumbnail_brief": {"headline": "", **performance,
