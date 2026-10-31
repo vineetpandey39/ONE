@@ -6637,6 +6637,16 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
             upload_report, delivery_receipt = _require_private_delivery_receipt(
                 uploader, package, master, upload_report
             )
+            from openjarvis.one_agents import youtube_studio_shopping
+            shopping_report = youtube_studio_shopping.apply_package(
+                str(upload_report.get("video_id") or ""), package
+            )
+            from openjarvis.one_agents import sonia_monetization
+            monetization_scorecard = sonia_monetization.record(
+                package, video_id=str(upload_report.get("video_id") or ""), shopping=shopping_report
+            )
+            upload_report["shopping"] = shopping_report
+            upload_report["monetization_scorecard"] = str(monetization_scorecard)
             stages.set_stage("echo", stages.CARRYING_TO_HEAD,
                              "Taking VISTA's verified private upload back to HELIOS")
             _require_active_job(job, "report VISTA private upload completion to HELIOS")
@@ -6657,6 +6667,8 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
                     "video_id": upload_report.get("video_id"), "studio_url": upload_report.get("studio_url"),
                     "master": str(master), "thumbnail": str(thumbnail), "subtitles": str(caption),
                     "delivery_receipt": str(delivery_receipt),
+                    "shopping": shopping_report,
+                    "monetization_scorecard": str(monetization_scorecard),
                     "content": f"VISTA Short uploaded privately: "
                                f"{upload_report.get('studio_url') or upload_report.get('video_id')}",
                     "handed_to": {"agent": "HELIOS", "job_id": report["id"]}}
