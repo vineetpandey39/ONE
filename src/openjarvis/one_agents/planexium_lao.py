@@ -19,18 +19,18 @@ def workflow_zip(name, steps):
     }
     workflow = yaml.safe_dump({"name": name, "step_pacing_ms": 2500,
                                "steps": steps}, sort_keys=False)
-    # The old UUID suffix created a permanent LAO package and process for every
-    # retry. A content fingerprint preserves isolation when the workflow really
-    # changes while allowing identical runs to reuse one dependency pair.
-    package_name = f"{name}-{hashlib.sha256(workflow.encode('utf-8')).hexdigest()[:12]}"
-    manifest = {"name": package_name, "version": "1.0.0", "entrypoint": "workflow.yaml",
+    # Package/process identity is stable. A changed workflow is a new version
+    # of the same dependency, not a brand-new dependency in LAO's catalog.
+    package_name = name
+    version = hashlib.sha256(workflow.encode("utf-8")).hexdigest()[:12]
+    manifest = {"name": package_name, "version": version, "entrypoint": "workflow.yaml",
                 "runtime_type": "browser", "input_schema": {"type": "object", "properties": {}},
                 "output_schema": {"type": "object", "properties": outputs}}
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("package.json", json.dumps(manifest))
         archive.writestr("workflow.yaml", workflow)
-    return package_name, stream.getvalue()
+    return package_name, version, stream.getvalue()
 
 
 def _find_in_scopes(client, resource, predicate):
@@ -46,11 +46,10 @@ def _find_in_scopes(client, resource, predicate):
 
 
 def run_preserved_workflow(client, payload):
-    # Reuse LAO's existing package/version/process/job APIs. No backend patch,
-    # service restart, new dependency or edit to an existing process is needed.
+    # Reuse LAO's existing package/version/process/job APIs.
     if not payload.get("folder_id"):
         raise ValueError("PLANEXIUM package requires its explicit scoped folder")
-    name, archive = workflow_zip(payload["name"], payload["steps"])
+    name, version_name, archive = workflow_zip(payload["name"], payload["steps"])
     folder_id = str(payload["folder_id"])
     package = _find_in_scopes(
         client, "/packages",
@@ -61,10 +60,10 @@ def run_preserved_workflow(client, payload):
                                            "description": "PLANEXIUM isolated production workflow"})
 
     versions = client.get(f"/packages/{package['id']}/versions") or []
-    version = next((row for row in versions if row.get("version") == "1.0.0"), None)
+    version = next((row for row in versions if row.get("version") == version_name), None)
     if version is None:
         response = httpx.post(client.base_url + "/packages/" + package["id"] + "/versions",
-            headers=client._headers(), data={"version": "1.0.0"},
+            headers=client._headers(), data={"version": version_name},
             files={"file": ("package.zip", archive, "application/zip")}, timeout=client.timeout)
         response.raise_for_status()
         version = response.json()
@@ -80,7 +79,25 @@ def run_preserved_workflow(client, payload):
             "input_defaults": {}, "required_assets": [], "priority": 100,
             "retry_policy": {"max_attempts": 1, "backoff_seconds": 0}, "timeout_seconds": 10800})
     elif str(process.get("package_version_id")) != str(version["id"]):
-        raise RuntimeError(f"LAO process '{process_name}' points at an unexpected package version")
+        process_payload = {
+            "name": process_name,
+            "folder_id": folder_id,
+            "package_version_id": version["id"],
+            "input_defaults": process.get("input_defaults") or {},
+            "required_assets": process.get("required_assets") or [],
+            "priority": process.get("priority", 100),
+            "retry_policy": process.get("retry_policy") or {"max_attempts": 1, "backoff_seconds": 0},
+            "timeout_seconds": process.get("timeout_seconds", 10800),
+        }
+        if hasattr(client, "put"):
+            process = client.put(f"/processes/{process['id']}", process_payload)
+        else:
+            response = httpx.put(
+                client.base_url + f"/processes/{process['id']}",
+                headers=client._headers(), json=process_payload, timeout=client.timeout,
+            )
+            response.raise_for_status()
+            process = response.json()
     job = client.post("/jobs", {"process_id": process["id"], "input_args": payload["input_args"]})
     return {"job": job, "process_id": process["id"], "package_id": package["id"],
             "package_version_id": version["id"]}

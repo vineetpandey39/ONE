@@ -94,6 +94,16 @@ class _LaoClient:
             return {}
         return response.json()
 
+    def put(self, path: str, payload: dict[str, Any]) -> Any:
+        response = httpx.put(
+            f"{self.base_url}{path}",
+            json=payload,
+            headers=self._headers(),
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
     def list_processes(self, scope: str) -> list[dict[str, Any]]:
         return list(self.get("/processes", scope=scope) or [])
 
