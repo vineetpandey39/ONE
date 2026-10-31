@@ -293,6 +293,46 @@ def _choose(page: Any, labels: tuple[str, ...], *, required: bool = False) -> bo
     return False
 
 
+def _same_profile(left: str | Path, right: str | Path) -> bool:
+    return (os.path.normcase(os.path.abspath(str(left)))
+            == os.path.normcase(os.path.abspath(str(right))))
+
+
+def _cdp_profile_owner(cdp_url: str) -> str | None:
+    """Which user-data-dir is the Chrome on this port serving?
+
+    CDP cannot be asked - /json/version reports the build, never the profile -
+    so the listening process is found and its own command line read. Returns
+    None when the question cannot be answered (nothing listening, no
+    permission, no --user-data-dir on the command line); None means "unknown",
+    and the caller treats unknown as "carry on", because refusing to publish
+    whenever a process lookup is unavailable would be worse than the risk.
+    """
+    import subprocess
+    from urllib.parse import urlparse
+
+    port = urlparse(cdp_url).port
+    if not port:
+        return None
+    try:
+        found = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"$c=Get-NetTCPConnection -LocalPort {port} -State Listen "
+             f"-ErrorAction SilentlyContinue | Select-Object -First 1; "
+             f"if($c){{(Get-CimInstance Win32_Process -Filter "
+             f'"ProcessId=$($c.OwningProcess)").CommandLine}}'],
+            capture_output=True, text=True, timeout=20)
+        command_line = (found.stdout or "").strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if not command_line:
+        return None
+    match = re.search(r'--user-data-dir=(?:"([^"]+)"|(\S+))', command_line)
+    if not match:
+        return None
+    return match.group(1) or match.group(2)
+
+
 def open_session(*, headless: bool = False) -> Any:
     """Open the dedicated profile. First use intentionally allows login."""
     from playwright.sync_api import sync_playwright
@@ -305,15 +345,26 @@ def open_session(*, headless: bool = False) -> Any:
     # could have driven the throwaway capture profile. They never met only
     # because they have not yet run at the same time.
     cdp_url = os.environ.get("LAO_KDP_CDP_URL", "http://127.0.0.1:9321")
-    try:
-        browser = pw.chromium.connect_over_cdp(cdp_url, timeout=2500)
-        if browser.contexts:
-            context = browser.contexts[0]
-            context._lao_playwright = pw  # type: ignore[attr-defined]
-            context._lao_cdp_browser = browser  # type: ignore[attr-defined]
-            return context
-    except Exception:
-        pass
+    # A port is a number, not an identity. Whatever answers on 9321 gets driven
+    # as if it were the KDP browser, and the comment above records how close
+    # that came to filming an Amazon-signed-in window. Checked before attaching;
+    # a stranger on the port means we open our own profile instead of theirs,
+    # which is also the safe outcome - their Chrome holds a different
+    # user-data-dir, so launching ours cannot collide with it.
+    owner = _cdp_profile_owner(cdp_url)
+    if owner is not None and not _same_profile(owner, profile_dir()):
+        print(f"[kdp] {cdp_url} is serving profile {owner}, not {profile_dir()}; "
+              "not attaching to another account's browser", file=sys.stderr)
+    else:
+        try:
+            browser = pw.chromium.connect_over_cdp(cdp_url, timeout=2500)
+            if browser.contexts:
+                context = browser.contexts[0]
+                context._lao_playwright = pw  # type: ignore[attr-defined]
+                context._lao_cdp_browser = browser  # type: ignore[attr-defined]
+                return context
+        except Exception:
+            pass
     context = pw.chromium.launch_persistent_context(
         str(profile_dir()), channel="chrome", headless=headless,
         viewport={"width": 1440, "height": 1000}, accept_downloads=True,
@@ -460,7 +511,13 @@ class AmazonChallenge(RuntimeError):
 
 
 def login_ready() -> bool:
-    """Read-only probe of the owner's browser; never launch a competing profile."""
+    """Read-only probe of the owner's browser; never launch a competing profile.
+
+    Falls back to the profile's stored cookies when no browser is serving CDP.
+    Without that, signing in and then closing Chrome left a held job with
+    nothing able to answer "yes" - the probe only ever looked at port 9321, so
+    a hold could outlive the sign-in that was supposed to clear it.
+    """
     from playwright.sync_api import sync_playwright
 
     try:
@@ -468,7 +525,7 @@ def login_ready() -> bool:
             browser = pw.chromium.connect_over_cdp(
                 os.environ.get("LAO_KDP_CDP_URL", "http://127.0.0.1:9321"), timeout=3000)
             if not browser.contexts:
-                return False
+                return stored_login()
             page = browser.contexts[0].new_page()
             try:
                 page.goto(KDP_CREATE_URL,
@@ -478,8 +535,14 @@ def login_ready() -> bool:
                         and page.get_by_text("Create eBook", exact=True).count() > 0)
             finally:
                 page.close()
-    except Exception:
+    except AmazonChallenge:
+        # The browser is sitting on the wall right now. Stored cookies cannot
+        # argue with what the page is showing.
         return False
+    except Exception:
+        # Could not reach a browser at all - the ordinary case once the
+        # operator closes Chrome. Ask the profile instead of saying no.
+        return stored_login()
 
 
 def _refuse_if_challenged(page: Any) -> None:
