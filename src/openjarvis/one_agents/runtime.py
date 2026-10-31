@@ -3625,7 +3625,45 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
                  if isinstance(row, dict) and row.get("build_eligible")]
     fresh_shortlist = [row for row in shortlist
                        if not _find_kdp_topic_duplicate(str(row.get("topic") or ""), topic_history)]
+    # The same lane test the commission is judged by, applied to the candidate
+    # before a synthesis run is spent on it. Until 2026-10-31 the lane was only
+    # checked after synthesis, which made two instructions in one prompt
+    # contradict each other: "commission inside Vineet Pandey's authority lane"
+    # and "the engine has already selected the winner; use only that winner, do
+    # not replace it". When the deterministic winner was off-lane the model had
+    # to disobey one of them, and the authority gate then refused the result -
+    # "investing for beginners" on 19 Oct, "ai for beginners" on 26 Oct. Judged
+    # here, an off-lane candidate never becomes the brief in the first place.
+    #
+    # Deliberately NOT a fallback that widens the lane when nothing fits: no
+    # in-lane candidate means no book this week, which is the honest outcome and
+    # the one the owner's catalogue strategy asks for.
+    off_lane = [row for row in fresh_shortlist
+                if not publishing_strategy.authority_fit(str(row.get("topic") or ""))["passed"]]
+    if off_lane:
+        fresh_shortlist = [row for row in fresh_shortlist if row not in off_lane]
+        _publishing_event(
+            job, agent="HERMES", event_type="shortlist_lane_filtered",
+            stage="authority_lane_prefilter",
+            summary=(f"Dropped {len(off_lane)} off-lane candidate(s) before commissioning; "
+                     f"{len(fresh_shortlist)} remain in lane"),
+            details={"dropped": [row.get("topic") for row in off_lane],
+                     "kept": [row.get("topic") for row in fresh_shortlist]},
+        )
     winner = radar_snapshot.get("winner") or {}
+    if winner and not publishing_strategy.authority_fit(str(winner.get("topic") or ""))["passed"]:
+        rejected = str(winner.get("topic") or "")
+        winner = fresh_shortlist[0] if fresh_shortlist else {}
+        radar_snapshot["winner"] = winner or None
+        _publishing_event(
+            job, agent="HERMES", event_type="winner_repointed",
+            stage="authority_lane_prefilter",
+            summary=(f"Deterministic winner {rejected!r} is outside the authority lane; "
+                     + (f"promoted {winner.get('topic')!r}" if winner
+                        else "no in-lane candidate remains")),
+            details={"rejected": rejected, "promoted": winner.get("topic") if winner else None,
+                     "in_lane_shortlist": [row.get("topic") for row in fresh_shortlist]},
+        )
     if winner and _find_kdp_topic_duplicate(str(winner.get("topic") or ""), topic_history) and fresh_shortlist:
         superseded = str(winner.get("topic") or "")
         winner = fresh_shortlist[0]

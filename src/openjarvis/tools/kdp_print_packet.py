@@ -30,6 +30,7 @@ machine and is what produced the existing renders, so it is what is asked.
 from __future__ import annotations
 
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -78,42 +79,78 @@ def wrap_size(page_count: int, *, trim_w: float = 6.0, trim_h: float = 9.0,
 
 
 def render_docx_to_pdf(source: str | Path, target: str | Path,
-                       *, timeout: int = 300) -> Path:
+                       *, timeout: int = 300, attempts: int = 2) -> Path:
     """Render a .docx through Word, which is what paginates it.
 
     Driven through PowerShell rather than pywin32 so nothing new has to be
     installed into the environment for a job that runs a few times a week.
+
+    Retried, because Word is a shared desktop application rather than a
+    library. On 2026-10-23 this lost The Venture Ledger's paperback to
+    "You cannot call a method on a null-valued expression": Documents.Open
+    had returned $null and the next line dereferenced it. The same document
+    rendered in 8s on 2026-10-31 with nothing changed, so the cause was the
+    state Word happened to be in, not the file or this code. One hiccup
+    should not cost a book its print edition.
     """
     src, dst = Path(source).resolve(), Path(target).resolve()
     if not src.is_file():
         raise FileNotFoundError(f"No document to render at {src}")
     dst.parent.mkdir(parents=True, exist_ok=True)
 
+    # Opened writable, not read-only as before. Updating fields modifies the
+    # document, and asking a read-only document to do it is a contradiction
+    # Word is entitled to refuse. Nothing is saved back over the .docx:
+    # SaveAs writes the PDF and Close is told not to save.
     script = f"""
 $ErrorActionPreference = 'Stop'
-$word = New-Object -ComObject Word.Application
-$word.Visible = $false
-$word.DisplayAlerts = 0
+$word = $null
+$doc = $null
 try {{
-    $doc = $word.Documents.Open('{src}', $false, $true)
+    $word = New-Object -ComObject Word.Application
+    $word.Visible = $false
+    $word.DisplayAlerts = 0
+    $doc = $word.Documents.Open('{src}', $false, $false, $false)
+    # Open can hand back nothing at all without raising - a busy or
+    # dialog-blocked Word does exactly that. Said plainly here, because the
+    # alternative is a null dereference one line down whose message names
+    # neither Word nor the document.
+    if ($null -eq $doc) {{
+        throw "Word.Documents.Open returned nothing for '{src}' - Word is busy, blocked by a dialog, or refused the file"
+    }}
     # Fields (a table of contents is one) hold whatever they held when the
     # document was written; a stale TOC changes the page count the spine is
-    # cut from, so they are refreshed before the render.
-    $doc.Fields.Update() | Out-Null
+    # cut from, so they are refreshed before the render. A refresh that
+    # fails is a stale page number, not a lost paperback, so it does not
+    # stop the render - it is reported and the PDF is still produced.
+    try {{
+        $doc.Fields.Update() | Out-Null
+    }} catch {{
+        Write-Output "WARN: field refresh failed, rendering with the stored values: $($_.Exception.Message)"
+    }}
     $doc.SaveAs([ref]'{dst}', [ref]17)
-    $doc.Close($false)
 }} finally {{
-    $word.Quit()
+    # Each guarded on its own. A bare $word.Quit() in a finally block throws
+    # when $word was never created, and that exception replaces the real one.
+    if ($null -ne $doc) {{ try {{ $doc.Close($false) }} catch {{}} }}
+    if ($null -ne $word) {{ try {{ $word.Quit() }} catch {{}} }}
 }}
 """
-    result = subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-        capture_output=True, text=True, timeout=timeout,
-    )
-    if not dst.is_file():
-        raise RuntimeError(
-            f"Word did not produce {dst.name}: {(result.stderr or result.stdout).strip()[:300]}")
-    return dst
+    failures: list[str] = []
+    for attempt in range(1, max(1, attempts) + 1):
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        if dst.is_file():
+            return dst
+        detail = (result.stderr or result.stdout or "").strip().replace("\n", " ")
+        failures.append(f"attempt {attempt} (exit {result.returncode}): {detail[:220]}")
+        if attempt < max(1, attempts):
+            # Long enough for an instance that is shutting down to finish, so
+            # the retry builds a fresh one instead of attaching to the corpse.
+            time.sleep(5)
+    raise RuntimeError(f"Word did not produce {dst.name}: " + "; ".join(failures))
 
 
 def page_count_of(pdf_path: str | Path) -> int:
