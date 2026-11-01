@@ -54,7 +54,9 @@ def run_reference(path, job):
         return {'status':'reference_ready_for_editorial_review','reference':str(target),'sha256':digest(target),'reused':True}
     marker='OTO-REFERENCE-'+path.name
     prompt+=' Request marker: '+marker
-    write(path/'production/character-bible/reference-request.json',{'prompt':prompt,'sources':brief['reference_stages']})
+    write(path/'production/character-bible/reference-request.json',{
+        'prompt':prompt, 'sources':brief['reference_stages'],
+        'visual_policy':'recognisable-hero-v2', 'browser_binding_policy':'origin-mission-generic-v2'})
     stages.set_stage('chandan',stages.EXECUTING,f"{manifest['subject']}: sourced age/body/kit reference")
     steps=[{'action':'open_browser','args':{'profile_dir':browser['profile_dir'],'cdp_url':browser['cdp_url'],'start_url':'https://chatgpt.com/'}},
       {'action':'open_tab','args':{'url':'https://chatgpt.com/','name':'episode_reference'}},
