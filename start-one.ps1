@@ -13,6 +13,29 @@ $companyPidFile = Join-Path $oneRoot "one-company.pid"
 $floorsWorkerPidFile = Join-Path $oneRoot "one-floors-worker.pid"
 $sanjeevaniPidFile = Join-Path $oneRoot "sanjeevani-server.pid"
 
+# LAO depends on Docker Desktop, but Docker's user-session engine can take a
+# while to come up after logon (and can occasionally wedge in its Secrets
+# Engine startup).  Keep LAO recovery detached from ONE so a slow Docker boot
+# never delays this script, while the existing ONE-AutoRestart five-minute
+# task provides LAO with the same durable retry cadence.  The LAO bootstrap is
+# idempotent and refuses to recreate containers or volumes.
+$laoBootstrap = Join-Path $oneRoot 'watchdogs\lao-bootstrap.ps1'
+if (Test-Path -LiteralPath $laoBootstrap) {
+    try {
+        $laoBootstrapRunning = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -and $_.CommandLine -like "*$laoBootstrap*" } |
+            Select-Object -First 1
+        if (-not $laoBootstrapRunning) {
+            Start-Process -FilePath 'powershell.exe' `
+                -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', $laoBootstrap) `
+                -WorkingDirectory (Split-Path -Parent $laoBootstrap) `
+                -WindowStyle Hidden | Out-Null
+        }
+    } catch {
+        Write-Host "LAO bootstrap launch degraded: $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+}
+
 function Test-ProcessAlreadyRunning {
     <#
       Defense-in-depth check ON TOP OF the .pid file, keyed on what a
