@@ -39,10 +39,12 @@ SOUND_CUES = {"none", "whoosh", "impact", "silence_drop", "crowd_lift", "locatio
 
 VISUAL_FAMILIES = {
     "establishing_wide", "dynamic_action", "equipment_macro", "environmental_pov",
-    "obscured_side_action", "low_angle", "overhead", "reflection", "crowd_reaction",
+    "three_quarter_closeup", "side_action", "low_angle", "overhead", "reflection", "crowd_reaction",
     "document_or_score_evidence", "team_context", "travel_context", "feet_detail",
     "behind_stumps", "quiet_aftermath",
 }
+
+CAMERA_ORIENTATIONS = {"front", "three_quarter", "side_profile", "rear", "pov", "overhead", "detail", "environment"}
 
 NARRATION_RULES = (
     "Third-person English narration; emotionally specific, conversational and restrained. "
@@ -184,6 +186,21 @@ def validate(plan: list[dict[str, Any]], contract: dict[str, Any]) -> list[str]:
             errors.append("sound cue missing/invalid for: " + ", ".join(map(str, bad_cue[:8])))
         if cues.count("whoosh") > max(1, len(plan) // 8):
             errors.append("whoosh is overused; reserve it for motivated transitions")
+        orientations = [str(s.get("camera_orientation") or "") for s in plan]
+        bad_orientation = [s.get("shot_id") for s, orientation in zip(plan, orientations)
+                           if orientation not in CAMERA_ORIENTATIONS]
+        if bad_orientation:
+            errors.append("camera orientation missing/invalid for: " + ", ".join(map(str, bad_orientation[:8])))
+        else:
+            rear_count = orientations.count("rear")
+            if rear_count / len(plan) > 0.15:
+                errors.append("rear-view shots exceed 15% of the episode")
+            if any(orientations[i] == orientations[i - 1] == "rear" for i in range(1, len(orientations))):
+                errors.append("adjacent rear-view shots are prohibited")
+            face_angles = {"front", "three_quarter", "side_profile"}
+            for chapter_no, shots in _chapters(plan):
+                if not any(str(s.get("camera_orientation")) in face_angles for s in shots):
+                    errors.append(f"chapter {chapter_no} needs an emotionally legible face angle")
         prime = [s for s in plan if s.get("story", {}).get("role") in {"cold_open_payoff", "turning_point", "records_payoff"}]
         if not any(str(s.get("director", {}).get("kinetic_text") or "").strip() for s in prime):
             errors.append("prime scenes need at least one factual kinetic-text payoff")

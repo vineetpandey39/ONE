@@ -33,7 +33,8 @@ def validate_pack(path):
     reference = reference_file(path, manifest)
     review_path = path / 'runtime/reference-review.json'
     review = pipeline.read(review_path)
-    checks = ('face_obscured', 'age_accuracy', 'anatomy', 'historical_kit', 'no_invented_markings')
+    checks = ('identity_consistent', 'age_accuracy', 'front_reference', 'three_quarter_reference',
+              'side_profile_reference', 'anatomy', 'historical_kit', 'no_invented_markings')
     if (review.get('status') != 'passed' or review.get('reference_sha256') != pipeline.digest(reference)
             or not review.get('reviewer') or not all(review.get(k) is True for k in checks)):
         raise ValueError('Hash-bound reference editorial review has not passed')
@@ -133,7 +134,7 @@ def run_checkpoint(path, job, payload):
     prompt = reference_prompt(manifest, pipeline.read(path / 'research/commission-brief.json'))
     prompt += (' Correct the attached rejected sheet: ' + payload['rejection_reason'] +
                ' Remove all invented bib numbers, jersey numbers, sponsor marks and lettering. '
-               'Leave competition bibs blank unless explicitly sourced in this brief. Preserve face-obscured age stages.')
+               'Leave competition bibs blank unless explicitly sourced in this brief. Preserve recognisable, age-locked identity across front, three-quarter and side-profile views.')
     from . import stages
     stages.set_stage('chandan', stages.EXECUTING, manifest['subject'] + ': correcting rejected reference')
     pipeline.image_provider(path, {'shot_id': correction, 'image': str(target), 'reference': str(archive), 'prompt': prompt})
