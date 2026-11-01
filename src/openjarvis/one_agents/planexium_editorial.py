@@ -23,17 +23,36 @@ def archive_hold_seconds(scene):
 def _article_figure_panels(asset):
     """Expose distinct panels in explicitly captioned official concept montages."""
     title = str(asset.get('title', ''))
-    if (asset.get('provider') != 'NASA'
-            or not re.search(r'\bconcepts depict\b', title, re.IGNORECASE)):
+    concepts = re.search(r'\bconcepts depict\b', title, re.IGNORECASE)
+    spiral = re.search(r'\barranged in a spiral pattern\b', title, re.IGNORECASE)
+    if asset.get('provider') != 'NASA' or not (concepts or spiral):
         return [asset]
     try:
         from PIL import Image
         source = Path(asset['path'])
         with Image.open(source) as image:
-            if image.width / image.height < 2.4 or image.height < 240:
-                return [asset]
-            panels = [image.crop((0, 0, image.width // 2, image.height)),
-                      image.crop((image.width // 2, 0, image.width, image.height))]
+            if concepts:
+                if image.width / image.height < 2.4 or image.height < 240:
+                    return [asset]
+                panels = [image.crop((0, 0, image.width // 2, image.height)),
+                          image.crop((image.width // 2, 0, image.width, image.height))]
+            else:
+                # NASA/APOD sometimes commissions a square multi-observation
+                # montage and the narration discusses individual examples.
+                # Expose nine non-overlapping, independently hashed details so
+                # later scenes do not repeat the full montage. The source
+                # identity retains the parent plus panel number for audit.
+                if not (0.75 <= image.width / image.height <= 1.35
+                        and image.width >= 720 and image.height >= 720):
+                    return [asset]
+                panels = []
+                for row in range(3):
+                    for column in range(3):
+                        left = round(column * image.width / 3)
+                        top = round(row * image.height / 3)
+                        right = round((column + 1) * image.width / 3)
+                        bottom = round((row + 1) * image.height / 3)
+                        panels.append(image.crop((left, top, right, bottom)))
             result = []
             for number, panel in enumerate(panels, 1):
                 path = source.with_name(f"panel-{asset['sha256'][:12]}-{number}.png")
