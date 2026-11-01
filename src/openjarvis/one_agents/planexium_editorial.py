@@ -31,6 +31,19 @@ def commissioned_figure_hold_seconds(scene, rows):
     return 27.5 if scene.get('screen_text') and motion >= 2 else 20
 
 
+def montage_panel_matches_scene(asset, scene_number):
+    """Reserve ordered official montage details for their narration scene."""
+    if not asset.get('source_panel'):
+        return True
+    title = str(asset.get('title', ''))
+    if not re.search(r'\barranged in a spiral pattern\b', title, re.IGNORECASE):
+        return True
+    # The commissioned APOD sequence is narrated in the same outward order.
+    # Reserving one audited detail per scene prevents early generic "Moon"
+    # lexical matches from exhausting every crop before later examples.
+    return int(asset['source_panel']) == int(scene_number)
+
+
 def _article_figure_panels(asset):
     """Expose distinct panels in explicitly captioned official concept montages."""
     title = str(asset.get('title', ''))
@@ -70,7 +83,7 @@ def _article_figure_panels(asset):
                 panel.save(path, format='PNG')
                 identity = hashlib.sha256(path.read_bytes()).hexdigest()
                 metadata = {**asset.get('metadata', {}),
-                            'title': f'{title} (panel {number} of 2)'}
+                            'title': f'{title} (panel {number} of {len(panels)})'}
                 derived = {**asset, 'path': str(path), 'sha256': identity,
                            'title': metadata['title'], 'metadata': metadata,
                            'derived_from_sha256': asset['sha256'],
@@ -239,6 +252,8 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
                 if asset.get('editorial_scene') not in (None, number):
                     continue
                 if asset.get('timeline_position') == 'open':
+                    continue
+                if not montage_panel_matches_scene(asset, number):
                     continue
                 metadata = {'title': asset.get('title', ''),
                             'description': asset.get('caption', '')}
