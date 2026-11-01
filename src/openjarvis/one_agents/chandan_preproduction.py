@@ -16,8 +16,14 @@ END = "END_OTO_PACK_JSON"
 SHOT_TYPES = ("three_quarter_closeup", "side_action", "dynamic_action", "establishing_wide",
               "low_angle", "overhead", "equipment_macro", "environmental_pov",
               "crowd_reaction", "quiet_aftermath")
-MOTIONS = ("slow_push", "lateral_drift", "focus_detail", "controlled_pullback", "subtle_parallax")
-TRANSITIONS = ("hard_cut", "match_cut", "measured_dissolve", "whip_pan", "sound_bridge")
+MOTIONS = ("slow_push", "slow_pullback", "lateral_drift", "focus_detail", "wide_hold", "vertical_reveal", "prime_ramp")
+TRANSITIONS = ("hard_cut", "match_cut", "measured_dissolve", "dip_to_black", "whip_cut", "sound_bridge")
+ORIENTATION = {
+    "three_quarter_closeup": "three_quarter", "side_action": "side_profile",
+    "dynamic_action": "front", "establishing_wide": "environment", "low_angle": "three_quarter",
+    "overhead": "overhead", "equipment_macro": "detail", "environmental_pov": "pov",
+    "crowd_reaction": "environment", "quiet_aftermath": "side_profile",
+}
 ROADMAP = (
     "Record-pressure cold open and the question of reinvention",
     "Madeira childhood context without invented hardship or routines",
@@ -132,9 +138,11 @@ def generate(path: Path) -> dict:
             narration = re.sub(r"\s+", " ", str(shot.get("narration") or "")).strip()
             if not 25 <= len(narration.split()) <= 60:
                 raise ValueError(f"{shot_id} narration length outside governed range")
-            shot_type = str(shot.get("shot_type") or SHOT_TYPES[(number - 1) % len(SHOT_TYPES)])
-            if shot_type not in SHOT_TYPES:
-                raise ValueError(f"Unsupported shot type for {shot_id}")
+            # Deterministic balanced grammar: every chapter gets a distinct
+            # five-shot sequence, no adjacent duplicates, and no dominant family.
+            chapter_zero = chapter_index - 1
+            step = 1 if chapter_zero < 10 else 3
+            shot_type = SHOT_TYPES[(chapter_zero + (offset - 1) * step) % len(SHOT_TYPES)]
             visual = re.sub(r"\s+", " ", str(shot.get("visual") or "")).strip()
             prompt_text = (f"Create ONE full-frame 16:9 photoreal cinematic CGI biography scene, original illustrative reconstruction, not archival footage. {shot_id}: {visual}. "
                            f"Subject {manifest['subject']}, age {chapter['age']}, era {chapter['era']}. Preserve the approved canonical identity from the attached reference. "
@@ -146,9 +154,9 @@ def generate(path: Path) -> dict:
                          "visual": visual, "shot_type": shot_type, "prompt": prompt_text, "reference": str(reference),
                          "image": str(images / f"{shot_id}.png"), "motion": MOTIONS[(number - 1) % len(MOTIONS)],
                          "director": {"shot_type": shot_type, "faceless": False, "transition": TRANSITIONS[(number - 1) % len(TRANSITIONS)],
-                                      "sound_cue": "selective_whoosh" if shot_type in {"dynamic_action", "low_angle"} else "location_bed",
+                                      "sound_cue": "whoosh" if shot_type in {"dynamic_action", "low_angle"} and number % 3 == 0 else ("silence_drop" if number in {1, 26, 46, 71} else "location_bed"),
                                       "kinetic_text": str(shot.get("kinetic_text") or "")},
-                         "status": "planned", "story": {"role": "cold_open" if number <= 5 else "chronological_payoff",
+                         "camera_orientation": ORIENTATION[shot_type], "status": "planned", "story": {"role": "cold_open" if number <= 5 else "chronological_payoff",
                          "open_loop": number in {1, 6, 26, 46}, "must_pay_off_with_documented_fact": True,
                          "pattern_interrupt": "camera_or_sound_shift", "retention_checkpoint": round((number - 1) / 75, 3)}})
             narration_lines.append(narration)
