@@ -16,7 +16,7 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-ENVATO_RECEIPT_REVISION = "v7"
+ENVATO_RECEIPT_REVISION = "v8"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -507,7 +507,7 @@ def stock_context(request):
     """
     subject = str(request["subject"]).casefold()
     stop = {"a","an","the","of","in","with","and","generic","cinematic","close","up",
-            "dramatic","beautiful","footage","video"}
+            "dramatic","beautiful","footage","video","animation","sunlight"}
     context = next((w for w in re.findall(r"[A-Za-z]+", request["query"])
                     if w.casefold() != subject and w.casefold() not in stop), None)
     if not context:
