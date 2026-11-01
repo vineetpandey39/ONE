@@ -10573,7 +10573,12 @@ def _travel_checkpoint(payload: dict[str, Any]) -> tuple[Path, dict[str, Any], s
     if not re.fullmatch(r"[a-f0-9-]{36}", checkpoint):
         raise RuntimeError("Missing valid preproduction checkpoint id")
     source = _yatra_preproduction_file(checkpoint)
-    record = json.loads(source.read_text(encoding="utf-8"))[0]
+    records = json.loads(source.read_text(encoding="utf-8"))
+    record = records[0]
+    normalized_scene_plan = _normalize_yatra_scene_plan(record.get("scene_plan"))
+    if normalized_scene_plan != record.get("scene_plan"):
+        record["scene_plan"] = normalized_scene_plan
+        source.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
     folder = f"{_yatra_slug(record.get('video_title') or '')}-{checkpoint[:8]}"
     asset_root = _YATRA_ASSET_ROOT / folder
     repair_file = asset_root / "targeted-repair.json"
@@ -10616,6 +10621,7 @@ def _travel_checkpoint(payload: dict[str, Any]) -> tuple[Path, dict[str, Any], s
         if revised.get("full_script") != record.get("full_script"):
             raise RuntimeError("Reviewed visual plan changed narration; explicit voice revision required")
         source, record = reviewed, revised
+    _validate_yatra_contract(record, _YATRA_EXPECTED_SCENES)
     return source, record, folder, checkpoint
 
 
