@@ -9726,6 +9726,25 @@ def _normalize_yatra_json_block(value: Any) -> Any:
     return cleaned.removesuffix("```").strip()
 
 
+def _normalize_yatra_scene_plan(value: Any) -> Any:
+    """Canonicalise harmless YAML field aliases before downstream parsing.
+
+    ChatGPT occasionally spells the established scene-level ``time`` and
+    ``duration`` fields as ``time_span`` and ``duration_seconds``. The plan is
+    otherwise complete, but all three downstream readers use the canonical
+    names; without this normalisation a valid 20-scene plan looks like twenty
+    zero-duration scenes and narration is correctly blocked.
+
+    Preserve indentation and every value. Only exact field names at the
+    beginning of a line are rewritten, so prose and nested relative timings
+    are untouched.
+    """
+    if not isinstance(value, str):
+        return value
+    value = re.sub(r"(?m)^(\s*)time_span\s*:", r"\1time:", value)
+    return re.sub(r"(?m)^(\s*)duration_seconds\s*:", r"\1duration:", value)
+
+
 def _yatra_motion_manifest(asset_root: Path) -> Path:
     """Prepare cached H.264 proxies for ProRes 10-bit inputs before Motion V3.
 
@@ -10837,15 +10856,18 @@ def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, 
     # copy of it, so the language travels with the video rather than with whichever job payload happens to carry it.
     # The cue lines are normalised here too, before any copy of the plan exists.
     normalized = normalize_script_cues(plan_record.get("full_script") or "")
+    normalized_scene_plan = _normalize_yatra_scene_plan(plan_record.get("scene_plan"))
     normalized_map = _normalize_yatra_json_block(plan_record.get("opening_map_spec"))
     if shopping_contract:
         plan_record["shopping_contract"] = shopping_contract
     if (plan_record.get("language") != sonia_language_profile(payload)["key"]
             or normalized != (plan_record.get("full_script") or "")
+            or normalized_scene_plan != plan_record.get("scene_plan")
             or normalized_map != plan_record.get("opening_map_spec")
             or shopping_contract is not None):
         plan_record["language"] = sonia_language_profile(payload)["key"]
         plan_record["full_script"] = normalized
+        plan_record["scene_plan"] = normalized_scene_plan
         plan_record["opening_map_spec"] = normalized_map
         plan_file.write_text(json.dumps(plan_records, ensure_ascii=False, indent=2), encoding="utf-8")
     contract = _validate_yatra_contract(plan_record, _YATRA_EXPECTED_SCENES)
