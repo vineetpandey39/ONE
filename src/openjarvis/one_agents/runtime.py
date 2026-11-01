@@ -6773,6 +6773,25 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
             raise RuntimeError("private upload gate has no readable master for delivery binding")
         uploader = youtube_publish._load("youtube_api_upload")
         gate, delivery_receipt = _require_private_delivery_receipt(uploader, package, master, gate)
+        thumbnail_refresh = None
+        if gate.get("status") == "already_uploaded":
+            candidates = [gate.get("thumbnail_used"), *((gate.get("thumbnails") or []))]
+            thumbnail = next((Path(str(p)) for p in candidates if p and Path(str(p)).is_file()), None)
+            if thumbnail is not None:
+                video_id = str(gate.get("video_id") or gate.get("already_uploaded_as") or "")
+                access, _scopes = uploader.refresh_access(uploader.load_credentials())
+                uploader.set_thumbnail(access, video_id, thumbnail)
+                thumbnail_refresh = {
+                    "schema": "sonia-private-thumbnail-refresh/1",
+                    "video_id": video_id,
+                    "thumbnail": str(thumbnail),
+                    "thumbnail_sha256": hashlib.sha256(thumbnail.read_bytes()).hexdigest(),
+                    "privacy_status": gate["delivery_verification"].get("privacy_status"),
+                    "refreshed_at": datetime.now(timezone.utc).isoformat(),
+                }
+                receipt_path = package.parent / "private-thumbnail-refresh-receipt.json"
+                receipt_path.write_text(json.dumps(thumbnail_refresh, ensure_ascii=False, indent=2), encoding="utf-8")
+                thumbnail_refresh["receipt"] = str(receipt_path)
         from openjarvis.one_agents import youtube_studio_shopping
         shopping_report = youtube_studio_shopping.apply_package(
             str(gate.get("video_id") or gate.get("already_uploaded_as") or ""), package
@@ -6796,11 +6815,13 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
             "format": "youtube_private_draft", "worker": "echo", "distribution": result,
             "delivery_verification": gate["delivery_verification"],
             "delivery_receipt": str(delivery_receipt),
+            "thumbnail_refresh": thumbnail_refresh,
             "shopping": shopping_report,
             "monetization_scorecard": str(monetization_scorecard),
             "storage_cleanup": storage, "published": False, "output": str(package)}), mode="report", tier="fast",
             dedupe_key=f"travel:{payload.get('lao_job')}:distribution-report")
         return {"agent": "ECHO", **result, "delivery_verification": gate["delivery_verification"],
+                "thumbnail_refresh": thumbnail_refresh,
                 "shopping": shopping_report,
                 "monetization_scorecard": str(monetization_scorecard),
                 "delivery_receipt": str(delivery_receipt), "storage_cleanup": storage,

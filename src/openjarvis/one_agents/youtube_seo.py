@@ -26,7 +26,10 @@ _WORD = re.compile(r"[a-z0-9]+")
 _HOOK_OK = {"new", "now", "rule", "rules", "why", "how", "what", "this", "that", "dont", "don", "t", "miss", "stop",
             "before", "you", "your", "go", "read", "first", "wait", "watch", "update", "alert", "guide", "know",
             "need", "must", "real", "truth", "mistake", "mistakes", "check", "safe", "plan", "trip", "is", "it", "a"}
-_GENERIC_THUMBNAIL_HOOKS = {"WHAT'S NEW?", "WHATS NEW?", "BIG UPDATE", "MUST WATCH", "NEW UPDATE"}
+_GENERIC_THUMBNAIL_HOOKS = {
+    "WHAT'S NEW?", "WHATS NEW?", "BIG UPDATE", "MUST WATCH", "NEW UPDATE",
+    "STATUS", "LATEST STATUS", "FLIGHT STATUS", "UPDATE", "NEWS", "TRAVEL UPDATE",
+}
 
 LLM = Callable[[str, dict], dict]
 
@@ -304,8 +307,8 @@ def metadata_from_model(record: dict, packaging: dict, llm: LLM | None,
         "(exactly 3 objects with keys name, left_usp (one concrete hero visual idea, no text), sonia_expression "
         "(2 to 3 words), text (a 1 to 3 word hook in capitals using only words found in the title or brief). "
         "Prefer zero or very little text: the visual must communicate the story before the words do. Do not use "
-        "generic hooks such as WHAT'S NEW, BIG UPDATE or MUST WATCH when a topic-specific place, number or change "
-        "is available)."
+        "generic hooks such as WHAT'S NEW, BIG UPDATE, STATUS or MUST WATCH when a topic-specific place, number, "
+        "question or change is available. Prefer a truthful curiosity gap such as CANCELLED? over a label)."
         if channel.thumbnail_mode == "portrait" else
         "(exactly 3 objects with keys name, left_usp (one truthful focal visual, no portrait), "
         "text (a 2 to 4 word hook in capitals using only words found in the title or brief)).")
@@ -408,6 +411,8 @@ THUMBNAIL_PROMPT = (
     "three strict zones: LEFT 0-38 percent is a low-detail, high-contrast hook zone; CENTRE 38-66 percent contains "
     "one large, unobstructed hero proof of the story ({left_usp}); RIGHT 66-100 percent contains Sonia. The hero "
     "proof must remain fully recognizable at phone size and must not sit behind the future hook text or Sonia. "
+    "Never use a world map or route diagram as the main background: for a flight-route story, prefer one aircraft, "
+    "one destination landmark and one large status/cancellation cue. Show each iconic landmark exactly once. "
     "Use one dominant background and at most one supporting cue. No collage, no secondary people, no tiny objects, "
     "no repeated landmarks, no decorative clutter. The image must tell one visual sentence before any text is added.\n\n"
     "LIGHTING HIERARCHY: give the cleanest key light and strongest local contrast to exactly three things: Sonia's "

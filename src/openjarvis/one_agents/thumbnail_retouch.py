@@ -164,7 +164,7 @@ def under_eye_boxes(image: Image.Image, face: tuple[int, int, int, int]) -> list
 
 
 def brighten_under_eyes(image: Image.Image, face: tuple[int, int, int, int] | None,
-                        lift: float = 1.06, strength: float = 0.32) -> Image.Image:
+                        lift: float = 1.12, strength: float = 0.50) -> Image.Image:
     """Lift the dark circles under her eyes (the Chairman, 2026-10-09) with a soft, warm local brightening."""
     if not face:
         return image
