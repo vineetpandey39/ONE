@@ -8,8 +8,16 @@ from pathlib import Path
 
 def archive_hold_seconds(scene):
     """Bound an animated still beat without relaxing ordinary archive density."""
-    return 22.5 if (scene.get('visual_kind') == 'graphic'
-                    and scene.get('illustrative') is True) else 15
+    # Some explainers are directed as stock-led scenes even though the script
+    # explicitly calls for an illustrative mechanism and supplies kinetic
+    # screen copy. Those scenes still receive the authored pan/zoom and
+    # director treatment, so one verified still can safely carry the residual
+    # beat after licensed motion. Keep observational and uncaptioned stock
+    # scenes on the stricter fifteen-second density ceiling.
+    illustrative_directed = (scene.get('illustrative') is True
+                             and (scene.get('visual_kind') == 'graphic'
+                                  or bool(scene.get('screen_text'))))
+    return 22.5 if illustrative_directed else 15
 
 
 def _article_figure_panels(asset):
