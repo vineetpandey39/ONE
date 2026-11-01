@@ -56,7 +56,7 @@ def run_reference(path, job):
     prompt+=' Request marker: '+marker
     write(path/'production/character-bible/reference-request.json',{
         'prompt':prompt, 'sources':brief['reference_stages'],
-        'visual_policy':'recognisable-hero-v2', 'browser_binding_policy':'origin-mission-generic-v3'})
+        'visual_policy':'recognisable-hero-v2-no-brand-marks', 'browser_binding_policy':'origin-mission-generic-v4'})
     stages.set_stage('chandan',stages.EXECUTING,f"{manifest['subject']}: sourced age/body/kit reference")
     steps=[{'action':'open_browser','args':{'profile_dir':browser['profile_dir'],'cdp_url':browser['cdp_url'],'start_url':'https://chatgpt.com/'}},
       {'action':'open_tab','args':{'url':'https://chatgpt.com/','name':'episode_reference'}},
