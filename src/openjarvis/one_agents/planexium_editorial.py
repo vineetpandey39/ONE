@@ -44,6 +44,14 @@ def montage_panel_matches_scene(asset, scene_number):
     return int(asset['source_panel']) == int(scene_number)
 
 
+def reserved_montage_panel(asset, scene_number):
+    """True only for a source-audited montage detail bound to this scene."""
+    return (asset.get('source_panel') is not None
+            and re.search(r'\barranged in a spiral pattern\b',
+                          str(asset.get('title', '')), re.IGNORECASE) is not None
+            and montage_panel_matches_scene(asset, scene_number))
+
+
 def _article_figure_panels(asset):
     """Expose distinct panels in explicitly captioned official concept montages."""
     title = str(asset.get('title', ''))
@@ -257,7 +265,9 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
                     continue
                 metadata = {'title': asset.get('title', ''),
                             'description': asset.get('caption', '')}
-                matches = (nasa_subject_matches(scene.get('title', ''), metadata)
+                reserved_montage = reserved_montage_panel(asset, number)
+                matches = (reserved_montage
+                           or nasa_subject_matches(scene.get('title', ''), metadata)
                            or nasa_subject_matches(scene.get('media_query', ''), metadata)
                            or nasa_subject_matches(scene.get('narration', ''), metadata))
                 if (seen(asset) or not matches
