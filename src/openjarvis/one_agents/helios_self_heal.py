@@ -1268,7 +1268,14 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
                         "repo": str(repo), "returncode": status.returncode,
                         "status": str(getattr(status, "stdout", ""))[-1200:],
                         "stderr": str(getattr(status, "stderr", ""))[-1200:]})
-        return {"ok": False, "reason": "repository is not clean; protected concurrent changes"}
+        # Concurrent edits are an operational deferral, not a failed model
+        # repair round.  Mark this explicitly so the Governor preserves its
+        # finite repair budget until it can safely dispatch a provider.
+        return {
+            "ok": False,
+            "pending": True,
+            "reason": "repository is not clean; protected concurrent changes",
+        }
     if dirty_engine:
         _audit_attempt({"job_id": evidence.get("job_id"),
                         "event": "dirty_engine_checkout_preserved",
@@ -1531,6 +1538,11 @@ def heal_failure(connect: Connect, finding: Any) -> str:
         if repair.get("ok"):
             receipt_path.write_text(json.dumps(repair), encoding="utf-8")
     if not repair.get("ok"):
+        if repair.get("pending"):
+            return (
+                f"{PENDING_PREFIX}{repair.get('reason') or 'repair temporarily deferred'}; "
+                "repair circuit unchanged"
+            )
         circuit = _record_repair_failure(
             evidence, str(repair.get("reason") or "no verified repair"),
         )
