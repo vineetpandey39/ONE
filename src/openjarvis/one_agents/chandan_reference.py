@@ -62,7 +62,12 @@ def run_reference(path, job):
       {'action':'generate_and_download_chatgpt_image','args':{'prompt':prompt,'request_marker':marker,'strict_fresh_turn':True,'allow_fresh_chat_recovery':False,'filename':target.name,'max_attempts':1,'stall_timeout_ms':300000,'as':'image_path'}},
       {'action':'switch_tab','args':{'name':'episode_reference','as':'episode_chat_url'}}]
     config=read(ROOT/'runtime-config.json');provider=LaoDraft(LaoOrchestratorTool(),config.get('lao_folder_id'),tuple(Path(p) for p in config['artifact_roots']))
-    result,pid=provider.run(f"Origin to Ovation - {manifest['subject']} - reference",steps,{},path/'runtime/providers/character-reference.json',timeout=900)
+    # Bind provider receipts to the actual request. A corrected policy, subject
+    # or reference brief must not inherit an older terminal LAO job merely
+    # because the generic receipt filename is the same.
+    request_tag = digest(path/'production/character-bible/reference-request.json')[:12]
+    result,pid=provider.run(f"Origin to Ovation - {manifest['subject']} - reference",steps,{},
+                            path/'runtime/providers'/f'character-reference-{request_tag}.json',timeout=900)
     shutil.copy2(provider.artifact(result,pid,target.name),target)
     manifest['browser']['chat_url']=captured_chat(result);manifest['character_reference']=str(target);write(path/'mission.json',manifest)
     receipt={'status':'reference_ready_for_editorial_review','reference':str(target),'sha256':digest(target),'provider_job':pid,'chat_url':manifest['browser']['chat_url'],'upload_authorized':False}

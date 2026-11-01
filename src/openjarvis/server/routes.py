@@ -329,7 +329,7 @@ async def one_jobs():
 
 @router.post("/v1/one/jobs/{job_id}/resume")
 async def one_resume_job(job_id: str):
-    """Resume only a failed YATRA visual job with its saved paid-work checkpoints."""
+    """Resume a failed YATRA visual or OCULUS capture checkpoint."""
     from openjarvis.one_agents.runtime import resume_yatra_visual_job
 
     try:
@@ -337,7 +337,7 @@ async def one_resume_job(job_id: str):
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"accepted": True, "job": job,
-            "note": "Resuming saved YATRA visuals; approved narration and accepted assets are reused."}
+            "note": "Resuming saved YATRA/OCULUS stage; narration, accepted assets and captures are reused."}
 
 
 @router.get("/v1/one/triggers")

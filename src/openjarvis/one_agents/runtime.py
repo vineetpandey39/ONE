@@ -500,7 +500,7 @@ def list_agent_jobs(agent_id: str, limit: int = 20) -> list[dict[str, Any]]:
 
 
 def resume_yatra_visual_job(job_id: str) -> dict[str, Any]:
-    """Safely retry a failed visual-only YATRA job from its saved checkpoint.
+    """Safely retry a failed YATRA visual or OCULUS capture checkpoint.
 
     This intentionally refuses discovery/script/narration jobs: those stages
     can change the approved story or spend voice credits. Visual resumes must
@@ -511,16 +511,18 @@ def resume_yatra_visual_job(job_id: str) -> dict[str, Any]:
     previous = get_job(job_id)
     if not previous:
         raise ValueError("YATRA job not found")
-    if previous.get("agent_id") != "yatra" or previous.get("mode") != "execute":
-        raise ValueError("Only failed YATRA execute jobs can be resumed here")
+    agent_id = str(previous.get("agent_id") or "")
+    if agent_id not in {"yatra", "oculus"} or previous.get("mode") != "execute":
+        raise ValueError("Only failed YATRA/OCULUS execute jobs can be resumed here")
     if previous.get("status") != "failed":
         raise ValueError("Resume is available only for failed jobs")
     try:
         payload = json.loads(str(previous.get("task") or ""))
     except (TypeError, ValueError) as exc:
         raise ValueError("The failed job has no readable saved task") from exc
-    if not isinstance(payload, dict) or payload.get("stage") != "visuals":
-        raise ValueError("Only the saved visual stage can be resumed; narration is not retried")
+    expected_stage = "visuals" if agent_id == "yatra" else "capture"
+    if not isinstance(payload, dict) or payload.get("stage") != expected_stage:
+        raise ValueError("Only the saved visual/capture stage can be resumed; narration is not retried")
     checkpoint = str(payload.get("preproduction_job") or "").strip()
     receipt_value = str(payload.get("narration_receipt") or "").strip()
     if not checkpoint or not receipt_value:
@@ -568,13 +570,24 @@ def resume_yatra_visual_job(job_id: str) -> dict[str, Any]:
     except (OSError, TypeError, json.JSONDecodeError) as exc:
         raise ValueError(f"Saved narration checkpoint is unreadable: {exc}") from exc
 
-    active = [item for item in list_agent_jobs("yatra", 100)
+    if agent_id == "oculus":
+        from openjarvis.one_agents import yatra_obs
+
+        visuals_value = str(payload.get("visuals_receipt") or "").strip()
+        if not visuals_value:
+            raise ValueError("Saved OCULUS task is missing its YATRA visuals receipt")
+        visuals_path = Path(visuals_value).resolve()
+        yatra_obs.validate_visuals_receipt(
+            visuals_path, checkpoint=checkpoint, asset_root=receipt_path.parent.parent)
+
+    active = [item for item in list_agent_jobs(agent_id, 100)
               if item.get("id") != job_id and item.get("status") in {"queued", "running"}]
     if active:
-        raise ValueError(f"YATRA already has active job {active[0].get('id')}; wait before resuming")
-    return enqueue_job("yatra", str(previous["task"]), mode="execute",
+        raise ValueError(f"{agent_id.upper()} already has active job {active[0].get('id')}; wait before resuming")
+    resume_kind = "yatra-visual" if agent_id == "yatra" else "oculus-capture"
+    return enqueue_job(agent_id, str(previous["task"]), mode="execute",
                        tier=str(previous.get("tier") or "fast"),
-                       dedupe_key=f"yatra-visual-resume:{job_id}")
+                       dedupe_key=f"{resume_kind}-resume:{job_id}")
 
 
 def list_jobs(limit: int = 20) -> list[dict[str, Any]]:
