@@ -1,4 +1,10 @@
-"""Face-obscured biography direction. Automated detection is screening, not editorial approval."""
+"""Recognisable, editorial biography direction for Origin to Ovation.
+
+The old face-hidden policy produced repetitive rear views and weakened emotional
+connection.  Faces are now required as part of a diverse, age-locked visual
+grammar.  Detection remains screening only; identity, dignity and anatomy need
+editorial review.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,7 +19,7 @@ FACE_MIN_FRACTION = 0.07
 # episode consequently looked like five pictures repeated fourteen times.
 COVERAGE = (
     "establishing_wide", "dynamic_action", "equipment_macro", "environmental_pov",
-    "obscured_side_action", "low_angle", "overhead", "reflection", "crowd_reaction",
+    "three_quarter_closeup", "side_action", "low_angle", "overhead", "reflection", "crowd_reaction",
     "document_or_score_evidence", "team_context", "travel_context", "feet_detail",
     "behind_stumps", "quiet_aftermath",
 )
@@ -21,32 +27,32 @@ MOTION = ("slow_push", "lateral_drift", "focus_detail", "slow_pullback", "wide_h
 
 _DIRECTIONS = {
     "establishing_wide": "Wide period establishing view of {place}; environment leads the frame; no identifiable athlete",
-    "dynamic_action": "Dynamic faceless action at {place}: {action}; body mechanics and equipment contact physically correct",
+    "dynamic_action": "Dynamic action at {place}: {action}; recognisable age-locked athlete and physically correct mechanics",
     "equipment_macro": "Macro still-life of {object}; period wear and texture visible; no face or generic bat-grip repeat",
-    "environmental_pov": "First-person environmental POV at {place}, using {object} as foreground story evidence; no face",
-    "obscured_side_action": "Side action angle with the entire face hidden by helmet, deep shadow or crop: {action}; {look}",
-    "low_angle": "Ground-level low angle showing {action}, feet, surface and scale; head turned completely away; {look}",
-    "overhead": "High overhead composition mapping {place}, subject small and face unreadable, action: {action}",
-    "reflection": "Oblique reflection in glass, rain or polished equipment; facial detail impossible; {place}; {look}",
-    "crowd_reaction": "Reaction-led frame from spectators or teammates while the faceless subject remains distant at {place}",
+    "environmental_pov": "First-person environmental POV at {place}, using {object} as foreground story evidence",
+    "three_quarter_closeup": "Emotional three-quarter close-up during {action}; recognisable age-locked identity, natural expression, {look}",
+    "side_action": "True side action angle during {action}; recognisable profile, correct anatomy and equipment mechanics; {look}",
+    "low_angle": "Ground-level low angle showing {action}, face visible when composition permits, feet, surface and scale; {look}",
+    "overhead": "High overhead composition mapping {place}, action: {action}",
+    "reflection": "Oblique reflection in glass, rain or polished equipment; recognisable but non-distorted identity; {place}; {look}",
+    "crowd_reaction": "Reaction-led frame from spectators or teammates with the athlete emotionally legible at {place}",
     "document_or_score_evidence": "Graphic-ready factual insert of {evidence}; historically accurate object or scoreboard, no invented text",
-    "team_context": "Team-context tableau around {action}; subject seen from rear or fully occluded, distinct body poses, {look}",
-    "travel_context": "Period-accurate journey or transition through {place}; luggage or equipment tells the story; face hidden",
+    "team_context": "Team-context tableau around {action}; recognisable subject, distinct body poses, {look}",
+    "travel_context": "Period-accurate journey or transition through {place}; luggage, expression and equipment tell the story",
     "feet_detail": "Close detail of period footwear, crease or ground during {action}; anatomically correct stance, no face",
-    "behind_stumps": "Behind-stumps view of {action}; wicketkeeping/batting equipment correct, face fully blocked by helmet or crop",
-    "quiet_aftermath": "Quiet aftermath at {place}: empty space, used {object}, or distant rear silhouette carries the consequence",
+    "behind_stumps": "Behind-stumps view of {action}; wicketkeeping/batting equipment and anatomy correct",
+    "quiet_aftermath": "Quiet aftermath at {place}: expression, empty space or used {object} carries the consequence",
 }
 
 FACELESS_RULES = (
-    "The subject's face is never visible: no frontal view, no profile showing eyes, nose or mouth; the head is turned "
-    "away from camera, cropped out of frame, or in deep shadow. Recognition comes only from the signature details "
-    "given. No logos, crests, sponsor marks, signatures or watermark; the only text allowed is the shirt number "
-    "or documented jersey name stated. Never add a modern number/name to an era without evidence. "
-    "Never place the camera behind the athlete. Use true lateral court views, distant silhouettes, head-out-of-frame "
-    "side crops, equipment, hands, feet, environmental POV or reflections without facial detail. Side angles are "
-    "allowed only with the face fully obscured. Keep every athlete portrayal dignified: no rear-body composition "
-    "and no camera emphasis on the back, hips, chest, thighs or body shape; use distant full-body action, neutral "
-    "upper-torso crops, equipment occlusion, court geography and action mechanics instead. Do not render Olympic "
+    "Show a recognisable, age-appropriate editorial interpretation of the athlete. Preserve the approved canonical "
+    "face proportions, hair, skin tone and era-specific features across every scene; do not create a photographic "
+    "clone or claim archival authenticity. Use front, three-quarter, true side-profile, close-up, medium and wide "
+    "coverage. Rear-view shots are transitional only and may not exceed 15 percent of the episode; never use two "
+    "rear views consecutively. At least one emotionally legible face shot must appear in every chapter, while no "
+    "single camera grammar may dominate. Keep every portrayal dignified: never emphasize the back, hips, chest, "
+    "thighs or body shape. No logos, crests, sponsor marks, signatures or watermark; the only text allowed is a "
+    "documented shirt number or jersey name appropriate to that exact era. Do not render Olympic "
     "rings, event branding, flags, logos, crests, sponsor marks, venue lettering, scoreboards or readable text. "
     "Sport-specific anatomy, grip and equipment mechanics must be physically correct; no extra fingers, fused hands "
     "or twisted wrists, elbows or shoulders.")
@@ -103,9 +109,10 @@ def prompt(shot_id: str, visual: str, chapter: dict[str, Any], subject: str) -> 
 
 
 def thumbnail_prompt(subject: str, look: str, headline: str) -> str:
-    return (f"Cinematic photoreal CGI biography thumbnail, 16:9. {subject} seen from behind under stadium lights, "
-            f"walking out to bat, face never visible; {look}. Huge floodlit crowd ahead, strong simple composition. "
-            f"{FACELESS_RULES} Large readable headline only: {headline}.")
+    return (f"Cinematic photoreal CGI biography thumbnail, 16:9. Large recognisable emotional face of {subject} in "
+            f"front or three-quarter view; {look}. Add one career-defining sport object or moment and a clean contrasting "
+            f"background. The face and eyes are the primary focal point; no rear silhouette. {FACELESS_RULES} "
+            f"Large readable 2-to-4-word conflict headline only: {headline}.")
 
 
 def visible_faces(image: Path, min_fraction: float = FACE_MIN_FRACTION) -> list[dict[str, Any]]:
@@ -127,24 +134,13 @@ def visible_faces(image: Path, min_fraction: float = FACE_MIN_FRACTION) -> list[
 
 
 def reject_faces(plan: list[dict[str, Any]], rejected_dir: Path) -> list[dict[str, Any]]:
-    """Move every generated frame that shows a face out of the plan's image path, so the next batch regenerates it."""
-    rejected = []
-    for shot in plan:
-        image = Path(shot["image"])
-        if not image.is_file():
-            continue
-        faces = visible_faces(image)
-        if faces:
-            rejected_dir.mkdir(parents=True, exist_ok=True)
-            target = rejected_dir / f"{image.stem}-face-{len(list(rejected_dir.glob(image.stem + '-face-*')))+1}{image.suffix}"
-            image.replace(target)
-            rejected.append({"shot_id": shot["shot_id"], "moved_to": str(target), "faces": faces})
-    return rejected
+    """Compatibility no-op: visible faces are now expected and reviewed for identity."""
+    return []
 
 
 def enforce_prompt(text: str) -> str:
-    """Enforce channel policy at every provider boundary, including old callers."""
-    return str(text).rstrip() + "\nMANDATORY CAMERA RULE (overrides any portrait/likeness instruction above): " + FACELESS_RULES
+    """Enforce the current channel visual policy at every provider boundary."""
+    return str(text).rstrip() + "\nMANDATORY RECOGNISABLE-HERO RULE (overrides hidden-face instructions above): " + FACELESS_RULES
 
 
 def scene_qa(image: Path, *, age, era, reviewer=None) -> dict:
@@ -152,9 +148,9 @@ def scene_qa(image: Path, *, age, era, reviewer=None) -> dict:
     import hashlib
     findings = visible_faces(image)
     checks = reviewer or {}
-    required = ("face_obscured", "anatomy", "historical_accuracy")
+    required = ("identity_consistent", "dignified_framing", "anatomy", "historical_accuracy")
     return {"image_sha256": hashlib.sha256(image.read_bytes()).hexdigest(), "age": age, "era": era,
             "detected_faces": findings, "screening": "rejected" if findings else "no_face_detected",
-            "editorial_status": "passed" if not findings and all(checks.get(k) is True for k in required)
+            "editorial_status": "passed" if all(checks.get(k) is True for k in required)
                 and age is not None and era else "review_required",
             "visual_checks": {k: checks.get(k) for k in required}}

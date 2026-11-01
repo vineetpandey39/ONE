@@ -1,4 +1,4 @@
-"""Sourced, subject-neutral, face-obscured reference commissioning."""
+"""Sourced, age-locked, recognisable reference commissioning."""
 from pathlib import Path
 import shutil
 import re
@@ -22,9 +22,8 @@ def reference_prompt(manifest, brief):
         if any(stage.get(k) in (None,'',[]) for k in required):raise ValueError('Incomplete sourced reference stage')
         if not all(str(u).startswith('https://') for u in stage['source_urls']):raise ValueError('Reference sources must be HTTPS links')
         lines.append(f"Age {stage['age']}, year {stage['year']}, {stage['place']}: {stage['appearance']}; {stage['equipment']}.")
-    return (f"Generate a canonical age/body/kit reference sheet for {manifest['subject']}, original photoreal cinematic CGI. "
-            'CAMERA AXIS IS STRICTLY THE COURT SIDELINE, perpendicular to the player, never behind or diagonal-behind. Use true 90-degree lateral full-court silhouettes with the human figure small, shoulder-to-hand side crops with the entire head outside the frame, and hands/racket/footwork/equipment details. If a face or the back of the torso would be visible, replace that panel with athlete-free court or equipment evidence. Never render frontal heads, facial profiles or expressions. '
-            'Never use a rear-body composition and never emphasize the subject’s back, hips, chest, thighs or body shape. Prefer athlete-free equipment and court evidence wherever possible. '
+    return (f"Generate a canonical age/face/body/kit reference sheet for {manifest['subject']}, original photoreal cinematic CGI. "
+            'For every sourced age stage include front, three-quarter and true side-profile head-and-shoulder views, one neutral full-body sport stance, and hands/equipment detail. Preserve stable identity geometry across ages while showing evidence-based maturation, hair and era-specific kit. Use dignified neutral framing and never emphasize the subject’s back, hips, chest, thighs or body shape. '
             + ' '.join(lines) + ' ' + FACELESS_RULES + ' Age labels may be small editorial captions. '
             'Illustrative period-appropriate reference, not archival evidence. No invented luxury or poverty. Output the image itself.')
 

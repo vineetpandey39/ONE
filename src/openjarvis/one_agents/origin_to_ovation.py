@@ -290,9 +290,6 @@ def run_stage(job, *, enqueue):
             reference_result = run_reference(path, job)
             if manifest["production_phase"] == "reference_first":
                 return reference_result
-            from openjarvis.one_agents.origin_to_ovation_faceless import visible_faces
-            if visible_faces(Path(reference_result["reference"])):
-                return {"_blocked": True, "status": "review_required", "blocked_reason": "Reference exposes a face; revise before scenes"}
             manifest = read(path / "mission.json")
         plan = read(master_dir / "shot-plan.json")
         # Bind packaging, opening, factual beat loops, ending and post-publish learning before expensive generation.
@@ -344,27 +341,6 @@ def run_stage(job, *, enqueue):
             "processed": sum(Path(s["image"]).is_file() for s in plan), "total": len(plan)})
         with building_progress(manifest.get("subject") or path.name, plan) as phase:
             image_batch_provider(path, plan)
-            if plan:
-                # Faceless plans (2026-10-22): a frame that still shows a face is regenerated, never reviewed for
-                # likeness.
-                from openjarvis.one_agents.origin_to_ovation_faceless import reject_faces
-                phase("checking frames for faces")
-                rejected_dir = master_dir / "images-rejected-face"
-                history = []
-                for _round in range(2):
-                    rejected = reject_faces(plan, rejected_dir)
-                    history += rejected
-                    if not rejected:
-                        break
-                    phase(f"regenerating {len(rejected)} frame(s) that showed a face")
-                    image_batch_provider(path, plan)
-                still = reject_faces(plan, rejected_dir)
-                write(path / "runtime" / "face-check.json", {"rejected": history + still, "remaining": still,
-                      "editorial_status": "review_required", "limitations": "Detector negatives do not approve face obscuration, anatomy or historical accuracy"})
-                if still:
-                    return {"_blocked": True, "status": "faces_still_visible",
-                            "blocked_reason": "These scenes kept showing a face after two regenerations",
-                            "shots": [r["shot_id"] for r in still]}
             from openjarvis.one_agents.origin_to_ovation_faceless import scene_qa
             write(path / "runtime" / "scene-visual-qa.json", {
                 "status": "review_required", "shots": {
@@ -457,9 +433,9 @@ def run_stage(job, *, enqueue):
         metadata_path = master_dir / "editorial-metadata.json"
         metadata = read(metadata_path) if metadata_path.is_file() else {}
         if metadata.get("thumbnail_concepts"):
-            # 2026-10-23: one story-led concept per angle, none repeating an earlier episode or showing a face.
+            # One story-led concept per angle, recognisable face required and no earlier-episode copy.
             from openjarvis.one_agents import origin_to_ovation_thumbnails as T
-            from openjarvis.one_agents.origin_to_ovation_faceless import FACELESS_RULES, visible_faces
+            from openjarvis.one_agents.origin_to_ovation_faceless import FACELESS_RULES
             earlier = T.earlier_thumbnails(ROOT / "missions", path.name)
             concepts = []
             for index, concept in enumerate(metadata["thumbnail_concepts"], start=1):
@@ -470,8 +446,6 @@ def run_stage(job, *, enqueue):
                                       "prompt": f"{concept['prompt']} {FACELESS_RULES} "
                                                 f"Headline text exactly: {concept['headline']}."})
                 reasons = T.resemblance(image, concept["headline"], earlier)
-                if visible_faces(image):
-                    reasons.append("a face is visible")
                 concepts.append({**concept, "image": str(image), "rejected": reasons})
             picked = T.choose(concepts, metadata.get("thumbnail_choice"))
             write(path / "runtime" / "thumbnail-concepts.json",
@@ -479,7 +453,7 @@ def run_stage(job, *, enqueue):
                    "chairman_choice": metadata.get("thumbnail_choice")})
             if picked is None:
                 return {"_blocked": True, "status": "thumbnail_concepts_rejected",
-                        "blocked_reason": "Every thumbnail concept showed a face or repeated an earlier episode",
+                        "blocked_reason": "Every thumbnail concept repeated an earlier episode or failed packaging review",
                         "concepts": concepts}
             shutil.copy2(picked["image"], master_dir / "thumbnail.png")
             if picked.get("title"):
@@ -496,8 +470,8 @@ def run_stage(job, *, enqueue):
             "shot_id": "thumbnail", "image": str(master_dir / "thumbnail.png"),
             "reference": reference,
             "prompt": metadata.get("thumbnail_prompt", "Create a premium 16:9 cinematic CGI biography thumbnail. "
-                      "Show the episode athlete from behind, face completely hidden, with historically accurate equipment. "
-                      "Use the episode metadata for the headline; no visible faces or invented identity.")})
+                      "Show a large recognisable emotional front or three-quarter face with historically accurate equipment. "
+                      "Use the episode metadata for a 2-to-4-word conflict headline; no rear silhouette or invented identity.")})
         if manifest.get("upload_policy") == "package_only_until_later_explicit_user_instruction":
             return {"status": "package_ready_upload_not_authorized", "mission_id": path.name,
                     "master": str(master_dir / "master.mp4"), "seo": str(path / "runtime" / "seo.json")}
