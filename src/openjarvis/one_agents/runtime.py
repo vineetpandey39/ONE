@@ -6444,6 +6444,59 @@ def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
                     "thumbnail_sha256": receipt["sha256"], "published": False}
         finally:
             stages.clear_stage("ares")
+    if (payload.get("brand") == "sonia_travel_vlogs"
+            and payload.get("stage") == "thumbnail_ctr_repair"):
+        package_path = Path(str(payload.get("package") or ""))
+        root = Path(str(payload.get("asset_root") or ""))
+        hook = str(payload.get("hook_text") or "").strip().upper()
+        visual = str(payload.get("visual_brief") or "").strip()
+        if (not root.is_dir() or not package_path.is_file()
+                or package_path.resolve().parent.parent != root.resolve()
+                or not hook or not visual):
+            raise RuntimeError("ARES received an incomplete thumbnail CTR-repair handoff")
+        stages.worker_confirms_receipt("ares", "Received the approved thumbnail CTR correction brief")
+        try:
+            stages.set_stage("ares", stages.EXECUTING,
+                             "Generating a no-map, single-landmark curiosity thumbnail")
+            package = json.loads(package_path.read_text(encoding="utf-8"))
+            backup = package_path.with_name("youtube-seo-package.pre-thumbnail-ctr-repair.json")
+            if not backup.exists():
+                backup.write_bytes(package_path.read_bytes())
+            package["thumbnail"]["text"] = hook
+            package["thumbnail"]["variants"] = [{
+                "name": "CTR repair", "left_usp": visual,
+                "sonia_expression": "concerned curiosity, alert eyes", "text": hook,
+            }]
+            package["thumbnail"]["chatgpt_prompt_template"] += (
+                "\n\nCURRENT CTR REPAIR: use a cinematic near-black/navy background with controlled red and cyan side "
+                "accents. Do not use a world map or route diagram. Show exactly one Burj Khalifa, one aircraft and "
+                "one large cancellation cue. Keep Sonia large and identity-accurate."
+            )
+            package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
+            from openjarvis.one_agents import ares_thumbnail
+            from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+            receipt = ares_thumbnail.make_thumbnail_experiment(
+                package_path, tool=LaoOrchestratorTool(), artifact_roots=_YATRA_ROBOT_ARTIFACTS,
+                max_wait_seconds=780,
+            )
+            if not receipt.get("ok") or not Path(str(receipt.get("path") or "")).is_file():
+                raise RuntimeError("ARES thumbnail CTR repair did not produce a QC-passed canonical winner")
+            thumbnail = Path(receipt["path"])
+            digest = hashlib.sha256(thumbnail.read_bytes()).hexdigest()
+            stages.set_stage("ares", stages.CARRYING_TO_HEAD,
+                             "Handing the corrected canonical thumbnail to ECHO")
+            _require_active_job(job, "hand the corrected thumbnail to ECHO")
+            echo = enqueue_job(
+                "echo", json.dumps({**payload, "stage": "thumbnail_refresh", "thumbnail": str(thumbnail),
+                                    "thumbnail_sha256": digest}),
+                mode="execute", tier="fast",
+                dedupe_key=f"travel:{payload.get('lao_job')}:thumbnail-refresh:{digest[:16]}",
+            )
+            return {"agent": "ARES", "stage": "thumbnail_ctr_repair", "status": "qc_passed",
+                    "thumbnail": str(thumbnail), "thumbnail_sha256": digest,
+                    "handed_to": {"agent": "ECHO", "job_id": echo["id"]}}
+        finally:
+            stages.clear_stage("ares")
     # LinkedIn Authority: the one channel Floor 3 owns (Chairman, 2026-10-13).
     _task_text = str(job.get("task") or "")
     _li = floors_bridge.load("floor_03_growth", "linkedin_authority")
@@ -6494,7 +6547,6 @@ def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
             vista_job_id = str(payload.get("vista_job") or job.get("id") or "")
             handoff_key = f"vista:{origin}:{slot}:{vista_job_id}:publish"
             if payload.get("rebuild_run_dir"):
-                import hashlib
                 master = Path(str(result.get("master") or ""))
                 if not master.is_file():
                     raise RuntimeError("Rebuilt VISTA package has no master for upload dedupe")
@@ -6611,6 +6663,57 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("PLANEXIUM distribution requires explicit private-upload stage")
         from openjarvis.one_agents.planexium import stage_private
         return {"agent": "ECHO", "brand": "planexium", "published": False, **stage_private(payload)}
+    if payload.get("brand") == "sonia_travel_vlogs" and payload.get("stage") == "thumbnail_refresh":
+        package = Path(str(payload.get("package") or ""))
+        thumbnail = Path(str(payload.get("thumbnail") or ""))
+        if not package.is_file() or not thumbnail.is_file() or package.parent.parent != thumbnail.parent.parent:
+            raise RuntimeError("ECHO received an incomplete thumbnail-refresh handoff")
+        expected = str(payload.get("thumbnail_sha256") or "")
+        actual = hashlib.sha256(thumbnail.read_bytes()).hexdigest()
+        if not expected or actual != expected:
+            raise RuntimeError("ECHO thumbnail-refresh hash binding failed")
+        gate_path = package.parent / "upload-gate.json"
+        gate = json.loads(gate_path.read_text(encoding="utf-8"))
+        video_id = str(gate.get("video_id") or gate.get("already_uploaded_as") or "")
+        if not video_id:
+            raise RuntimeError("ECHO thumbnail-refresh has no private video id")
+        stages.worker_confirms_receipt("echo", "Received ARES's QC-passed corrected thumbnail")
+        try:
+            stages.set_stage("echo", stages.EXECUTING,
+                             "Refreshing only the thumbnail on the existing private draft")
+            from openjarvis.one_agents import youtube_publish
+            uploader = youtube_publish._load("youtube_api_upload")
+            delivery = uploader.verify_private_delivery(video_id)
+            if (not delivery.get("verified") or delivery.get("privacy_status") != "private"
+                    or delivery.get("channel_id") != uploader.EXPECTED_CHANNEL_ID):
+                raise RuntimeError("thumbnail refresh refused: remote Sonia private-delivery gate failed")
+            access, _scopes = uploader.refresh_access(uploader.load_credentials())
+            uploader.set_thumbnail(access, video_id, thumbnail)
+            receipt = {
+                "schema": "sonia-private-thumbnail-refresh/1", "video_id": video_id,
+                "thumbnail": str(thumbnail), "thumbnail_sha256": actual,
+                "channel_id": delivery.get("channel_id"), "privacy_status": delivery.get("privacy_status"),
+                "processing_status": delivery.get("processing_status"),
+                "refreshed_at": datetime.now(timezone.utc).isoformat(),
+            }
+            receipt_path = package.parent / "private-thumbnail-refresh-receipt.json"
+            receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
+            gate.update(thumbnail_used=str(thumbnail), thumbnail_sha256=actual,
+                        thumbnail_refreshed_at=receipt["refreshed_at"])
+            gate_path.write_text(json.dumps(gate, ensure_ascii=False, indent=2), encoding="utf-8")
+            stages.set_stage("echo", stages.CARRYING_TO_HEAD,
+                             "Reporting the verified private thumbnail correction to HELIOS")
+            report = enqueue_job(
+                "helios", json.dumps({**payload, "stage": "thumbnail_refresh_complete",
+                                      "thumbnail_refresh": receipt, "published": False}),
+                mode="report", tier="fast",
+                dedupe_key=f"travel:{payload.get('lao_job')}:thumbnail-refresh-report:{actual[:16]}",
+            )
+            return {"agent": "ECHO", "stage": "thumbnail_refresh", "status": "completed",
+                    "thumbnail_refresh": receipt, "receipt": str(receipt_path),
+                    "handed_to": {"agent": "HELIOS", "job_id": report["id"]}}
+        finally:
+            stages.clear_stage("echo")
     if payload.get("brand") == "sonia_travel_vlogs" and payload.get("stage") == "vista_short_publish":
         package = Path(str(payload.get("package") or ""))
         slot = str(payload.get("slot") or "")
