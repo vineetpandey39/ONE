@@ -176,6 +176,8 @@ def generate(path: Path) -> dict:
     script = script.replace('VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"', f'VOICE_ID = "{brief["voice"]["voice_id"]}"')
     script = script.replace('TITLE = "P. V. Sindhu Biography: The Finals That Forged a Champion"', f'TITLE = {json.dumps(pack["title"])}')
     script = script.replace("narration-george", f"narration-{brief['voice']['name'].lower()}").replace("pv-sindhu-george", f"{manifest['subject_id']}-{brief['voice']['name'].lower()}")
+    script = script.replace('"voice": "George"', f'"voice": "{brief["voice"]["name"]}"')
+    script = script.replace('"voice": "George", "duration_seconds"', f'"voice": "{brief["voice"]["name"]}", "duration_seconds"')
     (master / "generate_narration.py").write_text(script, encoding="utf-8")
     manifest.update(production_phase="reference_then_produce", reference_review_required=True)
     pipeline.write(path / "mission.json", manifest)
