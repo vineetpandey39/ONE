@@ -20,6 +20,17 @@ def archive_hold_seconds(scene):
     return 22.5 if illustrative_directed else 15
 
 
+def commissioned_figure_hold_seconds(scene, rows):
+    """Bound an official source detail after substantial licensed motion."""
+    motion = sum(row.get('kind') in {'envato', 'authored_scientific_motion'}
+                 for row in rows)
+    # A scene with two independently reviewed motion clips and explicit
+    # kinetic director copy can let its exact commissioned detail carry the
+    # final beat. This is still a moving, captioned composition—not an
+    # unbroken static photograph—and avoids repeating the full source montage.
+    return 27.5 if scene.get('screen_text') and motion >= 2 else 20
+
+
 def _article_figure_panels(asset):
     """Expose distinct panels in explicitly captioned official concept montages."""
     title = str(asset.get('title', ''))
@@ -245,16 +256,19 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
                 # archive-only density target.  One exact source figure may
                 # carry a twenty-second beat, and later scenes may be the only
                 # relevant home for the remaining figures.
-                capacity = sum(20 if row['kind'] == 'primary' else 15 for row in pictures)
+                primary_hold = commissioned_figure_hold_seconds(scene, rows)
+                capacity = sum(primary_hold if row['kind'] == 'primary' else 15
+                               for row in pictures)
                 if capacity >= remaining:
                     break
         # A figure taken directly from the commissioned article may hold for
         # up to twenty seconds with the restrained pan/zoom. Archive-search
         # stills retain the tighter fifteen-second density rule.
+        primary_hold = commissioned_figure_hold_seconds(scene, rows)
         source_figure_hold_ok = (pictures and any(row['kind'] == 'primary' for row in pictures)
-                                 and (sum(20 if row['kind'] == 'primary' else 15
+                                 and (sum(primary_hold if row['kind'] == 'primary' else 15
                                           for row in pictures) >= remaining
-                                      or remaining / len(pictures) <= 20))
+                                      or remaining / len(pictures) <= primary_hold))
         if len(pictures) < needed and not source_figure_hold_ok:
             raise ValueError(f'Scene {number} lacks distinct relevant imagery; shorten narration or revise its visual brief')
         if pictures:
