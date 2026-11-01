@@ -540,11 +540,13 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
         try:
             base = _local_fallback_base(portrait, str(pkg.get("destination") or "Travel"),
                                         out_dir / f"variant-{variant_index + 1}-local-base.png")
+            hook_min_font = (84 if len(str(variant["text"]).split()) == 1
+                             and len(str(variant["text"])) > 8 else thumbnail_compose.MIN_FONT)
             composed = thumbnail_compose.compose(base, variant["text"],
                                                   out_dir / f"variant-{variant_index + 1}-final.png",
                                                   primary=tuple(variant.get("primary_colour", [255, 255, 255])),
                                                   accent=tuple(variant.get("accent_colour", [255, 214, 0])),
-                                                  side=text_side)
+                                                  side=text_side, min_font=hook_min_font)
             receipt = {"ok": composed["qc"]["ok"], "path": composed["path"], "qc": composed["qc"],
                        "base": str(base), "portrait": str(portrait), "variant": variant["name"], "layout": layout,
                        "style": style, "text": variant["text"], "source": "local_fallback", "fallback_reason": reason}
@@ -595,11 +597,13 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
     try:
         # Each variant writes its own file; only the experiment promotes a QC-passed winner to final.png. A failed
         # variant used to overwrite final.png, and the upload gate shipped it (Air France, 2026-10-09).
+        hook_min_font = (84 if len(str(variant["text"]).split()) == 1
+                         and len(str(variant["text"])) > 8 else thumbnail_compose.MIN_FONT)
         composed = thumbnail_compose.compose(Path(finish["path"]), variant["text"],
                                               out_dir / f"variant-{variant_index + 1}-final.png",
                                               primary=tuple(variant.get("primary_colour", [255, 255, 255])),
                                               accent=tuple(variant.get("accent_colour", [255, 214, 0])),
-                                              side=text_side)
+                                              side=text_side, min_font=hook_min_font)
     except (ValueError, OSError) as exc:
         return {"ok": False, "stage": "compose", "lao_job": lao_job, "base": str(base), "error": str(exc)}
     receipt = {"ok": composed["qc"]["ok"], "path": composed["path"], "qc": composed["qc"], "base": str(base),

@@ -84,6 +84,12 @@ def _font(size: int) -> ImageFont.FreeTypeFont:
     raise RuntimeError("No bold font available for thumbnail text")
 
 
+def _condensed_font(size: int) -> ImageFont.FreeTypeFont | None:
+    """Return a condensed ASCII display face when one long hook needs it."""
+    path = Path(r"C:\Windows\Fonts\impact.ttf")
+    return ImageFont.truetype(str(path), size) if path.is_file() else None
+
+
 def _cover(img: Image.Image) -> Image.Image:
     scale = max(SIZE[0] / img.width, SIZE[1] / img.height)
     resized = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
@@ -186,14 +192,22 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
     if min_font not in sizes:
         sizes.append(min_font)
     for size in sizes:
-        font, stroke = _font(size), max(6, size // 12)
-        lines = _wrap(words, font, draw, stroke, max_text_width)
-        if not lines or len(lines) > 3:
-            continue
-        line_h = draw.textbbox((0, 0), "HG", font=font, stroke_width=stroke)[3]
-        block_h = line_h * len(lines) + int(size * 0.08) * (len(lines) - 1)
-        if block_h <= SIZE[1] * 0.62:
-            chosen = (size, font, stroke, lines, line_h, block_h)
+        fonts = [_font(size)]
+        if len(words) == 1 and text.isascii():
+            condensed = _condensed_font(size)
+            if condensed is not None:
+                fonts.append(condensed)
+        for font in fonts:
+            stroke = max(6, size // 12)
+            lines = _wrap(words, font, draw, stroke, max_text_width)
+            if not lines or len(lines) > 3:
+                continue
+            line_h = draw.textbbox((0, 0), "HG", font=font, stroke_width=stroke)[3]
+            block_h = line_h * len(lines) + int(size * 0.08) * (len(lines) - 1)
+            if block_h <= SIZE[1] * 0.62:
+                chosen = (size, font, stroke, lines, line_h, block_h)
+                break
+        if chosen:
             break
     if not chosen:
         raise ValueError("thumbnail text cannot be set at a readable size; shorten it")
