@@ -181,3 +181,47 @@ def generate(path: Path) -> dict:
     pipeline.write(path / "mission.json", manifest)
     return {"status": "production_pack_ready", "shots": len(plan), "provider_job": provider_job,
             "shot_plan": str(master / "shot-plan.json")}
+
+
+def tighten_narration(path: Path) -> dict:
+    """Shorten a validated board to a real 10–12 minute voice contract."""
+    manifest = pipeline.read(path / "mission.json")
+    master = path / "production/master-v1"
+    plan = pipeline.read(master / "shot-plan.json")
+    if len(plan) != 75:
+        raise ValueError("Narration tightening requires the complete 75-shot board")
+    steps = [
+        {"action": "open_browser", "args": {"profile_dir": manifest["browser"]["profile_dir"], "cdp_url": manifest["browser"]["cdp_url"], "start_url": "https://chatgpt.com/"}},
+        {"action": "open_tab", "args": {"url": "https://chatgpt.com/", "name": "narration_tighten"}},
+    ]
+    chunks = []
+    for start in range(0, 75, 15):
+        subset = [{"shot_id": s["shot_id"], "narration": s["narration"]} for s in plan[start:start + 15]]
+        begin, end = f"BEGIN_OTO_TIGHT_{start + 1:02d}", f"END_OTO_TIGHT_{start + 15:02d}"
+        key = f"tight_{start + 1:02d}_{start + 15:02d}"
+        prompt = (f"Rewrite these 15 connected sports-biography narration lines for a 10–12 minute film. Return JSON only between {begin} and {end}: "
+                  '{"shots":[{"shot_id":"P01","narration":"16-20 words"}]}. '
+                  "Keep every shot_id. Each narration must be 16–20 English words, third-person, human and cinematic. Preserve the supported meaning and chronology; add no facts, dialogue, thoughts, motives, statistics or claims. Avoid sentence fragments and repetitive openings. "
+                  f"Input: {json.dumps(subset, ensure_ascii=False)} End with {end}.")
+        steps.append({"action": "ask_chatgpt", "args": {"prompt": prompt, "expected_markers": [begin, end], "timeout_ms": 300000, "as": key}})
+        chunks.append((key, begin, end))
+    config = pipeline.read(pipeline.ROOT / "runtime-config.json")
+    provider = LaoDraft(LaoOrchestratorTool(), config.get("lao_folder_id"), tuple(Path(p) for p in config["artifact_roots"]))
+    outputs, provider_job = provider.run(f"Origin to Ovation - {manifest['subject']} - narration tighten", steps, {},
+                                         path / "runtime/providers/narration-tighten-v1.json", timeout=900)
+    revised = {}
+    for key, begin, end in chunks:
+        data = _marked_json(outputs.get(key, ""), begin, end)
+        for row in data.get("shots") or []:
+            words = str(row.get("narration") or "").split()
+            if not 14 <= len(words) <= 22:
+                raise ValueError(f"{row.get('shot_id')} tightened narration outside governed tolerance")
+            revised[str(row.get("shot_id"))] = " ".join(words)
+    if set(revised) != {s["shot_id"] for s in plan}:
+        raise ValueError("Tightening response did not return all 75 unique shots")
+    for shot in plan:
+        shot["narration"] = revised[shot["shot_id"]]
+    pipeline.write(master / "shot-plan.json", plan)
+    (master / "narration.txt").write_text("\n\n".join(s["narration"] for s in plan), encoding="utf-8")
+    return {"status": "narration_tightened", "words": sum(len(s["narration"].split()) for s in plan),
+            "provider_job": provider_job}

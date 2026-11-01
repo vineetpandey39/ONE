@@ -6906,7 +6906,13 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
         )
         stages.set_stage("echo", stages.EXECUTING,
                          "Adding subtitles, requested languages and the channel comment")
-        result = youtube_distribution.complete(package)
+        # Keep distribution inside the agent watchdog.  The distribution helper's
+        # standalone default is one hour, while ONE jobs are reaped after 45 minutes.
+        # ECHO already owns a shorter configurable budget for language work; use it
+        # here as well so a healthy private upload cannot be reported as failed.
+        result = youtube_distribution.complete(
+            package, localization_budget=ECHO_LANGUAGE_BUDGET_SECONDS
+        )
         # The last step of Sonia's video, so the residue goes here: whether this pass uploaded the cut or found it
         # already on YouTube. Until 2026-10-08 cleanup ran only inside a fresh upload, so a re-checked video
         # (status already_uploaded) kept its ~2 GB of intermediates forever.
