@@ -69,7 +69,8 @@ AGENTS: dict[str, dict[str, str]] = {
     "herald": {"name": "HERALD", "role": "LinkedIn authority-post production and publishing worker (Growth floor, reports to ARES)", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth", "seat": "worker", "reports_to": "ares"},
     "chandan": {"name": "CHANDAN", "role": "Origin to Ovation biography production worker; reuses approved assets and hands completed masters to ARES", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
     "planexium": {"name": "PLANEXIUM", "role": "The Planexium science production worker using local Windows narration and shared services", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
-    "yatra": {"name": "YATRA", "role": "Sonia Travel Vlogs Envato acquisition, OBS capture and video assembly worker", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
+    "yatra": {"name": "YATRA", "role": "Sonia Travel Vlogs licensed-footage acquisition and receipt-gated video assembly worker", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
+    "oculus": {"name": "OCULUS", "role": "Sonia Travel Vlogs official-page OBS capture, semantic QC and render-handoff worker", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
     "fabula": {"name": "FABULA", "role": "YouTube narration production and approved voice checkpoint worker", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
     "lyra": {"name": "LYRA", "role": "YouTube SEO, metadata and thumbnail experiment packaging specialist", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
     "echo": {"name": "ECHO", "role": "YouTube subtitles, localization, relevant Shopping attachment, comments and governed upload completion worker", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
@@ -10682,6 +10683,8 @@ def _run_yatra(job: dict[str, Any]) -> dict[str, Any]:
     payload = _json_task(job)
     if payload.get("stage") == "visuals":
         return _run_yatra_visuals(job)
+    if payload.get("stage") == "render":
+        return _run_yatra_render(job)
     if payload.get("preproduction_job"):
         _, _, _, checkpoint = _travel_checkpoint(payload)
         follow = enqueue_job("fabula", json.dumps({**payload, "stage": "narration"}),
@@ -10974,19 +10977,123 @@ def _run_yatra_visuals(job: dict[str, Any]) -> dict[str, Any]:
         music = _yatra_acquire_music(tool, plan_record, asset_folder)
         if not music.get("ok"):
             raise RuntimeError(f"YATRA ambient music acquisition failed: {music}")
-    stages.set_stage("yatra", stages.EXECUTING,
-                     "Recording official-source browser demos")
-    captures = _yatra_record_captures({**payload, 'assetFolder': asset_folder}, video_title or asset_folder)
+    from openjarvis.one_agents import yatra_obs
+    obs_plan_path = asset_root / "obs-capture-plan.json"
+    narration_manifest = Path(str(narration.get("manifest") or ""))
+    visuals_receipt = yatra_obs.write_visuals_receipt(
+        asset_root=asset_root,
+        checkpoint=str(lao_job_id),
+        source_job=str(job["id"]),
+        plan=local_plan,
+        narration_manifest=narration_manifest,
+        obs_plan=obs_plan_path,
+        context={
+            "video_title": video_title,
+            "origin_job": payload.get("origin_job"),
+            "opening_map": opening_map,
+            "footage": footage,
+            "narration": narration,
+            "music": music,
+            "obs_plan": (obs_plan.get("detail") or "")[-1200:],
+        },
+    )
+    stages.set_stage("yatra", stages.CARRYING_TO_HEAD,
+                     "Handing the hash-bound visual checkpoint to OCULUS for official-page capture")
+    _require_active_job(job, "hand the visual checkpoint to OCULUS")
+    follow_payload = {
+        **payload,
+        "stage": "capture",
+        "checkpoint": str(lao_job_id),
+        "assetFolder": asset_folder,
+        "video_title": video_title,
+        "plan_file": str(local_plan),
+        "visuals_receipt": str(visuals_receipt),
+    }
+    follow = stages.head_briefs_worker(
+        "yatra", "oculus",
+        carrying_detail="Taking the verified acquisition checkpoint to OCULUS",
+        briefing_detail="OCULUS, record every planned official-page source, run semantic/integrity QC, then return a hash-bound render receipt.",
+        awaiting_detail="Waiting for OCULUS official-page captures",
+        enqueue=lambda: enqueue_job("oculus", json.dumps(follow_payload), mode="execute",
+                                    dedupe_key=f"travel:{lao_job_id}:obs"),
+    )
+    return {"agent": "YATRA", "stage": "visuals", "production_complete": False,
+            "lao_job": lao_job_id, "asset_folder": asset_folder,
+            "visuals_receipt": str(visuals_receipt),
+            "handed_to": {"agent": "OCULUS", "job_id": follow["id"]}}
+
+
+def _run_oculus(job: dict[str, Any]) -> dict[str, Any]:
+    """Own official-page OBS capture and hand a sealed checkpoint to render."""
+    from openjarvis.one_agents import yatra_obs
+
+    payload = _json_task(job)
+    if payload.get("stage") != "capture":
+        raise RuntimeError("OCULUS accepts only YATRA capture-stage handoffs")
+    checkpoint = str(payload.get("checkpoint") or "")
+    asset_folder = str(payload.get("assetFolder") or "")
+    asset_root = _YATRA_ASSET_ROOT / asset_folder
+    visuals_receipt = Path(str(payload.get("visuals_receipt") or ""))
+    yatra_obs.validate_visuals_receipt(
+        visuals_receipt, checkpoint=checkpoint, asset_root=asset_root)
+    stages.set_stage("oculus", stages.EXECUTING,
+                     "Recording the planned official pages through OBS")
+    captures = _yatra_record_captures(payload, str(payload.get("video_title") or asset_folder))
     if not captures.get("ok"):
-        # Official-page demos are optional evidence inserts. route_visuals
-        # selects OBS only for recordings that actually exist and otherwise
-        # supplies the scene's information card, so an unavailable OBS
-        # websocket must cost the demos, not the already acquired video.
-        # Keep the failed result intact for the production receipt while
-        # making the deliberate degradation explicit.
-        captures = {**captures, "skipped": True, "optional_failure": True}
+        raise RuntimeError(f"OCULUS capture failed; render was not started: {captures.get('detail')}")
+    routes = _yatra_run_tool(_YATRA_EDIT_TOOLS / "route_visuals.py", [str(asset_root)], minutes=10)
+    if not routes.get("ok"):
+        raise RuntimeError(f"OCULUS could not refresh visual routes after capture: {routes.get('detail')}")
+    integrity = _yatra_validate_capture_integrity(asset_root)
+    if not integrity.get("ok"):
+        raise RuntimeError(f"OCULUS capture integrity/QC failed; render was not started: {integrity.get('detail')}")
+    capture_receipt = yatra_obs.write_capture_receipt(
+        asset_root=asset_root,
+        checkpoint=checkpoint,
+        source_job=str(job["id"]),
+        visuals_receipt=visuals_receipt,
+        integrity=integrity,
+    )
+    stages.set_stage("oculus", stages.CARRYING_TO_HEAD,
+                     "Returning the sealed capture checkpoint to YATRA render")
+    _require_active_job(job, "hand verified captures to YATRA render")
+    render_payload = {
+        **payload,
+        "stage": "render",
+        "oculus_receipt": str(capture_receipt),
+    }
+    follow = stages.head_briefs_worker(
+        "oculus", "yatra",
+        carrying_detail="Taking verified official-page captures back to YATRA",
+        briefing_detail="YATRA, verify OCULUS hashes and render only; do not reacquire footage or replay narration.",
+        awaiting_detail="Waiting for YATRA render and QC",
+        enqueue=lambda: enqueue_job("yatra", json.dumps(render_payload), mode="execute",
+                                    dedupe_key=f"travel:{checkpoint}:render"),
+    )
+    return {"agent": "OCULUS", "stage": "capture", "production_complete": False,
+            "captures": captures, "integrity": integrity,
+            "oculus_receipt": str(capture_receipt),
+            "handed_to": {"agent": "YATRA", "job_id": follow["id"]}}
+
+
+def _run_yatra_render(job: dict[str, Any]) -> dict[str, Any]:
+    """Render only from YATRA and OCULUS receipts; never replay paid stages."""
+    from openjarvis.one_agents import yatra_obs
+
+    payload = _json_task(job)
+    checkpoint = str(payload.get("checkpoint") or "")
+    asset_folder = str(payload.get("assetFolder") or "")
+    asset_root = _YATRA_ASSET_ROOT / asset_folder
+    plan_file = Path(str(payload.get("plan_file") or asset_root / "production-plan.json"))
+    visuals_receipt = Path(str(payload.get("visuals_receipt") or ""))
+    oculus_receipt = Path(str(payload.get("oculus_receipt") or ""))
+    visual = yatra_obs.validate_visuals_receipt(
+        visuals_receipt, checkpoint=checkpoint, asset_root=asset_root)
+    capture = yatra_obs.validate_capture_receipt(
+        oculus_receipt, checkpoint=checkpoint, asset_root=asset_root,
+        visuals_receipt=visuals_receipt)
     stages.set_stage("yatra", stages.EXECUTING,
-                     "Drawing the cards, cutting the picture to the voice, checking the result")
+                     "Rendering only from the verified YATRA and OCULUS checkpoints")
     cut = _yatra_cut_video(plan_file, asset_folder)
     if not cut.get("ok"):
         # A cut that failed (or failed QC) is not a deliverable. Handing it on
@@ -11001,25 +11108,27 @@ def _run_yatra_visuals(job: dict[str, Any]) -> dict[str, Any]:
     stages.set_stage("yatra", stages.CARRYING_TO_HEAD,
                      "Taking the verified master and production receipt back to HELIOS")
     _require_active_job(job, "deliver the verified master to HELIOS")
+    context = visual.get("context") or {}
     report = enqueue_job("helios", json.dumps({
         "brand": "sonia_travel_vlogs", "worker": "yatra",
-        "title": video_title, "format": "travel_video_production",
-        "published": False, "output": f"LAO job {lao_job_id}",
-        "lao_job": lao_job_id, "lao_receipt": last,
-        "asset_folder": asset_folder, "opening_map": opening_map,
-        "footage": footage, "captures": captures, "obs_plan": (obs_plan.get("detail") or "")[-600:],
-        "narration": narration, "music": music, "cut": cut,
-        "origin_job": payload.get("origin_job"),
-    }), mode="report", tier="fast")
+        "title": context.get("video_title"), "format": "travel_video_production",
+        "published": False, "output": f"LAO job {checkpoint}",
+        "lao_job": checkpoint,
+        "asset_folder": asset_folder, "opening_map": context.get("opening_map"),
+        "footage": context.get("footage"), "captures": capture,
+        "obs_plan": context.get("obs_plan"),
+        "narration": context.get("narration"), "music": context.get("music"), "cut": cut,
+        "origin_job": context.get("origin_job"),
+    }), mode="report", tier="fast", dedupe_key=f"travel:{checkpoint}:helios-report")
     stages.set_stage("yatra", stages.DELIVERING, "Delivered YATRA artifacts to HELIOS")
     time.sleep(1); stages.clear_stage("yatra")
-    return {"agent": "YATRA", "mode": "preproduction", "published": False,
-            "lao_job": lao_job_id, "asset_folder": asset_folder,
-            "opening_map": opening_map, "footage": footage,
-            "captures": captures, "narration": narration,
-            "music": music,
+    return {"agent": "YATRA", "stage": "render", "published": False,
+            "lao_job": checkpoint, "asset_folder": asset_folder,
+            "opening_map": context.get("opening_map"), "footage": context.get("footage"),
+            "captures": capture, "narration": context.get("narration"),
+            "music": context.get("music"),
             "cut": cut,
-            "handed_to": {"agent": "IRIS", "job_id": report["id"]}}
+            "handed_to": {"agent": "HELIOS", "job_id": report["id"]}}
 
 
 # The capability check asks whether an agent holds *any* capability, not
@@ -11173,6 +11282,7 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         "chandan": _run_chandan,
         "planexium": _run_planexium,
         "yatra": _run_yatra,
+        "oculus": _run_oculus,
         "fabula": _run_fabula,
         "echo": _run_echo,
         "vista": _run_vista,
@@ -11278,6 +11388,10 @@ def _job_watchdog_seconds(job: dict[str, Any] | None = None) -> float:
         # Sequential full-video acquisition has its own bounded per-clip waits.
         # Outer watchdog must outlive 12h acquisition + capture/edit stages.
         return max(default, 16 * 3600.0)
+    if job and job.get("agent_id") == "oculus":
+        # Nine or more official-page recordings plus OCR/semantic QC can take
+        # materially longer than the generic queue watchdog.
+        return max(default, 4 * 3600.0)
     if job and job.get("agent_id") == "lyra":
         payload = _json_task(job)
         if (payload.get("brand") == "sonia_travel_vlogs"
