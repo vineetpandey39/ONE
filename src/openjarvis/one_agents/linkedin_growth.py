@@ -159,12 +159,18 @@ def produce(*, v2_payload: dict[str, Any], job_id: str, tool: Any, home: Path, r
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = bundle.v2.load_ledger(base / "ledger.json")
     openers = [str(r.get("opener", "")) for r in rows[-8:] if r.get("opener")]
+    # ARES chose the shape in plan(); a hand-built payload without one gets it chosen here, the same way.
+    chosen = ({"shape": v2_payload["shape"], "ending": v2_payload.get("ending", "question")}
+              if v2_payload.get("shape") else bundle.v2.choose_shape(rows, fmt=fmt, story=story))
+    shape, ending = chosen["shape"], chosen["ending"]
+    recent_shapes = [bundle.v2.shape_of(r) for r in rows[-4:]]
     attempts = 1 + int(config.get("max_regenerations", 2))
     fix: list[str] | None = None
     problems: list[str] = []
     for attempt in range(1, attempts + 1):
         stages.set_stage("herald", stages.EXECUTING, f"Writing the {fmt} in ChatGPT (attempt {attempt}/{attempts})")
-        prompt = bundle.v2.writer_prompt(story, lane_label, fmt, avoid_openers=openers, fix=fix)
+        prompt = bundle.v2.writer_prompt(story, lane_label, fmt, shape=shape, ending=ending,
+                                         avoid_openers=openers, recent_shapes=recent_shapes, fix=fix)
         result = run_draft(tool, prompt, roots, max_wait=max_wait, poll=poll, sleep=sleep)
         (out_dir / f"attempt-{attempt}-raw.txt").write_text(result.get("raw", ""), encoding="utf-8")
         if not result["raw"]:
@@ -172,6 +178,7 @@ def produce(*, v2_payload: dict[str, Any], job_id: str, tool: Any, home: Path, r
             fix = None
             continue
         draft = bundle.v2.parse_draft(result["raw"], fmt)
+        draft["shape"], draft["ending"] = shape, ending
         verdict = bundle.v2.gate(draft, story, rows)
         problems = list(verdict["problems"])
         rendered = None
@@ -242,11 +249,14 @@ def record(*, home: Path, v2_payload: dict[str, Any], draft: dict[str, Any], pub
         return
     story = v2_payload["story"]
     first = (draft.get("caption", "").splitlines() or [""])[0]
+    skeleton = bundle.v2.fingerprint(draft.get("caption", ""))
     bundle.v2.append_ledger(
         agent_dir(home) / "ledger.json",
         {"story_title": story.get("title", ""), "opener": first[:140], "format": draft.get("format"),
          "lane": v2_payload.get("lane"), "evergreen": bool(story.get("evergreen")), "published": published,
-         "lao_job": lao_job},
+         "lao_job": lao_job, "shape": draft.get("shape") or v2_payload.get("shape") or "before_now",
+         "ending": draft.get("ending") or v2_payload.get("ending") or "", "labels": skeleton["labels"],
+         "ended_q": skeleton["ended_q"]},
         keep_days=int(bundle.v2.load_v2_config().get("ledger_days", 45)))
 
 
