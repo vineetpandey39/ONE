@@ -68,14 +68,18 @@ def plan(*, weekday: int, fetch: Callable[[str], bytes], prior_titles: list[str]
     if fmt == "carousel" and bundle.render is None:
         fmt = "text"  # no Pillow in this interpreter: degrade the format, not the day
     base = agent_dir(home)
-    recent = bundle.v2.recent_titles(bundle.v2.load_ledger(base / "ledger.json")) + list(prior_titles)
+    rows = bundle.v2.load_ledger(base / "ledger.json")
+    recent = bundle.v2.recent_titles(rows) + list(prior_titles)
     choice = bundle.radar.choose(fetch, lane, recent)
     story = choice.get("picked")
     if not story:
         return None
     radar_path = base / f"{job_id}-radar.json"
     radar_path.write_text(json.dumps(choice, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    # The structure of the post is the head's decision too: rotated by code so neighbouring posts never share one.
+    shape = bundle.v2.choose_shape(rows, fmt=fmt, story=story)
     return {"story": story, "lane": lane, "lane_label": choice["lane_label"], "format": fmt,
+            "shape": shape["shape"], "ending": shape["ending"],
             "story_source": choice["source"], "runners_up": choice["runners_up"], "radar_path": str(radar_path),
             "publish_mode": config.get("publish_mode", "auto")}
 
