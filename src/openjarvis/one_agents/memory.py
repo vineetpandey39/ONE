@@ -127,11 +127,25 @@ def mark_refused(note_path: str, reason: str) -> bool:
     the 11:00 run, which had itself been refused and never became a book.
     Every refusal permanently narrowed the space for the next one - inside a
     narrow authority lane, a ratchet that runs out within a few attempts.
+
+    The path is whatever remember() handed back, and that is relative to the
+    vault root - "Company/Floor 05 .../2026-11-02 2207 HERMES - Commissioning
+    Brief.md". Resolved against the process's working directory instead, it is
+    simply not a file, and the first version of this silently marked nothing:
+    the 2026-11-02 run was refused, wrote its note, and the note went straight
+    back into prior_titles as a third false blocker. Absolute paths still work,
+    which is why the tests passed and production did not.
     """
     from pathlib import Path
 
     try:
+        if not note_path:
+            return False
         path = Path(note_path)
+        if not path.is_absolute():
+            status = obsidian_status()
+            if status.get("connected"):
+                path = Path(status["path"]) / note_path
         if not path.is_file():
             return False
         text = path.read_text(encoding="utf-8", errors="ignore")
