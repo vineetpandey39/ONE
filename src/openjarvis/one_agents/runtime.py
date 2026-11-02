@@ -3206,9 +3206,31 @@ def _book_product(brief: str) -> str:
     ) if part)
 
 
+# An angle this close to a previous one is the same book wearing a new title.
+# Deliberately high: in-lane angles share a template, so two genuinely
+# different books sit around 0.48 (measured: the beginners guide against the
+# governance playbook). Nothing short of near-identical phrasing reaches 0.70.
+ANGLE_REPEAT = 0.70
+
+
 def _find_kdp_topic_duplicate(candidate: str,
-                              history: list[dict[str, str]] | None = None) -> dict[str, Any] | None:
+                              history: list[dict[str, str]] | None = None,
+                              *, angle: str = "") -> dict[str, Any] | None:
     """Fail closed on the same title, language, or three-part subject concept.
+
+    ``candidate`` is the book as a product - title, buyer, purchase query - and
+    ``angle`` is its one-line pitch. Both are judged, because each catches what
+    the other misses.
+
+    The product alone misses a straight repeat. On 2026-11-02 HERMES produced
+    an angle BYTE-IDENTICAL to the live B0HN5DCPJ3 under a reworded title, and
+    on title/buyer/query that scored 0.370 against the two ways the published
+    book is stored - under the bar. SCRIBE started a manuscript for a book
+    already on sale before it was stopped by hand.
+
+    The angle alone is worse: HERMES writes every angle to one template, so two
+    genuinely different books in one lane score around 0.48 on it and the lane
+    could only ever hold a single title. That is the failure this pair replaces.
 
     ``history`` is the floor's prior topics. Pass a snapshot taken BEFORE this
     run wrote anything: HERMES records its commissioning note in the vault, and
@@ -3221,6 +3243,7 @@ def _find_kdp_topic_duplicate(candidate: str,
     if not candidate:
         return {"reason": "empty candidate topic", "candidate": candidate}
     candidate_terms = _topic_terms(candidate)
+    angle_terms = _topic_terms(angle) if angle else set()
     candidate_families = {
         name for name, pattern in _KDP_TOPIC_FAMILIES.items() if pattern.search(candidate)
     }
@@ -3229,6 +3252,9 @@ def _find_kdp_topic_duplicate(candidate: str,
         previous_terms = _topic_terms(previous)
         union = candidate_terms | previous_terms
         lexical = len(candidate_terms & previous_terms) / len(union) if union else 0.0
+        angle_union = angle_terms | previous_terms
+        angle_match = (len(angle_terms & previous_terms) / len(angle_union)
+                       if angle_terms and angle_union else 0.0)
         previous_families = {
             name for name, pattern in _KDP_TOPIC_FAMILIES.items() if pattern.search(previous)
         }
@@ -3236,13 +3262,19 @@ def _find_kdp_topic_duplicate(candidate: str,
         # Three shared subject dimensions catches paraphrases such as
         # "tasks automated by unaffordable tools" vs "invisible automation &
         # paywall tech" even when the proposed title itself is different.
-        if lexical >= 0.34 or len(shared_families) >= 3:
+        matched_on = ("the same product" if lexical >= 0.34
+                      else "a repeated angle" if angle_match >= ANGLE_REPEAT
+                      else "three shared subject concepts"
+                      if len(shared_families) >= 3 else "")
+        if matched_on:
             return {
                 "reason": "topic overlaps prior KDP commission",
+                "matched_on": matched_on,
                 "candidate": candidate,
                 "previous": previous,
                 "source": record["source"],
                 "lexical_similarity": round(lexical, 3),
+                "angle_similarity": round(angle_match, 3),
                 "shared_concepts": shared_families,
             }
     return None
@@ -4014,8 +4046,8 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     # scored six candidates and only ever the first was tried. Ask again with
     # the next one, here, while nothing has been written yet.
     for attempt, next_winner in enumerate(remaining_shortlist[:2], start=1):
-        collision = (_find_kdp_topic_duplicate(_book_product(brief), topic_history)
-                     if angle else None)
+        collision = (_find_kdp_topic_duplicate(_book_product(brief), topic_history,
+                                               angle=angle) if angle else None)
         if not collision:
             break
         _publishing_event(
@@ -4247,7 +4279,7 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     # model to follow. Stop here before BIBLOS spends a slot on a known topic;
     # the same check runs again in _hermes_commission to close the race where
     # another title is completed while this audit is in flight.
-    duplicate = _find_kdp_topic_duplicate(_book_product(brief), topic_history)
+    duplicate = _find_kdp_topic_duplicate(_book_product(brief), topic_history, angle=angle)
     if duplicate:
         stages.clear_stage("hermes")
         # The brief went into the vault a few hundred lines above, before this
@@ -4325,7 +4357,8 @@ def _hermes_commission(job: dict[str, Any], payload: dict[str, Any]) -> dict[str
     # The research phase carried the four identity fields over, because this
     # job has no brief of its own to read them from. Falling back to the angle
     # keeps an older queued payload working rather than failing it.
-    duplicate = _find_kdp_topic_duplicate(str(payload.get("identity") or angle), history)
+    duplicate = _find_kdp_topic_duplicate(str(payload.get("identity") or angle), history,
+                                          angle=angle)
     if duplicate:
         stages.clear_stage("hermes")
         memory.mark_refused(str(payload.get("vault_note") or ""),
