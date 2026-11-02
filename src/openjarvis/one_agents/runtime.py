@@ -3161,6 +3161,40 @@ def _topic_terms(text: str) -> set[str]:
     }
 
 
+def _book_identity(brief: str, angle: str = "") -> str:
+    """What this book IS: title, angle, buyer, and the search that finds it.
+
+    Both the lane gate and the uniqueness gate ask a question about the book,
+    so both get the same four fields rather than a sentence about it.
+
+    The uniqueness gate used to be handed the ANGLE alone, and the model writes
+    every angle to one template - "A method for X to Y ... using ... without
+    relying on ... proprietary tools". Measured on 2026-11-02, the words two
+    in-lane candidates shared were almost entirely that template: method,
+    proprietary, relying, standards, tools, using, workflows. The words that
+    actually told them apart - individuals vs enterprise operators, build vs
+    govern - were a minority and were outvoted.
+
+    So "Agentic AI for Beginners: Build Your Own Workflows on Windows", bought
+    by sysadmins searching "agentic ai for beginners book", was refused as a
+    duplicate of "Agentic Automation: Governing AI Workflows", bought by
+    enterprise operators. Different buyer, different promise, different search:
+    two books, not one. Agentic AI is a field, not a title, and a gate that
+    cannot see inside it makes the lane hold exactly one book forever.
+
+    On the four identity fields the same threshold separates them cleanly - the
+    beginners book scores 0.160 against the published one, a re-proposal of the
+    published book itself scores 0.391. The gate keeps its strictness; it stops
+    measuring sentence furniture.
+    """
+    return "\n".join(part for part in (
+        _marker(brief, "TITLE"),
+        angle or _marker(brief, "ANGLE"),
+        _marker(brief, "BUYER"),
+        _marker(brief, "PURCHASE_QUERY"),
+    ) if part)
+
+
 def _find_kdp_topic_duplicate(candidate: str,
                               history: list[dict[str, str]] | None = None) -> dict[str, Any] | None:
     """Fail closed on the same title, language, or three-part subject concept.
@@ -3969,7 +4003,8 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     # scored six candidates and only ever the first was tried. Ask again with
     # the next one, here, while nothing has been written yet.
     for attempt, next_winner in enumerate(remaining_shortlist[:2], start=1):
-        collision = _find_kdp_topic_duplicate(angle, topic_history) if angle else None
+        collision = (_find_kdp_topic_duplicate(_book_identity(brief, angle), topic_history)
+                     if angle else None)
         if not collision:
             break
         _publishing_event(
@@ -3998,10 +4033,7 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     # single match - the series label the model had just written itself. Its
     # title, buyer ("aspiring entrepreneur") and purchase query ("business plan
     # book pdf") are nowhere near the lane, and on these four fields it fails.
-    authority = publishing_strategy.authority_fit(
-        "\n".join((_marker(brief, "TITLE"), angle, _marker(brief, "BUYER"),
-                   _marker(brief, "PURCHASE_QUERY")))
-    )
+    authority = publishing_strategy.authority_fit(_book_identity(brief, angle))
     selected_series = _marker(brief, "SERIES")
     allowed_series = {
         "Windows Power User Field Guides", "Enterprise Automation Playbooks",
@@ -4204,7 +4236,7 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     # model to follow. Stop here before BIBLOS spends a slot on a known topic;
     # the same check runs again in _hermes_commission to close the race where
     # another title is completed while this audit is in flight.
-    duplicate = _find_kdp_topic_duplicate(angle, topic_history)
+    duplicate = _find_kdp_topic_duplicate(_book_identity(brief, angle), topic_history)
     if duplicate:
         stages.clear_stage("hermes")
         # The brief went into the vault a few hundred lines above, before this
@@ -4249,6 +4281,7 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
                 # keeps counting as a prior commission and refuses the next
                 # candidate.
                 "vault_note": result.get("vault_note"),
+                "identity": _book_identity(brief, angle),
                 "mission_id": mission_id, "objective": task,
                 "select_active": False,
                 "wide_requested": kdp_mode == "nonfiction",
@@ -4278,7 +4311,10 @@ def _hermes_commission(job: dict[str, Any], payload: dict[str, Any]) -> dict[str
     history = [record for record in _kdp_topic_history()
                if not (record.get("source") == "ONE Vault / Floor 05"
                        and str(record.get("topic") or "").strip() == angle.strip())]
-    duplicate = _find_kdp_topic_duplicate(angle, history)
+    # The research phase carried the four identity fields over, because this
+    # job has no brief of its own to read them from. Falling back to the angle
+    # keeps an older queued payload working rather than failing it.
+    duplicate = _find_kdp_topic_duplicate(str(payload.get("identity") or angle), history)
     if duplicate:
         stages.clear_stage("hermes")
         memory.mark_refused(str(payload.get("vault_note") or ""),
