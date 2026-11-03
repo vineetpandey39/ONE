@@ -9,9 +9,97 @@ import subprocess
 from contextlib import contextmanager
 import sys
 from pathlib import Path
+from datetime import datetime
 
 ROOT = Path("E:/ONE-SUITE/data/youtube/origin_to_ovation")
 BRAND = "origin_to_ovation"
+
+
+def commission_next(job):
+    """Create the next queued, evidence-backed mission for a scheduler fire.
+
+    Topic research remains an explicit durable input.  This function never
+    guesses an athlete from prose and never reuses somebody already present in
+    the permanent content calendar.
+    """
+    queue_path = ROOT / "commission-queue.json"
+    if not queue_path.is_file():
+        queue_path = Path(__file__).with_name("origin_to_ovation_commission_queue.json")
+    if not queue_path.is_file():
+        raise ValueError("Origin to Ovation commission queue is missing")
+    queue = read(queue_path)
+    candidates = queue.get("candidates") or []
+    calendar_path = ROOT / "content-calendar.json"
+    calendar = read(calendar_path) if calendar_path.is_file() else {"episodes": []}
+    used = {str(row.get("subject_id") or "") for row in calendar.get("episodes", [])}
+    candidate = next((row for row in candidates if row.get("status", "ready") == "ready"
+                      and row.get("subject_id") not in used), None)
+    if candidate is None:
+        raise ValueError("No evidence-backed, duplicate-safe canonical subject remains in the commission queue")
+    required = ("subject_id", "subject", "selection", "working_title",
+                "central_dramatic_question", "sources", "reference_stages")
+    if any(not candidate.get(key) for key in required):
+        raise ValueError("Queued Origin to Ovation subject is missing commissioning evidence")
+    if (len(candidate["reference_stages"]) < 3
+            or not all(str(url).startswith("https://") for url in candidate["sources"].values())):
+        raise ValueError("Queued Origin to Ovation evidence is incomplete")
+    today = datetime.now().strftime("%Y-%m-%d")
+    mission_id = f"{candidate['subject_id']}-{today}"
+    path = ROOT / "missions" / mission_id
+    if path.exists():
+        raise ValueError(f"Commission path already exists: {mission_id}")
+    for part in ("research", "runtime", "production/character-bible", "production/master-v1/images"):
+        (path / part).mkdir(parents=True, exist_ok=True)
+    voice = calendar.get("next_new_episode_voice") or {"name": "George", "voice_id": "JBFqnCBsd6RMkjVDRZzb"}
+    manifest = {
+        "schema": "one.youtube-mission/v1", "brand": BRAND,
+        "display_name": "Origin to Ovation", "handle": "@OriginToOvation",
+        "channel_account_label": "Chandan", "floor_id": "12",
+        "head_agent": "helios", "agent_id": "chandan",
+        "mission_id": mission_id, "subject": candidate["subject"],
+        "subject_id": candidate["subject_id"], "master_language": "en-US",
+        "production_phase": "reference_first", "current_model": True,
+        "upload_authorized": False, "public_publish_authorized": False,
+        "upload_policy": "package_only_until_later_explicit_user_instruction",
+        "fresh_code_required": True, "reference_review_required": True,
+        "commissioned_date": today,
+        "editorial_system": {
+            "story": "truthful cold open -> formative years -> setbacks -> reinvention -> records-led resolution",
+            "direction": "15 sourced chapters, five varied cinematic shots each, motivated motion and restrained sound design",
+            "visual": "original photoreal cinematic CGI with recognisable age-locked editorial identity",
+            "camera_variety": "front, three-quarter and true side views lead; rear views transitional only",
+            "seo": "ARES story-specific metadata gate using the proven channel format",
+        },
+        "browser": {
+            "owner": "origin-to-ovation-chandan-youtube",
+            "profile_dir": str(ROOT / "chrome-profile"),
+            "cdp_url": "http://127.0.0.1:9350", "start_url": "https://chatgpt.com/",
+            "persistent": True, "shared_with_other_agents": False,
+            "login_status": "user_confirmed_signed_in",
+            "observed_studio_channel_id": "UClXpP8uPW7uSe0-APZBK0iw",
+            "observed_route_requires_owner_confirmation": True,
+        },
+    }
+    brief = {key: candidate[key] for key in required}
+    brief.update({
+        "voice": voice,
+        "opening_hook": candidate.get("opening_hook", "The greatest ending only matters after the unfinished years before it."),
+        "direction_requirements": candidate.get("direction_requirements", {}),
+        "factual_guardrails": candidate.get("factual_guardrails", [
+            "No invented dialogue, thoughts, private routines, hardship or travel details.",
+            "Every milestone and statistic must remain within a linked official source.",
+        ]),
+        "upload_authorized": False,
+        "scheduler_origin_job_id": job["id"],
+    })
+    write(path / "mission.json", manifest)
+    write(path / "research" / "commission-brief.json", brief)
+    write(path / "runtime" / "commission-receipt.json", {
+        "status": "commissioned", "mission_id": mission_id,
+        "subject_id": candidate["subject_id"], "origin_job_id": job["id"],
+        "queue_sha256": digest(queue_path), "public_publish_authorized": False,
+    })
+    return {"brand": BRAND, "mission_id": mission_id, "stage": "commission"}
 
 
 def read(path):

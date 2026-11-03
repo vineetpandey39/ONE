@@ -7503,13 +7503,10 @@ def _run_helios(job: dict[str, Any]) -> dict[str, Any]:
     # actual commissioned job is JSON (brand=origin_to_ovation) and takes the
     # governed HELIOS -> CHANDAN -> ARES -> ECHO path above.
     if "[origin-to-ovation]" in task.casefold():
-        return {
-            "agent": "HELIOS", "mode": "blocked", "_blocked": True,
-            "status": "commission_required",
-            "blocked_reason": ("Origin to Ovation needs an evidence-backed, duplicate-safe "
-                               "canonical subject commission before CHANDAN can execute."),
-            "handed_to": None,
-        }
+        from openjarvis.one_agents.origin_to_ovation import commission_next, run_stage
+        commissioned = dict(job)
+        commissioned["task"] = json.dumps(commission_next(job), ensure_ascii=False)
+        return run_stage(commissioned, enqueue=enqueue_job)
     if payload.get("brand") == "planexium" or (not payload and "planexium" in task.casefold()):
         from openjarvis.one_agents.planexium import head_job
         return head_job(job, enqueue=enqueue_job)

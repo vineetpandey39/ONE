@@ -1,0 +1,40 @@
+{
+  "schema": "one.origin-to-ovation.commission-queue/v1",
+  "candidates": [
+    {
+      "status": "ready",
+      "subject_id": "lionel-messi",
+      "subject": "Lionel Messi",
+      "selection": "A globally searched football journey with a documented arc from Rosario and Barcelona at thirteen through record-setting club years, international heartbreak and the 2022 World Cup resolution.",
+      "working_title": "Lionel Messi: The Long Road to the World Cup",
+      "opening_hook": "For years, the greatest prize in football was the one achievement his career still could not answer.",
+      "central_dramatic_question": "How did Lionel Messi carry record-breaking brilliance and repeated international disappointment until Argentina's World Cup victory finally changed the meaning of his journey?",
+      "sources": {
+        "barcelona_biography": "https://www.fcbarcelona.com/en/ficha/2214377/leo-messi",
+        "fifa_argentina_career": "https://www.fifa.com/en/articles/lionel-messi-argentina-career",
+        "fifa_qatar_review": "https://www.fifa.com/en/member-associations/france/articles/world-cup-qatar-2022-tournament-review-argentina-messi-mbappe-morocco-croatia-japan",
+        "fifa_qatar_stats": "https://www.fifa.com/en/tournaments/mens/worldcup/qatar2022/articles/world-cup-2022-qatar-the-stats-behind-argentina-triumph",
+        "olympic_2008_report": "https://library.olympics.com/digitalCollection/DigitalCollectionAttachmentDownloadHandler.ashx?documentId=158223&parentDocumentId=67117&skipCopyright=true&skipWatermark=true"
+      },
+      "reference_stages": [
+        {"age": 8, "year": 1995, "place": "period-appropriate Rosario youth football setting", "appearance": "recognisable child identity with age-appropriate proportions and dark hair", "equipment": "simple mid-1990s youth football clothing and ball with no logos", "source_urls": ["https://www.fcbarcelona.com/en/ficha/2214377/leo-messi"]},
+        {"age": 13, "year": 2000, "place": "Barcelona youth academy environment", "appearance": "recognisable early-teen identity, small age-appropriate build", "equipment": "plain turn-of-the-century academy training kit with no crests or sponsors", "source_urls": ["https://www.fcbarcelona.com/en/ficha/2214377/leo-messi"]},
+        {"age": 18, "year": 2005, "place": "youth international football arena", "appearance": "recognisable teenage identity with era-accurate longer hair", "equipment": "plain 2005 competition kit, boots and ball without branding", "source_urls": ["https://www.fifa.com/en/articles/lionel-messi-argentina-career"]},
+        {"age": 27, "year": 2014, "place": "World Cup final-era stadium atmosphere", "appearance": "recognisable adult identity with era-accurate hair and athletic build", "equipment": "plain 2014 Argentina-colour kit without crest, sponsor or readable marks", "source_urls": ["https://www.fifa.com/en/articles/lionel-messi-argentina-career"]},
+        {"age": 35, "year": 2022, "place": "Qatar World Cup final atmosphere", "appearance": "recognisable mature identity with era-accurate beard and hair", "equipment": "plain 2022 Argentina-colour kit and ball without protected marks", "source_urls": ["https://www.fifa.com/en/member-associations/france/articles/world-cup-qatar-2022-tournament-review-argentina-messi-mbappe-morocco-croatia-japan"]}
+      ],
+      "direction_requirements": {
+        "rear_view_cap": "no more than 15 percent and never consecutive",
+        "required_camera_mix": ["front_emotional_closeup", "three_quarter_action", "true_side_profile", "establishing_wide", "equipment_macro", "crowd_reaction", "quiet_aftermath"],
+        "anatomy_gate": "Messi is left-footed; reject mirrored mechanics, malformed hands, feet, joints or duplicated limbs.",
+        "prime_kinetic_facts": ["2008 · Olympic Gold", "2021 · Copa America", "2022 · World Champion", "2022 · Golden Ball"]
+      },
+      "factual_guardrails": [
+        "Do not invent private medical, family, financial or academy conversations.",
+        "Do not narrate exact childhood routines or motives unless the linked source supports them.",
+        "Treat visuals as original CGI reconstructions, not archival footage.",
+        "Preserve documented left-footed football mechanics across shots."
+      ]
+    }
+  ]
+}
