@@ -212,20 +212,26 @@ def _crop_around(image: Any, face: tuple[int, int, int, int] | None, *, wide: fl
     return crop.resize((max(1, round(crop.width * scale)), height), Image.LANCZOS)
 
 
-def reference_sheet(portrait: Path, library: Path, out: Path) -> dict[str, Any]:
+def reference_sheet(portrait: Path, library: Path, out: Path, *, always_anchor: bool = False) -> dict[str, Any]:
     """What ChatGPT sees as Sonia: the chosen photo cropped to head and shoulders, plus her clearest close-up.
 
     Air France, 2026-10-09: the chosen photo was full-length, Sonia's face was 81 px of a 1310 px image, and
     ChatGPT invented a different face. A photo whose face is under FACE_MIN_PIXELS gets a second panel with the
-    approved portrait whose face is largest, and the prompt takes the face from it."""
+    approved portrait whose face is largest, and the prompt takes the face from it.
+
+    always_anchor adds that close-up even when the chosen face is large (VISTA, 2026-11-03: a single casual kitchen
+    photo in harsh light gave ChatGPT nothing steady to hold and the UK visa thumbnail "did not look like Sonia
+    from any angle"). The close-up comes from a different approved photo than the chosen one."""
     from PIL import Image
     image, faces = _faces(portrait)
     left = _crop_around(image, faces[0] if faces else None, wide=3.4, up=1.0, down=3.2)
     panels = [left]
-    if not faces or faces[0][3] < FACE_MIN_PIXELS:
+    if always_anchor or not faces or faces[0][3] < FACE_MIN_PIXELS:
         anchors = []
         config = library / "portraits.json"
         names = json.loads(config.read_text(encoding="utf-8")).get("preferred", []) if config.is_file() else []
+        if always_anchor:
+            names = [n for n in names if (library / n).resolve() != Path(portrait).resolve()]
         for candidate in [library / n for n in names if (library / n).is_file()]:
             c_image, c_faces = _faces(candidate)
             if c_faces and c_faces[0][3] >= FACE_MIN_PIXELS:
