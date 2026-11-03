@@ -177,6 +177,7 @@ def transfer(job, path, target, stage, enqueue, evidence):
     write(path / "runtime" / f"handoff-{job['agent_id']}-{target}.json",
           {**packet, "to_agent": target, "job_id": receipt["id"]})
     return {"status": "handed_off", "next_job": receipt["id"], "to_agent": target,
+            "handed_to": {"agent": target.upper(), "job_id": receipt["id"]},
             "mission_id": path.name}
 
 
