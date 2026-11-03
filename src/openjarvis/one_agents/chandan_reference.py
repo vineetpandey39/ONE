@@ -35,7 +35,6 @@ def captured_chat(result):
     return url
 
 def reference_prompt(manifest, brief):
-    from openjarvis.one_agents.origin_to_ovation_faceless import FACELESS_RULES
     if brief.get('subject_id') != manifest.get('subject_id'):
         raise ValueError('Reference brief subject must match mission')
     stages=brief.get('reference_stages',[])
@@ -45,11 +44,21 @@ def reference_prompt(manifest, brief):
         required=('age','year','place','appearance','equipment','source_urls')
         if any(stage.get(k) in (None,'',[]) for k in required):raise ValueError('Incomplete sourced reference stage')
         if not all(str(u).startswith('https://') for u in stage['source_urls']):raise ValueError('Reference sources must be HTTPS links')
-        lines.append(f"Age {stage['age']}, year {stage['year']}, {stage['place']}: {stage['appearance']}; {stage['equipment']}.")
-    return (f"Generate a canonical age/face/body/kit reference sheet for {manifest['subject']}, original photoreal cinematic CGI. "
-            'For every sourced age stage include front, three-quarter and true side-profile head-and-shoulder views, one neutral full-body sport stance, and hands/equipment detail. Preserve stable identity geometry across ages while showing evidence-based maturation, hair and era-specific kit. Use dignified neutral framing and never emphasize the subject’s back, hips, chest, thighs or body shape. '
-            + ' '.join(lines) + ' ' + FACELESS_RULES + ' Age labels may be small editorial captions. '
-            'Illustrative period-appropriate reference, not archival evidence. No invented luxury or poverty. Output the image itself.')
+        lines.append(f"Age {stage['age']} ({stage['year']}), {stage['place']}: {stage['appearance']}; {stage['equipment']}.")
+    # Keep the commissioning request concise.  The former prompt combined an
+    # exact face/body model, childhood full-body studies and the entire
+    # episode camera policy; ChatGPT correctly treated that ambiguous bundle
+    # as a risky biometric-clone request.  This is an editorial continuity
+    # board, not a photographic identity model.  Shot-level dignity, anatomy
+    # and camera rules are enforced later by the reviewed scene pack.
+    return (f"Create one clearly illustrated cinematic CGI editorial continuity board for a documentary about "
+            f"{manifest['subject']}. This must look like original CGI artwork, not a real photograph or archival "
+            "record. Arrange five separate, dignified head-and-shoulder portrait panels showing the documented "
+            "age progression below. Use a consistent, recognisable editorial interpretation without exact biometric "
+            "replication. Show a natural three-quarter view in each panel; neutral expressions; simple background. "
+            + ' '.join(lines) +
+            " Keep clothing generic and era-appropriate. No logos, sponsors, signatures, watermarks, event branding, "
+            "flags or readable venue text. Small age/year captions are allowed. Output only the single continuity-board image.")
 
 def record_chat(browser, marker):
     from playwright.sync_api import sync_playwright
