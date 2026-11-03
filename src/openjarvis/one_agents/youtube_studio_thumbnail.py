@@ -54,27 +54,39 @@ def _selected_uploaded_thumbnail(page) -> dict[str, Any]:
           const image = node.querySelector('img');
           const selected = attrs['aria-pressed'] === 'true' || attrs['aria-selected'] === 'true' ||
             /selected|checked|active/.test(`${node.className} ${node.parentElement?.className}`.toLowerCase());
-          return {present:true, selected, attrs, image_src:image?.currentSrc || image?.src || null};
+          // The attribute, never image.src: an empty src resolves to the page's own URL, which is how every
+          // failed save "verified" until 2026-11-03.
+          return {present:true, selected, attrs, image_src:image?.getAttribute('src') || null,
+                  visible: !!(node.offsetWidth || node.offsetHeight), natural_width: image?.naturalWidth || 0};
         }"""
     )
 
 
+def _persisted_image(src: Any, video_id: str) -> bool:
+    """A saved custom thumbnail is served from YouTube's image host for this exact video, never a local blob:."""
+    return bool(re.match(r"^https://i\d*\.ytimg\.com/vi/" + re.escape(video_id) + r"/", str(src or "")))
+
+
 def _wait_for_uploaded_thumbnail_evidence(
-    page, *, timeout: int = 45_000
+    page, video_id: str, *, timeout: int = 45_000
 ) -> dict[str, Any]:
-    """Wait for persisted thumbnail data without requiring its hover overlay."""
+    """After reload, require the uploaded tile to show YouTube's persisted image of this exact video.
+
+    2026-11-03 CA_ee_shYbg: two "verified" saves had left only the auto-generated frame. The uploaded tile was
+    hidden with src="" and the old check read image.src, which resolves "" to the edit page URL. A real save shows
+    the tile with https://i9.ytimg.com/vi/<id>/sddefault.jpg?v=..."""
     uploaded = page.locator(UPLOADED_THUMBNAIL_SELECTOR).first
     uploaded.wait_for(state="attached", timeout=timeout)
     page.wait_for_function(
-        """selector => [...document.querySelectorAll(selector)].some(node => {
-          const image = node.querySelector('img');
-          return Boolean(image?.currentSrc || image?.src);
+        """([selector, id]) => [...document.querySelectorAll(selector)].some(node => {
+          const src = node.querySelector('img')?.getAttribute('src') || '';
+          return new RegExp('^https://i\\\\d*\\\\.ytimg\\\\.com/vi/' + id + '/').test(src);
         })""",
-        arg=UPLOADED_THUMBNAIL_SELECTOR,
+        arg=[UPLOADED_THUMBNAIL_SELECTOR, video_id],
         timeout=timeout,
     )
     evidence = _selected_uploaded_thumbnail(page)
-    if not evidence.get("present") or not evidence.get("image_src"):
+    if not evidence.get("present") or not _persisted_image(evidence.get("image_src"), video_id):
         raise RuntimeError(
             "Studio save returned but the exact video's uploaded thumbnail "
             "could not be verified after reload"
@@ -143,11 +155,14 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
             uploaded = page.locator(UPLOADED_THUMBNAIL_SELECTOR).first
             uploaded.wait_for(state="visible", timeout=60_000)
             uploaded.scroll_into_view_if_needed(timeout=30_000)
-            # Uploading creates the candidate; selecting it is a separate
-            # Studio action.  Always select the uploaded candidate explicitly.
-            uploaded.click(timeout=30_000)
             save = page.get_by_role("button", name="Save", exact=True).first
             save.wait_for(state="visible", timeout=30_000)
+            # Current Studio selects the uploaded image itself and enables Save. Clicking the tile again (as this
+            # stage always did) left Studio on its auto-generated frame, so CA_ee_shYbg went out with no custom
+            # thumbnail twice on 2026-11-03. Select it only when Studio has not.
+            page.wait_for_timeout(2_000)
+            if not save.is_enabled():
+                uploaded.click(timeout=30_000)
             page.wait_for_function("() => !document.querySelector('button[aria-label=\"Save\"]')?.disabled", timeout=30_000)
             save.click()
             # The enabled/disabled transition is transient in current Studio
@@ -167,7 +182,7 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
             # The preview button is a hover overlay and is normally hidden
             # after reload.  Verify its persisted image data instead of
             # treating overlay visibility as upload state.
-            evidence = _wait_for_uploaded_thumbnail_evidence(page)
+            evidence = _wait_for_uploaded_thumbnail_evidence(page, video_id)
             proof = receipt_path.with_suffix(".png")
             editor = page.locator(THUMBNAIL_EDITOR_SELECTOR).first
             editor.wait_for(state="visible", timeout=30_000)

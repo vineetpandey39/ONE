@@ -7497,6 +7497,19 @@ def _run_helios(job: dict[str, Any]) -> dict[str, Any]:
     if payload.get("brand") == "origin_to_ovation":
         from openjarvis.one_agents.origin_to_ovation import run_stage
         return run_stage(job, enqueue=enqueue_job)
+    # A scheduled Origin to Ovation clock is a commissioning request, not a
+    # Sonia Travel Vlogs brief.  Until HELIOS has created an evidence-backed
+    # mission.json and supplied its canonical subject, fail closed here.  The
+    # actual commissioned job is JSON (brand=origin_to_ovation) and takes the
+    # governed HELIOS -> CHANDAN -> ARES -> ECHO path above.
+    if "[origin-to-ovation]" in task.casefold():
+        return {
+            "agent": "HELIOS", "mode": "blocked", "_blocked": True,
+            "status": "commission_required",
+            "blocked_reason": ("Origin to Ovation needs an evidence-backed, duplicate-safe "
+                               "canonical subject commission before CHANDAN can execute."),
+            "handed_to": None,
+        }
     if payload.get("brand") == "planexium" or (not payload and "planexium" in task.casefold()):
         from openjarvis.one_agents.planexium import head_job
         return head_job(job, enqueue=enqueue_job)
