@@ -61,7 +61,11 @@ def commission_next(job):
         "production_phase": "reference_first", "current_model": True,
         "upload_authorized": False, "public_publish_authorized": False,
         "upload_policy": "package_only_until_later_explicit_user_instruction",
-        "fresh_code_required": True, "reference_review_required": True,
+        # The scheduler invokes the already-tested channel runtime. Reserve an
+        # exact-id deployment only for an explicit code migration/repair, not
+        # for every ordinary biography, otherwise the normal worker correctly
+        # leaves each episode parked in `reserved` forever.
+        "fresh_code_required": False, "reference_review_required": True,
         "commissioned_date": today,
         "editorial_system": {
             "story": "truthful cold open -> formative years -> setbacks -> reinvention -> records-led resolution",

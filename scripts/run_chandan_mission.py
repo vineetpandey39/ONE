@@ -2,6 +2,8 @@
 import json
 import os
 import traceback
+import threading
+import time
 from pathlib import Path
 
 os.environ.setdefault("OPENJARVIS_HOME", "E:/ONE-SUITE/data")
@@ -50,6 +52,13 @@ def main():
                     raise RuntimeError("Queue ownership changed")
                 job = runtime.get_job(job["id"])
                 print(json.dumps({"agent": job["agent_id"], "job_id": job["id"], "status": "running"}), flush=True)
+                stop_heartbeat = threading.Event()
+                def keep_ownership():
+                    while not stop_heartbeat.wait(30):
+                        runtime.job_recovery.heartbeat(runtime._connect, job["id"])
+                runtime.job_recovery.heartbeat(runtime._connect, job["id"])
+                heartbeat_thread = threading.Thread(target=keep_ownership, daemon=True)
+                heartbeat_thread.start()
                 try:
                     result = runtime.execute_job(job)
                     blocked = bool(result.get("_blocked")) or result.get("governed") == "refused"
@@ -62,6 +71,9 @@ def main():
                     write(state / "last-error.json", {"job": job["id"], "error": str(error),
                                                      "traceback": traceback.format_exc()})
                     raise
+                finally:
+                    stop_heartbeat.set()
+                    heartbeat_thread.join(timeout=2)
             else:
                 raise RuntimeError(f"Existing job {job['id']} is {job['status']}; inspect before retry")
             write(state / "last-result.json", {"job": job["id"], "agent": job["agent_id"], "result": result})
