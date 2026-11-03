@@ -7,12 +7,13 @@ CHATGPT_IMAGE_RETRY = {
     # Shared LAO recovery contract used by the other production agents.  A
     # silent/empty assistant turn must result in a fresh image request rather
     # than repeatedly polling the same dead turn.
-    'max_attempts': 4,
+    'max_attempts': 6,
     'always_nudge_fresh_image': True,
     'allow_fresh_chat_recovery': True,
-    'retry_backoff_seconds': 15,
+    'retry_backoff_seconds': 60,
     'strict_fresh_turn': True,
-    'stall_timeout_ms': 300000,
+    'stall_timeout_ms': 180000,
+    'poll_ms': 3000,
 }
 
 def provider_receipt(path, request_tag):
@@ -39,11 +40,15 @@ def reference_prompt(manifest, brief):
         raise ValueError('Reference brief subject must match mission')
     stages=brief.get('reference_stages',[])
     if len(stages)<3:raise ValueError('At least three sourced age stages required')
-    lines=[]
     for stage in stages:
         required=('age','year','place','appearance','equipment','source_urls')
         if any(stage.get(k) in (None,'',[]) for k in required):raise ValueError('Incomplete sourced reference stage')
         if not all(str(u).startswith('https://') for u in stage['source_urls']):raise ValueError('Reference sources must be HTTPS links')
+    lines=[]
+    adult_stages=[stage for stage in stages if int(stage['age']) >= 18]
+    if len(adult_stages) < 2:
+        raise ValueError('At least two sourced adult reference stages required')
+    for stage in adult_stages:
         lines.append(f"Age {stage['age']} ({stage['year']}), {stage['place']}: {stage['appearance']}; {stage['equipment']}.")
     # Keep the commissioning request concise.  The former prompt combined an
     # exact face/body model, childhood full-body studies and the entire
@@ -51,14 +56,15 @@ def reference_prompt(manifest, brief):
     # as a risky biometric-clone request.  This is an editorial continuity
     # board, not a photographic identity model.  Shot-level dignity, anatomy
     # and camera rules are enforced later by the reviewed scene pack.
-    return (f"Create one clearly illustrated cinematic CGI editorial continuity board for a documentary about "
-            f"{manifest['subject']}. This must look like original CGI artwork, not a real photograph or archival "
-            "record. Arrange five separate, dignified head-and-shoulder portrait panels showing the documented "
-            "age progression below. Use a consistent, recognisable editorial interpretation without exact biometric "
-            "replication. Show a natural three-quarter view in each panel; neutral expressions; simple background. "
+    return (f"Generate an image based on this description. Do not ask follow-up questions. Description: "
+            f"A cinematic CGI editorial illustration for a sports biography about {manifest['subject']}. "
+            "Create one clean three-panel adult career progression, clearly CGI artwork rather than a photograph. "
+            "Each panel is a respectful head-and-shoulders three-quarter portrait with a simple neutral stadium "
+            "background and natural expression. Keep the same recognisable editorial character across the panels "
+            "without attempting an exact photographic or biometric replica. "
             + ' '.join(lines) +
             " Keep clothing generic and era-appropriate. No logos, sponsors, signatures, watermarks, event branding, "
-            "flags or readable venue text. Small age/year captions are allowed. Output only the single continuity-board image.")
+            "flags, trophies or readable text. Output only the single image.")
 
 def record_chat(browser, marker):
     from playwright.sync_api import sync_playwright
