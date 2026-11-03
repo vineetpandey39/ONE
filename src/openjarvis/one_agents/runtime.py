@@ -11111,9 +11111,25 @@ def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, 
     asset_folder = f"{_yatra_slug(video_title or trend_brief)}-{lao_job_id[:8]}"
     if _yatra_editorial_hold(plan_record):
         stages.clear_stage(owner)
-        return {"agent": owner.upper(), "stage": "editorial_hold", "production_complete": False,
+        held = {"agent": owner.upper(), "stage": "editorial_hold", "production_complete": False,
                 "lao_job": lao_job_id, "asset_folder": asset_folder, "contract": contract,
                 "reason": "Saved ChatGPT draft has final_verdict: REWRITE; repair this checkpoint before Sonia voice credits"}
+        # One rewrite, never a loop (2026-11-03 Bhutan: the hold was right - the "complete guide" gave no permit
+        # steps - but nothing asked for a better draft, so the slot simply ended). The writer's own review goes back
+        # to ChatGPT with the same brief; a second REWRITE holds as before and still spends no voice credits.
+        if payload.get("rewrite_of"):
+            return {**held, "rewrite_of": payload["rewrite_of"],
+                    "reason": "Rewritten draft was rejected again by its own review; held for the Chairman"}
+        _require_active_job(job, "commission the YATRA rewrite")
+        review = str(plan_record.get("quality_gate") or "")[:6000]
+        rewrite = enqueue_job(owner, json.dumps({
+            **payload, "rewrite_of": lao_job_id,
+            "trendBrief": trend_brief + "\n\nREWRITE REQUIRED. Your previous draft for this brief was rejected by its "
+                          "own quality review, quoted below. Write a complete new draft that fixes every point "
+                          "marked NO or REWRITE; keep what passed.\n\n" + review}),
+            mode="execute", dedupe_key=f"travel:{lao_job_id}:rewrite")
+        return {**held, "stage": "editorial_rewrite", "rewrite_job": rewrite.get("id"),
+                "reason": "Draft rejected by its own review; one rewrite commissioned with the review notes"}
     _require_active_job(job, "commission FABULA narration")
     follow = enqueue_job("fabula", json.dumps({**payload, "stage": "narration",
                          "preproduction_job": lao_job_id}), mode="execute",
