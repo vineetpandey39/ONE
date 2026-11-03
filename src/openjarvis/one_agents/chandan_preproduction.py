@@ -42,6 +42,28 @@ ROADMAP = (
     "Verified records, meaning of longevity and natural CTA",
 )
 
+MESSI_ROADMAP = (
+    "World Cup-pressure cold open and the unanswered international question",
+    "Rosario childhood context without invented hardship or routines",
+    "Newell's youth football and the move to Barcelona",
+    "Barcelona academy development and the senior debut",
+    "Early brilliance, physical resilience and the first transformation",
+    "Club dominance, individual awards and rising expectations",
+    "Argentina responsibility and the 2014 World Cup final",
+    "Repeated international heartbreak and the burden of comparison",
+    "Record scale at Barcelona and a changing role",
+    "The 2021 Copa America breakthrough",
+    "Leaving Barcelona and adapting in Paris",
+    "Qatar 2022: pressure, leadership and the final campaign",
+    "The World Cup final and the long-awaited resolution",
+    "Later-career reinvention and sustained international longevity",
+    "Verified records, legacy and a natural CTA",
+)
+
+
+def _roadmap(manifest: dict) -> tuple[str, ...]:
+    return MESSI_ROADMAP if manifest.get("subject_id") == "lionel-messi" else ROADMAP
+
 
 def _prompt(manifest: dict, brief: dict) -> str:
     sources = brief.get("sources") or {}
@@ -65,7 +87,7 @@ Do not output markdown fences. End with {END}."""
 def _chunk_prompt(manifest: dict, brief: dict, start: int, end: int) -> tuple[str, str, str]:
     begin = f"BEGIN_OTO_PACK_{start:02d}_{end:02d}"
     finish = f"END_OTO_PACK_{start:02d}_{end:02d}"
-    roadmap = "\n".join(f"{i + 1}. {title}" for i, title in enumerate(ROADMAP))
+    roadmap = "\n".join(f"{i + 1}. {title}" for i, title in enumerate(_roadmap(manifest)))
     sources = brief.get("sources") or {}
     prompt = f"""Continue as CHANDAN, factual sports-biography writer and director for {manifest['subject']}.
 Return ONLY valid JSON between {begin} and {finish}; no markdown fences or commentary.

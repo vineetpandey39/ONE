@@ -33,8 +33,8 @@ def validate_pack(path):
     reference = reference_file(path, manifest)
     review_path = path / 'runtime/reference-review.json'
     review = pipeline.read(review_path)
-    checks = ('identity_consistent', 'age_accuracy', 'front_reference', 'three_quarter_reference',
-              'side_profile_reference', 'anatomy', 'historical_kit', 'no_invented_markings')
+    checks = ('identity_consistent', 'age_accuracy', 'three_quarter_reference', 'anatomy',
+              'clearly_cgi', 'dignified_framing', 'no_invented_markings')
     if (review.get('status') != 'passed' or review.get('reference_sha256') != pipeline.digest(reference)
             or not review.get('reviewer') or not all(review.get(k) is True for k in checks)):
         raise ValueError('Hash-bound reference editorial review has not passed')
