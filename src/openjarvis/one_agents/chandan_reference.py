@@ -3,6 +3,30 @@ from pathlib import Path
 import shutil
 import re
 
+CHATGPT_IMAGE_RETRY = {
+    # Shared LAO recovery contract used by the other production agents.  A
+    # silent/empty assistant turn must result in a fresh image request rather
+    # than repeatedly polling the same dead turn.
+    'max_attempts': 4,
+    'always_nudge_fresh_image': True,
+    'allow_fresh_chat_recovery': True,
+    'retry_backoff_seconds': 15,
+    'strict_fresh_turn': True,
+    'stall_timeout_ms': 300000,
+}
+
+def provider_receipt(path, request_tag):
+    """Return a new receipt after terminal failure; never erase evidence."""
+    from openjarvis.one_agents.origin_to_ovation import read
+    root = path/'runtime/providers'
+    base = root/f'character-reference-{request_tag}.json'
+    if not base.exists() or str(read(base).get('terminal_status', '')).lower() not in ('failed', 'stopped'):
+        return base
+    version = 2
+    while (root/f'character-reference-{request_tag}-v{version}.json').exists():
+        version += 1
+    return root/f'character-reference-{request_tag}-v{version}.json'
+
 def captured_chat(result):
     """Validate the named workflow tab URL captured before browser cleanup."""
     url = str(result.get('episode_chat_url', '')).split('?')[0]
@@ -61,15 +85,18 @@ def run_reference(path, job):
     steps=[{'action':'open_browser','args':{'profile_dir':browser['profile_dir'],'cdp_url':browser['cdp_url'],'start_url':'https://chatgpt.com/'}},
       {'action':'open_tab','args':{'url':'https://chatgpt.com/','name':'episode_reference'}},
       {'action':'wait_for_any_selector','args':{'selectors':['#prompt-textarea',"[contenteditable='true']",'textarea'],'timeout_ms':60000}},
-      {'action':'generate_and_download_chatgpt_image','args':{'prompt':prompt,'request_marker':marker,'strict_fresh_turn':True,'allow_fresh_chat_recovery':False,'filename':target.name,'max_attempts':1,'stall_timeout_ms':300000,'as':'image_path'}},
+      {'action':'generate_and_download_chatgpt_image','args':{
+          'prompt':prompt,'request_marker':marker,'filename':target.name,
+          **CHATGPT_IMAGE_RETRY,'as':'image_path'}},
       {'action':'switch_tab','args':{'name':'episode_reference','as':'episode_chat_url'}}]
     config=read(ROOT/'runtime-config.json');provider=LaoDraft(LaoOrchestratorTool(),config.get('lao_folder_id'),tuple(Path(p) for p in config['artifact_roots']))
     # Bind provider receipts to the actual request. A corrected policy, subject
     # or reference brief must not inherit an older terminal LAO job merely
     # because the generic receipt filename is the same.
     request_tag = digest(path/'production/character-bible/reference-request.json')[:12]
+    receipt = provider_receipt(path, request_tag)
     result,pid=provider.run(f"Origin to Ovation - {manifest['subject']} - reference",steps,{},
-                            path/'runtime/providers'/f'character-reference-{request_tag}.json',timeout=900)
+                            receipt,timeout=1800)
     shutil.copy2(provider.artifact(result,pid,target.name),target)
     manifest['browser']['chat_url']=captured_chat(result);manifest['character_reference']=str(target);write(path/'mission.json',manifest)
     receipt={'status':'reference_ready_for_editorial_review','reference':str(target),'sha256':digest(target),'provider_job':pid,'chat_url':manifest['browser']['chat_url'],'upload_authorized':False}
