@@ -49,7 +49,13 @@ def reference_prompt(manifest, brief):
     if len(adult_stages) < 2:
         raise ValueError('At least two sourced adult reference stages required')
     for stage in adult_stages:
-        lines.append(f"Age {stage['age']} ({stage['year']}), {stage['place']}: {stage['appearance']}; {stage['equipment']}.")
+        appearance = re.sub(
+            r"\brecognisable\s+(teenage|adult|mature)\s+identity\b",
+            r"the same fictionalised \1 football protagonist",
+            str(stage['appearance']),
+            flags=re.IGNORECASE,
+        )
+        lines.append(f"Age {stage['age']} ({stage['year']}), {stage['place']}: {appearance}; {stage['equipment']}.")
     # Keep the commissioning request concise.  The former prompt combined an
     # exact face/body model, childhood full-body studies and the entire
     # episode camera policy; ChatGPT correctly treated that ambiguous bundle
@@ -57,11 +63,11 @@ def reference_prompt(manifest, brief):
     # board, not a photographic identity model.  Shot-level dignity, anatomy
     # and camera rules are enforced later by the reviewed scene pack.
     return (f"Generate an image based on this description. Do not ask follow-up questions. Description: "
-            f"A cinematic CGI editorial illustration for a sports biography about {manifest['subject']}. "
+            "A cinematic CGI editorial illustration for a fictionalised adult Argentine football protagonist. "
             "Create one clean three-panel adult career progression, clearly CGI artwork rather than a photograph. "
             "Each panel is a respectful head-and-shoulders three-quarter portrait with a simple neutral stadium "
-            "background and natural expression. Keep the same recognisable editorial character across the panels "
-            "without attempting an exact photographic or biometric replica. "
+            "background and natural expression. Keep the same clearly fictionalised editorial character across "
+            "the panels. Do not depict or replicate any real person's face and do not create a photographic clone. "
             + ' '.join(lines) +
             " Keep clothing generic and era-appropriate. No logos, sponsors, signatures, watermarks, event branding, "
             "flags, trophies or readable text. Output only the single image.")
