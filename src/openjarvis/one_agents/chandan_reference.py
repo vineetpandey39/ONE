@@ -49,13 +49,12 @@ def reference_prompt(manifest, brief):
     if len(adult_stages) < 2:
         raise ValueError('At least two sourced adult reference stages required')
     for stage in adult_stages:
-        appearance = re.sub(
-            r"\brecognisable\s+(teenage|adult|mature)\s+identity\b",
-            r"the same fictionalised \1 football protagonist",
-            str(stage['appearance']),
-            flags=re.IGNORECASE,
+        age = int(stage['age'])
+        life_stage = "young adult" if age < 21 else ("adult" if age < 32 else "mature adult")
+        lines.append(
+            f"Age {age}: the same fictionalised {life_stage} football protagonist, "
+            "plain unbranded training shirt, neutral studio background."
         )
-        lines.append(f"Age {stage['age']} ({stage['year']}), {stage['place']}: {appearance}; {stage['equipment']}.")
     # Keep the commissioning request concise.  The former prompt combined an
     # exact face/body model, childhood full-body studies and the entire
     # episode camera policy; ChatGPT correctly treated that ambiguous bundle
@@ -63,11 +62,11 @@ def reference_prompt(manifest, brief):
     # board, not a photographic identity model.  Shot-level dignity, anatomy
     # and camera rules are enforced later by the reviewed scene pack.
     return (f"Generate an image based on this description. Do not ask follow-up questions. Description: "
-            "A cinematic CGI editorial illustration for a fictionalised adult Argentine football protagonist. "
+            "A cinematic CGI editorial character-design sheet for a fictional adult football protagonist. "
             "Create one clean three-panel adult career progression, clearly CGI artwork rather than a photograph. "
             "Each panel is a respectful head-and-shoulders three-quarter portrait with a simple neutral stadium "
             "background and natural expression. Keep the same clearly fictionalised editorial character across "
-            "the panels. Do not depict or replicate any real person's face and do not create a photographic clone. "
+            "the panels, with stylised CGI features and painterly skin texture. "
             + ' '.join(lines) +
             " Keep clothing generic and era-appropriate. No logos, sponsors, signatures, watermarks, event branding, "
             "flags, trophies or readable text. Output only the single image.")
@@ -97,7 +96,9 @@ def run_reference(path, job):
     target.parent.mkdir(parents=True,exist_ok=True)
     if target.is_file() and browser.get('chat_url'):
         return {'status':'reference_ready_for_editorial_review','reference':str(target),'sha256':digest(target),'reused':True}
-    marker='OTO-REFERENCE-'+path.name
+    # The browser marker is only a machine correlation token.  Never leak a
+    # public figure's name through it into an otherwise-neutral art request.
+    marker='OTO-REFERENCE-'+digest(path/'research/commission-brief.json')[:12]
     prompt+=' Request marker: '+marker
     write(path/'production/character-bible/reference-request.json',{
         'prompt':prompt, 'sources':brief['reference_stages'],
