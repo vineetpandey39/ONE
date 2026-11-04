@@ -179,6 +179,16 @@ def enforce_prompt(text: str) -> str:
         visual = visual.replace("Barcelona-colour", "neutral")
         visual = visual.replace("dark-red-and-blue", "neutral")
         visual = visual.replace("Argentina", "fictional team")
+        # Direct face-recreation language is the remaining likeness trigger in
+        # long persistent chats.  Preserve emotional visibility through true
+        # side profiles and medium coverage instead of reverting to repetitive
+        # rear views.
+        visual = re.sub(r"\bfront[- ]three-quarter\b", "true side-profile", visual, flags=re.I)
+        visual = re.sub(r"\bfront-facing\b", "side-facing at medium distance", visual, flags=re.I)
+        visual = re.sub(r"\bthree-quarter facial (?:view|angle|geometry)\b",
+                        "true side-profile facial view", visual, flags=re.I)
+        visual = re.sub(r"\bfacial close-up\b", "medium true side-profile shot", visual, flags=re.I)
+        visual = re.sub(r"\brecognisable\b|\brecognizable\b", "emotionally legible", visual, flags=re.I)
         if re.match(r"P02:", visual, flags=re.I):
             visual = (
                 "P02: Wide establishing view of a fictional football stadium with symmetrical pitch geometry, "
