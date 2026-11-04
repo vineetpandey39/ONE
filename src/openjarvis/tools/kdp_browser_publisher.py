@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 import re
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
@@ -248,18 +249,44 @@ def write_state(packet: SubmissionPacket, stage: str, **extra: Any) -> dict[str,
     return state
 
 
-def _click(page: Any, labels: tuple[str, ...], *, required: bool = True) -> bool:
+def _click(page: Any, labels: tuple[str, ...], *, required: bool = True,
+           timeout_ms: int | None = None) -> bool:
+    """Click the first of these controls to appear.
+
+    A control we declare *required* is one the page is expected to have, so we
+    wait for it. An optional one is a "click it if it happens to be there"
+    probe and must not stall the run. That distinction is the whole fix.
+
+    Measured 2026-11-04 on draft A24GT0AF8CWSZ1: the eBook content step
+    uploaded the manuscript and the cover, then asked for "Save and Continue"
+    while KDP was still converting. The page's own stamp reads "Uploaded on
+    November 04, 2026 20:09 PM GMT. File processing complete." and the job
+    died at 20:09:24. KDP hides that button until processing finishes, so a
+    1.2-second look called the control missing and threw away a finished book
+    that was already sitting in a KDP draft. Asked again afterwards,
+    Playwright resolved exactly one visible match.
+
+    1.2 seconds was never a wait for a server-side conversion; it was a glance.
+    """
     _refuse_if_challenged(page)
-    for label in labels:
-        locator = page.get_by_role("button", name=re.compile(label, re.I)).first
-        try:
-            if locator.is_visible(timeout=1200):
-                locator.click()
-                return True
-        except Exception:
-            continue
+    budget = timeout_ms if timeout_ms is not None else (120_000 if required else 1_200)
+    deadline = time.monotonic() + budget / 1000.0
+    while True:
+        for label in labels:
+            locator = page.get_by_role("button", name=re.compile(label, re.I)).first
+            try:
+                if locator.is_visible(timeout=400):
+                    locator.click()
+                    return True
+            except Exception:
+                continue
+        if time.monotonic() >= deadline:
+            break
+        page.wait_for_timeout(500)
     if required:
-        raise RuntimeError("KDP control not found: " + " / ".join(labels))
+        raise RuntimeError(
+            f"KDP control not found after waiting {budget // 1000}s: "
+            + " / ".join(labels))
     return False
 
 
