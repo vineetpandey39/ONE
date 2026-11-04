@@ -271,6 +271,33 @@ def _ranked_tags(meta: dict, title: str, packaging: dict, channel: ChannelProfil
     return _valid_tags([t for t in candidates if isinstance(t, str) and t.strip()])
 
 
+def enforce_grounded_terminology(value: Any, record: dict[str, Any]) -> Any:
+    """Repair model wording only when the production record proves the canonical term.
+
+    Metadata is generated after the factual script has been approved, so an LLM typo
+    must not weaken that approval.  Keep this deliberately narrow: a replacement is
+    enabled only when the same record contains the authoritative canonical wording.
+    """
+    corpus = json.dumps(record, ensure_ascii=False).casefold()
+    replacements: list[tuple[re.Pattern[str], str]] = []
+    if "bhutan" in corpus and "sustainable development fee" in corpus:
+        replacements.append((re.compile(r"\bspecial development fee\b", re.IGNORECASE),
+                             "Sustainable Development Fee"))
+
+    def repair(item: Any) -> Any:
+        if isinstance(item, str):
+            for pattern, canonical in replacements:
+                item = pattern.sub(canonical, item)
+            return item
+        if isinstance(item, list):
+            return [repair(entry) for entry in item]
+        if isinstance(item, dict):
+            return {key: repair(entry) for key, entry in item.items()}
+        return item
+
+    return repair(value)
+
+
 def metadata_from_model(record: dict, packaging: dict, llm: LLM | None,
                         channel: ChannelProfile = SONIA) -> tuple[dict, str]:
     """Wording that has to be written fresh: intro, tags, queries, hashtags, destination, thumbnail hooks."""
@@ -506,6 +533,7 @@ def build_package(record: dict[str, Any], *, master: Path, plan_path: Path, port
         cues = [(int(t // 60), int(t % 60), cues[i][2]) for i, t in enumerate(starts)]
         timing = "narration"
     meta, meta_source = metadata_from_model(record, packaging, llm, channel)
+    meta = enforce_grounded_terminology(meta, record)
     search_terms = [meta.get("primary_query", ""), *meta.get("secondary_queries", []),
                     *meta.get("tags", []), title]
     chapter_plan, label_source = chapter_labels(
