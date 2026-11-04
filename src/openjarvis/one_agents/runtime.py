@@ -6241,6 +6241,11 @@ def _sonia_seo_package(payload: dict[str, Any]) -> dict[str, Any]:
             existing = {}
     if payload.get("resume_packaging_only") and existing:
         package = youtube_seo.repair_description_hashtags(existing)
+        # A saved-stage retry must keep paid/localized work while still applying
+        # factual terminology corrections learned from the approved production
+        # record.  Never require a fresh model call or thumbnail generation just
+        # to repair contradicted metadata wording.
+        package = youtube_seo.enforce_grounded_terminology(package, record)
         out.write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
         package["path"] = str(out)
         return package

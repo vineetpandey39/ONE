@@ -292,6 +292,7 @@ def image_batch_provider(path, shots):
         "P73": "Create one full-frame 16:9 photoreal cinematic CGI scene of an anonymous mature adult footballer in true side profile at a generic modern stadium, plain pale-blue training shirt, medium-wide framing, short dark hair and trimmed beard, natural athletic posture, face not identifiable, no awards, trophies, names, logos, flags, text or match recreation.",
         "P74": "Create one full-frame 16:9 photoreal cinematic CGI low-angle wide stadium portrait with one small anonymous adult footballer near the centre circle, plain pale-blue-and-white kit, face indistinct due to distance, realistic floodlights and restrained atmosphere, no celebration, trophies, names, logos, flags, scoreboards or readable text.",
     }
+    recovery_only = all(shot["shot_id"] in recovery_prompts for shot in missing)
     write(batch_plan, {"calls": [{
         "kind": "scene", "filename": Path(shot["image"]).name,
         # Recovery prompts are already deliberately subject-free.  Passing
@@ -308,7 +309,11 @@ def image_batch_provider(path, shots):
         {"action": "open_browser", "args": {
             "profile_dir": browser["profile_dir"], "cdp_url": browser["cdp_url"],
             "start_url": "https://chatgpt.com/"}},
-        {"action": "navigate", "args": {"url": browser["chat_url"]}},
+        # A long conversation that has accumulated refusals can keep refusing
+        # even completely neutral prompts.  Recovery stays in CHANDAN's same
+        # dedicated persistent Chrome profile but starts a clean conversation.
+        {"action": "navigate", "args": {
+            "url": "https://chatgpt.com/" if recovery_only else browser["chat_url"]}},
         {"action": "wait_for_any_selector", "args": {
             "selectors": ["#prompt-textarea", "[contenteditable='true']", "textarea"],
             "timeout_ms": 60000}},
