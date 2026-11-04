@@ -3814,9 +3814,20 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "interview anyone or verify a name, so do not commission a book whose honest "
         "execution needs specific factual claims about real named organisations, "
         "government programmes, current events, or living people — every specific in "
-        "it would be invented and the book would be unpublishable. Nonfiction is "
-        "welcome when it delivers a method, framework or skill the reader applies to "
-        "their own life.\n\n"
+        "it would be invented and the book would be unpublishable.\n\n"
+        "Commission an INSTRUCTIONAL MANUAL, not an essay and not a point of view. "
+        "The reader is buying the ability to do something they cannot do yet. The "
+        "catalogue's own earning titles are the shape to match - Mastering Windows "
+        "Command Line Interface: A Complete Beginner-to-Advanced Guide to CMD, "
+        "PowerShell, and Batch Scripting for Windows Power Users, and Mastering "
+        "Agentic AI: Build, Deploy, and Scale Autonomous AI Systems. Each names a "
+        "skill, names the tools, and promises a journey from one level to another. "
+        "None of them argues a thesis.\n\n"
+        "So: no abstract noun plus a colon plus a claim. No why-old-rules-fail, no "
+        "hidden-cost-of, no what-nobody-tells-you. Those read as opinion pieces, and "
+        "this floor has published seven of them. A manual earns because a reader "
+        "finishes a chapter able to run a command, build a thing, or fix a fault "
+        "they could not fix before.\n\n"
         # The contradiction that cost four runs. This line survived the
         # 2026-10-14 prompt-gate fix one screen below it, and it wins: asked
         # for "exact source_url values" that were stripped before it ever saw
@@ -3858,9 +3869,20 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         "Reply in exactly this shape:\n"
         "MODE: nonfiction\n"
         "REGION: <primary market, e.g. global or india>\n"
-        "ANGLE: <one line — the specific hook this book leads with, naming no real "
-        "organisation or person>\n"
-        "TITLE: <literal benefit-led working title, preferably <=60 characters>\n"
+        "ANGLE: <one line - what the reader will be ABLE TO DO after finishing, "
+        "stated as a capability, naming no real organisation or person. Not a hook, "
+        "not a claim about the world>\n"
+        "OUTCOME: <the one concrete thing they can build, run or operate at the end>\n"
+        "PREREQUISITE: <what the reader is assumed to know already; none is valid>\n"
+        "TOOLS: <the named tools and commands this book teaches, comma separated - "
+        "the ones a buyer scans a subtitle for>\n"
+        "MODULES: <6-12 chapter subjects in teaching order, beginner to advanced, "
+        "separated by a pipe. Each is something the reader can DO, not a topic to "
+        "discuss>\n"
+        "TITLE: <house shape: Mastering [skill], or [skill] Mastery, then a colon, "
+        "then A Complete [level]-to-[level] Guide to [tool], [tool] and [tool] for "
+        "[audience]. Literal, no metaphor. The part before the colon stays under 60 "
+        "characters>\n"
         "BUYER: <one specific role and problem>\n"
         "PURCHASE_QUERY: <exact problem-led query a buyer would type>\n"
         "SERIES: <Windows Power User Field Guides | Enterprise Automation Playbooks | Agentic AI Operations>\n"
@@ -5811,6 +5833,40 @@ def _lao_failure_reason(lao_job_id: str, last_poll: dict[str, Any] | None = None
     return reason[:400] if reason else "LAO recorded no reason for the failure"
 
 
+def _book_curriculum(brief_path: str) -> str:
+    """The syllabus HERMES commissioned, as instructions LAO can write to.
+
+    LAO is handed one line and nothing else, so it writes whatever that line
+    suggests - on 2026-10-23 a business-plan angle came back as a startup
+    story about two invented people. Now that the commission carries OUTCOME,
+    PREREQUISITE, TOOLS and MODULES, they travel with it: a chapter list in
+    teaching order is far harder to turn into an essay than a one-line hook.
+
+    Returns an empty string when the brief has none of them, so an older
+    queued commission still behaves exactly as before.
+    """
+    try:
+        brief = Path(brief_path).read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+    parts = []
+    for marker, label in (("OUTCOME", "By the end the reader can"),
+                          ("PREREQUISITE", "Assumed knowledge"),
+                          ("TOOLS", "Tools and commands to teach")):
+        value = _marker(brief, marker)
+        if value:
+            parts.append(f"{label}: {value}")
+    modules = _marker(brief, "MODULES")
+    if modules:
+        chapters = [chapter.strip() for chapter in modules.split("|") if chapter.strip()]
+        if chapters:
+            numbered = "\n".join(f"  {n}. {chapter}"
+                                 for n, chapter in enumerate(chapters, 1))
+            parts.append("Write these chapters, in this order, each one teaching "
+                         "the reader to do the thing it names:\n" + numbered)
+    return "\n\n".join(parts)
+
+
 def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 5 worker - runs LAO's KDP factory and waits for the book.
 
@@ -5858,6 +5914,7 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
     # instead of scanning RSS, so HERMES's actual researched angle is what
     # the book gets written about instead of being silently discarded.
     input_args: dict[str, Any] = {"mode": kdp_mode, "region": region, "dryRun": True}
+    curriculum = _book_curriculum(str(brief.get("brief_path") or ""))
     if angle:
         # The lane travels with the angle. LAO's package exposes no input for
         # it, and what it is handed is all it knows: on 2026-10-23 it took a
@@ -5867,11 +5924,13 @@ def _run_scribe(job: dict[str, Any]) -> dict[str, Any]:
         # depend on LAO reading it.
         input_args["topicOverride"] = (
             f"{angle}\n\n"
-            "Hard constraints: this is a nonfiction utility book in the "
+            "Hard constraints: this is an INSTRUCTIONAL MANUAL in the "
             "Windows / PowerShell / networking / enterprise automation / "
-            "agentic AI operations / AI governance lane. Teach a method the "
-            "reader applies to their own work. Do not invent named people, "
-            "companies or case studies, and do not write a narrative."
+            "agentic AI operations / AI governance lane. Every chapter teaches "
+            "the reader to do something and shows the commands or steps that do "
+            "it. Do not invent named people, companies or case studies. Do not "
+            "write a narrative, a story, or an argument about the industry."
+            + ((chr(10) + chr(10) + curriculum) if curriculum else "")
         )
 
     # Declared before the nested attempt function and mutated via `nonlocal`
