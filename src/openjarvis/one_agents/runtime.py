@@ -3266,9 +3266,31 @@ def _book_product(brief: str) -> str:
 ANGLE_REPEAT = 0.70
 
 
+# House-style scaffolding. Every title in this catalogue now carries it, so it
+# says nothing about WHICH book one is - the same way every angle carried the
+# same template. Measured 2026-11-05 on titles against the live shelf: with it
+# in, a near-duplicate of "Mastering Agentic AI" scores 0.294 and a completely
+# different Windows manual scores 0.333, four hundredths apart and the wrong way
+# round. With it out they are 0.333 and 0.091.
+_TITLE_BOILERPLATE = frozenset(
+    _stem(word) for word in (
+        "mastering", "mastery", "master", "complete", "comprehensive",
+        "beginner", "beginners", "advanced", "guide", "guides", "handbook",
+        "playbook", "edition", "step", "ultimate", "practical", "field",
+        "interface", "users", "user",
+    ))
+
+
+# A title this close to one already on sale is the same product. Lower than the
+# 0.34 product bar on purpose: a shelf row is a bare title, so there is no buyer
+# or purchase query on either side to carry the comparison. The nearest
+# false positive measured 0.182.
+SHELF_TITLE_REPEAT = 0.30
+
+
 def _find_kdp_topic_duplicate(candidate: str,
                               history: list[dict[str, str]] | None = None,
-                              *, angle: str = "") -> dict[str, Any] | None:
+                              *, angle: str = "", title: str = "") -> dict[str, Any] | None:
     """Fail closed on the same title, language, or three-part subject concept.
 
     ``candidate`` is the book as a product - title, buyer, purchase query - and
@@ -3297,6 +3319,7 @@ def _find_kdp_topic_duplicate(candidate: str,
         return {"reason": "empty candidate topic", "candidate": candidate}
     candidate_terms = _topic_terms(candidate)
     angle_terms = _topic_terms(angle) if angle else set()
+    title_terms = (_topic_terms(title) - _TITLE_BOILERPLATE) if title else set()
     candidate_families = {
         name for name, pattern in _KDP_TOPIC_FAMILIES.items() if pattern.search(candidate)
     }
@@ -3315,7 +3338,16 @@ def _find_kdp_topic_duplicate(candidate: str,
         # Three shared subject dimensions catches paraphrases such as
         # "tasks automated by unaffordable tools" vs "invisible automation &
         # paywall tech" even when the proposed title itself is different.
-        matched_on = ("the same product" if lexical >= 0.34
+        shelf_match = 0.0
+        if title_terms and record.get("source") == "KDP shelf":
+            # Title against title, both stripped of the house scaffolding -
+            # the only like-for-like comparison available against a shelf row.
+            shelf_terms = _topic_terms(previous) - _TITLE_BOILERPLATE
+            shelf_union = title_terms | shelf_terms
+            shelf_match = (len(title_terms & shelf_terms) / len(shelf_union)
+                           if shelf_union else 0.0)
+        matched_on = ("a title already on sale" if shelf_match >= SHELF_TITLE_REPEAT
+                      else "the same product" if lexical >= 0.34
                       else "a repeated angle" if angle_match >= ANGLE_REPEAT
                       else "three shared subject concepts"
                       if len(shared_families) >= 3 else "")
@@ -3328,6 +3360,7 @@ def _find_kdp_topic_duplicate(candidate: str,
                 "source": record["source"],
                 "lexical_similarity": round(lexical, 3),
                 "angle_similarity": round(angle_match, 3),
+                "shelf_title_similarity": round(shelf_match, 3),
                 "shared_concepts": shared_families,
             }
     return None
@@ -3961,10 +3994,18 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
         # placeholder straight into its answer, then invented a second one with
         # letters that are not even hex. A concrete example in a prompt is an
         # answer the model is allowed to give.
-        "EVIDENCE: <one line per claim, each ending with the evidence_id of the "
-        "radar item it comes from, in square brackets. Copy the id exactly as it "
-        "appears in the radar above - never compose, shorten or invent one. A "
-        "claim you cannot tie to a radar item does not belong here>\n"
+        # The bracket has to be specified by SHAPE, not by example. Told only
+        # to end a line 'with the evidence_id in square brackets', the model
+        # wrote [evidence_id: "deterministic winner"] on 2026-11-05 - it copied
+        # the JSON key it could see and invented a value. A specimen id cannot
+        # be given either: the first version of this line carried one and the
+        # model copied the placeholder straight into its answer.
+        "EVIDENCE: <one line per claim. End each line with one square bracket "
+        "holding ONLY a radar item evidence_id VALUE - twenty characters, digits "
+        "and the letters a to f, nothing else inside the bracket. No label, no "
+        "quotes, no colon, and not the words evidence_id. Copy the value from the "
+        "radar above exactly; never compose, shorten or invent one. A claim you "
+        "cannot tie to a radar item does not belong here>\n"
         "BRIEF:\n"
         "<8-14 lines: target reader, why now, competing titles, what makes this "
         "one different, and the honest commercial risk>"
@@ -4122,7 +4163,9 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     # the next one, here, while nothing has been written yet.
     for attempt, next_winner in enumerate(remaining_shortlist[:2], start=1):
         collision = (_find_kdp_topic_duplicate(_book_product(brief), topic_history,
-                                               angle=angle) if angle else None)
+                                               angle=angle,
+                                               title=_marker(brief, "TITLE"))
+                     if angle else None)
         if not collision:
             break
         _publishing_event(
@@ -4354,7 +4397,8 @@ def _run_hermes(job: dict[str, Any]) -> dict[str, Any]:
     # model to follow. Stop here before BIBLOS spends a slot on a known topic;
     # the same check runs again in _hermes_commission to close the race where
     # another title is completed while this audit is in flight.
-    duplicate = _find_kdp_topic_duplicate(_book_product(brief), topic_history, angle=angle)
+    duplicate = _find_kdp_topic_duplicate(_book_product(brief), topic_history, angle=angle,
+                                          title=_marker(brief, "TITLE"))
     if duplicate:
         stages.clear_stage("hermes")
         # The brief went into the vault a few hundred lines above, before this
