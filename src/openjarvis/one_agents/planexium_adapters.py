@@ -16,7 +16,7 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-ENVATO_RECEIPT_REVISION = "v8"
+ENVATO_RECEIPT_REVISION = "v9"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -551,6 +551,21 @@ def concrete_stock_brief(request):
         # both independently visible facts so an office laptop alone cannot
         # pass, while an engineer inspecting a digital rendering can.
         request.update(query="digital rendering computer", subject="rendering")
+    elif subject == "deployment" and "solar panel" in query:
+        # "Deployment" alone is dominated by software/continuous-deployment
+        # results.  The commissioned visual is a physical solar panel visibly
+        # unfolding on a spacecraft, so bind the catalogue search to that
+        # object instead of the ambiguous action noun.
+        request.update(query="spacecraft solar panel unfolding animation",
+                       subject="solar panel")
+    elif subject == "spacecraft" and "mechanical structure" in query:
+        # "Mechanical structure" is an editorial idea rather than a catalogue
+        # object.  Envato's broad spacecraft search can drift into unrelated
+        # business-technology globes, while free-stock catalogues rarely tag
+        # the abstract phrase at all.  Ask for the independently visible
+        # spacecraft exterior and keep spacecraft as the required subject.
+        request.update(query="spacecraft exterior engineering animation",
+                       subject="spacecraft")
     if "astronaut" in request["query"].casefold():
         request["blocked_keywords"] += ["costume", "comedy", "humor", "urban", "city", "sneakers"]
     return request
