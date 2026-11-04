@@ -175,9 +175,14 @@ def enforce_prompt(text: str) -> str:
         visual = visual.replace("international tournament", "fictional football match")
         visual = visual.replace("pale-blue-and-white", "neutral")
         visual = visual.replace("Argentina", "fictional team")
+        if re.match(r"P02:", visual, flags=re.I):
+            visual = (
+                "P02: Wide establishing view of a fictional football stadium with symmetrical pitch geometry, "
+                "realistic floodlights, distant spectators and one small generic player near the centre circle; "
+                "the player's face is too distant to identify. Slow descending crane composition."
+            )
         return (
-            "Create one 16:9 cinematic CGI illustration. Use the attached original CGI character sheet "
-            "as the design reference for continuity. Scene: " + visual + " "
+            "Create one 16:9 cinematic CGI illustration. Scene: " + visual + " "
             "Use neutral unbranded sportswear, realistic lighting, physically correct football anatomy and "
             "natural hands and feet. No logos, flags, readable text or watermarks. Output only the image."
         )
