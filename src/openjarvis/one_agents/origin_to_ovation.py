@@ -294,7 +294,12 @@ def image_batch_provider(path, shots):
     }
     write(batch_plan, {"calls": [{
         "kind": "scene", "filename": Path(shot["image"]).name,
-        "prompt": enforce_prompt(recovery_prompts.get(shot["shot_id"], shot["prompt"])), "stall_timeout_ms": 240000,
+        # Recovery prompts are already deliberately subject-free.  Passing
+        # them through enforce_prompt appended identity/face requirements that
+        # contradicted equipment-only and anonymous fallback scenes and caused
+        # fresh provider refusals.
+        "prompt": (recovery_prompts[shot["shot_id"]] if shot["shot_id"] in recovery_prompts
+                   else enforce_prompt(shot["prompt"])), "stall_timeout_ms": 240000,
         "max_attempts": 3,
     } for shot in missing]})
     provider = LaoDraft(LaoOrchestratorTool(), config.get("lao_folder_id"),
