@@ -157,6 +157,7 @@ def enforce_prompt(text: str) -> str:
     }
     for old, new in substitutions.items():
         safe = safe.replace(old, new)
+    safe = re.sub(r"\bMessi[- ]?inspired\b", "fictional", safe, flags=re.I)
     # Provider refusals can still be triggered by a cluster of biographical,
     # tournament, age and national-kit cues even after the subject name is
     # removed.  Scenes are illustrations, while the sourced narration carries
