@@ -467,7 +467,13 @@ def run_stage(job, *, enqueue):
                     for shot in plan if Path(shot["image"]).is_file()}})
             # Generator validates the paid chapter receipts and skips valid audio.
             phase("narration")
+            if sum(len(str(shot.get("narration") or "").split()) for shot in plan) > 1650:
+                from openjarvis.one_agents.chandan_preproduction import tighten_narration
+                tighten_narration(path)
+                plan = read(master_dir / "shot-plan.json")
             subprocess.run([sys.executable, str(master_dir / "generate_narration.py")], check=True)
+            from openjarvis.one_agents.chandan_narration_alignment import ensure_alignments
+            ensure_alignments(master_dir)
             from openjarvis.one_agents.chandan_render import render
             phase("rendering the master")
             rendered = render(master_dir)
