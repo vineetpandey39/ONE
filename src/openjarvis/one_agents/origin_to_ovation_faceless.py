@@ -171,9 +171,13 @@ def enforce_prompt(text: str) -> str:
         visual = visual.replace(production_prefix, "", 1).strip()
         visual = re.sub(r"\b(?:Lionel\s+)?Messi(?:[- ]?inspired)?\b", "fictional football character", visual,
                         flags=re.I)
+        visual = re.sub(r"\beditorial likeness\b", "fictional character", visual, flags=re.I)
         visual = re.sub(r"\bAge[- ]?\d+\b", "adult", visual, flags=re.I)
         visual = visual.replace("international tournament", "fictional football match")
         visual = visual.replace("pale-blue-and-white", "neutral")
+        visual = visual.replace("pale-blue and white", "neutral")
+        visual = visual.replace("Barcelona-colour", "neutral")
+        visual = visual.replace("dark-red-and-blue", "neutral")
         visual = visual.replace("Argentina", "fictional team")
         if re.match(r"P02:", visual, flags=re.I):
             visual = (
