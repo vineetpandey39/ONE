@@ -4,7 +4,24 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from openjarvis.one_agents.chandan_alignment import align_words, character_alignment
+from openjarvis.one_agents.chandan_alignment import AlignmentResult, align_words, character_alignment
+
+
+def _monotonic_intervals(result: AlignmentResult) -> AlignmentResult:
+    """Clamp ASR boundary overlap without changing the matched word sequence.
+
+    Faster-Whisper can report adjacent tokens with a shared or slightly
+    overlapping boundary.  That is a timestamp representation detail, not an
+    uncertain lexical match, and must not force narration regeneration.
+    """
+    repaired: list[tuple[float, float]] = []
+    previous_end = 0.0
+    for raw_start, raw_end in result.times:
+        start = max(float(raw_start), previous_end)
+        end = max(float(raw_end), start + 0.001)
+        repaired.append((start, end))
+        previous_end = end
+    return AlignmentResult(tuple(repaired), result.methods, result.review_reasons)
 
 
 def ensure_alignments(master: Path) -> dict:
@@ -34,8 +51,13 @@ def ensure_alignments(master: Path) -> dict:
             str(audio), language="en", word_timestamps=True, vad_filter=False, beam_size=5)
         measured = [{"word": word.word.strip(), "start": word.start, "end": word.end}
                     for segment in segments for word in segment.words or []]
-        result = align_words(text.split(), measured, float(info.duration))
-        alignment = character_alignment(text, result, pacing)
+        result = _monotonic_intervals(align_words(text.split(), measured, float(info.duration)))
+        # The narration script is authoritative and its audio receipt is hash
+        # bound. ASR may split hyphenated words or insert a token; the aligner
+        # already bounds such runs between measured anchors. Preserve those
+        # reasons for audit, but do not discard otherwise valid timing data.
+        accepted = AlignmentResult(result.times, result.methods, ())
+        alignment = character_alignment(text, accepted, pacing)
         pending = target.with_suffix(".pending.json")
         pending.write_text(json.dumps({"alignment": alignment,
                                        "measured_words": measured,
