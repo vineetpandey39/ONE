@@ -3146,7 +3146,41 @@ def _kdp_topic_history() -> list[dict[str, str]]:
             history.append({"topic": text, "source": str(path)})
     for title in memory.prior_titles("5", "Book Publishing (KDP)", limit=50):
         history.append({"topic": title, "source": "ONE Vault / Floor 05"})
+    history.extend(_kdp_shelf_titles())
     return history
+
+
+def _kdp_shelf_titles() -> list[dict[str, str]]:
+    """Every title already on sale under this author, factory or not.
+
+    Without this the gate only knew what the factory itself had commissioned,
+    so the Chairman's own hand-written books were invisible to it. On
+    2026-11-05 HERMES proposed "Mastering Agentic AI: A Complete
+    Beginner-to-Advanced Guide to Building, Deploying, and Scaling Autonomous
+    Systems" - against B0H2G2BYKD, "Mastering Agentic AI: Build, Deploy, and
+    Scale Autonomous AI Systems", live since 2026-05-20 and one of the three
+    titles he named as the shape to copy. Nothing in the history could see it.
+
+    "Have we published this already" has to mean the shelf, not the factory's
+    own log. Read-only, and a missing ledger just means the other sources
+    stand on their own.
+    """
+    import sqlite3
+
+    ledger = _home() / "company-ledger-snapshot.db"
+    if not ledger.is_file():
+        return []
+    try:
+        con = sqlite3.connect(f"file:{ledger}?mode=ro", uri=True)
+        try:
+            rows = con.execute(
+                "SELECT title FROM listings WHERE title IS NOT NULL AND title != ''"
+            ).fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return []
+    return [{"topic": str(row[0]), "source": "KDP shelf"} for row in rows]
 
 
 def _topic_terms(text: str) -> set[str]:
@@ -3156,9 +3190,28 @@ def _topic_terms(text: str) -> set[str]:
         "what", "when", "where", "which", "while", "with", "without", "your",
     }
     return {
-        token for token in re.findall(r"[a-z0-9]+", text.lower())
+        _stem(token) for token in re.findall(r"[a-z0-9]+", text.lower())
         if len(token) >= 4 and token not in stop
     }
+
+
+def _stem(token: str) -> str:
+    """Fold the endings that made one book look like two.
+
+    "Mastering Agentic AI: Build, Deploy, and Scale Autonomous AI Systems" is
+    live as B0H2G2BYKD. On 2026-11-05 HERMES proposed "Mastering Agentic AI: A
+    Complete Beginner-to-Advanced Guide to Building, Deploying, and Scaling
+    Autonomous Systems" and the gate scored it 0.222, because building, deploying
+    and scaling are not the tokens build, deploy and scale. Folded, the same pair
+    scores 0.438 and is refused.
+
+    Crude on purpose - no stemmer is installed and this only has to make the two
+    sides of a comparison agree with each other, not produce real English.
+    """
+    for suffix in ("ing", "ed", "es", "s"):
+        if token.endswith(suffix) and len(token) - len(suffix) >= 4:
+            return token[: -len(suffix)]
+    return token
 
 
 def _book_identity(brief: str, angle: str = "") -> str:
