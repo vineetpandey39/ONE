@@ -6572,6 +6572,22 @@ def _ares_report_linkedin(job: dict[str, Any], payload: dict[str, Any], li: Any)
             "output": str(output_path), "vault_note": remembered.get("path")}
 
 
+def _travel_handoff_key(payload: dict[str, Any], stage: str) -> str:
+    """Bind Sonia travel handoffs to the concrete rendered master.
+
+    The LAO checkpoint is intentionally stable across a saved-stage rerender.
+    A checkpoint-only key therefore aliases a withdrawn/older upload whenever
+    YATRA produces a corrected master.  Propagating the master digest keeps
+    retries of the same bytes idempotent while allowing a genuinely new cut to
+    traverse HELIOS, LYRA and ECHO exactly once.
+    """
+    key = f"travel:{payload.get('lao_job')}:{stage}"
+    master_sha256 = str(payload.get("master_sha256") or "").strip().lower()
+    if master_sha256:
+        key += f":{master_sha256[:16]}"
+    return key
+
+
 def _run_lyra(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 12 YouTube packaging specialist.
 
@@ -6632,7 +6648,7 @@ def _run_lyra(job: dict[str, Any]) -> dict[str, Any]:
                         "seo": package, "published": False,
                         "output": package["path"]}),
             mode="report", tier="fast",
-            dedupe_key=f"travel:{payload.get('lao_job')}:seo-report",
+            dedupe_key=_travel_handoff_key(payload, "seo-report"),
         )
         return {"agent": "LYRA", "stage": "seo", "seo": package,
                 "published": False,
@@ -7169,7 +7185,7 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
             "shopping": shopping_report,
             "monetization_scorecard": str(monetization_scorecard),
             "storage_cleanup": storage, "published": False, "output": str(package)}), mode="report", tier="fast",
-            dedupe_key=f"travel:{payload.get('lao_job')}:distribution-report")
+            dedupe_key=_travel_handoff_key(payload, "distribution-report"))
         return {"agent": "ECHO", **result, "delivery_verification": gate["delivery_verification"],
                 "thumbnail_refresh": thumbnail_refresh,
                 "shopping": shopping_report,
@@ -8369,7 +8385,7 @@ def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any], *,
                          worker="lyra")
         follow = enqueue_job("lyra", json.dumps({**payload, "stage": "seo"}),
                              mode="execute", tier="fast",
-                             dedupe_key=f"travel:{payload.get('lao_job')}:seo")
+                             dedupe_key=_travel_handoff_key(payload, "seo"))
         stages.set_stage(head_id, stages.AWAITING_WORKER,
                          "Waiting for LYRA SEO and private-upload package", worker="lyra")
         return {"agent": head_name, "mode": "handoff", "brand": brand["slug"],
@@ -8386,7 +8402,7 @@ def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any], *,
                          "Taking LYRA package to ECHO for subtitles, languages and comment", worker="echo")
         follow = enqueue_job("echo", json.dumps({**payload, "package": package}),
                              mode="execute", tier="fast",
-                             dedupe_key=f"travel:{payload.get('lao_job')}:distribution")
+                             dedupe_key=_travel_handoff_key(payload, "distribution"))
         stages.set_stage(head_id, stages.AWAITING_WORKER,
                          "Waiting for ECHO to complete the private YouTube draft", worker="echo")
         return {"agent": head_name, "mode": "handoff", "brand": brand["slug"],
@@ -11527,6 +11543,10 @@ def _run_yatra_render(job: dict[str, Any]) -> dict[str, Any]:
             # Preserve the primary renderer error when the fallback also fails.
             detail = f"{earlier.get('engine')} failed first:\n{str(earlier.get('detail') or '')[-1500:]}\n--- then:\n{detail}"
         raise RuntimeError(f"YATRA cut failed at {step}; nothing was handed to HELIOS/LYRA.\n{detail}")
+    master = Path(str(cut.get("master") or ""))
+    if not master.is_file():
+        raise RuntimeError("YATRA QC passed without a concrete master file")
+    master_sha256 = yatra_obs.sha256_file(master)
     stages.set_stage("yatra", stages.CARRYING_TO_HEAD,
                      "Taking the verified master and production receipt back to HELIOS")
     _require_active_job(job, "deliver the verified master to HELIOS")
@@ -11540,8 +11560,11 @@ def _run_yatra_render(job: dict[str, Any]) -> dict[str, Any]:
         "footage": context.get("footage"), "captures": capture,
         "obs_plan": context.get("obs_plan"),
         "narration": context.get("narration"), "music": context.get("music"), "cut": cut,
+        "master_sha256": master_sha256,
         "origin_job": context.get("origin_job"),
-    }), mode="report", tier="fast", dedupe_key=f"travel:{checkpoint}:helios-report")
+    }), mode="report", tier="fast",
+        dedupe_key=_travel_handoff_key({"lao_job": checkpoint, "master_sha256": master_sha256},
+                                       "helios-report"))
     stages.set_stage("yatra", stages.DELIVERING, "Delivered YATRA artifacts to HELIOS")
     time.sleep(1); stages.clear_stage("yatra")
     return {"agent": "YATRA", "stage": "render", "published": False,
@@ -11549,6 +11572,7 @@ def _run_yatra_render(job: dict[str, Any]) -> dict[str, Any]:
             "opening_map": context.get("opening_map"), "footage": context.get("footage"),
             "captures": capture, "narration": context.get("narration"),
             "music": context.get("music"),
+            "master_sha256": master_sha256,
             "cut": cut,
             "handed_to": {"agent": "HELIOS", "job_id": report["id"]}}
 
