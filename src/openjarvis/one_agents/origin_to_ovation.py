@@ -279,9 +279,22 @@ def image_batch_provider(path, shots):
         return {"status": "reused", "count": len(shots)}
     output_root = Path(missing[0]["image"]).parent
     batch_plan = path / "runtime" / "chatgpt-image-batch-plan.json"
+    # A small number of biography shots can be refused repeatedly when a prompt
+    # combines a named public figure, multiple ages, awards, or a close portrait.
+    # Preserve the editorial beat while switching only those failed frames to
+    # neutral evidence-led visual grammar.  Existing images are never touched.
+    recovery_prompts = {
+        "P27": "Create one full-frame 16:9 photoreal cinematic CGI scene of a neutral football equipment timeline: four distinct pairs of period-appropriate boots and four footballs arranged chronologically on a dark studio bench, subtle changes in material and wear, warm-to-cool light progression, no people, faces, names, logos, trophies, text or branding.",
+        "P41": "Create one full-frame 16:9 photoreal cinematic CGI biography scene of an anonymous mature adult footballer in true side profile at a generic evening training ground, plain deep maroon shirt, short dark hair and trimmed beard, medium-wide framing, natural posture, face not identifiable, no club cues, logos, text, awards or match recreation.",
+        "P45": "Create one full-frame 16:9 photoreal cinematic CGI quiet-aftermath scene inside a generic South American stadium tunnel: a plain pale-blue-and-white training shirt folded on a wooden bench beside clean boots and a football, soft daylight from the pitch, no people, faces, names, logos, trophies, flags or readable text.",
+        "P67": "Create one full-frame 16:9 photoreal cinematic CGI football-career timeline using three separate equipment stations for early, middle and mature career eras: period-appropriate boots, footballs and plain folded training shirts, neutral stadium backgrounds, natural chronological lighting progression, no people, portraits, names, logos, trophies, flags or readable text.",
+        "P72": "Create one full-frame 16:9 photoreal cinematic CGI triptych suggesting three international-football eras through stadium architecture, match balls and plain pale-blue-and-white folded shirts, each panel visually distinct and chronological, no people, portraits, medals, trophies, names, logos, flags, ceremonies or readable text.",
+        "P73": "Create one full-frame 16:9 photoreal cinematic CGI scene of an anonymous mature adult footballer in true side profile at a generic modern stadium, plain pale-blue training shirt, medium-wide framing, short dark hair and trimmed beard, natural athletic posture, face not identifiable, no awards, trophies, names, logos, flags, text or match recreation.",
+        "P74": "Create one full-frame 16:9 photoreal cinematic CGI low-angle wide stadium portrait with one small anonymous adult footballer near the centre circle, plain pale-blue-and-white kit, face indistinct due to distance, realistic floodlights and restrained atmosphere, no celebration, trophies, names, logos, flags, scoreboards or readable text.",
+    }
     write(batch_plan, {"calls": [{
         "kind": "scene", "filename": Path(shot["image"]).name,
-        "prompt": enforce_prompt(shot["prompt"]), "stall_timeout_ms": 240000,
+        "prompt": enforce_prompt(recovery_prompts.get(shot["shot_id"], shot["prompt"])), "stall_timeout_ms": 240000,
         "max_attempts": 3,
     } for shot in missing]})
     provider = LaoDraft(LaoOrchestratorTool(), config.get("lao_folder_id"),
