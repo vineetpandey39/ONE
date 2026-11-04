@@ -140,7 +140,31 @@ def reject_faces(plan: list[dict[str, Any]], rejected_dir: Path) -> list[dict[st
 
 def enforce_prompt(text: str) -> str:
     """Enforce the current channel visual policy at every provider boundary."""
-    return str(text).rstrip() + "\nMANDATORY RECOGNISABLE-HERO RULE (overrides hidden-face instructions above): " + FACELESS_RULES
+    safe = str(text)
+    # Public-figure names and event/kit mimicry can turn an otherwise original
+    # CGI reconstruction into a third-party-similarity request.  The attached,
+    # hash-approved fictional reference carries continuity; narration carries
+    # the factual identity.  Keep image prompts neutral and provider-safe.
+    substitutions = {
+        "Subject Lionel Messi": "Subject: the fictional adult football protagonist from the attached reference",
+        "Lionel Messi": "the fictional football protagonist",
+        "Messi-inspired editorial likeness": "fictional editorial character from the attached reference",
+        "Argentina-colour": "plain pale-blue and white training",
+        "Qatar World Cup": "international tournament",
+        "World Cup": "international tournament",
+        "recognisable": "emotionally legible",
+    }
+    for old, new in substitutions.items():
+        safe = safe.replace(old, new)
+    rules = (
+        "Use the attached fictional CGI character as the only continuity reference. "
+        "Keep age, hair and wardrobe progression internally consistent without depicting or naming any real person. "
+        "Use varied front, three-quarter, true side-profile, close-up, medium and wide coverage; rear views are rare "
+        "transitions only. Keep framing dignified. No logos, crests, sponsors, signatures, watermarks, flags, event "
+        "branding, scoreboards, venue lettering or readable text. Hands, feet, joints, ball contact and football "
+        "mechanics must be physically correct. Render original cinematic CGI, not a photograph or archival frame."
+    )
+    return safe.rstrip() + "\nMANDATORY ORIGINAL-CGI RULE: " + rules
 
 
 def scene_qa(image: Path, *, age, era, reviewer=None) -> dict:
