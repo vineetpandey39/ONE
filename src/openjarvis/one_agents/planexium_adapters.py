@@ -16,7 +16,7 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-ENVATO_RECEIPT_REVISION = "v10"
+ENVATO_RECEIPT_REVISION = "v11"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -566,6 +566,16 @@ def concrete_stock_brief(request):
         # spacecraft exterior and keep spacecraft as the required subject.
         request.update(query="spacecraft exterior engineering animation",
                        subject="spacecraft")
+    elif subject == "hardware" and "space station" in query:
+        # "Hardware" drifts into people writing the computing term.  The
+        # commissioned shot is the visible station exterior, so require the
+        # station and use module/exterior terms for catalogue retrieval.
+        request.update(query="space station exterior modules orbit",
+                       subject="station")
+    elif subject == "power" and "spacecraft" in query:
+        # Bind the abstract system label to its visible solar-power hardware.
+        request.update(query="spacecraft solar power system animation",
+                       subject="solar")
     if "astronaut" in request["query"].casefold():
         request["blocked_keywords"] += ["costume", "comedy", "humor", "urban", "city", "sneakers"]
     return request
