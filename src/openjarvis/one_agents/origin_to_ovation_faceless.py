@@ -188,6 +188,8 @@ def enforce_prompt(text: str) -> str:
         visual = re.sub(r"\bthree-quarter facial (?:view|angle|geometry)\b",
                         "true side-profile facial view", visual, flags=re.I)
         visual = re.sub(r"\bfacial close-up\b", "medium true side-profile shot", visual, flags=re.I)
+        visual = re.sub(r"\bthree-quarter\b", "true side-profile", visual, flags=re.I)
+        visual = re.sub(r"\bclose-up\b", "medium shot", visual, flags=re.I)
         visual = re.sub(r"\brecognisable\b|\brecognizable\b", "emotionally legible", visual, flags=re.I)
         if re.match(r"P02:", visual, flags=re.I):
             visual = (
