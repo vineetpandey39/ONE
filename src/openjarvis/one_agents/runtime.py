@@ -10586,7 +10586,13 @@ def _yatra_cut_video(plan_file: Path, asset_folder: str, run=None) -> dict[str, 
             outcome = runner(script, args, minutes=minutes)
         result[name] = outcome
         if name == "routes" and outcome.get("ok"):
-            integrity = _yatra_validate_capture_integrity(asset_root)
+            # OCULUS owns the sealed semantic-QC receipt.  Re-check the raw
+            # capture pixels before rendering, but do not rewrite that receipt:
+            # a fresh checked_at timestamp would invalidate the hash already
+            # bound into oculus-receipt.json and make every later saved-stage
+            # render fail before it starts.
+            integrity = _yatra_validate_capture_integrity(
+                asset_root, persist_receipt=False)
             result["capture_integrity"] = integrity
             if not integrity.get("ok"):
                 result.update({"ok": False, "failed_at": "capture_integrity"})
@@ -10606,7 +10612,8 @@ def _yatra_cut_video(plan_file: Path, asset_folder: str, run=None) -> dict[str, 
     return result
 
 
-def _yatra_validate_capture_integrity(asset_root: Path) -> dict[str, Any]:
+def _yatra_validate_capture_integrity(
+        asset_root: Path, *, persist_receipt: bool = True) -> dict[str, Any]:
     """Fail a cut if any routed OBS source is missing, non-HD, or mostly black.
 
     Checking only the final composite misses a broken source range when motion
@@ -10710,13 +10717,18 @@ def _yatra_validate_capture_integrity(asset_root: Path) -> dict[str, Any]:
               "detail": (f"all {len(capture_ids)} active OBS capture(s) passed integrity and semantic checks"
                          if not issues else "; ".join(issues))}
     receipt = capture_dir / "capture-semantic-qc.json"
-    receipt.parent.mkdir(parents=True, exist_ok=True)
-    receipt.write_text(json.dumps({
-        "schema": "yatra-capture-semantic-qc/1",
-        "checked_at": datetime.now(timezone.utc).isoformat(),
-        **result,
-    }, indent=2, ensure_ascii=False), encoding="utf-8")
-    result["receipt"] = str(receipt)
+    if persist_receipt:
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text(json.dumps({
+            "schema": "yatra-capture-semantic-qc/1",
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            **result,
+        }, indent=2, ensure_ascii=False), encoding="utf-8")
+        result["receipt"] = str(receipt)
+    elif receipt.is_file():
+        # Keep the path visible to diagnostics without mutating OCULUS's
+        # hash-bound evidence artifact.
+        result["receipt"] = str(receipt)
     return result
 
 
