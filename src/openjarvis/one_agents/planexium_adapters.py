@@ -16,7 +16,7 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-ENVATO_RECEIPT_REVISION = "v12"
+ENVATO_RECEIPT_REVISION = "v13"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -612,6 +612,13 @@ def concrete_stock_brief(request):
         # Bind the abstract system label to its visible solar-power hardware.
         request.update(query="spacecraft solar power system animation",
                        subject="solar")
+    elif subject == "spectrum" and "stellar" in query:
+        # Bare "spectrum" is dominated by music visualizers.  The authored
+        # science shot is starlight separated for spectroscopy, so require the
+        # visible star and explicitly exclude audio-spectrum catalogue drift.
+        request.update(query="star light spectroscopy rainbow animation",
+                       subject="star")
+        request["blocked_keywords"] += ["audio", "music", "visualizer", "waterfall"]
     if "astronaut" in request["query"].casefold():
         request["blocked_keywords"] += ["costume", "comedy", "humor", "urban", "city", "sneakers"]
     return request
