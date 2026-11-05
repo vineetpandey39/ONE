@@ -325,7 +325,8 @@ def _run_job(job):
 
 def title_matches_thumbnail_promise(title: str, hook: str) -> bool:
     """Require the selected title to state the winning thumbnail's concrete promise."""
-    aliases = {"mins": "minute", "min": "minute", "minutes": "minute"}
+    aliases = {"mins": "minute", "min": "minute", "minutes": "minute",
+               "captured": "capture", "captures": "capture", "capturing": "capture"}
     generic = {"the", "a", "an", "why", "how", "where", "what", "does", "do", "is"}
 
     def tokens(value: str) -> set[str]:
