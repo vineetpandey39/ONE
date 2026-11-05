@@ -88,6 +88,14 @@ def require_seo(package):
     return audit
 
 
+def normalize_comment(value):
+    """Keep the model's first complete viewer question, dropping CTA spillover."""
+    comment = " ".join(str(value or "").split())
+    if "?" in comment:
+        comment = comment.split("?", 1)[0].strip() + "?"
+    return comment
+
+
 def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=None):
     prompt = (
         "You are ARES, the SEO agent for The Planexium science YouTube channel. "
@@ -144,7 +152,7 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
             title = str(out["title"]).strip()
             # The hourly sweep posts this once the video is public; until 2026-10-22 every Planexium package carried
             # the same "Which part would you like us to explain next?".
-            comment = " ".join(str(out.get("comment") or "").split())
+            comment = normalize_comment(out.get("comment"))
             if not 30 <= len(comment) <= 220 or not comment.endswith("?") or re.search(r"https?://|#\w", comment):
                 raise ValueError("comment must be one 30-220 character question about this video, no links or hashtags")
             result["pinned_comment_draft"] = comment

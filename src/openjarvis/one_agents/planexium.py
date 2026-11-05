@@ -252,23 +252,27 @@ class Pipeline:
             if self.config.get("ares_seo") and result.get("output"):
                 from openjarvis.one_agents.planexium_seo import require_seo
                 package = json.loads(Path(result["output"]).read_text(encoding="utf-8"))
+                # Local validation is only a preflight. Even an already-valid
+                # package still needs ARES to seal the independent SEO audit;
+                # otherwise the private-upload gate can never open.
                 try:
                     require_seo(package)
                 except ValueError:
-                    from openjarvis.one_agents.runtime import enqueue_job
-                    self.health("awaiting_seo", stage="seo")
-                    ledger[self.context.mission_id]["status"] = "awaiting_seo"
+                    pass
+                from openjarvis.one_agents.runtime import enqueue_job
+                self.health("awaiting_seo", stage="seo")
+                ledger[self.context.mission_id]["status"] = "awaiting_seo"
+                _write(ledger_path, ledger)
+                try:
+                    seo = enqueue_job("ares", json.dumps({"brand": "planexium", "stage": "seo",
+                        "mission_id": self.context.mission_id}), mode="execute", tier="fast",
+                        dedupe_key=f"planexium:{self.context.mission_id}:ares-seo-v1")
+                except Exception as exc:
+                    ledger[self.context.mission_id]["status"] = "seo_failed"
                     _write(ledger_path, ledger)
-                    try:
-                        seo = enqueue_job("ares", json.dumps({"brand": "planexium", "stage": "seo",
-                            "mission_id": self.context.mission_id}), mode="execute", tier="fast",
-                            dedupe_key=f"planexium:{self.context.mission_id}:ares-seo-v1")
-                    except Exception as exc:
-                        ledger[self.context.mission_id]["status"] = "seo_failed"
-                        _write(ledger_path, ledger)
-                        self.health("seo_failed", stage="seo", error_class=type(exc).__name__)
-                        raise
-                    result.update(status="awaiting_seo", handed_to={"agent": "ARES", "job_id": seo["id"]})
+                    self.health("seo_failed", stage="seo", error_class=type(exc).__name__)
+                    raise
+                result.update(status="awaiting_seo", handed_to={"agent": "ARES", "job_id": seo["id"]})
             return result
 
     def _produce(self, commission, *, plan, pilot):
