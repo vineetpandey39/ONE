@@ -16,7 +16,7 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-ENVATO_RECEIPT_REVISION = "v13"
+ENVATO_RECEIPT_REVISION = "v14"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -619,6 +619,13 @@ def concrete_stock_brief(request):
         request.update(query="star light spectroscopy rainbow animation",
                        subject="star")
         request["blocked_keywords"] += ["audio", "music", "visualizer", "waterfall"]
+    elif subject == "cluster" and "orbit" in query:
+        # Catalogue search treats bare "cluster" as a loose keyword and can
+        # drift into cluster-bomb title templates.  The commissioned shot is
+        # specifically a globular group of stars moving around a galaxy.
+        request.update(query="globular star group orbiting galaxy animation",
+                       subject="star")
+        request["blocked_keywords"] += ["bomb", "weapon", "title", "typography"]
     if "astronaut" in request["query"].casefold():
         request["blocked_keywords"] += ["costume", "comedy", "humor", "urban", "city", "sneakers"]
     return request
