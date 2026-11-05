@@ -16,7 +16,7 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-ENVATO_RECEIPT_REVISION = "v14"
+ENVATO_RECEIPT_REVISION = "v15"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -624,6 +624,13 @@ def concrete_stock_brief(request):
         # drift into cluster-bomb title templates.  The commissioned shot is
         # specifically a globular group of stars moving around a galaxy.
         request.update(query="globular star group orbiting galaxy animation",
+                       subject="star")
+        request["blocked_keywords"] += ["bomb", "weapon", "title", "typography"]
+    elif subject == "cluster" and "star" in query:
+        # The same ambiguous catalogue noun affects non-orbit cluster shots:
+        # require visible stars and avoid templates or weapons that merely use
+        # "cluster" in their title/tags. Editorial motion supplies trajectory.
+        request.update(query="dense globular stars deep space animation",
                        subject="star")
         request["blocked_keywords"] += ["bomb", "weapon", "title", "typography"]
     if "astronaut" in request["query"].casefold():
