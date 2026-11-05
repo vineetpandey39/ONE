@@ -42,7 +42,7 @@
     "timeout": 14400,
     "minimum_free_bytes": 57982058496,
     "start_headroom_bytes": 34359738368,
-    "segmented_start_headroom_bytes": 8589934592,
+    "segmented_start_headroom_bytes": 2147483648,
     "minimum_commit_headroom_bytes": 8589934592,
     "segmented_output_reserve_bytes": 6442450944,
     "final_copy_reserve_bytes": 3221225472,
