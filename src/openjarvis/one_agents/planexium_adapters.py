@@ -16,7 +16,7 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-ENVATO_RECEIPT_REVISION = "v11"
+ENVATO_RECEIPT_REVISION = "v12"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -462,6 +462,42 @@ def probe_stock(path: Path) -> dict:
     return {"seconds": seconds, "width": 1920, "height": 1080}
 
 
+def normalize_free_stock_1080p(path: Path) -> tuple[Path, dict]:
+    """Materialize a deterministic 1080p editorial copy of valid fallback video."""
+    import subprocess
+
+    path = Path(path)
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=width,height", "-of", "json", str(path)],
+        capture_output=True, text=True, check=True, timeout=60,
+    )
+    stream = (json.loads(result.stdout).get("streams") or [{}])[0]
+    width, height = int(stream.get("width") or 0), int(stream.get("height") or 0)
+    if width <= 0 or height <= 0:
+        raise ValueError("Free-stock fallback has no measurable video stream")
+    if (width, height) == (1920, 1080):
+        return path, {"normalized_1080p": False, "source_width": width, "source_height": height}
+    if width < height:
+        raise ValueError("Free-stock fallback must be horizontal video")
+    source = path.with_name(f"{path.stem}.source{path.suffix}")
+    if not source.exists():
+        path.replace(source)
+    temporary = path.with_name(f".{path.stem}.normalizing{path.suffix}")
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-i", str(source),
+         "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease:flags=lanczos,"
+                "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
+         "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+         "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(temporary)],
+        check=True, timeout=1800,
+    )
+    temporary.replace(path)
+    probe_stock(path)
+    return path, {"normalized_1080p": True, "source_width": width, "source_height": height,
+                  "source_path": str(source)}
+
+
 def materialize_stock_download(path: Path) -> Path:
     """Extract Envato's single-video ZIP while preserving the source archive."""
     path = Path(path)
@@ -689,12 +725,13 @@ class EnvatoAdapter:
                 if not subject_named:
                     continue
                 path = download(hit, folder, output_root, query, subject_named)
+                path, normalization = normalize_free_stock_1080p(path)
                 measured = probe_stock(path)
                 return {"provider": name, "path": str(path), "job_id": None, "query": request["query"],
                     "title": str(hit.get("tags") or request["subject"]), "catalog_query": query,
                     "illustrative": True, "rights_review_required": True, "subject_evidence": subject_named,
                     "source_url": str(hit.get("pageURL") or ""), "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                    **measured}
+                    **normalization, **measured}
         raise RuntimeError(f"Envato failed {self.failure_limit} quality-reviewed candidates and no usable Pexels/Pixabay fallback was available")
 
     def accepted(self, index, request):
