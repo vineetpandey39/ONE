@@ -175,7 +175,7 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
     if str(state).startswith("failed"):
         raise RuntimeError(f"Sonia persistent Chrome is unavailable: {state}")
 
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
     studio_url = f"https://studio.youtube.com/video/{video_id}/edit"
     with sync_playwright() as playwright:
         browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{launcher.PORT}", timeout=20_000)
@@ -190,24 +190,6 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
             # expose exact channel navigation links, which are a stronger
             # identity check than a translated/hidden display label.
             _wait_for_sonia_channel(page)
-            # A prior ECHO attempt can finish Studio's upload but die before
-            # its receipt is written.  In that state Studio hides the upload
-            # tile and exposes the exact video's persisted custom image.  Treat
-            # that as the durable resume point instead of waiting forever on a
-            # hidden template or uploading the same thumbnail again.
-            if page.locator(UPLOADED_THUMBNAIL_SELECTOR).count():
-                existing = _selected_uploaded_thumbnail(page)
-                if _persisted_image(existing.get("image_src"), video_id):
-                    proof = receipt_path.with_suffix(".png")
-                    editor = page.locator(THUMBNAIL_EDITOR_SELECTOR).first
-                    editor.wait_for(state="visible", timeout=30_000)
-                    editor.scroll_into_view_if_needed(timeout=30_000)
-                    editor.screenshot(path=str(proof))
-                    return _write_thumbnail_receipt(
-                        receipt_path, video_id=video_id, thumbnail=thumbnail,
-                        digest=digest, studio_url=studio_url,
-                        evidence=existing, proof=proof, resumed_existing=True,
-                    )
             loader = page.locator(THUMBNAIL_LOADER_SELECTOR).first
             loader.wait_for(state="attached", timeout=45_000)
             # Studio renders the thumbnail editor well below the initial fold.
@@ -217,6 +199,27 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
             section = page.get_by_text(THUMBNAIL_SECTION_TEXT, exact=True).first
             section.wait_for(state="visible", timeout=45_000)
             section.scroll_into_view_if_needed(timeout=30_000)
+            # A prior ECHO attempt can finish Studio's upload but die before
+            # its receipt is written. Studio lazy-loads this editor only after
+            # the section reaches the viewport, so inspect the persisted tile
+            # here, not at the top of the video-details page.
+            persisted = page.locator(UPLOADED_THUMBNAIL_SELECTOR).first
+            try:
+                persisted.wait_for(state="attached", timeout=5_000)
+                existing = _selected_uploaded_thumbnail(page)
+            except PlaywrightTimeoutError:
+                existing = {}
+            if _persisted_image(existing.get("image_src"), video_id):
+                proof = receipt_path.with_suffix(".png")
+                editor = page.locator(THUMBNAIL_EDITOR_SELECTOR).first
+                editor.wait_for(state="visible", timeout=30_000)
+                editor.scroll_into_view_if_needed(timeout=30_000)
+                editor.screenshot(path=str(proof))
+                return _write_thumbnail_receipt(
+                    receipt_path, video_id=video_id, thumbnail=thumbnail,
+                    digest=digest, studio_url=studio_url,
+                    evidence=existing, proof=proof, resumed_existing=True,
+                )
             upload_tile = page.get_by_role("button", name=UPLOAD_FILE_TEXT, exact=True).first
             upload_tile.wait_for(state="visible", timeout=30_000)
             upload_tile.scroll_into_view_if_needed(timeout=30_000)
