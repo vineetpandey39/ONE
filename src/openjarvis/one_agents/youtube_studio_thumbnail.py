@@ -67,6 +67,35 @@ def _persisted_image(src: Any, video_id: str) -> bool:
     return bool(re.match(r"^https://i\d*\.ytimg\.com/vi/" + re.escape(video_id) + r"/", str(src or "")))
 
 
+def _wait_for_sonia_channel(page, *, timeout: int = 45_000, attempts: int = 2) -> None:
+    """Require Sonia's exact channel link, with one bounded Studio reload.
+
+    Studio occasionally returns the video-details shell before its navigation
+    links are attached.  The upload has already happened at this point, so a
+    one-shot wait turned a healthy private delivery into a failed ECHO job.
+    Keep the channel-id proof, but reload once before declaring the persistent
+    Sonia session invalid.
+    """
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            page.locator(CHANNEL_LINK_SELECTOR).first.wait_for(
+                state="attached", timeout=timeout
+            )
+            return
+        except PlaywrightTimeoutError as exc:
+            last_error = exc
+            if attempt + 1 >= attempts:
+                break
+            page.reload(wait_until="domcontentloaded", timeout=90_000)
+    raise RuntimeError(
+        f"Sonia Studio session did not expose channel {CHANNEL_ID} after "
+        f"{attempts} attempts"
+    ) from last_error
+
+
 def _wait_for_uploaded_thumbnail_evidence(
     page, video_id: str, *, timeout: int = 45_000
 ) -> dict[str, Any]:
@@ -132,7 +161,7 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
             # channel name as visible text.  The persistent Sonia session does
             # expose exact channel navigation links, which are a stronger
             # identity check than a translated/hidden display label.
-            page.locator(CHANNEL_LINK_SELECTOR).first.wait_for(state="attached", timeout=45_000)
+            _wait_for_sonia_channel(page)
             loader = page.locator(THUMBNAIL_LOADER_SELECTOR).first
             loader.wait_for(state="attached", timeout=45_000)
             # Studio renders the thumbnail editor well below the initial fold.
@@ -176,7 +205,7 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
             except Exception:
                 pass
             page.reload(wait_until="domcontentloaded", timeout=90_000)
-            page.locator(CHANNEL_LINK_SELECTOR).first.wait_for(state="attached", timeout=45_000)
+            _wait_for_sonia_channel(page)
             if f"/video/{video_id}/edit" not in page.url:
                 raise RuntimeError("Studio thumbnail verification left the exact video details page")
             # The preview button is a hover overlay and is normally hidden
