@@ -96,6 +96,34 @@ def _wait_for_sonia_channel(page, *, timeout: int = 45_000, attempts: int = 2) -
     ) from last_error
 
 
+def _write_thumbnail_receipt(
+    receipt_path: Path, *, video_id: str, thumbnail: Path, digest: str,
+    studio_url: str, evidence: dict[str, Any], proof: Path,
+    resumed_existing: bool = False,
+) -> dict[str, Any]:
+    result = {
+        "schema": "sonia-studio-short-thumbnail/1",
+        "ok": True,
+        "video_id": video_id,
+        "studio_url": studio_url,
+        "thumbnail": str(thumbnail),
+        "thumbnail_sha256": digest,
+        "persistent_browser_owner": "sonia-youtube",
+        "control": "Uploaded thumbnail",
+        "verified_after_reload": True,
+        "studio_evidence": evidence,
+        "proof": str(proof),
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if resumed_existing:
+        result["resumed_existing"] = True
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = receipt_path.with_suffix(receipt_path.suffix + ".tmp")
+    temporary.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temporary, receipt_path)
+    return {**result, "receipt": str(receipt_path)}
+
+
 def _wait_for_uploaded_thumbnail_evidence(
     page, video_id: str, *, timeout: int = 45_000
 ) -> dict[str, Any]:
@@ -162,6 +190,24 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
             # expose exact channel navigation links, which are a stronger
             # identity check than a translated/hidden display label.
             _wait_for_sonia_channel(page)
+            # A prior ECHO attempt can finish Studio's upload but die before
+            # its receipt is written.  In that state Studio hides the upload
+            # tile and exposes the exact video's persisted custom image.  Treat
+            # that as the durable resume point instead of waiting forever on a
+            # hidden template or uploading the same thumbnail again.
+            if page.locator(UPLOADED_THUMBNAIL_SELECTOR).count():
+                existing = _selected_uploaded_thumbnail(page)
+                if _persisted_image(existing.get("image_src"), video_id):
+                    proof = receipt_path.with_suffix(".png")
+                    editor = page.locator(THUMBNAIL_EDITOR_SELECTOR).first
+                    editor.wait_for(state="visible", timeout=30_000)
+                    editor.scroll_into_view_if_needed(timeout=30_000)
+                    editor.screenshot(path=str(proof))
+                    return _write_thumbnail_receipt(
+                        receipt_path, video_id=video_id, thumbnail=thumbnail,
+                        digest=digest, studio_url=studio_url,
+                        evidence=existing, proof=proof, resumed_existing=True,
+                    )
             loader = page.locator(THUMBNAIL_LOADER_SELECTOR).first
             loader.wait_for(state="attached", timeout=45_000)
             # Studio renders the thumbnail editor well below the initial fold.
@@ -171,7 +217,7 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
             section = page.get_by_text(THUMBNAIL_SECTION_TEXT, exact=True).first
             section.wait_for(state="visible", timeout=45_000)
             section.scroll_into_view_if_needed(timeout=30_000)
-            upload_tile = page.get_by_text(UPLOAD_FILE_TEXT, exact=True).first
+            upload_tile = page.get_by_role("button", name=UPLOAD_FILE_TEXT, exact=True).first
             upload_tile.wait_for(state="visible", timeout=30_000)
             upload_tile.scroll_into_view_if_needed(timeout=30_000)
             # Studio wires upload processing to the visible button's file-
@@ -220,22 +266,7 @@ def set_short_thumbnail(video_id: str, thumbnail: Path, *, receipt_path: Path | 
         finally:
             page.close()
 
-    result = {
-        "schema": "sonia-studio-short-thumbnail/1",
-        "ok": True,
-        "video_id": video_id,
-        "studio_url": studio_url,
-        "thumbnail": str(thumbnail),
-        "thumbnail_sha256": digest,
-        "persistent_browser_owner": "sonia-youtube",
-        "control": "Uploaded thumbnail",
-        "verified_after_reload": True,
-        "studio_evidence": evidence,
-        "proof": str(proof),
-        "saved_at": datetime.now(timezone.utc).isoformat(),
-    }
-    receipt_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = receipt_path.with_suffix(receipt_path.suffix + ".tmp")
-    temporary.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(temporary, receipt_path)
-    return {**result, "receipt": str(receipt_path)}
+    return _write_thumbnail_receipt(
+        receipt_path, video_id=video_id, thumbnail=thumbnail, digest=digest,
+        studio_url=studio_url, evidence=evidence, proof=proof,
+    )
