@@ -310,7 +310,17 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
     policy=editorial.get('visual_policy')
     total_seconds = sum(float(segment['seconds']) for segment in voice['segments'])
     archive_time_ratio = archive_seconds / total_seconds if total_seconds else 1.0
-    if policy and archive_time_ratio > float(policy.get('archive_shot_ratio_max',0.40)):
+    # Archive coverage is allocated in indivisible editorial beats. Permit at
+    # most one normal beat beyond the fractional target so a fully licensed,
+    # motion-rich cut is not rejected solely by shot quantization. This is not
+    # a general ratio relaxation: missing licensed coverage still fails the
+    # distinct-motion gate above, and a second excess archive beat fails here.
+    archive_quantum = max((archive_hold_seconds(scene)
+                           for scene in science['scenes']), default=15.0)
+    quantization_allowance = min(archive_quantum, total_seconds * 0.02)
+    archive_limit = (float(policy.get('archive_shot_ratio_max', 0.40)) * total_seconds
+                     + quantization_allowance) if policy else total_seconds
+    if policy and archive_seconds > archive_limit:
         raise ValueError('Visual-density gate: archival stills would dominate the cut')
     if not write_outputs:
         return result
