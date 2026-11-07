@@ -16,7 +16,7 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-ENVATO_RECEIPT_REVISION = "v15"
+ENVATO_RECEIPT_REVISION = "v16"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -638,6 +638,35 @@ def concrete_stock_brief(request):
     return request
 
 
+def secondary_stock_queries(request):
+    """Primary catalogue query plus a broader two-fact query, never subject-only.
+
+    YATRA advances a stuck shot through explicit search stages. PLANEXIUM used
+    to spend its second half on the bare subject, which turned ``robotics``
+    into factory automation and discarded the authored ``student`` context.
+    Keep the independently verifiable context and a visible subject in every
+    stage so a sparse primary search can broaden without weakening relevance.
+    """
+    primary = " ".join(str(request["query"]).split())
+    try:
+        context = stock_context(request)
+    except ValueError:
+        # Legacy/unit briefs with only one fact cannot produce a safer second
+        # query. Keep their bounded candidate behaviour without inventing one.
+        return [primary]
+    subject = str(request["subject"]).strip()
+    visible = {"robotics": "robot", "students": "student"}.get(subject.casefold(), subject)
+    words = re.findall(r"[A-Za-z0-9]+", primary)
+    subject_words = set(re.findall(r"[A-Za-z0-9]+", subject.casefold()))
+    tail = next((word for word in reversed(words)
+                 if word.casefold() not in subject_words
+                 and word.casefold() != context.casefold()
+                 and word.casefold() not in {"animation", "footage", "video"}), "")
+    secondary = " ".join(dict.fromkeys(
+        part for part in (context, visible, tail) if part))
+    return list(dict.fromkeys(q for q in (primary, secondary) if q))
+
+
 def verified_stock_subject(title, subject, outputs):
     if subject.casefold() in title.casefold():
         return True
@@ -729,7 +758,7 @@ class EnvatoAdapter:
             key = key_fn(acquire.resolve_vault_asset)
             if not key:
                 continue
-            for query in dict.fromkeys((request["query"], request["subject"])):
+            for query in secondary_stock_queries(request):
                 try:
                     hits = search(key, query)
                 except Exception:
@@ -866,12 +895,19 @@ class EnvatoAdapter:
                         if key == "{{input.blockedTitleKeywords}}":step["args"]["forbidden"] = inputs["blockedTitleKeywords"]
                         if key == "{{input.previouslyDownloadedTitles}}":step["args"]["forbidden"] = inputs["previouslyDownloadedTitles"]
                 fallback_row = None
+                catalog_queries = secondary_stock_queries(request)
+                # Preserve the established five-result cursor per search
+                # stage. A single-query legacy brief still gets a bounded
+                # second page; real two-fact briefs advance to the semantic
+                # secondary query instead of the bare subject.
+                per_query = max(1, self.failure_limit // 2)
                 for candidate in range(first_candidate, first_candidate + self.failure_limit):
-                    fallback = candidate >= first_candidate + max(1, self.failure_limit // 2)
-                    catalog_query = str(request["subject"]) if fallback else query
+                    offset = candidate - first_candidate
+                    stage = min(offset // per_query, len(catalog_queries) - 1)
+                    catalog_query = catalog_queries[stage]
                     inputs["envatoQuery"] = catalog_query
                     inputs["envatoQueryUrl"] = quote_plus(catalog_query)
-                    inputs["resultIndex"] = str(candidate - first_candidate - max(1, self.failure_limit // 2) + 1 if fallback else candidate)
+                    inputs["resultIndex"] = str(offset % per_query + 1)
                     # v7 binds the receipt namespace to the concrete-subject
                     # policy and PLANEXIUM's isolated persistent Envato
                     # session.  Older failed jobs were launched with a
