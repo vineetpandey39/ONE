@@ -133,16 +133,25 @@ def observe(visits: list[dict[str, str]], *, cfg: dict[str, Any], state_path: Pa
                 sleep(random.uniform(*pause))
             entry: dict[str, Any] = {"label": visit.get("label", ""), "url": visit["url"], "posts": []}
             results.append(entry)
-            responses: list[Any] = []
+            bodies: list[str] = []
 
-            def keep(resp: Any, _bag: list[Any] = responses) -> None:
+            def keep(resp: Any, _bag: list[str] = bodies) -> None:
+                # Read the body now: a streamed pagination response is gone by the time the scrolling is over.
                 if "sduiid=" in resp.url or "rsc-action" in resp.url:
-                    _bag.append(resp)
+                    try:
+                        _bag.append(resp.text())
+                    except Exception:  # noqa: BLE001 - an unreadable payload only costs its own pairings
+                        pass
 
             try:
                 if pair is not None:
                     page.on("response", keep)
                 document = page.goto(visit["url"], wait_until="domcontentloaded", timeout=45000)
+                if pair is not None and document is not None:
+                    try:
+                        bodies.append(document.text())
+                    except Exception:  # noqa: BLE001
+                        pass
                 try:
                     page.wait_for_selector("main", timeout=15000)
                 except Exception:  # noqa: BLE001 - a page without <main> is judged below by what it says
@@ -161,7 +170,7 @@ def observe(visits: list[dict[str, str]], *, cfg: dict[str, Any], state_path: Pa
                 payload = page.evaluate(posts_js) or {}
                 entry["posts"] = list(payload.get("posts") or [])
                 if pair is not None:
-                    entry["urn_by_key"] = _pairs(pair, [document, *responses])
+                    entry["urn_by_key"] = _pairs(pair, bodies)
             except Exception as exc:  # noqa: BLE001 - one bad page must not cost the others
                 entry["error"] = f"{type(exc).__name__}: {exc}"[:160]
                 status = "partial"
@@ -195,12 +204,12 @@ def observe(visits: list[dict[str, str]], *, cfg: dict[str, Any], state_path: Pa
     return {"status": status, "detail": detail, "visits": results}
 
 
-def _pairs(pair: Callable[[str], dict[str, str]], responses: list[Any]) -> dict[str, str]:
+def _pairs(pair: Callable[[str], dict[str, str]], bodies: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
-    for resp in responses:
+    for body in bodies:
         try:
-            out.update(pair(resp.text()))
-        except Exception:  # noqa: BLE001 - one unreadable response must not cost the rest
+            out.update(pair(body))
+        except Exception:  # noqa: BLE001 - one unreadable payload must not cost the rest
             continue
     return out
 
