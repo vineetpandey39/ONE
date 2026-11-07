@@ -511,6 +511,9 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
                    portrait: Path | None = None) -> dict[str, Any]:
     package_path = Path(package_path)
     root = package_path.parent.parent
+    approved = valid_editorial_approval(root)
+    if approved:
+        return approved
     pkg = json.loads(package_path.read_text(encoding="utf-8"))
     from openjarvis.one_agents.youtube_channels import SONIA
 
@@ -565,6 +568,12 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
         return {"ok": False, "stage": "plan", "error": f"{type(exc).__name__}: {exc}"}
 
     def fallback(reason: str) -> dict[str, Any]:
+        approved = valid_editorial_approval(root)
+        if approved:
+            # A generation attempt may have started before the editor approved
+            # another candidate.  The late failure must not replace that bound
+            # winner with a continuity fallback.
+            return approved
         try:
             base = _local_fallback_base(portrait, str(pkg.get("destination") or "Travel"),
                                         out_dir / f"variant-{variant_index + 1}-local-base.png")
@@ -610,11 +619,17 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
         result = fallback(f"ChatGPT thumbnail job ended as {status}")
         result.update(lao_job=lao_job, chatgpt_status=status)
         return result
+    approved = valid_editorial_approval(root)
+    if approved:
+        return approved
     found = _find_artifact(artifact_roots, lao_job, filename)
     if not found:
         result = fallback(f"job succeeded but {filename} is not on disk")
         result.update(lao_job=lao_job, chatgpt_status=status)
         return result
+    approved = valid_editorial_approval(root)
+    if approved:
+        return approved
     base = out_dir / filename
     shutil.copyfile(found, base)
     # Identity-safe finish: compact blemish cleanup and natural face balance; never a post-process white glow.
@@ -637,6 +652,9 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
     receipt = {"ok": composed["qc"]["ok"], "path": composed["path"], "qc": composed["qc"], "base": str(base),
                "lao_job": lao_job, "portrait": str(portrait), "variant": variant["name"], "text": variant["text"],
                "layout": layout, "style": style, "retouch": finish}
+    approved = valid_editorial_approval(root)
+    if approved:
+        return approved
     # A per-variant receipt must not overwrite the experiment decision.  The
     # old shared receipt always described variant 3, even when variant 1/2 won.
     (out_dir / f"variant-{variant_index + 1}-receipt.json").write_text(
@@ -673,14 +691,22 @@ def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: 
                              [h["portrait"] for h in history])
     results = []
     for index, variant in enumerate(variants):
+        approved = valid_editorial_approval(root)
+        if approved:
+            return approved
         result = make_thumbnail(package_path, tool=tool, artifact_roots=artifact_roots,
                                 variant_index=index, poll_seconds=poll_seconds,
                                 max_wait_seconds=max_wait_seconds, sleep=sleep, layout=layout, portrait=portrait)
+        if result.get("source") == "editorial_approval":
+            return result
         if result.get("ok"):
             saved = Path(result["path"])
             result["direction"] = {k: variant.get(k) for k in ("name", "posture", "gesture", "sonia_expression")}
             result["preupload_score"] = score_thumbnail(saved, result["qc"], variant)
         results.append(result)
+    approved = valid_editorial_approval(root)
+    if approved:
+        return approved
     eligible = [r for r in results if r.get("ok") and r.get("preupload_score")]
     generated = [r for r in eligible if r.get("source") != "local_fallback"]
     # A local fallback is continuity insurance, not a creative winner. Its
@@ -704,6 +730,9 @@ def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: 
                    "portrait": str(portrait), "error": "none of the three thumbnail variants passed QC"}
     else:
         winner = max(eligible, key=lambda r: r["preupload_score"]["score"])
+        approved = valid_editorial_approval(root)
+        if approved:
+            return approved
         final = root / "thumbnail" / "final.png"
         shutil.copyfile(winner["path"], final)
         receipt = {"ok": True, "path": str(final), "winner": winner["variant"], "layout": layout, "style": style,
@@ -713,6 +742,9 @@ def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: 
         from openjarvis.one_agents import youtube_thumbnail_ab
         receipt["native_ab_test"] = youtube_thumbnail_ab.build_plan(
             root, receipt, visibility="private", content_format=str(pkg.get("content_format") or "long_form"))
+    approved = valid_editorial_approval(root)
+    if approved:
+        return approved
     (root / "thumbnail" / "thumbnail-experiment.json").write_text(
         json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
     (root / "thumbnail" / "thumbnail-receipt.json").write_text(
