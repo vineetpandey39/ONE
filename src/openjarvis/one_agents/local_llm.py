@@ -41,18 +41,21 @@ def ladder(kind: str, names: list[str] | None = None) -> list[str]:
     return ready
 
 
-def options(temperature: float, num_ctx: int) -> dict:
+def options(temperature: float, num_ctx: int, *, num_predict: int | None = None) -> dict:
     """CPU-only unless ONE_LLM_ALLOW_GPU=1: a model loaded onto this machine's nearly full 8 GB GPU took the
     whole system down once."""
     opts: dict = {"temperature": temperature, "num_ctx": num_ctx}
+    if num_predict is not None:
+        opts["num_predict"] = int(num_predict)
     if os.environ.get("ONE_LLM_ALLOW_GPU") != "1":
         opts.update(num_gpu=0, num_thread=int(os.environ.get("ONE_LLM_THREADS", "8")))
     return opts
 
 
-def chat_json(model: str, system: str, payload: dict, *, temperature: float, num_ctx: int, timeout: int = 1800) -> dict:
+def chat_json(model: str, system: str, payload: dict, *, temperature: float, num_ctx: int,
+              timeout: int = 1800, num_predict: int | None = None) -> dict:
     body = {"model": model, "stream": False, "think": False, "format": "json", "keep_alive": 0,
-            "options": options(temperature, num_ctx),
+            "options": options(temperature, num_ctx, num_predict=num_predict),
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]}
     req = urllib.request.Request(OLLAMA + "/api/chat", data=json.dumps(body).encode(),

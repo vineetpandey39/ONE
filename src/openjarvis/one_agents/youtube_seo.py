@@ -78,8 +78,29 @@ def llm_options(temperature: float, num_ctx: int) -> dict:
 
 
 def ollama_json(system: str, payload: dict) -> dict:
-    """Short structured metadata: small fast models first, CPU only, next model on failure."""
-    return local_llm.run("short", system, payload, temperature=0.2, num_ctx=12288)
+    """Bounded structured metadata; deterministic fields remain the terminal fallback.
+
+    SEO used to let every installed CPU model consume a 30-minute request and
+    generate until the whole 12k context was exhausted.  One malformed model
+    answer could therefore hold LYRA for hours before the already-safe
+    deterministic fallback ran.  A single preferred model gets a small,
+    explicit output budget; validation below still decides which fields are
+    safe to keep.
+    """
+    timeout = max(10, int(os.environ.get("YOUTUBE_SEO_LLM_TIMEOUT_SECONDS", "180")))
+    num_predict = max(256, int(os.environ.get("YOUTUBE_SEO_LLM_NUM_PREDICT", "1400")))
+    models = local_llm.ladder("short")[:1]
+
+    def bounded_chat(model: str, prompt: str, data: dict, *, temperature: float, num_ctx: int) -> dict:
+        return local_llm.chat_json(
+            model, prompt, data, temperature=temperature, num_ctx=num_ctx,
+            timeout=timeout, num_predict=num_predict,
+        )
+
+    return local_llm.run(
+        "short", system, payload, temperature=0.2, num_ctx=12288,
+        chat=bounded_chat, names=models,
+    )
 
 
 def parse_packaging(text: str) -> dict[str, str]:
