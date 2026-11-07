@@ -142,6 +142,16 @@ def reject_faces(plan: list[dict[str, Any]], rejected_dir: Path) -> list[dict[st
 def enforce_prompt(text: str) -> str:
     """Enforce the current channel visual policy at every provider boundary."""
     safe = str(text)
+    if re.search(r"\b(?:sprinter|sprint|starting blocks|athletics stadium|running track)\b", safe, flags=re.I):
+        safe = re.sub(r"\bUsain Bolt\b", "the fictional sprint protagonist", safe, flags=re.I)
+        safe = safe.replace("recognisable", "internally consistent")
+        return (
+            safe.rstrip() + "\nMANDATORY ORIGINAL-CGI SPRINT RULE: Use the attached fictional CGI sprint "
+            "character only for internal continuity. Preserve the same tall lean proportions, skin tone, face "
+            "geometry and era-appropriate hair across panels without naming or cloning a real person. Use plain "
+            "unbranded sprint clothing, realistic starting-block placement and physically correct sprint anatomy. "
+            "No logos, flags, bib text, sponsors, event branding, readable text or watermarks. Output only one image."
+        )
     production_prefix = (
         "Create ONE full-frame 16:9 photoreal cinematic CGI biography scene, "
         "original illustrative reconstruction, not archival footage."

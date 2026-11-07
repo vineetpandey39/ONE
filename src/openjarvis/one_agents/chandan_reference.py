@@ -44,6 +44,11 @@ def reference_prompt(manifest, brief):
         required=('age','year','place','appearance','equipment','source_urls')
         if any(stage.get(k) in (None,'',[]) for k in required):raise ValueError('Incomplete sourced reference stage')
         if not all(str(u).startswith('https://') for u in stage['source_urls']):raise ValueError('Reference sources must be HTTPS links')
+    subject_id = str(manifest.get('subject_id') or '')
+    is_sprinter = subject_id == 'usain-bolt'
+    protagonist = 'sprint protagonist' if is_sprinter else 'football protagonist'
+    activity = ('plain unbranded sprint training singlet, neutral athletics-stadium background'
+                if is_sprinter else 'plain unbranded training shirt, neutral studio background')
     lines=[]
     adult_stages=[stage for stage in stages if int(stage['age']) >= 18]
     if len(adult_stages) < 2:
@@ -52,8 +57,8 @@ def reference_prompt(manifest, brief):
         age = int(stage['age'])
         life_stage = "young adult" if age < 21 else ("adult" if age < 32 else "mature adult")
         lines.append(
-            f"Age {age}: the same fictionalised {life_stage} football protagonist, "
-            "plain unbranded training shirt, neutral studio background."
+            f"Age {age}: the same fictionalised {life_stage} {protagonist}, "
+            f"{activity}."
         )
     # Keep the commissioning request concise.  The former prompt combined an
     # exact face/body model, childhood full-body studies and the entire
@@ -62,7 +67,7 @@ def reference_prompt(manifest, brief):
     # board, not a photographic identity model.  Shot-level dignity, anatomy
     # and camera rules are enforced later by the reviewed scene pack.
     return (f"Generate an image based on this description. Do not ask follow-up questions. Description: "
-            "A cinematic CGI editorial character-design sheet for a fictional adult football protagonist. "
+            f"A cinematic CGI editorial character-design sheet for a fictional adult {protagonist}. "
             "Create one clean three-panel adult career progression, clearly CGI artwork rather than a photograph. "
             "Each panel is a respectful head-and-shoulders three-quarter portrait with a simple neutral stadium "
             "background and natural expression. Keep the same clearly fictionalised editorial character across "

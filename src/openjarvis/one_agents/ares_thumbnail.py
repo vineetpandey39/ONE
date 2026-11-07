@@ -308,15 +308,26 @@ def requested_thumbnail_style(thumb: dict[str, Any]) -> str:
     return THUMBNAIL_STYLE_ALIASES[requested]
 
 
-def style_prompt(style: str, recent: list[dict[str, Any]]) -> str:
+BLACK_VARIANT_PALETTES = (
+    ("restrained amber/gold story light", "cool cyan/blue separation light"),
+    ("deep crimson/magenta story light", "restrained teal separation light"),
+    ("electric lime/chartreuse story light", "controlled violet/indigo separation light"),
+)
+
+
+def style_prompt(style: str, recent: list[dict[str, Any]], variant_index: int = 0) -> str:
     """Provider direction for the selected style while keeping premium black layouts opt-in."""
     if style == BLACK_DUAL_COLOUR_STYLE:
+        story_light, separation_light = BLACK_VARIANT_PALETTES[
+            max(0, int(variant_index)) % len(BLACK_VARIANT_PALETTES)
+        ]
         return (
-            "\n\nEXPLICIT USER STYLE: Use a predominantly matte-black background with one restrained warm/orange "
-            "story light on the left and one restrained cool/blue separation light on Sonia at the right. "
+            "\n\nEXPLICIT USER STYLE: Use a predominantly matte-black background with one "
+            f"{story_light} on the left and one {separation_light} on Sonia at the right. "
             "Keep the route or destination proof large and simple, preserve the clean text lane, and avoid "
             "turning the frame into a full scenic collage. This premium black dual-colour treatment was "
-            "explicitly requested for this video."
+            "explicitly requested for this video. This palette is mandatory for this experiment variant; "
+            "do not substitute the amber/orange plus cyan/blue palette from another variant."
         )
     recent_styles = [str(row.get("style") or "") for row in recent[:2]]
     return (
@@ -510,7 +521,7 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
         prompt = layout_prompt(thumb["chatgpt_prompt_template"], layout).format(
             video_title=pkg["recommended_title"], destination=pkg.get("destination") or "the destination",
             left_usp=variant["left_usp"], sonia_expression=variant["sonia_expression"], thumbnail_text=variant["text"])
-        prompt += style_prompt(style, history)
+        prompt += style_prompt(style, history, variant_index)
         # What may change is listed apart from what may not. The identity clause
         # used to be the tail of a sentence whose verb was "Change the pose,
         # gesture and expression ... while preserving Sonia's identity, face
