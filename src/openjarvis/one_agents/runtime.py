@@ -505,7 +505,7 @@ def list_agent_jobs(agent_id: str, limit: int = 20) -> list[dict[str, Any]]:
 
 
 def resume_yatra_visual_job(job_id: str) -> dict[str, Any]:
-    """Safely retry a failed YATRA visual or OCULUS capture checkpoint.
+    """Safely retry a failed YATRA visual/render or OCULUS capture checkpoint.
 
     This intentionally refuses discovery/script/narration jobs: those stages
     can change the approved story or spend voice credits. Visual resumes must
@@ -525,10 +525,11 @@ def resume_yatra_visual_job(job_id: str) -> dict[str, Any]:
         payload = json.loads(str(previous.get("task") or ""))
     except (TypeError, ValueError) as exc:
         raise ValueError("The failed job has no readable saved task") from exc
-    expected_stage = "visuals" if agent_id == "yatra" else "capture"
-    if not isinstance(payload, dict) or payload.get("stage") != expected_stage:
-        raise ValueError("Only the saved visual/capture stage can be resumed; narration is not retried")
-    checkpoint = str(payload.get("preproduction_job") or "").strip()
+    stage = str(payload.get("stage") or "") if isinstance(payload, dict) else ""
+    allowed_stages = {"visuals", "render"} if agent_id == "yatra" else {"capture"}
+    if stage not in allowed_stages:
+        raise ValueError("Only the saved visual/capture/render stage can be resumed; narration is not retried")
+    checkpoint = str(payload.get("preproduction_job") or payload.get("checkpoint") or "").strip()
     receipt_value = str(payload.get("narration_receipt") or "").strip()
     if not checkpoint or not receipt_value:
         raise ValueError("Saved visual task is missing its preproduction or narration checkpoint")
@@ -584,12 +585,33 @@ def resume_yatra_visual_job(job_id: str) -> dict[str, Any]:
         visuals_path = Path(visuals_value).resolve()
         yatra_obs.validate_visuals_receipt(
             visuals_path, checkpoint=checkpoint, asset_root=receipt_path.parent.parent)
+    elif stage == "render":
+        # A render failure happens after YATRA and OCULUS have both sealed their
+        # checkpoints.  Replaying the earlier ``visuals`` job would reacquire
+        # media and recapture official pages; resuming the render task itself
+        # is safe only after both hash-bound receipts still validate.
+        from openjarvis.one_agents import yatra_obs
+
+        visuals_value = str(payload.get("visuals_receipt") or "").strip()
+        oculus_value = str(payload.get("oculus_receipt") or "").strip()
+        if not visuals_value or not oculus_value:
+            raise ValueError("Saved YATRA render task is missing its visual or OCULUS receipt")
+        visuals_path = Path(visuals_value).resolve()
+        oculus_path = Path(oculus_value).resolve()
+        saved_asset_root = receipt_path.parent.parent
+        yatra_obs.validate_visuals_receipt(
+            visuals_path, checkpoint=checkpoint, asset_root=saved_asset_root)
+        yatra_obs.validate_capture_receipt(
+            oculus_path, checkpoint=checkpoint, asset_root=saved_asset_root,
+            visuals_receipt=visuals_path)
 
     active = [item for item in list_agent_jobs(agent_id, 100)
               if item.get("id") != job_id and item.get("status") in {"queued", "running"}]
     if active:
         raise ValueError(f"{agent_id.upper()} already has active job {active[0].get('id')}; wait before resuming")
-    resume_kind = "yatra-visual" if agent_id == "yatra" else "oculus-capture"
+    resume_kind = ("yatra-render" if agent_id == "yatra" and stage == "render"
+                   else "yatra-visual" if agent_id == "yatra"
+                   else "oculus-capture")
     return enqueue_job(agent_id, str(previous["task"]), mode="execute",
                        tier=str(previous.get("tier") or "fast"),
                        dedupe_key=f"{resume_kind}-resume:{job_id}")

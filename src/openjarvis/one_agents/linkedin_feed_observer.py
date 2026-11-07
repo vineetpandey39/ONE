@@ -22,6 +22,7 @@ import random
 import time
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 CHROME = Path(os.environ.get("ONE_LINKEDIN_CHROME", r"C:\Program Files\Google\Chrome\Application\chrome.exe"))
 LOGIN_MARKERS = ("/login", "/authwall", "/uas/", "/signup")
@@ -29,6 +30,7 @@ CHALLENGE_MARKERS = ("/checkpoint/", "/challenge")
 BLOCK_PHRASES = ("unusual activity", "we've restricted", "we have restricted", "temporarily restricted",
                  "verify you're not a robot", "verify you are not a robot", "too many requests")
 COOL_OFF_SECONDS = 24 * 3600
+HOME_PATHS = ("/feed", "/feed/foryou")
 
 
 def profile_dir(home: Path) -> Path:
@@ -147,7 +149,9 @@ def observe(visits: list[dict[str, str]], *, cfg: dict[str, Any], state_path: Pa
                 if pair is not None:
                     page.on("response", keep)
                 document = page.goto(visit["url"], wait_until="domcontentloaded", timeout=45000)
-                if pair is not None and document is not None:
+                # Only the home feed's own document holds a payload worth reading. Reading the body of a redirect (the
+                # hashtag page redirects to a search) hung the browser driver for minutes in testing, so it is skipped.
+                if pair is not None and document is not None and urlparse(page.url).path.rstrip("/") in HOME_PATHS:
                     try:
                         bodies.append(document.text())
                     except Exception:  # noqa: BLE001
