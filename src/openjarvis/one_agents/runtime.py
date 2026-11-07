@@ -6723,7 +6723,16 @@ def _run_orion(job: dict[str, Any]) -> dict[str, Any]:
         return [{"url": s.get("source_url", ""), "title": s.get("title", ""),
                  "content": ((s.get("raw_signal") or {}).get("snippet") or "")} for s in signals]
 
-    return _engage_worker(job, "orion", lambda c: linkedin_engage.run_hunt(c, _home(), search=search),
+    def observe(visits: list[dict[str, str]]) -> dict[str, Any]:
+        from openjarvis.one_agents import linkedin_feed_observer as observer
+        bundle = linkedin_engage.libs()
+        home = _home()
+        return observer.observe(visits, cfg=bundle.policy.load_policy().get("observer") or {},
+                                state_path=linkedin_engage.engage_dir(home) / "observer_state.json",
+                                profile=observer.profile_dir(home), posts_js=bundle.feed.POST_BOUNDARIES_JS)
+
+    return _engage_worker(job, "orion",
+                          lambda c: linkedin_engage.run_hunt(c, _home(), search=search, observe=observe),
                           "Searching for fresh LinkedIn posts in the Chairman's niches")
 
 

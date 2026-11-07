@@ -45,10 +45,13 @@ def read_text(image: str | Path, *, timeout: int = 120) -> str:
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
          "-File", str(_OCR_SCRIPT), str(image)],
         capture_output=True, text=True, timeout=timeout)
+    stdout = done.stdout or ""
+    stderr = done.stderr or ""
     if done.returncode != 0:
+        detail = (stderr or stdout).strip() or f"exit code {done.returncode}"
         raise RuntimeError(
-            f"Windows OCR failed: {(done.stderr or done.stdout).strip()[:300]}")
-    return done.stdout.strip()
+            f"Windows OCR failed: {detail[:300]}")
+    return stdout.strip()
 
 
 def _words(text: str) -> list[str]:

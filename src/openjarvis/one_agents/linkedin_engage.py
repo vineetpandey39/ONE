@@ -53,10 +53,11 @@ class Libs:
         self.voice = floors_bridge.load(FLOOR, "engage_voice")
         self.models = floors_bridge.load(FLOOR, "engage_models")
         self.decorum = floors_bridge.load(FLOOR, "decorum")
+        self.feed = floors_bridge.load(FLOOR, "engage_feed")
 
     @property
     def ready(self) -> bool:
-        return all((self.policy, self.hunt, self.voice, self.models, self.decorum))
+        return all((self.policy, self.hunt, self.voice, self.models, self.decorum, self.feed))
 
 
 def libs() -> Libs | None:
@@ -168,7 +169,28 @@ def close(cycle: dict[str, Any], reason: str) -> None:
 
 # --------------------------------------------------------------------------- ORION
 
+def run_observe(home: Path, policy: dict[str, Any], cycle_n: int, observe: Callable[[list[dict[str, str]]], dict[str, Any]] | None,
+                bundle: Libs, now: float) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """ORION's feed look: (candidates, report). The report always says what happened, including 'login_required'."""
+    cfg = policy.get("observer") or {}
+    if observe is None or not cfg.get("enabled", False):
+        return [], {"status": "off"}
+    visits = bundle.feed.plan_visits(policy, cycle_n)
+    try:
+        seen = observe(visits)
+    except Exception as exc:  # noqa: BLE001 - a dead observer is reported, never hidden
+        return [], {"status": "error", "detail": f"{type(exc).__name__}: {exc}"[:200]}
+    own = tuple(n.lower() for n in [policy["persona"]["name"], *cfg.get("skip_author_names", [])] if n)
+    parsed = bundle.feed.candidates_from_visits(seen.get("visits") or [], own_names=own, now=now)
+    report = {"status": seen.get("status", "error"), "detail": seen.get("detail", ""),
+              "pages": [{"label": v.get("label"), "posts": len(v.get("posts") or []), "error": v.get("error", "")}
+                        for v in seen.get("visits") or []],
+              **{k: parsed[k] for k in ("boundaries", "paired", "fresh_72h", "dropped")}}
+    return parsed["candidates"], report
+
+
 def run_hunt(cycle: dict[str, Any], home: Path, *, search: Callable[[list[str]], list[dict[str, Any]]],
+             observe: Callable[[list[dict[str, str]]], dict[str, Any]] | None = None,
              now: float | None = None) -> dict[str, Any]:
     """Find acceptable fresh posts. Reports a thin catch as thin; never pads with stale posts."""
     at = _now(now)
@@ -193,6 +215,7 @@ def run_hunt(cycle: dict[str, Any], home: Path, *, search: Callable[[list[str]],
     web = bundle.hunt.from_hits(hits)
     inbox_file = engage_dir(home) / "inbox" / "links.txt"
     inbox = bundle.hunt.from_inbox(inbox_file.read_text(encoding="utf-8") if inbox_file.is_file() else "")
+    feed, feed_report = run_observe(home, policy, int(cycle.get("n", 0)), observe, bundle, at)
 
     seen = set(handled(home)) | {r.get("target", "") for r in rows}
     cooldown = policy["limits"]["same_author_cooldown_days"] * 86400
@@ -200,7 +223,7 @@ def run_hunt(cycle: dict[str, Any], home: Path, *, search: Callable[[list[str]],
                       if r.get("kind") == "comment" and r.get("status") in {"posted", "shadow"}
                       and at - float(r.get("ts", 0)) < cooldown and r.get("author_slug")}
     unique: dict[str, dict[str, Any]] = {}
-    for cand in inbox + web:  # the inbox is the fresh source, so it wins a tie
+    for cand in inbox + feed + web:  # the inbox is hand-picked, the feed is fresh, web search is mostly old
         unique.setdefault(cand["urn"], cand)
     judged = [bundle.hunt.judge(c, policy, niche_of=bundle.policy.niche_of, blocked_topic=bundle.policy.blocked_topic,
                                 seen_urns=seen, recent_authors=recent_authors, now=at) for c in unique.values()]
@@ -211,12 +234,18 @@ def run_hunt(cycle: dict[str, Any], home: Path, *, search: Callable[[list[str]],
             key = reason.split(":")[0]
             reasons[key] = reasons.get(key, 0) + 1
     cycle["search"] = {"queries": queries, "hits": len(hits), "web_posts": len(web), "inbox_posts": len(inbox),
+                       "feed_posts": len(feed), "feed": feed_report,
                        "judged": len(judged), "rejected_for": reasons, "error": search_error}
     cycle["candidates"] = chosen
     if chosen:
         cycle["stage"] = "hunted"
     else:
-        close(cycle, "no fresh, on-niche, safe posts this cycle" + (f" (search error: {search_error})" if search_error else ""))
+        note = ""
+        if search_error:
+            note += f" (search error: {search_error})"
+        if feed_report.get("status") not in {"off", "ok", None}:
+            note += f" (feed observer: {feed_report['status']}" + (f", {feed_report['detail']}" if feed_report.get("detail") else "") + ")"
+        close(cycle, "no fresh, on-niche, safe posts this cycle" + note)
     return cycle
 
 
