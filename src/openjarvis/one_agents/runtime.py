@@ -10347,7 +10347,18 @@ _YATRA_BROAD_GUIDE_CATEGORIES = (
 
 def _yatra_topic_fidelity_problem(record: dict[str, Any], trend_brief: str) -> str:
     """Return why an incident-led draft widened into a generic destination guide."""
-    if not _YATRA_INCIDENT_TOPIC.search(trend_brief):
+    # Only classify the commissioned subject.  The rest of a TrendBrief often
+    # names excluded prior stories (for example "Dubai flight cancellations");
+    # scanning that whole document falsely turned an Oman evergreen guide into
+    # an incident video and forced an unrelated rewrite.
+    chosen = re.search(r"(?im)^\s*(?:\*\*)?Chosen headline(?:\*\*)?\s*:\s*[\"']?(.+?)\s*[\"']?\s*$",
+                       trend_brief)
+    if chosen:
+        subject = chosen.group(1)
+    else:
+        chosen = re.search(r"(?im)^Chosen from today's scored travel news:\s*(.+?)\s*\(score", trend_brief)
+        subject = chosen.group(1) if chosen else "\n".join(trend_brief.splitlines()[:8])
+    if not _YATRA_INCIDENT_TOPIC.search(subject):
         return ""
     title = str(record.get("video_title") or "")
     script = str(record.get("full_script") or "")
@@ -11560,14 +11571,21 @@ def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, 
         plan_record["scene_plan"] = normalized_scene_plan
         plan_record["opening_map_spec"] = normalized_map
         plan_file.write_text(json.dumps(plan_records, ensure_ascii=False, indent=2), encoding="utf-8")
-    contract = _validate_yatra_contract(plan_record, _YATRA_EXPECTED_SCENES)
+    # A draft that rejects itself must reach the bounded rewrite path even when
+    # one of the rejected sections is structurally incomplete.  Requiring a
+    # parseable OBS block before honoring final_verdict: REWRITE converted a
+    # safe pre-voice hold into an unresumable exception (Oman, 2026-11-07).
+    # A READY draft still passes the complete blocking contract unchanged.
+    editorial_hold = _yatra_editorial_hold(plan_record)
+    contract = ({"status": "editorial_rewrite_required"} if editorial_hold
+                else _validate_yatra_contract(plan_record, _YATRA_EXPECTED_SCENES))
     video_title = str(plan_record.get("video_title") or "").strip()
     # Keep each LAO production checkpoint in a clean, retry-stable folder.
     # A title-only path made a fresh revision silently inherit stale 4K or
     # duplicate downloads from the prior cut; the LAO job id scopes retries to
     # the same folder while giving a genuinely new run its own assets.
     asset_folder = f"{_yatra_slug(video_title or trend_brief)}-{lao_job_id[:8]}"
-    if _yatra_editorial_hold(plan_record):
+    if editorial_hold:
         stages.clear_stage(owner)
         held = {"agent": owner.upper(), "stage": "editorial_hold", "production_complete": False,
                 "lao_job": lao_job_id, "asset_folder": asset_folder, "contract": contract,
