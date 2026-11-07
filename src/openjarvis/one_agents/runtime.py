@@ -8986,6 +8986,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
     through here.)
     """
     task = str(job.get("task") or "")
+    request_payload = _json_task(job)
     mode = str(job.get("mode") or "plan").strip().lower()
     is_vista_short = bool(re.search(r"\[vista-short\s+slot=(0900|1300|1800)\s+lane=([a-z_]+)\]", task, re.I))
     vista_production_spec: dict[str, Any] | None = None
@@ -9045,6 +9046,21 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
             prior, limit=60 if is_vista_short else 25,
             include_shorts=bool(is_vista_short),
             within_days=1.0 if is_vista_short else None)
+        # A draft rejected twice by FABULA is a topic-level failure, not a
+        # completed daily slot.  FABULA hands a bounded fallback request back
+        # to HELIOS with the rejected headline(s).  Put those exclusions at
+        # the front of the normal durable history so the same scored story
+        # cannot immediately win again when HELIOS performs fresh discovery.
+        # The rest of the selection path stays unchanged: Sanjeevani still
+        # supplies current evidence, code still ranks it and all normal
+        # freshness/duplicate/QC gates still apply to the secondary topic.
+        if request_payload.get("stage") == "topic_fallback":
+            exclusions = [
+                str(value).strip()
+                for value in request_payload.get("excluded_topics") or []
+                if str(value).strip()
+            ]
+            prior = exclusions + [value for value in prior if value not in exclusions]
         recent_stories = _sonia_recent_topics(
             [], limit=120, include_shorts=True,
             within_days=duplicate_days) if is_vista_short else []
@@ -11317,8 +11333,49 @@ def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, 
         # steps - but nothing asked for a better draft, so the slot simply ended). The writer's own review goes back
         # to ChatGPT with the same brief; a second REWRITE holds as before and still spends no voice credits.
         if payload.get("rewrite_of"):
+            topic_attempt = max(1, int(payload.get("topic_attempt") or 1))
+            if topic_attempt < 2:
+                # A second REWRITE ends this topic, not the scheduled daily
+                # mission.  Return to HELIOS so it can select the next ranked,
+                # current story through the normal research path.  This is
+                # deliberately one bounded secondary topic: every topic still
+                # gets at most one rewrite and a bad evidence day cannot loop
+                # forever or spend narration credits.
+                _require_active_job(job, "commission the secondary YATRA topic")
+                rejected = [video_title] if video_title else []
+                chosen = re.search(
+                    r"(?im)^Chosen from today's scored travel news:\s*(.+?)\s*\(score",
+                    trend_brief,
+                )
+                if chosen and chosen.group(1).strip() not in rejected:
+                    rejected.append(chosen.group(1).strip())
+                fallback_origin = str(payload.get("origin_job") or job.get("id") or "")
+                fallback = enqueue_job(
+                    "helios",
+                    json.dumps({
+                        "brand": "sonia_travel_vlogs",
+                        "stage": "topic_fallback",
+                        "topic_attempt": topic_attempt + 1,
+                        "fallback_of": fallback_origin,
+                        "editorial_hold_job": str(job.get("id") or ""),
+                        "excluded_topics": rejected,
+                        "reason": "primary topic failed FABULA editorial QC after one rewrite",
+                    }, ensure_ascii=False),
+                    mode="execute",
+                    tier="fast",
+                    dedupe_key=f"travel:{fallback_origin}:topic-fallback:{topic_attempt + 1}",
+                )
+                return {
+                    **held,
+                    "stage": "topic_fallback",
+                    "rewrite_of": payload["rewrite_of"],
+                    "topic_attempt": topic_attempt,
+                    "reason": "Rewritten draft was rejected again; HELIOS is selecting the secondary topic",
+                    "handed_to": {"agent": "HELIOS", "job_id": fallback["id"]},
+                }
             return {**held, "rewrite_of": payload["rewrite_of"],
-                    "reason": "Rewritten draft was rejected again by its own review; held for the Chairman"}
+                    "topic_attempt": topic_attempt,
+                    "reason": "Secondary topic was rejected again by its own review; held for the Chairman"}
         _require_active_job(job, "commission the YATRA rewrite")
         review = str(plan_record.get("quality_gate") or "")[:6000]
         rewrite = enqueue_job(owner, json.dumps({
