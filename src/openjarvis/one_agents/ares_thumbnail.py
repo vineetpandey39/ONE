@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -368,6 +369,16 @@ def experiment_variants(thumb: dict[str, Any]) -> list[dict[str, Any]]:
     for index, fmt in enumerate(EXPERIMENT_FORMATS):
         source = supplied[index] if index < len(supplied) else anchor
         text = str(source.get("text") or anchor.get("text") or thumb.get("text") or "WORTH IT?").strip()
+        # Three words can still be too wide for the protected mobile text
+        # lane (for example "AMAZON PAY TRAVEL").  When editorial supplied a
+        # shorter, explicit `Text: "..."` hook inside the approved visual
+        # concept, reuse that exact wording instead of inventing or truncating
+        # a claim.  This keeps the compose gate strict and evidence-safe.
+        if len(text) > 16:
+            concept = str(source.get("left_usp") or anchor.get("left_usp") or "")
+            explicit = re.search(r"\bText:\s*[\"“]([^\"”]{2,16})[\"”]", concept, flags=re.IGNORECASE)
+            if explicit:
+                text = explicit.group(1).strip()
         if neutral_route and text.upper() in UNSAFE_STANDALONE_ROUTE_CLAIMS:
             text = neutral_route
         variants.append({**source, **fmt,
