@@ -226,11 +226,15 @@ def run_write(cycle: dict[str, Any], voices: dict[str, Callable[[str], str]]) ->
     policy = bundle.policy.load_policy()
     replies = cycle["kind"] == "replies"
     items = cycle.get("to_reply" if replies else "candidates") or []
+    fixes = cycle.get("fix") or None  # set by THEMIS for the single rework pass
+    if fixes:
+        items = [i for i in items if i["id"] in fixes]
     if not items:
         close(cycle, "nothing to write")
         return cycle
     ids = [i["id"] for i in items]
-    prompt = bundle.voice.reply_prompt(items, policy) if replies else bundle.voice.comment_prompt(items, policy)
+    prompt = (bundle.voice.reply_prompt(items, policy, fixes) if replies
+              else bundle.voice.comment_prompt(items, policy, fixes))
     tried: list[str] = []
     drafts: dict[str, dict[str, str]] = {}
     writer = ""
@@ -322,6 +326,18 @@ def run_vet(cycle: dict[str, Any], voices: dict[str, Callable[[str], str]]) -> d
         cycle.setdefault("notes", []).append(review_note)
     if any(v.get("cleared") for v in vetted):
         cycle["stage"] = "vetted"
+        return cycle
+    # Nothing cleared. A draft refused for tone or content can be rewritten once, with the exact reasons; one refused
+    # because no independent reviewer answered cannot be fixed by writing again, so that closes the cycle.
+    fixable = {v["id"]: v["reasons"] for v in vetted
+               if not v.get("cleared") and v.get("reasons")
+               and (v.get("stage") == "code" or (v.get("stage") == "review" and not review_note))}
+    if fixable and int(cycle.get("attempt", 0)) < 1:
+        cycle["attempt"] = 1
+        cycle["fix"] = fixable
+        cycle["held_first_pass"] = vetted
+        cycle["stage"] = "triaged" if replies else "hunted"
+        cycle.setdefault("notes", []).append("THEMIS held every draft; one rework pass requested")
     else:
         close(cycle, "THEMIS held every draft")
     return cycle
