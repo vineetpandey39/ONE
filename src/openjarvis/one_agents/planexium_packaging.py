@@ -114,6 +114,10 @@ def validate_packaging(value, science):
         raise ValueError('Title candidates must differ')
     if len(concepts) != 3:
         raise ValueError('Provide three distinct thumbnail concepts')
+    archetypes = [str(concept.get('archetype') or '').strip() for concept in concepts]
+    required_archetypes = {'phenomenon_closeup', 'human_consequence', 'scale_relationship'}
+    if any(archetypes) and set(archetypes) != required_archetypes:
+        raise ValueError('Thumbnail concepts require the three PLANEXIUM visual archetypes')
     episode_words = set()
     for text in [science.get('video_title', ''), *titles,
                  science['scenes'][scene-1].get('screen_text', '')]:
@@ -151,6 +155,11 @@ def apply_packaging(package, strategy, science):
     package['thumbnail']['variants'] = [{**base, **c} for c in strategy['concepts']]
     package['thumbnail_strategy'] = {
         **strategy, 'mode': 'episode_specific_concepts',
+        'creative_system': 'planexium_one_visual_sentence_v2',
+        'visual_archetypes': ['phenomenon_closeup', 'human_consequence', 'scale_relationship'],
+        'mobile_rules': {'hero_frame_share':[0.45,0.65], 'left_hook_lane':[0.0,0.40],
+                         'phone_size_test':'recognizable at 10 percent size',
+                         'forbidden':['generic space wallpaper','sterile minimalism','collage','tiny explanatory details']},
         'selection': 'editorial first choice, provisional until audience testing',
         'internal_score_role': 'design_readiness_only',
         'audience_winner': None,

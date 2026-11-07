@@ -213,10 +213,11 @@ class ProductionServices:
         if spec.get("portrait_library") or "portrait" in str(spec.get("generation_mode", "")).lower().replace("no portrait reference", ""):
             raise ValueError("Original thumbnail cannot carry portrait inputs")
         chosen = spec["variants"][variant]
-        from openjarvis.one_agents.youtube_seo import ORIGINAL_THUMBNAIL_PROMPT
+        from openjarvis.one_agents.youtube_seo import ORIGINAL_THUMBNAIL_PROMPT, PLANEXIUM_THUMBNAIL_PROMPT
 
         # Use the trusted original-image template, never a package-supplied host template.
-        prompt = ORIGINAL_THUMBNAIL_PROMPT.format(
+        template = PLANEXIUM_THUMBNAIL_PROMPT if channel.brand == "planexium" else ORIGINAL_THUMBNAIL_PROMPT
+        prompt = template.format(
             video_title=package["recommended_title"], destination=package["destination"],
             left_usp=chosen["left_usp"], thumbnail_text=chosen["text"],
         )
@@ -225,10 +226,8 @@ class ProductionServices:
         if chosen.get("composition"):
             prompt += "\nComposition: " + chosen["composition"]
         if channel.brand == "planexium":
-            prompt += ("\nPLANEXIUM THUMBNAIL GATE: one unmistakable episode-specific hero subject must occupy "
-                       "45-70% of the canvas. Keep the hook in one compact text lane. Do not leave any other "
-                       "empty quadrant, do not use generic space wallpaper, and do not create a collage. The "
-                       "image must communicate the episode promise at phone size without relying on the title.")
+            prompt += ("\nCONCEPT ARCHETYPE: " + str(chosen.get("archetype") or chosen.get("name") or "phenomenon")
+                       + ". This candidate must differ in subject and composition, not merely crop, colour, or style.")
         folder = self.context.artifact(f"thumbnail/variant-{variant + 1}")
         folder.mkdir(parents=True, exist_ok=True)
         generated = generate(prompt=prompt, output=folder / "base.png", brand=channel.brand)

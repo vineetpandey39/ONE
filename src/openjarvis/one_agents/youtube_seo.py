@@ -469,6 +469,31 @@ ORIGINAL_THUMBNAIL_PROMPT = (
 )
 
 
+PLANEXIUM_THUMBNAIL_PROMPT = (
+    "Create a high-CTR, mobile-first 16:9 YouTube science documentary thumbnail background for PLANEXIUM. "
+    "This is a fresh text-to-image request, not an image edit; no reference image is required. Do not copy "
+    "another creator's branding.\n\nSTORY: {video_title}\nEPISODE SUBJECT: {destination}\nTRUTHFUL HERO PROOF: "
+    "{left_usp}\nFUTURE HOOK TEXT (do not render): {thumbnail_text}\n\nONE VISUAL SENTENCE: show one unmistakable, "
+    "episode-specific phenomenon or consequence that creates curiosity before any text is added. The hero proof "
+    "must occupy 45-65 percent of the canvas and remain recognizable at 10 percent size. Never substitute generic "
+    "space wallpaper, a decorative planet, a generic ISS beauty shot, or an empty star field for the actual episode "
+    "promise. Use one dominant background and at most one supporting cue; no collage, repeated objects, tiny labels, "
+    "decorative clutter, or multiple competing focal points.\n\nSTRICT ZONES: LEFT 0-40 percent is a low-detail, "
+    "high-contrast hook-safe lane. CENTRE 40-66 percent carries the bridge or tension cue. RIGHT 66-100 percent "
+    "contains the large unobstructed hero proof. Keep the lower-left clean for later exact text compositing. Do not "
+    "place the hero, a face, mission hardware, evidence, or another USP behind the hook-safe lane.\n\nLIGHTING AND "
+    "EMOTION: give the hero the cleanest key light and strongest local contrast. Keep context about one stop dimmer "
+    "and less saturated. Use deep navy/near-black context with one controlled hot accent (yellow, red, or cyan). "
+    "Prefer a human-scale consequence—one astronaut, scientist, student, hand, silhouette, or familiar object—only "
+    "when the supplied brief supports it; never invent a person or event. Avoid sterile minimalism: the frame should "
+    "feel consequential, not merely beautiful.\n\nEVIDENCE SAFETY: distinguish illustration from observation, do not "
+    "fabricate measurements, documents, interfaces, mission events, discoveries, danger, or scale. Do not render "
+    "text, numbers, arrows, logos, watermarks, borders, or UI. Preserve the factual relationship in the brief.\n\n"
+    "TECHNICAL: 1280x720 composition, ultra-sharp hero, clean silhouette, strong subject/background separation, no "
+    "distorted anatomy, and keep the bottom-right timestamp zone free. Output one polished background for final text compositing."
+)
+
+
 # Title and description language on YouTube: "English (United States)", not plain "English".
 METADATA_LANGUAGE = "en-US"
 PAYOFF = re.compile(r"this video|you'll|you will", re.I)
