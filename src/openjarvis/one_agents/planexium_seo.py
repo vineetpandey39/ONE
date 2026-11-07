@@ -150,6 +150,12 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
         try:
             result = dict(package)
             title = str(out["title"]).strip()
+            # The packaging stage may already provide a small, factual title
+            # set whose tokens exactly pay off the highest-scoring rendered
+            # thumbnail. Once that set is non-empty, do not let a model drift
+            # to a different otherwise-plausible title on a retry.
+            if required_titles and not re.search(r"\d", preferred_hook):
+                title = required_titles[0]
             # The hourly sweep posts this once the video is public; until 2026-10-22 every Planexium package carried
             # the same "Which part would you like us to explain next?".
             comment = normalize_comment(out.get("comment"))
@@ -327,7 +333,8 @@ def title_matches_thumbnail_promise(title: str, hook: str) -> bool:
     """Require the selected title to state the winning thumbnail's concrete promise."""
     aliases = {"mins": "minute", "min": "minute", "minutes": "minute",
                "captured": "capture", "captures": "capture", "capturing": "capture"}
-    generic = {"the", "a", "an", "why", "how", "where", "what", "does", "do", "is"}
+    generic = {"the", "a", "an", "why", "how", "where", "what", "does", "do", "is",
+               "to", "from", "with", "in", "of", "and"}
 
     def tokens(value: str) -> set[str]:
         found = set(re.findall(r"\d+(?:\.\d+)?|[a-z]+", value.casefold()))
