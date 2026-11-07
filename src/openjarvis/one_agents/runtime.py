@@ -19,13 +19,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from fractions import Fraction
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 import httpx
 
 from openjarvis.one_agents import (
-    floor_watch, floors_bridge, job_recovery, linkedin_growth, memory, publishing_strategy, stages,
+    floor_watch, floors_bridge, job_recovery, linkedin_engage, linkedin_growth, memory, publishing_strategy, stages,
 )
 
 
@@ -67,6 +67,11 @@ AGENTS: dict[str, dict[str, str]] = {
     # guessing wrong here means posting to the wrong account.
     "kairos": {"name": "KAIROS", "role": "aibyvineet carousel worker and Floor 4 revenue agent: turns @imagineindia.ai and @aibyvineet reach into income - money-funnel reviews, brand deals, media kits, affiliate and product plans (drafts only, sends nothing without the Chairman)", "floor_id": "4", "floor_name": "Media & Content", "division": "media", "seat": "worker", "reports_to": "ia"},
     "herald": {"name": "HERALD", "role": "LinkedIn authority-post production and publishing worker (Growth floor, reports to ARES)", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth", "seat": "worker", "reports_to": "ares"},
+    "orion": {"name": "ORION", "role": "LinkedIn Engagement Desk hunter: finds fresh, on-niche, safe public posts worth a comment (Growth floor, reports to ARES)", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth", "seat": "worker", "reports_to": "ares"},
+    "quill": {"name": "QUILL", "role": "LinkedIn Engagement Desk writer: drafts one useful comment or reply in the Chairman's voice (Growth floor, reports to ARES)", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth", "seat": "worker", "reports_to": "ares"},
+    "themis": {"name": "THEMIS", "role": "LinkedIn Engagement Desk decorum guard: rulebook plus an independent reviewer model; holds anything undignified (Growth floor, reports to ARES)", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth", "seat": "worker", "reports_to": "ares"},
+    "nuntius": {"name": "NUNTIUS", "role": "LinkedIn Engagement Desk courier: the only agent that sends, inside the caps and only what THEMIS sealed (Growth floor, reports to ARES)", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth", "seat": "worker", "reports_to": "ares"},
+    "hestia": {"name": "HESTIA", "role": "LinkedIn Engagement Desk listener: triages the comments on the Chairman's own posts (Growth floor, reports to ARES)", "floor_id": "3", "floor_name": "Growth & Distribution", "division": "growth", "seat": "worker", "reports_to": "ares"},
     "chandan": {"name": "CHANDAN", "role": "Origin to Ovation biography production worker; reuses approved assets and hands completed masters to ARES", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
     "planexium": {"name": "PLANEXIUM", "role": "The Planexium science production worker using local Windows narration and shared services", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
     "yatra": {"name": "YATRA", "role": "Sonia Travel Vlogs licensed-footage acquisition and receipt-gated video assembly worker", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "worker", "reports_to": "helios"},
@@ -6445,6 +6450,8 @@ def _ares_dispatch_linkedin(job: dict[str, Any], li: Any) -> dict[str, Any]:
     # ARES flow (the Sonia SEO leg also uses this head) would overwrite the
     # first's worker_job pointer. Decline visibly rather than silently skip.
     current = (stages.get_stages() or {}).get("ares")
+    if current and current.get("cycle"):
+        current = None  # the Engagement Desk's stage: the daily post outranks it, and the desk resumes its cycle later
     if current and current.get("stage") not in {"idle", None}:
         detail = str(current.get("detail") or "").strip()
         reason = (f"ARES is already mid-flow ({current.get('stage')}"
@@ -6571,6 +6578,148 @@ def _ares_report_linkedin(job: dict[str, Any], payload: dict[str, Any], li: Any)
             "format": payload.get("format") or "LinkedIn post", "published": bool(payload.get("published")),
             "output": str(output_path), "vault_note": remembered.get("path")}
 
+
+
+# --------------------------------------------------------------------------- LinkedIn Engagement Desk
+# Decisions live in floors/floor_03_growth (engage_*.py, decorum.py, engage/policy.json); the plumbing is
+# one_agents/linkedin_engage.py. These are only the head and worker shims: stages, queue, LAO, Sanjeevani.
+
+_ENGAGE_TRIGGERS = {"hunt": "linkedin-engage-hunt", "replies": "linkedin-engage-replies"}
+
+
+def _ares_engage(job: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    """ARES, head of the Engagement Desk: brief the next worker for the cycle, or file the finished cycle."""
+    le = linkedin_engage
+    home = _home()
+    is_report = str(job.get("mode") or "").strip().lower() == "report" and le.is_engage_payload(payload)
+    if is_report:
+        cycle = le.load_cycle(home, str(payload.get("cycle") or ""))
+        if not cycle:
+            raise RuntimeError(f"ARES cannot find engagement cycle {payload.get('cycle')!r}")
+    else:
+        kind = le.kind_of_task(str(job.get("task") or ""))
+        current = (stages.get_stages() or {}).get("ares")
+        if current and current.get("stage") not in {"idle", None}:
+            reason = f"ARES is already mid-flow ({current.get('stage')}); the {kind} cycle will resume at the next trigger."
+            return {"agent": "ARES", "mode": "blocked", "_blocked": True, "content": reason,
+                    "blocked_reason": reason, "handed_to": None}
+        why = le.desk_blocked()
+        if why:
+            return {"agent": "ARES", "mode": "blocked", "_blocked": True, "content": why, "blocked_reason": why,
+                    "handed_to": None}
+        cycle = le.begin_cycle(kind, home, job_id=str(job["id"]))
+        # Standing authority to send comes only from the scheduler's own fire receipt, never from a hand-typed dispatch.
+        cycle["authorized"] = bool(_job_fired_by_trigger(_ENGAGE_TRIGGERS[kind], str(job["id"])))
+        le.save_cycle(home, cycle)
+    worker = le.next_worker(cycle)
+    if not worker:
+        stages.set_stage("ares", stages.REPORTING, "Filing the finished LinkedIn engagement cycle")
+        li = le.libs()
+        mode = li.policy.load_policy()["mode"] if li else "unknown"
+        message = le.digest(cycle, mode)
+        output_dir = home / "agent_outputs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{job['id']}.md"
+        output_path.write_text(f"# ARES - LinkedIn Engagement Desk\n\n{message}\n", encoding="utf-8")
+        if cycle.get("delivered"):
+            memory.remember(agent="ARES", floor_id="3", floor_name="Growth & Distribution (LinkedIn Authority)",
+                            kind="Engagement Report", body=message, task=str(job.get("task") or "")[:200],
+                            tags=["linkedin", "engagement", cycle["kind"], mode])
+        time.sleep(2.0)
+        stages.clear_stage("ares")
+        return {"agent": "ARES", "mode": "report", "brand": le.BRAND, "cycle": cycle["id"], "content": message,
+                "output": str(output_path), "handed_to": None}
+    names = {"orion": "hunt fresh posts", "quill": "write the comments", "themis": "vet them for decorum",
+             "nuntius": "deliver the cleared ones", "hestia": "triage the comments on our posts"}
+    task = {"brand": le.BRAND, "cycle": cycle["id"], "kind": cycle["kind"], "authorized": bool(cycle.get("authorized"))}
+    briefed = stages.head_briefs_worker(
+        "ares", worker,
+        carrying_detail=f"Taking cycle {cycle['id']} to {worker.upper()}",
+        briefing_detail=f"{worker.upper()}, please {names[worker]} ({cycle['kind']} cycle)",
+        awaiting_detail=f"Waiting on {worker.upper()} to {names[worker]}",
+        enqueue=lambda: enqueue_job(worker, json.dumps(task), mode="execute", tier="fast"),
+        extra_awaiting={"cycle": cycle["id"]})
+    return {"agent": "ARES", "mode": "execute", "brand": le.BRAND, "cycle": cycle["id"],
+            "content": f"Briefed {worker.upper()} on {cycle['kind']} cycle {cycle['id']}.",
+            "handed_to": {"agent": worker.upper(), "job_id": briefed["id"]}}
+
+
+def _engage_worker(job: dict[str, Any], worker: str, work: Callable[[dict[str, Any]], None],
+                   executing: str) -> dict[str, Any]:
+    """Shared shape of every desk worker: confirm receipt, do the one thing, save the cycle, report to ARES."""
+    le = linkedin_engage
+    payload = _json_task(job)
+    if not le.is_engage_payload(payload):
+        raise RuntimeError(f"{worker.upper()} refuses work outside linkedin_engage")
+    home = _home()
+    cycle = le.load_cycle(home, str(payload.get("cycle") or ""))
+    if not cycle:
+        raise RuntimeError(f"{worker.upper()} cannot find engagement cycle {payload.get('cycle')!r}")
+    stages.worker_confirms_receipt(worker, f"Received engagement cycle {cycle['id']}")
+    stages.set_stage(worker, stages.EXECUTING, executing)
+    cycle["authorized"] = bool(payload.get("authorized", cycle.get("authorized")))
+    work(cycle)
+    le.save_cycle(home, cycle)
+    stages.set_stage(worker, stages.CARRYING_TO_HEAD, f"Taking the {cycle['stage']} cycle back to ARES")
+    report = enqueue_job("ares", json.dumps({"brand": le.BRAND, "cycle": cycle["id"], "worker": worker,
+                                             "stage": cycle["stage"]}), mode="report", tier="fast")
+    stages.set_stage(worker, stages.DELIVERING, f"Handed cycle {cycle['id']} ({cycle['stage']}) to ARES")
+    time.sleep(1)
+    stages.clear_stage(worker)
+    return {"agent": worker.upper(), "mode": "execute", "cycle": cycle["id"], "stage": cycle["stage"],
+            "closed_reason": cycle.get("closed_reason", ""), "handed_to": {"agent": "ARES", "job_id": report["id"]}}
+
+
+def _engage_voices(job: dict[str, Any]) -> dict[str, Callable[[str], str]]:
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+    heartbeat = lambda: job_recovery.heartbeat(_connect, job["id"])  # noqa: E731
+    return linkedin_engage.available_voices(LaoOrchestratorTool(), _YATRA_ROBOT_ARTIFACTS, heartbeat)
+
+
+def _run_orion(job: dict[str, Any]) -> dict[str, Any]:
+    def search(queries: list[str]) -> list[dict[str, Any]]:
+        lib = _sanjeevani_research()
+        if lib is None:
+            raise RuntimeError("Sanjeevani research library is unavailable")
+        signals, _ = lib.searxng(queries, time_range="", max_queries=len(queries))
+        return [{"url": s.get("source_url", ""), "title": s.get("title", ""),
+                 "content": ((s.get("raw_signal") or {}).get("snippet") or "")} for s in signals]
+
+    return _engage_worker(job, "orion", lambda c: linkedin_engage.run_hunt(c, _home(), search=search),
+                          "Searching for fresh LinkedIn posts in the Chairman's niches")
+
+
+def _run_quill(job: dict[str, Any]) -> dict[str, Any]:
+    return _engage_worker(job, "quill", lambda c: linkedin_engage.run_write(c, _engage_voices(job)),
+                          "Writing comments in the Chairman's voice")
+
+
+def _run_themis(job: dict[str, Any]) -> dict[str, Any]:
+    return _engage_worker(job, "themis", lambda c: linkedin_engage.run_vet(c, _engage_voices(job)),
+                          "Vetting every draft for decorum with an independent reviewer")
+
+
+def _run_nuntius(job: dict[str, Any]) -> dict[str, Any]:
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+    tool = LaoOrchestratorTool()
+
+    def deliver(cycle: dict[str, Any]) -> None:
+        def send(item: dict[str, Any]) -> dict[str, Any]:
+            # Standing authority is the trigger's fire receipt (ARES recorded it on the cycle); a hand-typed
+            # dispatch has none, so it can vet and record but never send.
+            if not cycle.get("authorized"):
+                return {"status": "failed", "error": "no standing authority on this cycle (no scheduler fire receipt)"}
+            return linkedin_engage.lao_send(
+                tool, _YATRA_ROBOT_ARTIFACTS, item, attach=lambda lao: job_recovery.attach(_connect, job["id"], lao),
+                heartbeat=lambda: job_recovery.heartbeat(_connect, job["id"]))
+        linkedin_engage.run_deliver(cycle, _home(), send=send)
+
+    return _engage_worker(job, "nuntius", deliver, "Delivering the comments THEMIS cleared")
+
+
+def _run_hestia(job: dict[str, Any]) -> dict[str, Any]:
+    return _engage_worker(job, "hestia", lambda c: linkedin_engage.run_triage(c, _home(), read_api=None),
+                          "Reading the comments on the Chairman's recent posts")
 
 def _travel_handoff_key(payload: dict[str, Any], stage: str) -> str:
     """Bind Sonia travel handoffs to the concrete rendered master.
@@ -6754,6 +6903,9 @@ def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
                     "handed_to": {"agent": "ECHO", "job_id": echo["id"]}}
         finally:
             stages.clear_stage("ares")
+    # LinkedIn Engagement Desk (Chairman, 2026-11-07): ARES is its head; five workers do the work.
+    if linkedin_engage.is_engage_payload(payload) or linkedin_engage.kind_of_task(str(job.get("task") or "")):
+        return _ares_engage(job, payload)
     # LinkedIn Authority: the one channel Floor 3 owns (Chairman, 2026-10-13).
     _task_text = str(job.get("task") or "")
     _li = floors_bridge.load("floor_03_growth", "linkedin_authority")
@@ -11782,6 +11934,11 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         "muse": _run_muse,
         "kairos": _run_kairos,
         "herald": _run_herald,
+        "orion": _run_orion,
+        "quill": _run_quill,
+        "themis": _run_themis,
+        "nuntius": _run_nuntius,
+        "hestia": _run_hestia,
         "chandan": _run_chandan,
         "planexium": _run_planexium,
         "yatra": _run_yatra,
