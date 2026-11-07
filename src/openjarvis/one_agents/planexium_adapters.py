@@ -966,12 +966,17 @@ class EnvatoAdapter:
                     raise ValueError("Provider success lacks a verified selected-asset subject title")
                 if any(str(word).casefold() in title.casefold() for word in inputs["blockedTitleKeywords"]):
                     raise ValueError("Selected asset contains a forbidden visual keyword")
-                if not stock_context_matches(request, {"title": title}):
+                subject_evidence = out.get("asset_subject_verified") or {}
+                if not stock_context_matches(request, {
+                        "title": title,
+                        "tags": subject_evidence.get("tags"),
+                        "description": subject_evidence.get("description"),
+                }):
                     raise ValueError("Selected asset lacks relevant visual context")
                 titles.append(title)
                 row = {"provider": "Envato", "path": str(path), "job_id": job, "query": query,
                        "title": str(out.get("selected_asset_title") or ""), "catalog_query": catalog_query, "illustrative": True,
-                       "rights_review_required": True, "subject_evidence": out.get("asset_subject_verified"),
+                       "rights_review_required": True, "subject_evidence": subject_evidence,
                        "sha256": sha, **probe_stock(path)}
                 saved = self.context.artifact(f"acquired/stock-{index}.json")
                 saved.parent.mkdir(parents=True, exist_ok=True)
