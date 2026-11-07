@@ -2590,6 +2590,33 @@ def _vista_repeat_story(story: dict[str, Any], commissions: list[dict[str, str]]
     return None
 
 
+_SONIA_INCIDENT_TOPIC = re.compile(
+    r"\b(?:incident|controversy|viral|arrest(?:ed)?|detain(?:ed)?|fight|chaos|scam|fire|crash|"
+    r"evacuat\w*|strand(?:ed)?|cancel(?:led|ed|lation)?|disrupt(?:ed|ion)?|bhandara|internet says|"
+    r"tourists?\s+(?:organise|organize|clash|fight|stranded))\b",
+    re.IGNORECASE,
+)
+_SONIA_DIRECT_TRAVELLER_IMPACT = re.compile(
+    r"\b(?:visa|entry|permit|immigration|flight|route|border|cancel(?:led|ed|lation)?|delay(?:ed|s)?|"
+    r"suspend(?:ed|s|ing)?|clos(?:e|ed|ure)|advisory|safety|scam|arrest(?:ed)?|detain(?:ed)?|ban|"
+    r"fee|fare|insurance|strike|weather|evacuat\w*|strand(?:ed)?)\b",
+    re.IGNORECASE,
+)
+
+
+def _sonia_incident_commission_problem(candidate: dict[str, Any]) -> str:
+    """Why a news incident cannot honestly sustain a Sonia travel video."""
+    text = " ".join(str(candidate.get(key) or "") for key in ("title", "headline"))
+    text += " " + " ".join(str(value) for value in (candidate.get("headlines") or []))
+    if not _SONIA_INCIDENT_TOPIC.search(text):
+        return ""
+    if int(candidate.get("n_sources") or 0) < 2:
+        return "incident requires at least two independent reporting outlets"
+    if not _SONIA_DIRECT_TRAVELLER_IMPACT.search(text):
+        return "viral incident has no direct traveller decision or safety impact"
+    return ""
+
+
 def _sonia_story_pick(reusable: Any, prior: list[str], job_id: str, travel: Any | None = None,
                       *, check_all_prior: bool = False,
                       recent_stories: list[str] | None = None) -> dict[str, Any]:
@@ -2624,6 +2651,10 @@ def _sonia_story_pick(reusable: Any, prior: list[str], job_id: str, travel: Any 
         if candidate.get("eligible") and not _sonia_has_travel_intent(candidate):
             candidate["eligible"] = False
             candidate.setdefault("verdict", []).append("outside Sonia niche: no traveller decision or destination utility")
+        incident_problem = _sonia_incident_commission_problem(candidate)
+        if candidate.get("eligible") and incident_problem:
+            candidate["eligible"] = False
+            candidate.setdefault("verdict", []).append(incident_problem)
         # The policy's duplicate window, applied to the story rather than to
         # the country: 17 October retold 16 October's Delhi-Osaka story, and
         # the destination gate could not have caught it without blocking Japan
@@ -2635,9 +2666,11 @@ def _sonia_story_pick(reusable: Any, prior: list[str], job_id: str, travel: Any 
                 candidate["eligible"] = False
                 candidate.setdefault("verdict", []).append(
                     f"already covered: {repeat[:70]}")
-    if pick is not None and not _sonia_has_travel_intent(pick):
+    if pick is not None and (not _sonia_has_travel_intent(pick)
+                             or _sonia_incident_commission_problem(pick)):
         pick = next((candidate for candidate in ranking if candidate.get("eligible")
-                     and _sonia_has_travel_intent(candidate)), None)
+                     and _sonia_has_travel_intent(candidate)
+                     and not _sonia_incident_commission_problem(candidate)), None)
     # Sunday's community poll lets viewers choose the next video. Their winner is taken when it is one of today's
     # commissionable stories (same freshness and outlet gates as any pick); otherwise the score decides as usual.
     viewer_vote = None
@@ -2716,9 +2749,14 @@ def _sonia_story_pick(reusable: Any, prior: list[str], job_id: str, travel: Any 
         "TrendBrief containing: discovery date; target viewer; destination/topic (this single destination, never a "
         "list of countries); why this story was chosen (use the 'selection' evidence row: its score breakdown and the YouTube velocity); viral "
         "search terms; why-now signal; evidence IDs; strongest truthful hook; locations/scenes worth showing; "
-        "practical flight/hotel/visa questions; volatile facts requiring same-day official verification; and "
+        "practical flight/hotel/visa questions ONLY when this chosen story directly changes those decisions; volatile "
+        "facts requiring same-day official verification; and "
         "explicit exclusions. Never widen the topic to the runner-ups, never invent a trend, a number or a quote, and "
-        "never imply Sonia visited. End with COMMISSION: YES or NO. "
+        "never imply Sonia visited. TOPIC FIDELITY IS A HARD GATE: when the chosen story is an incident, controversy, "
+        "disruption or other reported event, commission an incident explainer, not a destination itinerary. Cover what "
+        "happened, what is actually verified, why it matters, and only the traveller actions directly caused by that "
+        "event. Do not add a broad visa guide, hotels, attractions, budget, best time, or general trip planning merely "
+        "because the event happened in that country. End with COMMISSION: YES or NO. "
         f"Avoid prior topics: {json.dumps(prior[:15], ensure_ascii=False)}")
     return {"status": "picked", "pick": pick, "ranking_path": str(ranking_path), "evidence": evidence,
             "synthesis_evidence": synthesis_evidence, "prompt": prompt}
@@ -10296,6 +10334,48 @@ def _yatra_editorial_hold(record: dict[str, Any]) -> bool:
     return bool(re.search(r"(?im)^\s*final_verdict\s*:\s*REWRITE\s*$", gate))
 
 
+_YATRA_INCIDENT_TOPIC = _SONIA_INCIDENT_TOPIC
+
+_YATRA_BROAD_GUIDE_CATEGORIES = (
+    re.compile(r"\b(?:itinerar(?:y|ies)|complete travel guide|trip planning|travel planning|best places|things to do)\b",
+               re.IGNORECASE),
+    re.compile(r"\b(?:hotels?|accommodation|where to stay)\b", re.IGNORECASE),
+    re.compile(r"\b(?:visa guide|visa and entry|entry requirements?|immigration guide)\b", re.IGNORECASE),
+    re.compile(r"\b(?:budget trip|daily budget|best time to visit|attractions?)\b", re.IGNORECASE),
+)
+
+
+def _yatra_topic_fidelity_problem(record: dict[str, Any], trend_brief: str) -> str:
+    """Return why an incident-led draft widened into a generic destination guide."""
+    if not _YATRA_INCIDENT_TOPIC.search(trend_brief):
+        return ""
+    title = str(record.get("video_title") or "")
+    script = str(record.get("full_script") or "")
+    gate = str(record.get("quality_gate") or "")
+    if not _YATRA_INCIDENT_TOPIC.search(title):
+        return "incident-led brief is not paid off in the video title"
+    broad = [pattern.pattern for pattern in _YATRA_BROAD_GUIDE_CATEGORIES
+             if pattern.search(script) or pattern.search(gate)]
+    if len(broad) >= 2:
+        return ("incident explainer widens into multiple generic destination-guide sections "
+                "(itinerary/hotel/visa/budget); keep only actions directly caused by the incident")
+    if re.search(r"(?im)^\s*topic_fidelity\s*:\s*(?:FAIL|NO|REWRITE)\b", gate):
+        return "the writer's own topic-fidelity review rejected the draft"
+    return ""
+
+
+def _yatra_apply_topic_fidelity_gate(record: dict[str, Any], trend_brief: str) -> str:
+    """Seal a deterministic topic-fidelity rejection into the normal pre-voice QC gate."""
+    problem = _yatra_topic_fidelity_problem(record, trend_brief)
+    if not problem:
+        return ""
+    gate = str(record.get("quality_gate") or "").rstrip()
+    gate = re.sub(r"(?im)^\s*final_verdict\s*:\s*PASS\s*$", "", gate).rstrip()
+    record["quality_gate"] = (gate + f"\n\ntopic_fidelity: REWRITE - {problem}\n"
+                              "final_verdict: REWRITE\n").lstrip()
+    return problem
+
+
 def _normalize_yatra_json_block(value: Any) -> Any:
     """Remove only ChatGPT's rendered JSON language label from JSON fields."""
     if not isinstance(value, str):
@@ -11356,6 +11436,15 @@ def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, 
     lao_trend_brief = re.sub(r"[^\x09\x0A\x0D\x20-\x7E]", "", lao_trend_brief).strip()
     if not lao_trend_brief:
         raise RuntimeError("YATRA TrendBrief contains no LAO-safe prompt text")
+    lao_trend_brief += (
+        "\n\nTOPIC FIDELITY CONTRACT (mandatory, checked before paid narration):\n"
+        "If the headline is an incident, controversy, disruption or reported event, the video is an incident "
+        "explainer. The title, first 30 seconds and majority of narration must pay off that exact event: what "
+        "happened, what is verified, why it matters, and only traveller actions directly caused by it. Never turn "
+        "the country into a generic itinerary, visa, hotel, attractions, budget or complete-travel-guide video. "
+        "Mention such planning only when cited evidence proves the incident changed that decision, and state the "
+        "causal link. The quality_gate must include `topic_fidelity: PASS` or `topic_fidelity: REWRITE`."
+    )
 
     stages.worker_confirms_receipt(owner, "Received HELIOS's travel TrendBrief")
     # ChatGPT runs in the robots' Chrome, which the robots never launch themselves; bring it up if it is down
@@ -11457,13 +11546,15 @@ def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, 
     normalized = normalize_script_cues(plan_record.get("full_script") or "")
     normalized_scene_plan = _normalize_yatra_scene_plan(plan_record.get("scene_plan"))
     normalized_map = _normalize_yatra_json_block(plan_record.get("opening_map_spec"))
+    fidelity_problem = _yatra_apply_topic_fidelity_gate(plan_record, trend_brief)
     if shopping_contract:
         plan_record["shopping_contract"] = shopping_contract
     if (plan_record.get("language") != sonia_language_profile(payload)["key"]
             or normalized != (plan_record.get("full_script") or "")
             or normalized_scene_plan != plan_record.get("scene_plan")
             or normalized_map != plan_record.get("opening_map_spec")
-            or shopping_contract is not None):
+            or shopping_contract is not None
+            or fidelity_problem):
         plan_record["language"] = sonia_language_profile(payload)["key"]
         plan_record["full_script"] = normalized
         plan_record["scene_plan"] = normalized_scene_plan

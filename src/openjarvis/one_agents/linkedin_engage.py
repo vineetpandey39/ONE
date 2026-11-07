@@ -36,6 +36,8 @@ from openjarvis.one_agents import floors_bridge, linkedin_growth
 
 FLOOR = "floor_03_growth"
 ENGAGE_PROCESS = "LinkedIn Engage - Comment"
+DRAFT_PROCESS = "LinkedIn Engage - Draft"
+END_MARKER_INSTRUCTION = " After the JSON, on its own final line, write exactly: ===ENGAGE_END==="
 MARKERS = {"[linkedin-engage-hunt]": "hunt", "[linkedin-engage-replies]": "replies"}
 BRAND = "linkedin_engage"
 STAGES = {"hunt": ["new", "hunted", "drafted", "vetted", "delivered"],
@@ -516,13 +518,32 @@ def voice_claude_cli(prompt: str) -> str:
 
 
 def voice_chatgpt(tool: Any, roots: tuple[Path, ...], heartbeat: Callable[[], None]) -> Callable[[str], str]:
-    """ChatGPT through LAO's existing browser-driven draft process (the same one the daily post uses)."""
+    """ChatGPT through the desk's own LAO process, "LinkedIn Engage - Draft".
+
+    It is separate from the daily post's draft process on purpose: that one waits for the post's own end markers
+    and would "nudge" ChatGPT forever for an answer that does not contain them (seen 2026-11-07).
+    """
     def call(prompt: str) -> str:
-        got = linkedin_growth.run_draft(tool, prompt, roots, max_wait=420.0, poll=10.0,
-                                        sleep=lambda s: (heartbeat(), time.sleep(s))[1])
-        if not got.get("raw"):
-            raise RuntimeError(got.get("error") or "ChatGPT returned no text")
-        return str(got["raw"])
+        started = tool.execute(action="start", mode="publish", process_name=DRAFT_PROCESS, scope="production",
+                               confirm_publish=True,
+                               input_args={"prompt": prompt + END_MARKER_INSTRUCTION, "chatgptCredentialAssetName": "chatgptLogin"})
+        if not started.success:
+            raise RuntimeError(f"LAO refused the ChatGPT draft: {str(started.content)[:200]}")
+        lao_job = str(((started.metadata or {}).get("job") or {}).get("id") or "")
+        if not lao_job:
+            raise RuntimeError("LAO returned no job id for the ChatGPT draft")
+        status, _ = linkedin_growth._poll(tool, DRAFT_PROCESS, lao_job, max_wait=420.0, poll=10.0,
+                                          sleep=time.sleep, heartbeat=heartbeat)
+        found = linkedin_growth._find_artifact(roots, lao_job, "linkedin_engage_draft.json") if status == "Successful" else None
+        raw = ""
+        if found:
+            try:
+                raw = str(json.loads(found.read_text(encoding="utf-8"))[0].get("output") or "")
+            except (OSError, ValueError, IndexError, AttributeError):
+                raw = ""
+        if not raw:
+            raise RuntimeError(f"no ChatGPT draft artifact ({status})")
+        return raw
     return call
 
 
