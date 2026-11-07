@@ -685,8 +685,12 @@ def verified_stock_subject(title, subject, outputs):
 
 def stock_context_matches(request, metadata):
     """Reject contradictory stock metadata, including old accepted receipts."""
-    text = " ".join(str(metadata.get(key) or "")
-                    for key in ("title", "tags", "description")).casefold()
+    subject_evidence = metadata.get("subject_evidence") or {}
+    text = " ".join(
+        str(source.get(key) or "")
+        for source in (metadata, subject_evidence if isinstance(subject_evidence, dict) else {})
+        for key in ("title", "tags", "description")
+    ).casefold()
     blocked = ["fantasy", "surreal", "alien", *request.get("blocked_keywords", [])]
     if any(str(word).casefold() in text for word in blocked):
         return False
