@@ -10331,7 +10331,11 @@ def _validate_yatra_contract(record: dict[str, Any], expected_scenes: int | None
 def _yatra_editorial_hold(record: dict[str, Any]) -> bool:
     """Do not buy voice for a structurally valid draft the writer rejected."""
     gate = str(record.get("quality_gate") or "")
-    return bool(re.search(r"(?im)^\s*final_verdict\s*:\s*REWRITE\s*$", gate))
+    # ChatGPT commonly explains the verdict on the same line, for example
+    # ``final_verdict: REWRITE - cadence needs repair``. Requiring REWRITE to
+    # be the final token let an explicitly rejected draft reach paid narration
+    # (Oman, 2026-11-07). The word boundary still avoids REWRITTEN.
+    return bool(re.search(r"(?im)^\s*final_verdict\s*:\s*REWRITE\b", gate))
 
 
 _YATRA_INCIDENT_TOPIC = _SONIA_INCIDENT_TOPIC
