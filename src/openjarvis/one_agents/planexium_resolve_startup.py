@@ -142,7 +142,24 @@ def ensure_ready(settings, *, connector=connect, inventory=processes,
             resolve = connector(settings)
         if resolve is None:
             raise StartupBlocked("bridge_startup_timeout_no_forced_restart")
-        prepare_project(resolve, launched=launched)
+        while True:
+            try:
+                prepare_project(resolve, launched=launched)
+                break
+            except Exception as exc:
+                # A bridge can authenticate just before Resolve's scripting
+                # endpoint is ready, or briefly drop between connection and
+                # project inspection. Treat only that stable provider error as
+                # transient; ownership and project-safety failures still stop.
+                if type(exc).__name__ != "BridgeUnavailable" or now() >= deadline:
+                    raise
+                sleep(3)
+                resolve = connector(settings)
+                while resolve is None and now() < deadline:
+                    sleep(3)
+                    resolve = connector(settings)
+                if resolve is None:
+                    raise StartupBlocked("bridge_startup_timeout_no_forced_restart")
         status("ready")
     except Exception as exc:
         # Bridge exceptions may contain opaque provider data. Store stable codes only.
