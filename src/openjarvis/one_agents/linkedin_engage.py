@@ -306,6 +306,8 @@ def run_vet(cycle: dict[str, Any], voices: dict[str, Callable[[str], str]]) -> d
             continue
         item = _item_for(cycle, row["id"])
         decision = bundle.decorum.decide(row["code"], reviews.get(row["id"]))
+        if not decision["cleared"] and decision["stage"] == "review" and review_note:
+            decision["reasons"] = [review_note]  # say what actually went wrong, not "none was available"
         target = item.get("urn") or item.get("post_urn", "")
         entry = {"id": row["id"], "kind": kind, "target": target, "author": item.get("author") or item.get("commenter", ""),
                  "author_slug": item.get("author_slug", ""), "text": row["text"], "cleared": decision["cleared"],
@@ -488,9 +490,10 @@ def voice_claude_cli(prompt: str) -> str:
         raise RuntimeError("Claude CLI not found")
     import tempfile
     with tempfile.TemporaryDirectory() as scratch:
-        done = subprocess.run([exe, "-p", "--max-turns", "1", "--output-format", "text", "--disallowedTools",
-                               "Bash,Edit,Write,Read,WebFetch,WebSearch", prompt],
-                              capture_output=True, text=True, timeout=240, cwd=scratch, stdin=subprocess.DEVNULL)
+        # The prompt goes in on stdin: --disallowedTools is variadic and would swallow a positional prompt.
+        done = subprocess.run([exe, "-p", "--max-turns", "1", "--output-format", "text",
+                               "--disallowedTools", "Bash,Edit,Write,Read,WebFetch,WebSearch"],
+                              input=prompt, capture_output=True, text=True, timeout=240, cwd=scratch)
     if done.returncode != 0:
         raise RuntimeError(f"claude exited {done.returncode}: {done.stderr[:160]}")
     return done.stdout
