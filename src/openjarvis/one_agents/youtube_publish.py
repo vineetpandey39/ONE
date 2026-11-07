@@ -552,7 +552,12 @@ def approve_and_upload(gate_path: Path, *, synthetic: str, thumbnail: str | None
 
 def autopilot_upload(package_path: Path) -> dict[str, Any]:
     """Prepare the gate and, when the owner's standing policy allows it, upload privately without a click."""
-    gate = prepare_gate(Path(package_path))
+    # LYRA owns localization and writes the authoritative gate before ECHO is
+    # handed the package.  ECHO used to repeat the whole provider fan-out here,
+    # making a healthy upload look stuck for another 10-12 minutes.  A zero
+    # budget preserves any completed localizations while reporting the rest as
+    # non-blocking warnings; ECHO can proceed directly to the private upload.
+    gate = prepare_gate(Path(package_path), localization_budget_seconds=0)
     policy = load_policy()
     if gate["status"] != "awaiting_approval" or not policy.get("auto_upload_private"):
         return gate
