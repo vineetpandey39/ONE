@@ -281,7 +281,7 @@ def ensure_localizations(package_path: Path, locales: tuple[str, ...] = REQUIRED
     return added, failed
 
 
-def prepare_gate(package_path: Path) -> dict[str, Any]:
+def prepare_gate(package_path: Path, *, localization_budget_seconds: float | None = None) -> dict[str, Any]:
     """Run every non-human check and write upload-gate.json beside the package."""
     package_path = Path(package_path)
     from openjarvis.one_agents.youtube_channels import SONIA
@@ -311,7 +311,10 @@ def prepare_gate(package_path: Path) -> dict[str, Any]:
         warnings.append("localization skipped while editorial hold is open")
     else:
         try:
-            added, failed = ensure_localizations(package_path, requested_locales)
+            added, failed = ensure_localizations(
+                package_path, requested_locales,
+                budget_seconds=localization_budget_seconds,
+            )
             if added:
                 warnings.append(f"{len(added)} localizations ({', '.join(added)}) were machine-translated just now: "
                                 "review before going public")

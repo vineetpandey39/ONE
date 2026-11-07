@@ -6850,7 +6850,18 @@ def _run_lyra(job: dict[str, Any]) -> dict[str, Any]:
             }
         try:
             from openjarvis.one_agents import youtube_publish
-            package["upload_gate"] = youtube_publish.prepare_gate(Path(package["path"]))
+            # A packaging-only resume exists to reuse the already-written SEO
+            # and localization work after a downstream repair (most commonly
+            # a user-approved thumbnail). Missing locales are warnings, not
+            # upload blockers, and retrying the same unavailable translation
+            # providers here can hold a repaired private upload for 12 more
+            # minutes. A zero budget preserves every completed locale while
+            # letting ECHO's governed localization pass fill gaps later.
+            localization_budget = 0 if payload.get("resume_packaging_only") else None
+            package["upload_gate"] = youtube_publish.prepare_gate(
+                Path(package["path"]),
+                localization_budget_seconds=localization_budget,
+            )
         except Exception as exc:  # noqa: BLE001 - SEO package remains inspectable
             package["upload_gate"] = {
                 "status": "unavailable",
