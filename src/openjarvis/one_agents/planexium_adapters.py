@@ -672,10 +672,12 @@ def verified_stock_subject(title, subject, outputs):
         return True
     proof = outputs.get("asset_subject_verified") or {}
     verdict = proof.get("preview_verdict") or {}
+    metadata_text = " ".join(str(proof.get(key) or "")
+                             for key in ("description", "tags")).casefold()
     return bool(proof.get("policy") == "selected-metadata-preview-fast-v2"
         and proof.get("accepted") is True and proof.get("title") == title
         and str(proof.get("subject", "")).casefold() == subject.casefold()
-        and subject.casefold() in str(proof.get("description", "")).casefold()
+        and subject.casefold() in metadata_text
         and len(proof.get("preview_sha256", [])) >= 2
         and verdict.get("subject_match") is True
         and all(verdict.get(k) is False for k in ("unusable", "uncertain", "contradiction")))
