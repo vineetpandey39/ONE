@@ -94,12 +94,14 @@ def _launch(playwright: Any, profile: Path, headless: bool) -> Any:
 
 
 def observe(visits: list[dict[str, str]], *, cfg: dict[str, Any], state_path: Path, profile: Path,
-            posts_js: str, now: float | None = None, sleep: Callable[[float], None] = time.sleep,
-            launch: Callable[..., Any] | None = None) -> dict[str, Any]:
+            posts_js: str, pair: Callable[[str], dict[str, str]] | None = None, now: float | None = None,
+            sleep: Callable[[float], None] = time.sleep, launch: Callable[..., Any] | None = None) -> dict[str, Any]:
     """Visit each page, scroll a little, read the rendered posts. Returns {status, detail, visits}.
 
     status: ok | partial | disabled | login_required | challenge | cooling_off | daily_visit_cap | error.
     `launch` is injectable for tests; production uses Playwright's persistent context on the dedicated profile.
+    `pair` turns one feed payload body into {card key hash: activity URN}: the current feed renders cards without their
+    URN, so the payloads the page itself loaded are read (never fetched separately) to tie each card to its post.
     """
     at = time.time() if now is None else now
     state = _load(state_path)
@@ -131,8 +133,16 @@ def observe(visits: list[dict[str, str]], *, cfg: dict[str, Any], state_path: Pa
                 sleep(random.uniform(*pause))
             entry: dict[str, Any] = {"label": visit.get("label", ""), "url": visit["url"], "posts": []}
             results.append(entry)
+            responses: list[Any] = []
+
+            def keep(resp: Any, _bag: list[Any] = responses) -> None:
+                if "sduiid=" in resp.url or "rsc-action" in resp.url:
+                    _bag.append(resp)
+
             try:
-                page.goto(visit["url"], wait_until="domcontentloaded", timeout=45000)
+                if pair is not None:
+                    page.on("response", keep)
+                document = page.goto(visit["url"], wait_until="domcontentloaded", timeout=45000)
                 try:
                     page.wait_for_selector("main", timeout=15000)
                 except Exception:  # noqa: BLE001 - a page without <main> is judged below by what it says
@@ -150,9 +160,17 @@ def observe(visits: list[dict[str, str]], *, cfg: dict[str, Any], state_path: Pa
                     sleep(random.uniform(*scroll_wait))
                 payload = page.evaluate(posts_js) or {}
                 entry["posts"] = list(payload.get("posts") or [])
+                if pair is not None:
+                    entry["urn_by_key"] = _pairs(pair, [document, *responses])
             except Exception as exc:  # noqa: BLE001 - one bad page must not cost the others
                 entry["error"] = f"{type(exc).__name__}: {exc}"[:160]
                 status = "partial"
+            finally:
+                if pair is not None:
+                    try:
+                        page.remove_listener("response", keep)
+                    except Exception:  # noqa: BLE001
+                        pass
     except Exception as exc:  # noqa: BLE001 - a browser that will not start is reported, not hidden
         status, detail = "error", f"{type(exc).__name__}: {exc}"[:200]
     finally:
@@ -175,6 +193,16 @@ def observe(visits: list[dict[str, str]], *, cfg: dict[str, Any], state_path: Pa
         state["blocked_until"] = at + COOL_OFF_SECONDS
     _save(state_path, state)
     return {"status": status, "detail": detail, "visits": results}
+
+
+def _pairs(pair: Callable[[str], dict[str, str]], responses: list[Any]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for resp in responses:
+        try:
+            out.update(pair(resp.text()))
+        except Exception:  # noqa: BLE001 - one unreadable response must not cost the rest
+            continue
+    return out
 
 
 def _body_text(page: Any) -> str:

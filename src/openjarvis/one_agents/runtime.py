@@ -6729,7 +6729,7 @@ def _run_orion(job: dict[str, Any]) -> dict[str, Any]:
         home = _home()
         return observer.observe(visits, cfg=bundle.policy.load_policy().get("observer") or {},
                                 state_path=linkedin_engage.engage_dir(home) / "observer_state.json",
-                                profile=observer.profile_dir(home), posts_js=bundle.feed.POST_BOUNDARIES_JS)
+                                profile=observer.profile_dir(home), posts_js=bundle.feed.POST_BOUNDARIES_JS, pair=bundle.feed.urns_by_key)
 
     return _engage_worker(job, "orion",
                           lambda c: linkedin_engage.run_hunt(c, _home(), search=search, observe=observe),
