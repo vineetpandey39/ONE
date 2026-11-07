@@ -10740,7 +10740,7 @@ def _yatra_record_captures(payload: dict[str, Any], video_title: str) -> dict[st
 
 
 def _yatra_narrate(tool: Any, plan_record: dict[str, Any], asset_folder: str,
-                   video_title: str) -> dict[str, Any]:
+                   video_title: str, job: dict[str, Any] | None = None) -> dict[str, Any]:
     """Speak the approved script in Sonia's own cloned voice.
 
     Narration runs in LAO rather than here because the ElevenLabs key lives in
@@ -10818,6 +10818,13 @@ def _yatra_narrate(tool: Any, plan_record: dict[str, Any], asset_folder: str,
     narration_job = str(((started.metadata or {}).get("job") or {}).get("id") or "")
     if not narration_job:
         return {"ok": False, "detail": "LAO started narration without returning a job id"}
+    if job:
+        job_recovery.attach(_connect, job["id"], narration_job)
+        stages.set_stage(
+            "fabula", stages.EXECUTING,
+            "Producing approved Sonia narration",
+            lao_job=narration_job, lao_process=_YATRA_NARRATION_PROCESS,
+        )
 
     terminal = {"Successful", "Failed", "Stopped", "Cancelled", "Faulted"}
     deadline = time.time() + float(os.environ.get("ONE_YATRA_NARRATION_WAIT_SECONDS", "3600"))
@@ -10825,6 +10832,12 @@ def _yatra_narrate(tool: Any, plan_record: dict[str, Any], asset_folder: str,
     last_job: dict[str, Any] = {}
     while time.time() < deadline:
         time.sleep(float(os.environ.get("ONE_LAO_POLL_SECONDS", "30")))
+        if job and (get_job(job["id"]) or {}).get("status") != "running":
+            tool.execute(action="stop", process_name=_YATRA_NARRATION_PROCESS,
+                         scope="production", job_id=narration_job)
+            return {"ok": False, "status": "Cancelled", "lao_job": narration_job,
+                    "script_file": str(script_file),
+                    "detail": "ONE narration job was cancelled; LAO stop requested"}
         probe = tool.execute(action="status", process_name=_YATRA_NARRATION_PROCESS,
                              scope="production", job_id=narration_job)
         if not probe.success:
@@ -11323,7 +11336,9 @@ def _run_fabula(job: dict[str, Any]) -> dict[str, Any]:
     stages.worker_confirms_receipt("fabula", "Received approved narration checkpoint")
     try:
         stages.set_stage("fabula", stages.EXECUTING, "Validating or producing approved narration and measured scene timings")
-        narration = _yatra_narrate(LaoOrchestratorTool(), record, folder, record["video_title"])
+        narration = _yatra_narrate(
+            LaoOrchestratorTool(), record, folder, record["video_title"], job,
+        )
         if not narration.get("ok"):
             if narration.get("capacity_blocked"):
                 return {"agent": "FABULA", "stage": "narration", "_blocked": True,
