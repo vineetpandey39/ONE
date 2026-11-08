@@ -49,11 +49,27 @@ def align_words(expected: list[str], measured: list[dict], chapter_seconds: floa
     ek, mk = [token_key(x) for x in expected], [token_key(x['word']) for x in measured]
     if not all(ek + mk):
         raise ValueError('Empty normalized token')
-    spans = [(float(x['start']), float(x['end'])) for x in measured]
+    spans = []
+    # Segment-relative ASR additions can represent the same boundary as
+    # 43.300000000000004 and 43.3. Repair only floating-point-scale noise;
+    # real overlapping or out-of-audio anchors must still fail validation.
+    epsilon = 1e-9  # seconds, absolute tolerance (never scaled by chapter length)
     previous_end = 0.0
-    for start, end in spans:
-        if not all(math.isfinite(v) for v in (start, end)) or not 0 <= start <= end <= chapter_seconds or start < previous_end:
+    for word in measured:
+        start, end = float(word['start']), float(word['end'])
+        if not all(math.isfinite(v) for v in (start, end)):
             raise ValueError('Measured timing must be finite, bounded and nonoverlapping')
+        if -epsilon <= start < 0:
+            start = 0.0
+        if chapter_seconds < end <= chapter_seconds + epsilon:
+            end = chapter_seconds
+        if start < previous_end and previous_end - start <= epsilon:
+            start = previous_end
+        if end < start and start - end <= epsilon:
+            end = start
+        if not 0 <= start <= end <= chapter_seconds or start < previous_end:
+            raise ValueError('Measured timing must be finite, bounded and nonoverlapping')
+        spans.append((start, end))
         previous_end = end
 
     # Maximize matched canonical characters; prefer fewer skips and smaller groups.
