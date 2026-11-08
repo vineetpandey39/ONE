@@ -264,6 +264,8 @@ def _valid_tags(tags: list[str], limit: int = 500, max_tag_chars: int = 45) -> l
         tag = _clean(tag, 200).lower()
         tag = re.sub(r"[^\w%₹+.'-]+", " ", tag, flags=re.UNICODE)
         tag = _cut_words(" ".join(tag.split()), max_tag_chars).strip(" ,.-&+/")
+        # Repeated tokens create junk queries such as "travel deals 2026 travel".
+        tag = " ".join(dict.fromkeys(tag.split()))
         # A character limit must never leave a syntactically broken query such
         # as "thailand &" or "flights and" in the upload package.
         tag = re.sub(r"(?:\s+|^)(?:and|or|with|for|to|from|&)$", "", tag).strip(" ,.-&+/")
@@ -293,13 +295,19 @@ def _tag_intent_variants(primary: str, channel: ChannelProfile) -> list[str]:
     base = _query_seed(primary)
     if not base:
         return []
-    suffixes = [
-        "explained", "latest update", "guide", "travel tips", "booking checklist",
-        "what to know", "before travel", "planning tips", "booking tips", "trip checklist",
+    short_base = re.sub(r"\b20\d{2}\b", "", base).strip() if len(base) > 24 else base
+    words = short_base.split()
+    compact = ([" ".join([words[0], *words[-2:]]), " ".join([*words[:2], words[-1]])]
+               if len(words) >= 3 else [])
+    variants = [
+        *compact,
+        f"{short_base} explained", f"{short_base} update", f"{short_base} guide",
+        f"{short_base} tips", f"{short_base} checklist", f"{short_base} planning",
+        f"latest {short_base}", f"{short_base} facts",
     ]
     if channel == SONIA:
-        suffixes.extend(["india", "for indians"])
-    return [f"{base} {suffix}" for suffix in suffixes]
+        variants.extend([f"{short_base} india", f"india {short_base}", f"{short_base} for indians"])
+    return variants
 
 
 _DIRECTIVE_LEAD = re.compile(r"^(explain|show|cover|discuss|break down|compare|describe)\b[:\s-]*", re.I)

@@ -7160,6 +7160,38 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("PLANEXIUM distribution requires explicit private-upload stage")
         from openjarvis.one_agents.planexium import stage_private
         return {"agent": "ECHO", "brand": "planexium", "published": False, **stage_private(payload)}
+    if payload.get("brand") == "sonia_travel_vlogs" and payload.get("stage") == "metadata_tags_refresh":
+        package = Path(str(payload.get("package") or ""))
+        tags = [str(tag) for tag in (payload.get("tags") or [])]
+        expected = str(payload.get("tags_sha256") or "")
+        canonical = json.dumps(tags, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        actual = hashlib.sha256(canonical).hexdigest()
+        if not package.is_file() or not tags or not expected or expected != actual:
+            raise RuntimeError("ECHO received an incomplete or unbound metadata-tags refresh")
+        gate_path = package.parent / "upload-gate.json"
+        gate = json.loads(gate_path.read_text(encoding="utf-8"))
+        video_id = str(gate.get("video_id") or gate.get("already_uploaded_as") or "")
+        requested_video = str(payload.get("video_id") or video_id)
+        if not video_id or requested_video != video_id:
+            raise RuntimeError("ECHO metadata-tags refresh does not match the package upload gate")
+        stages.worker_confirms_receipt("echo", "Received a hash-bound Sonia tag refresh")
+        try:
+            stages.set_stage("echo", stages.EXECUTING,
+                             "Refreshing only the governed tags on the existing Sonia video")
+            from openjarvis.one_agents import youtube_publish
+            uploader = youtube_publish._load("youtube_api_upload")
+            refreshed = uploader.refresh_tags(video_id, tags)
+            receipt = {**refreshed, "package": str(package), "tags_sha256": actual}
+            receipt_path = package.parent / "metadata-tags-refresh-receipt.json"
+            temporary = receipt_path.with_suffix(receipt_path.suffix + ".tmp")
+            temporary.write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(temporary, receipt_path)
+            stages.set_stage("echo", stages.CARRYING_TO_HEAD,
+                             "Returning the verified Sonia tag refresh receipt")
+            return {"agent": "ECHO", "stage": "metadata_tags_refresh", "status": "completed",
+                    "metadata_tags_refresh": receipt, "receipt": str(receipt_path), "handed_to": None}
+        finally:
+            stages.clear_stage("echo")
     if payload.get("brand") == "sonia_travel_vlogs" and payload.get("stage") == "thumbnail_refresh":
         package = Path(str(payload.get("package") or ""))
         thumbnail = Path(str(payload.get("thumbnail") or ""))

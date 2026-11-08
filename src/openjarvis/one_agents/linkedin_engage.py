@@ -667,14 +667,17 @@ def lao_send(tool: Any, roots: tuple[Path, ...], item: dict[str, Any], *, attach
     try:
         probe = tool.execute(action="status", process_name=ENGAGE_PROCESS, scope="production", job_id=lao_job, include_logs=True)
         text = json.dumps((probe.metadata if probe.success else last) or {}, default=str)
-        for needle in ("token expired", "401", "requires the credential username", "throttled", "Unknown workflow action"):
+        for needle in ("ACCESS_DENIED", "token expired", "401", "requires the credential username", "throttled", "Unknown workflow action"):
             if needle in text:
                 error = needle
                 break
     except Exception:  # noqa: BLE001
         pass
     # "token expired" and "throttled" are raised before anything is sent; anything else may have posted.
-    certain_not_posted = error in {"token expired", "requires the credential username", "throttled", "Unknown workflow action"}
+    # ACCESS_DENIED (403) is LinkedIn refusing the call itself, so nothing was created; found live 2026-11-08, when the
+    # token's w_member_social scope turned out not to cover comments (partnerApiSocialActions.CREATE).
+    certain_not_posted = error in {"ACCESS_DENIED", "token expired", "requires the credential username", "throttled",
+                                   "Unknown workflow action"}
     return {"status": "failed" if certain_not_posted else "unknown", "lao_job": lao_job,
             "error": f"LAO {status}" + (f": {error}" if error else "")}
 
