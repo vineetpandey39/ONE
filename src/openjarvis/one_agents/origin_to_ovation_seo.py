@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from openjarvis.one_agents.youtube_seo import _valid_tags
+from openjarvis.one_agents.youtube_seo import _query_seed, _valid_tags, _viewer_facing
 
 MAX_DESCRIPTION = 5000
 MIN_TAGS = 15
@@ -19,7 +19,17 @@ MAX_CHAPTERS = 8
 
 
 def primary_query(subject: str, metadata: dict[str, Any]) -> str:
-    return str(metadata.get("primary_query") or f"{subject} biography").strip()
+    value = str(metadata.get("primary_query") or f"{subject} biography")
+    return " ".join(re.sub(r"[^\w%₹+.'-]+", " ", value, flags=re.UNICODE).strip().split())
+
+
+def secondary_queries(subject: str, metadata: dict[str, Any]) -> list[str]:
+    primary = primary_query(subject, metadata)
+    sport = _query_seed(metadata.get("sport") or "sports")
+    supplied = [_query_seed(q) for q in metadata.get("secondary_queries", []) if str(q).strip()]
+    grounded = [f"{subject} life story", f"{subject} career", f"{subject} documentary",
+                f"{subject} journey", f"{sport} biography"]
+    return [q for q in dict.fromkeys(supplied + grounded) if q and q != primary][:6]
 
 
 def concise_chapters(chapters: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -41,7 +51,7 @@ def ranked_tags(subject: str, metadata: dict[str, Any], title: str) -> list[str]
         f"{subject} life story", f"{subject} success story",
         f"{sport} biography", f"{sport} documentary", f"{sport} history",
         "sports biography", "athlete biography", "Origin to Ovation", *supplied,
-        *metadata.get("secondary_queries", []),
+        *secondary_queries(subject, metadata),
     ]
     return _valid_tags(candidates, limit=450)[:MAX_TAGS]
 
@@ -58,8 +68,8 @@ def hashtags(subject: str, metadata: dict[str, Any]) -> list[str]:
 def build(*, subject: str, title: str, metadata: dict[str, Any], chapters: list[dict[str, Any]],
           sources: list[dict[str, Any]], voice_name: str) -> dict[str, Any]:
     query = primary_query(subject, metadata)
-    lead = str(metadata.get("description_lead") or
-               f"{query}: follow the documented journey behind {title}.").strip()
+    lead = _viewer_facing(str(metadata.get("description_lead") or ""),
+                          f"{query}: this video follows the documented journey behind {title}.")
     if query.lower() not in lead[:200].lower():
         lead = f"{query} - {lead}"
     selected_chapters = concise_chapters(chapters)
@@ -75,10 +85,11 @@ def build(*, subject: str, title: str, metadata: dict[str, Any], chapters: list[
     )
     package = {
         "title": title, "description": description, "primary_query": query,
-        "secondary_queries": list(metadata.get("secondary_queries", [])),
+        "secondary_queries": secondary_queries(subject, metadata),
         "tags": ranked_tags(subject, metadata, title), "hashtags": hashtags(subject, metadata),
         "chapters": selected_chapters, "original_chapter_count": len(chapters), "sources": sources, "seo_owner": "ARES",
-        "strategy": "unique_story_promise_plus_subject_search_intent_v1",
+        "strategy": "unique_story_promise_plus_subject_search_intent_v2",
+        "seo_schema_version": "1.2",
         "post_publish_learning": {
             "minimum_wait": "Wait for processed traffic-source and retention data; never infer causation from a few views.",
             "compare": ["impressions", "ctr_by_traffic_source", "youtube_search_terms", "intro_30s",
@@ -89,9 +100,11 @@ def build(*, subject: str, title: str, metadata: dict[str, Any], chapters: list[
     errors = audit(package, subject)
     if errors:
         raise ValueError("ARES Origin to Ovation SEO blocked: " + "; ".join(errors))
+    package["seo_strategy_audit"] = strategy_audit(package)
     package["seo_audit"] = {"status": "passed", "checks": {
         "unique_story_title": True, "primary_query_in_first_200_chars": True,
         "concise_chapters": True, "tag_budget": True, "three_hashtags": True,
+        "shared_strategy_passed": True,
     }}
     return package
 
@@ -119,4 +132,20 @@ def audit(package: dict[str, Any], subject: str) -> list[str]:
         errors.append("use exactly three hashtags")
     if package.get("seo_owner") != "ARES":
         errors.append("SEO package must be owned by ARES")
+    if not strategy_audit(package)["ok"]:
+        errors.append("shared SEO strategy audit failed")
     return errors
+
+
+def strategy_audit(package: dict[str, Any]) -> dict[str, Any]:
+    tags = list(package.get("tags") or [])
+    lead = str(package.get("description") or "").split("CHAPTERS\n", 1)[0]
+    checks = {
+        "natural_primary_query": 2 <= len(str(package.get("primary_query") or "").split()) <= 9,
+        "four_secondary_queries": len(package.get("secondary_queries") or []) >= 4,
+        "clean_tag_set": MIN_TAGS <= len(tags) <= MAX_TAGS and not any(
+            re.search(r"(?:\s|^)(and|or|with|for|to|from|&)$", str(tag)) for tag in tags),
+        "viewer_facing_copy": not bool(re.match(
+            r"^(explain|show|cover|discuss|break down|compare|describe)\b", lead.strip(), re.I)),
+    }
+    return {"ok": all(checks.values()), "checks": checks}

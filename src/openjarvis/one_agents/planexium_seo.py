@@ -6,7 +6,9 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from openjarvis.one_agents.youtube_channels import PLANEXIUM
-from openjarvis.one_agents.youtube_seo import description_audit, ollama_json, _valid_tags
+from openjarvis.one_agents.youtube_seo import (
+    description_audit, ollama_json, _query_seed, _valid_tags, _viewer_facing,
+)
 
 
 def _ares_chat_json(model, prompt, payload, **kwargs):
@@ -67,8 +69,67 @@ def digest(path):
 
 def metadata_hash(package):
     return hashlib.sha256(json.dumps({k: package.get(k) for k in
-        ("recommended_title", "description", "tags", "primary_query")},
+        ("recommended_title", "description", "tags", "primary_query", "secondary_queries")},
         sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def _strategy_fields(out, package, science):
+    """Apply one grounded query/tag strategy to model and deterministic paths."""
+    title = str(out.get("title") or package.get("recommended_title") or "").strip()
+    primary = _query_seed(out.get("primary_query") or title)
+    if not 2 <= len(primary.split()) <= 9:
+        primary = _query_seed(title)
+    supplied = [_query_seed(q) for q in out.get("secondary_queries", []) if str(q).strip()]
+    seeds = [
+        f"{primary} explained", f"{primary} science", f"{primary} research",
+        f"{primary} documentary", _query_seed(science.get("video_title") or ""),
+    ]
+    secondary = [q for q in dict.fromkeys(supplied + seeds) if q and q != primary][:6]
+    tags = out.get("tags") or []
+    if isinstance(tags, str):
+        tags = tags.split(",")
+    words = re.findall(r"[a-z0-9]+", primary)
+    compact = [" ".join(words[:2]), " ".join(words[-2:]), " ".join(words[:3]),
+               " ".join(words[-3:]), "science explained", "science documentary",
+               "research explained", "evidence review", "space science"]
+    tags = _valid_tags([*tags, primary, *secondary, title, "the planexium",
+                        f"{primary} facts", f"{primary} analysis", *compact], limit=450)[:25]
+    opening = _viewer_facing(str(out.get("opening") or ""),
+                             f"This video explains {primary} using the supplied source-grounded science.")
+    if primary.casefold() not in opening[:200].casefold():
+        opening = f"{primary}: {opening}"
+    return title, primary, secondary, tags, opening
+
+
+def _strategy_audit(package):
+    tags = list(package.get("tags") or [])
+    lead = str(package.get("description") or "").split("CHAPTERS\n", 1)[0]
+    checks = {
+        "natural_primary_query": 2 <= len(str(package.get("primary_query") or "").split()) <= 9,
+        "four_secondary_queries": len(package.get("secondary_queries") or []) >= 4,
+        "clean_tag_set": 15 <= len(tags) <= 25 and not any(
+            re.search(r"(?:\s|^)(and|or|with|for|to|from|&)$", str(tag)) for tag in tags),
+        "viewer_facing_copy": not bool(re.match(
+            r"^(explain|show|cover|discuss|break down|compare|describe)\b", lead.strip(), re.I)),
+    }
+    return {"ok": all(checks.values()), "checks": checks}
+
+
+def _deterministic_output(package, science):
+    title = str(package.get("recommended_title") or science.get("video_title") or "Science Explained").strip()
+    primary = _query_seed(title)
+    topic = primary or "this science topic"
+    words = re.findall(r"[A-Za-z0-9]+", title)[:3]
+    topic_hash = "#" + "".join(word[:1].upper() + word[1:] for word in words)
+    if not re.fullmatch(r"#[A-Za-z][A-Za-z0-9_]{1,29}", topic_hash):
+        topic_hash = "#ScienceExplained"
+    return {
+        "title": title, "primary_query": primary,
+        "secondary_queries": [], "tags": [],
+        "opening": f"This video explains {topic} using the verified evidence and measured chapter plan.",
+        "hashtags": list(dict.fromkeys([topic_hash, "#Science", "#ThePlanexium"]))[:3],
+        "comment": f"Which part of {topic} should The Planexium explain next?",
+    }
 
 
 def require_seo(package):
@@ -79,6 +140,9 @@ def require_seo(package):
     audit["checks"]["valid_title"] = 1 <= len(package.get("recommended_title", "")) <= 100
     audit["checks"]["tag_budget_under_500"] = audit["tag_budget_chars"] <= 500
     audit["checks"]["ares_owned"] = package.get("seo_owner") == "ARES"
+    strategy = _strategy_audit(package)
+    audit["checks"]["shared_strategy_passed"] = strategy["ok"]
+    audit["checks"]["strategy_receipt_current"] = package.get("seo_strategy_audit") == strategy
     audit["checks"]["metadata_unchanged_since_audit"] = (
         package.get("seo_metadata_sha256") == metadata_hash(package))
     audit["ok"] = all(audit["checks"].values())
@@ -99,7 +163,7 @@ def normalize_comment(value):
 def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=None):
     prompt = (
         "You are ARES, the SEO agent for The Planexium science YouTube channel. "
-        "Return JSON: title (string), primary_query (string), opening (string), "
+        "Return JSON: title (string), primary_query (string), secondary_queries (array of 4-6 strings), opening (string), "
         "tags (JSON array of strings), hashtags (JSON array of exactly 3 strings). "
         "Use only the supplied science/script; distinguish simulated Mars on Earth from actual Mars. "
         "Title max 100 characters, compelling but factual, making the same promise as the thumbnail you choose. "
@@ -138,6 +202,7 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
     thumbnails = [{"name": v["name"], "text": concepts[v["name"]].get("text"),
                    "idea": concepts[v["name"]].get("left_usp")} for v in rendered]
     errors = None
+    semantic_failure = False
     for attempt in range(2):
         out = llm(prompt, {"science": {"video_title": science.get("video_title"),
                                       "claims": science.get("claims", [])},
@@ -149,7 +214,7 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
                           "previous_validation_error": errors})
         try:
             result = dict(package)
-            title = str(out["title"]).strip()
+            title, query, secondary_queries, tags, opening = _strategy_fields(out, package, science)
             # The packaging stage may already provide a small, factual title
             # set whose tokens exactly pay off the highest-scoring rendered
             # thumbnail. Once that set is non-empty, do not let a model drift
@@ -176,11 +241,10 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
                     raise ValueError("title must use the matching factual title candidate verbatim")
                 result["thumbnail_path"] = chosen["path"]
                 result["thumbnail_pairing"] = {"thumbnail": chosen["name"], "title": title, "chosen_by": "ARES"}
-            opening = str(out["opening"]).strip()
             if re.search(r"\b(proves?|proving|findings show)\b", opening, re.I):
+                semantic_failure = True
                 raise ValueError("Description must distinguish research aims from established results")
             opening = opening.replace("**", "")
-            query = " ".join(str(out["primary_query"]).split())
             if not query or len(query) > 80:
                 raise ValueError("Primary query must be a concise natural search phrase")
             if query.casefold() not in opening[:200].casefold():
@@ -191,9 +255,6 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
             if isinstance(hashtags, list):
                 hashtags = ["#"+re.sub(r"\s+", "", str(h).strip().lstrip("#"))
                             for h in hashtags]
-            tags = out["tags"]
-            if isinstance(tags, str):
-                tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
             if (not isinstance(hashtags, list) or len(set(hashtags)) != 3
                     or any(not re.fullmatch(r"#[A-Za-z][A-Za-z0-9_]{1,29}", h) for h in hashtags)):
                 raise ValueError("Exactly three valid distinct hashtags required")
@@ -205,17 +266,42 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
             tail = "CHAPTERS\n"+old.split("CHAPTERS\n", 1)[1]
             tail = re.sub(r"(?<!\w)#[A-Za-z0-9_]+", "", tail).strip()
             result.update(recommended_title=title, primary_query=query,
+                          secondary_queries=secondary_queries,
                           description=opening+"\n\n"+tail+"\n\n"+" ".join(hashtags),
-                          tags=_valid_tags(tags, limit=450), hashtags=hashtags, seo_owner="ARES",
+                          tags=tags, hashtags=hashtags, seo_owner="ARES",
                           seo_job_id=job_id, metadata_source="ares_model",
+                          seo_schema_version="1.2",
                           public_publish_authorized=False)
             result.update(owner="ARES", handoff="PLANEXIUM -> ARES SEO audit -> human upload review")
+            result["seo_strategy_audit"] = _strategy_audit(result)
             result["seo_metadata_sha256"] = metadata_hash(result)
             result["description_audit"] = require_seo(result)
             return result
         except (ValueError, KeyError, TypeError) as exc:
             errors = str(exc)
-    raise ValueError("ARES could not produce passing SEO: "+str(errors))
+    # A model-format failure must not strand an otherwise reviewed video. Keep
+    # thumbnail/scientific semantic failures fail-closed; only structural output
+    # failures use the same deterministic normalization and audit path.
+    if thumbnails or semantic_failure:
+        raise ValueError("ARES could not produce passing SEO: "+str(errors))
+    out = _deterministic_output(package, science)
+    result = dict(package)
+    title, query, secondary_queries, tags, opening = _strategy_fields(out, package, science)
+    old = package["description"]
+    if "CHAPTERS\n" not in old:
+        raise ValueError("ARES could not produce passing SEO: Measured chapters missing")
+    tail = "CHAPTERS\n" + old.split("CHAPTERS\n", 1)[1]
+    tail = re.sub(r"(?<!\w)#[A-Za-z0-9_]+", "", tail).strip()
+    result.update(recommended_title=title, primary_query=query, secondary_queries=secondary_queries,
+                  description=opening+"\n\n"+tail+"\n\n"+" ".join(out["hashtags"]),
+                  tags=tags, hashtags=out["hashtags"], seo_owner="ARES", seo_job_id=job_id,
+                  metadata_source="ares_deterministic_fallback", seo_schema_version="1.2",
+                  pinned_comment_draft=out["comment"], public_publish_authorized=False,
+                  owner="ARES", handoff="PLANEXIUM -> ARES SEO audit -> human upload review")
+    result["seo_strategy_audit"] = _strategy_audit(result)
+    result["seo_metadata_sha256"] = metadata_hash(result)
+    result["description_audit"] = require_seo(result)
+    return result
 
 
 def run_job(job):

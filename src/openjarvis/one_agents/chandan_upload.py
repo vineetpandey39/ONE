@@ -83,6 +83,10 @@ def prepare(mission: Path) -> dict:
     seo=_read(files['seo'])
     if seo.get('master_sha256')!=hashes['master_sha256']:
         raise ValueError('SEO references a different master')
+    from openjarvis.one_agents.origin_to_ovation_seo import audit as seo_audit
+    subject=str(_read(mission/'mission.json').get('subject') or seo.get('subject') or '').strip()
+    if not subject or seo_audit(seo,subject):
+        raise ValueError('Origin to Ovation SEO strategy gate failed or is stale')
     package={**seo,'brand':'origin_to_ovation','channel_id':channel_id,
         'recommended_title':seo['title'],'master':str(files['master']),
         'thumbnail_path':str(files['thumbnail']),'caption':str(files['caption']),
