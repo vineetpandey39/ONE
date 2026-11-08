@@ -7335,6 +7335,22 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
                     "handed_to": {"agent": "HELIOS", "job_id": report["id"]}}
         finally:
             stages.clear_stage("echo")
+    if payload.get("brand") == "sonia_travel_vlogs" and payload.get("stage") == "comment_duplicates_reconcile":
+        stages.worker_confirms_receipt("echo", "Received exact duplicate-comment reconciliation from HELIOS")
+        try:
+            from openjarvis.one_agents import youtube_publish
+            stages.set_stage("echo", stages.EXECUTING, "Reconciling exact Sonia-authored duplicate comments")
+            videos = [str(value) for value in (payload.get("videos") or []) if str(value).strip()]
+            if not videos:
+                raise RuntimeError("comment reconciliation needs at least one governed video id")
+            uploader = youtube_publish._load("youtube_api_upload")
+            results = uploader.reconcile_comment_duplicates(videos)
+            return {"agent": "ECHO", "stage": "comment_duplicates_reconcile", "status": "completed",
+                    "results": results,
+                    "content": f"Kept one canonical comment and removed "
+                               f"{sum(len(row.get('removed') or []) for row in results)} exact duplicate(s)."}
+        finally:
+            stages.clear_stage("echo")
     if payload.get("brand") == "sonia_travel_vlogs" and payload.get("stage") == "pending_comments":
         # The channel comment waits for the video to go public (comments are off while it is private).
         stages.worker_confirms_receipt("echo", "Received the owed channel comments from HELIOS")
@@ -7356,6 +7372,8 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
             return {"agent": "ECHO", "stage": "pending_comments", "results": posted, "languages": languages,
                     "planexium": planexium_posted,
                     "content": f"{sum(1 for r in everything if r.get('posted'))} comment(s) posted; "
+                               f"{sum(1 for r in everything if r.get('existing'))} existing comment(s) adopted; "
+                               f"{sum(int(r.get('duplicates_removed') or 0) for r in everything)} duplicate(s) removed; "
                                f"{sum(1 for r in everything if r.get('waiting'))} video(s) still private. "
                                f"Languages added on {sum(1 for r in languages if r.get('localized'))} upload(s). "
                                "Pin each posted comment in Studio."}
