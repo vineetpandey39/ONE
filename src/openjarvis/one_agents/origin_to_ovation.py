@@ -292,6 +292,12 @@ def image_batch_provider(path, shots):
         "P73": "Create one full-frame 16:9 photoreal cinematic CGI scene of an anonymous mature adult footballer in true side profile at a generic modern stadium, plain pale-blue training shirt, medium-wide framing, short dark hair and trimmed beard, natural athletic posture, face not identifiable, no awards, trophies, names, logos, flags, text or match recreation.",
         "P74": "Create one full-frame 16:9 photoreal cinematic CGI low-angle wide stadium portrait with one small anonymous adult footballer near the centre circle, plain pale-blue-and-white kit, face indistinct due to distance, realistic floodlights and restrained atmosphere, no celebration, trophies, names, logos, flags, scoreboards or readable text.",
     }
+    if manifest.get("subject_id") == "usain-bolt":
+        recovery_prompts.update({
+            "P32": "Create one full-frame 16:9 original cinematic CGI sprint illustration. True-side action view of the tall adult Black sprint protagonist from the attached reference running upright on a straight athletics track, plain black-and-yellow unbranded singlet, technically correct arm drive, hip extension, stride and foot contact, generic evening stadium, restrained motion blur, no named person, competitors, event recreation, logos, flags, bib text, scoreboards or watermarks.",
+            "P52": "Create one full-frame 16:9 original cinematic CGI sprint illustration. True-side action view of the mature tall Black sprint protagonist from the attached reference running on a generic international track, plain black-and-yellow unbranded singlet, realistic stride cycle and anatomically correct hands, arms, legs and feet, neutral stadium lighting, no named person, exact race, competitors, finish gesture, logos, flags, bib text, scoreboards or watermarks.",
+            "P73": "Create one full-frame 16:9 original cinematic CGI athletics illustration. Wide generic modern sprint stadium with the mature tall Black sprint protagonist from the attached reference standing in a front three-quarter medium view beside the track, plain black-and-yellow unbranded singlet, calm reflective expression and subtle layered lighting suggesting a long career, no named person, multiple ages, event recreation, logos, flags, bib text, scoreboards, trophies or watermarks.",
+        })
     recovery_only = all(shot["shot_id"] in recovery_prompts for shot in missing)
     write(batch_plan, {"calls": [{
         "kind": "scene", "filename": Path(shot["image"]).name,
