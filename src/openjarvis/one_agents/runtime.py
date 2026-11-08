@@ -6781,7 +6781,15 @@ def _run_nuntius(job: dict[str, Any]) -> dict[str, Any]:
             return linkedin_engage.lao_send(
                 tool, _YATRA_ROBOT_ARTIFACTS, item, attach=lambda lao: job_recovery.attach(_connect, job["id"], lao),
                 heartbeat=lambda: job_recovery.heartbeat(_connect, job["id"]))
-        linkedin_engage.run_deliver(cycle, _home(), send=send)
+        def verify(urn: str) -> dict[str, Any]:
+            # Reads the post's own permalink in the observer's signed-in profile; never clicks, types or comments.
+            from openjarvis.one_agents import linkedin_feed_observer as observer
+            bundle = linkedin_engage.libs()
+            home = _home()
+            return observer.verify_post(urn, cfg=bundle.policy.load_policy().get("observer") or {},
+                                        state_path=linkedin_engage.engage_dir(home) / "observer_state.json",
+                                        profile=observer.profile_dir(home), posts_js=bundle.feed.POST_BOUNDARIES_JS)
+        linkedin_engage.run_deliver(cycle, _home(), send=send, verify=verify)
 
     return _engage_worker(job, "nuntius", deliver, "Delivering the comments THEMIS cleared")
 

@@ -208,6 +208,86 @@ def observe(visits: list[dict[str, str]], *, cfg: dict[str, Any], state_path: Pa
     return {"status": status, "detail": detail, "visits": results}
 
 
+def may_verify(cfg: dict[str, Any], state: dict[str, Any], now: float) -> tuple[bool, str]:
+    """The gate for a permalink check: same stop rules as the observer, but its own small daily budget."""
+    if not cfg.get("enabled", False):
+        return False, "disabled"
+    if state.get("login_required"):
+        return False, "login_required"
+    if float(state.get("blocked_until", 0)) > now:
+        return False, "cooling_off"
+    used = int(state.get("verifies_today", 0)) if state.get("verifies_day") == _day(now) else 0
+    if used + 1 > int(cfg.get("verifies_per_day", 10)):
+        return False, "daily_verify_cap"
+    return True, ""
+
+
+def verify_post(urn: str, *, cfg: dict[str, Any], state_path: Path, profile: Path, posts_js: str,
+                now: float | None = None, sleep: Callable[[float], None] = time.sleep,
+                launch: Callable[..., Any] | None = None) -> dict[str, Any]:
+    """Open ONE post's own permalink and hand back what the page shows, so the caller can confirm it is the post a
+    comment was written for. Reads only; same stop rules as `observe`. Returns {status, detail, post}."""
+    at = time.time() if now is None else now
+    state = _load(state_path)
+    allowed, why = may_verify(cfg, state, at)
+    if not allowed:
+        return {"status": why, "detail": why.replace("_", " "), "post": None}
+    if not profile.exists():
+        state.update(login_required=True, last_status="login_required", last_status_at=at)
+        _save(state_path, state)
+        return {"status": "login_required", "detail": "no signed-in observer profile yet", "post": None}
+
+    digits = urn.rsplit(":", 1)[-1]
+    status, detail, post = "ok", "", None
+    context = None
+    playwright = None
+    try:
+        if launch is None:
+            from playwright.sync_api import sync_playwright
+            playwright = sync_playwright().start()
+            context = _launch(playwright, profile, headless=bool(cfg.get("headless", False)))
+        else:
+            context = launch(profile)
+        page = context.pages[0] if context.pages else context.new_page()
+        page.goto(f"https://www.linkedin.com/feed/update/{urn}/", wait_until="domcontentloaded", timeout=45000)
+        try:
+            page.wait_for_selector("main", timeout=15000)
+        except Exception:  # noqa: BLE001 - judged below by what the page says
+            pass
+        sleep(random.uniform(2.0, 4.0))
+        problem = _page_problem(page.url, _body_text(page))
+        if problem:
+            status, detail = ("login_required" if problem == "login" else
+                              "challenge" if problem in {"challenge", "blocked"} else "error"), problem
+        elif digits not in (page.url or ""):
+            status, detail = "unavailable", "the permalink did not open on that post (removed, or redirected)"
+        else:
+            posts = list((page.evaluate(posts_js) or {}).get("posts") or [])
+            if not posts:
+                status, detail = "unavailable", "no post card on the permalink page"
+            else:
+                post = posts[0]
+    except Exception as exc:  # noqa: BLE001 - a failed check is reported as not verified, never as a pass
+        status, detail = "error", f"{type(exc).__name__}: {exc}"[:200]
+    finally:
+        for closer in (getattr(context, "close", None), getattr(playwright, "stop", None)):
+            try:
+                if closer:
+                    closer()
+            except Exception:  # noqa: BLE001
+                pass
+
+    state = _load(state_path)
+    used = int(state.get("verifies_today", 0)) if state.get("verifies_day") == _day(at) else 0
+    state.update(verifies_day=_day(at), verifies_today=used + 1, last_verify_status=status, last_verify_at=at)
+    if status == "login_required":
+        state["login_required"] = True
+    if status == "challenge":
+        state["blocked_until"] = at + COOL_OFF_SECONDS
+    _save(state_path, state)
+    return {"status": status, "detail": detail, "post": post}
+
+
 def _pairs(pair: Callable[[str], dict[str, str]], bodies: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     for body in bodies:

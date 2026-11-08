@@ -376,9 +376,35 @@ def run_vet(cycle: dict[str, Any], voices: dict[str, Callable[[str], str]]) -> d
 
 # --------------------------------------------------------------------------- NUNTIUS
 
+def verify_target(bundle: Libs, verify: Callable[[str], dict[str, Any]] | None, urn: str,
+                  held: dict[str, Any]) -> tuple[str, str]:
+    """Open the post's own permalink and confirm it is the post the comment was written for.
+
+    -> ('verified' | 'mismatch' | 'unverified', detail). Only a positive match is 'verified'; a page that could not be
+    read, a verifier that is not wired, a cap or a block are all 'unverified', never a pass. Added 2026-11-08 after a
+    comment about one post was filed against another post's URN (a card paired with its neighbour's URN).
+    """
+    if verify is None:
+        return "unverified", "no permalink verifier is wired"
+    try:
+        seen = verify(urn)
+    except Exception as exc:  # noqa: BLE001
+        return "unverified", f"permalink check failed: {type(exc).__name__}: {str(exc)[:120]}"
+    if seen.get("status") != "ok" or not seen.get("post"):
+        return "unverified", f"permalink not read ({seen.get('detail') or seen.get('status')})"
+    verdict, why = bundle.feed.same_post(held.get("author", ""), held.get("text", ""), seen["post"],
+                                         check_author=held.get("source") == "feed")
+    if verdict == "same":
+        return "verified", ""
+    return ("mismatch" if verdict == "different" else "unverified"), why
+
+
 def run_deliver(cycle: dict[str, Any], home: Path, *, send: Callable[[dict[str, Any]], dict[str, Any]],
-                now: float | None = None) -> dict[str, Any]:
-    """Send what THEMIS cleared, inside the caps - or, in shadow mode, record it and send nothing."""
+                verify: Callable[[str], dict[str, Any]] | None = None, now: float | None = None) -> dict[str, Any]:
+    """Send what THEMIS cleared, inside the caps - or, in shadow mode, record it and send nothing.
+
+    Before any comment is sent (and, so the Chairman reviews only checked drafts, before it is recorded in shadow mode)
+    the post's permalink is opened and its text compared with the text the comment was written for."""
     bundle = libs()
     policy = bundle.policy.load_policy()
     auto = bundle.policy.posting_enabled(policy)
@@ -407,8 +433,24 @@ def run_deliver(cycle: dict[str, Any], home: Path, *, send: Callable[[dict[str, 
         if kind == "comment" and at - float(item.get("posted_ts", at)) > policy["limits"]["max_post_age_hours"] * 3600:
             outcomes.append({**base, "status": "held", "reasons": ["post went stale before sending"]})
             continue
+        notes: list[str] = []
+        if kind == "comment" and (policy.get("observer") or {}).get("verify_before_send", True):
+            state, detail = verify_target(bundle, verify, base["target"], _item_for(cycle, item["id"]))
+            if state == "mismatch":
+                outcomes.append({**base, "status": "held", "reasons": [
+                    "permalink shows a different post than the one this comment was written for: " + detail]})
+                mark_handled(home, base["target"], at)
+                continue
+            if state == "unverified":
+                if auto:
+                    outcomes.append({**base, "status": "deferred", "reasons": ["not sent, permalink not verified: " + detail]})
+                    continue
+                notes.append("permalink NOT verified: " + detail)
+            else:
+                notes.append("permalink verified")
         if not auto:
-            outcomes.append({**base, "status": "shadow", "reasons": ["desk is in shadow mode: vetted, recorded, not sent"]})
+            outcomes.append({**base, "status": "shadow",
+                             "reasons": ["desk is in shadow mode: vetted, recorded, not sent"] + notes})
             if kind == "comment":
                 mark_handled(home, base["target"], at)
             continue
