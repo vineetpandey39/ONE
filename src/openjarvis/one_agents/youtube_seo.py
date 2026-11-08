@@ -257,13 +257,13 @@ def chapter_labels(cues: list, screen_texts: list[str], title: str, llm: LLM | N
     return [(i, labels[i]) for i in indices], "fallback-grouped" if n >= 5 else "fallback"
 
 
-def _valid_tags(tags: list[str], limit: int = 500) -> list[str]:
+def _valid_tags(tags: list[str], limit: int = 500, max_tag_chars: int = 45) -> list[str]:
     """Return unique tags that fit YouTube's exact comma-separated budget."""
     out = []
     for tag in tags:
         tag = _clean(tag, 200).lower()
         tag = re.sub(r"[^\w%₹+.'-]+", " ", tag, flags=re.UNICODE)
-        tag = _cut_words(" ".join(tag.split()), 45).strip(" ,.-&+/")
+        tag = _cut_words(" ".join(tag.split()), max_tag_chars).strip(" ,.-&+/")
         # A character limit must never leave a syntactically broken query such
         # as "thailand &" or "flights and" in the upload package.
         tag = re.sub(r"(?:\s+|^)(?:and|or|with|for|to|from|&)$", "", tag).strip(" ,.-&+/")
@@ -276,6 +276,30 @@ def _valid_tags(tags: list[str], limit: int = 500) -> list[str]:
         if api_chars <= limit:
             out.append(tag)
     return out
+
+
+def _tag_api_chars(tags: list[str]) -> int:
+    """The character budget used by YouTube's Data API for comma-separated tags."""
+    return sum(len(tag) + tag.count(" ") for tag in tags) + max(0, len(tags) - 1)
+
+
+def _tag_intent_variants(primary: str, channel: ChannelProfile) -> list[str]:
+    """Grounded query variants that keep fallback metadata as useful as model metadata.
+
+    A failed wording model used to leave Sonia videos with a handful of generic
+    one-word tags. These variants only extend the already-grounded primary
+    query, so they cannot invent another destination, brand, price or rule.
+    """
+    base = _query_seed(primary)
+    if not base:
+        return []
+    suffixes = [
+        "explained", "latest update", "guide", "travel tips", "booking checklist",
+        "what to know", "before travel", "planning tips", "booking tips", "trip checklist",
+    ]
+    if channel == SONIA:
+        suffixes.extend(["india", "for indians"])
+    return [f"{base} {suffix}" for suffix in suffixes]
 
 
 _DIRECTIVE_LEAD = re.compile(r"^(explain|show|cover|discuss|break down|compare|describe)\b[:\s-]*", re.I)
@@ -397,10 +421,14 @@ def seo_strategy_audit(record: dict, title: str, meta: dict, tags: list[str], ho
         platform_words = set(_words(platform.group(1)))
         source_match = any(platform_words & _words(url) for url in urls)
     lead = " ".join(meta.get("intro") or [])
+    tag_count_floor = 15 if str(record.get("brand") or "sonia_travel_vlogs") == SONIA.brand else 8
+    tag_budget_floor = 350 if tag_count_floor == 15 else 200
     checks = {
         "natural_primary_query": 2 <= len(str(meta.get("primary_query") or "").split()) <= 9,
         "four_secondary_queries": len(meta.get("secondary_queries") or []) >= 4,
-        "clean_tag_set": len(tags) >= 8 and not any(re.search(r"(?:\s|^)(and|or|with|for|to|from|&)$", t) for t in tags),
+        "clean_tag_set": len(tags) >= tag_count_floor and not any(
+            re.search(r"(?:\s|^)(and|or|with|for|to|from|&)$", t) for t in tags),
+        "useful_tag_budget": _tag_api_chars(tags) >= tag_budget_floor,
         "viewer_facing_copy": not bool(_DIRECTIVE_LEAD.match(lead)),
         "title_thumbnail_number_alignment": not hook_numbers or hook_numbers <= title_numbers,
         "commercial_offer_official_source": source_match,
@@ -416,16 +444,20 @@ def _title_head(text: str) -> str:
 
 def _ranked_tags(meta: dict, title: str, packaging: dict, channel: ChannelProfile = SONIA) -> list[str]:
     """Build broad but truthful query coverage, ordered strongest-first."""
+    model_tags = [tag for tag in meta.get("tags", [])
+                  if channel != SONIA or len(str(tag).split()) >= 2]
     candidates = [
         meta.get("primary_query", ""),
         _title_head(title),
-        *meta.get("tags", []),
+        *model_tags,
         *meta.get("secondary_queries", []),
         # Titles are sentences; only their heads are queries ('… | 8' and '… — is this' were tags on 2026-10-06).
         *[_title_head(packaging.get(k, "")) for k in ("title_a_searchable", "title_b_intriguing", "title_c_hybrid")],
+        *_tag_intent_variants(meta.get("primary_query", ""), channel),
         channel.display_name.lower(),
     ]
-    return _valid_tags([t for t in candidates if isinstance(t, str) and t.strip()])
+    return _valid_tags([t for t in candidates if isinstance(t, str) and t.strip()],
+                       max_tag_chars=36 if channel == SONIA else 45)
 
 
 def enforce_grounded_terminology(value: Any, record: dict[str, Any]) -> Any:
@@ -565,7 +597,9 @@ def description_audit(description: str, primary_query: str, tags: list[str],
     first_200 = description[:200].casefold()
     query = " ".join(primary_query.casefold().split())
     chapter_count = len(re.findall(r"(?m)^\d{1,2}:\d{2}\s+", description))
-    tag_chars = sum(len(tag) + tag.count(" ") for tag in tags) + max(0, len(tags) - 1)
+    tag_chars = _tag_api_chars(tags)
+    tag_count_floor = 15 if channel == SONIA else 5
+    tag_budget_floor = 350 if channel == SONIA else 200
     checks = {
         "unique_description_over_300_chars": len(description) >= 300,
         "primary_query_in_first_200_chars": bool(query and query in first_200),
@@ -578,6 +612,8 @@ def description_audit(description: str, primary_query: str, tags: list[str],
         "three_hashtags": len(re.findall(r"(?<!\w)#\w+", description)) == 3,
         "five_or_more_tags": len(tags) >= 5,
         "tag_budget_over_200_chars": tag_chars >= 200,
+        "channel_tag_count_floor": len(tags) >= tag_count_floor,
+        "channel_tag_budget_floor": tag_chars >= tag_budget_floor,
     }
     return {"ok": all(checks.values()), "checks": checks, "chapter_count": chapter_count,
             "description_chars": len(description), "tag_budget_chars": tag_chars,
