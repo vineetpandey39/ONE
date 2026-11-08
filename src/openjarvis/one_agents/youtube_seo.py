@@ -261,7 +261,12 @@ def _valid_tags(tags: list[str], limit: int = 500) -> list[str]:
     """Return unique tags that fit YouTube's exact comma-separated budget."""
     out = []
     for tag in tags:
-        tag = _cut_words(_clean(tag, 200), 45).lower().strip(" ,.-")  # never cut mid-word ("...availab")
+        tag = _clean(tag, 200).lower()
+        tag = re.sub(r"[^\w%₹+.'-]+", " ", tag, flags=re.UNICODE)
+        tag = _cut_words(" ".join(tag.split()), 45).strip(" ,.-&+/")
+        # A character limit must never leave a syntactically broken query such
+        # as "thailand &" or "flights and" in the upload package.
+        tag = re.sub(r"(?:\s+|^)(?:and|or|with|for|to|from|&)$", "", tag).strip(" ,.-&+/")
         if len(tag) < 3 or tag in out:
             continue
         candidate = out + [tag]
@@ -271,6 +276,137 @@ def _valid_tags(tags: list[str], limit: int = 500) -> list[str]:
         if api_chars <= limit:
             out.append(tag)
     return out
+
+
+_DIRECTIVE_LEAD = re.compile(r"^(explain|show|cover|discuss|break down|compare|describe)\b[:\s-]*", re.I)
+_COMMERCIAL_PLATFORM = re.compile(r"\b(amazon(?:\s+pay)?|flipkart|makemytrip|cleartrip|ixigo|agoda|booking\.com|airbnb|expedia)\b", re.I)
+_COMMERCIAL_TOPIC = re.compile(r"\b(deals?|discounts?|offers?|cashback|sales?)\b", re.I)
+
+
+def _viewer_facing(text: str, fallback: str) -> str:
+    """Turn planning instructions into copy addressed to the viewer."""
+    value = _clean(text or fallback, 600).strip()
+    match = _DIRECTIVE_LEAD.match(value)
+    if match:
+        verb = {"show": "shows", "discuss": "discusses", "compare": "compares",
+                "describe": "describes", "cover": "covers", "explain": "explains",
+                "break down": "breaks down"}[match.group(1).lower()]
+        tail = value[match.end():].lstrip()
+        if verb == "explains":
+            tail = re.sub(r",\s*clearly distinguish\b", "; clearly distinguishes", tail, flags=re.I)
+            tail = re.sub(r",\s*and demonstrate\b", "; and demonstrates", tail, flags=re.I)
+        value = f"This video {verb} {tail}"
+    return value[:1].upper() + value[1:] if value else fallback
+
+
+def _query_seed(text: str) -> str:
+    value = re.split(r"\s+[|—–]\s+|\s*\|\s*|:\s*", _clean(text, 160))[0]
+    value = re.sub(r"[^\w%₹+.'-]+", " ", value.lower(), flags=re.UNICODE)
+    return " ".join(value.strip(" ,.-?!").split())
+
+
+def _fallback_queries(title: str, packaging: dict, channel: ChannelProfile) -> list[str]:
+    """Grounded long-tail coverage used by both model and fallback paths."""
+    heads = [_query_seed(title)] + [_query_seed(packaging.get(key, "")) for key in
+                                    ("title_a_searchable", "title_b_intriguing", "title_c_hybrid")]
+    base = heads[0]
+    without_year = re.sub(r"\b20\d{2}\b", "", base).strip()
+    tokens = [w for w in re.findall(r"[a-z0-9%]+", base) if w not in {"the", "and", "for", "with"}]
+    candidates = [*heads, without_year]
+    if channel == SONIA and base:
+        candidates.extend([f"{base} for indian travellers", f"{base} travel guide"])
+    if len(tokens) >= 3:
+        candidates.extend([" ".join(tokens[:4]), " ".join(tokens[-4:])])
+    return list(dict.fromkeys(q for q in candidates if len(q) >= 4))
+
+
+def _packaging_hook(packaging: dict) -> str:
+    """Prefer the reviewed brief's concise hook, including its uncertainty mark."""
+    for key in ("thumbnail_concept_a", "thumbnail_concept_b"):
+        text = str(packaging.get(key) or "")
+        match = re.search(r"\bText:\s*[\"']?([^\"'\n.]{2,28})", text, re.I)
+        if match:
+            hook = _clean(match.group(1), 28).strip().upper()
+            if 1 <= len(hook.split()) <= 3 and hook not in _GENERIC_THUMBNAIL_HOOKS:
+                return hook
+    return ""
+
+
+def normalize_metadata_strategy(meta: dict, record: dict, packaging: dict, title: str,
+                                channel: ChannelProfile) -> dict:
+    """One deterministic strategy layer for every LLM and every fallback."""
+    result = dict(meta)
+    seeds = _fallback_queries(title, packaging, channel)
+    primary = _query_seed(result.get("primary_query") or "")
+    if not primary or primary == title.casefold() or len(primary.split()) > 9:
+        primary = seeds[0] if seeds else _query_seed(title)
+    result["primary_query"] = primary
+    secondary = [_query_seed(q) for q in result.get("secondary_queries", []) if str(q).strip()]
+    secondary.extend(seeds)
+    result["secondary_queries"] = [q for q in dict.fromkeys(secondary) if q and q != primary][:6]
+    while len(result["secondary_queries"]) < 4:
+        suffix = ("official update", "booking checklist", "latest guide", "explained")[len(result["secondary_queries"])]
+        result["secondary_queries"].append(f"{primary} {suffix}".strip())
+
+    promise = str(packaging.get("core_promise") or title)
+    intro = list(result.get("intro") or [])
+    intro = (intro + [promise, "See the practical checks and evidence before you decide."])[:2]
+    result["intro"] = [_viewer_facing(intro[0], title), _viewer_facing(intro[1], title)]
+    points = [_viewer_facing(str(p), "") for p in result.get("description_points", []) if str(p).strip()]
+    if len(points) < 4:
+        clauses = [c.strip() for c in re.split(r"[.;]", promise) if len(c.strip()) > 18]
+        points.extend(_viewer_facing(c, "") for c in clauses)
+        points.extend([f"What {primary} means for your trip",
+                       "Which details need same-day official verification",
+                       "How to compare the final payable price and conditions",
+                       "A practical checklist before you book or travel"])
+    result["description_points"] = list(dict.fromkeys(p for p in points if p))[:6]
+
+    tags = [*result.get("tags", []), primary, *result["secondary_queries"], *seeds,
+            channel.display_name.lower()]
+    result["tags"] = _valid_tags(tags)
+    hook = _packaging_hook(packaging)
+    if not result.get("thumbnail_variants") and hook:
+        result["thumbnail_variants"] = [{"name": "Brief hook",
+            "left_usp": packaging.get("thumbnail_concept_a") or title,
+            "sonia_expression": "curious", "text": hook}]
+    return result
+
+
+def _aligned_title(title: str, packaging: dict, hook: str) -> str:
+    """Use a reviewed title candidate when it contains the hook's key number."""
+    numbers = set(re.findall(r"(?:₹\s*)?\d+(?:\.\d+)?%?", hook or ""))
+    if not numbers or numbers <= set(re.findall(r"(?:₹\s*)?\d+(?:\.\d+)?%?", title)):
+        return title
+    for key in ("title_a_searchable", "title_b_intriguing", "title_c_hybrid"):
+        candidate = clean_title(packaging.get(key, ""))
+        if candidate and numbers <= set(re.findall(r"(?:₹\s*)?\d+(?:\.\d+)?%?", candidate)):
+            return candidate
+    return title
+
+
+def seo_strategy_audit(record: dict, title: str, meta: dict, tags: list[str], hook: str) -> dict:
+    """Semantic acceptance checks shared by generated and fallback metadata."""
+    title_numbers = set(re.findall(r"(?:₹\s*)?\d+(?:\.\d+)?%?", title))
+    hook_numbers = set(re.findall(r"(?:₹\s*)?\d+(?:\.\d+)?%?", hook or ""))
+    platform = _COMMERCIAL_PLATFORM.search(title)
+    commercial = bool(platform and _COMMERCIAL_TOPIC.search(title))
+    urls = official_source_urls(record)
+    source_match = True
+    if commercial:
+        platform_words = set(_words(platform.group(1)))
+        source_match = any(platform_words & _words(url) for url in urls)
+    lead = " ".join(meta.get("intro") or [])
+    checks = {
+        "natural_primary_query": 2 <= len(str(meta.get("primary_query") or "").split()) <= 9,
+        "four_secondary_queries": len(meta.get("secondary_queries") or []) >= 4,
+        "clean_tag_set": len(tags) >= 8 and not any(re.search(r"(?:\s|^)(and|or|with|for|to|from|&)$", t) for t in tags),
+        "viewer_facing_copy": not bool(_DIRECTIVE_LEAD.match(lead)),
+        "title_thumbnail_number_alignment": not hook_numbers or hook_numbers <= title_numbers,
+        "commercial_offer_official_source": source_match,
+    }
+    return {"ok": all(checks.values()), "checks": checks,
+            "official_source_urls_checked": urls[:8]}
 
 
 def _title_head(text: str) -> str:
@@ -579,7 +715,8 @@ def build_package(record: dict[str, Any], *, master: Path, plan_path: Path, port
         cues = [(int(t // 60), int(t % 60), cues[i][2]) for i, t in enumerate(starts)]
         timing = "narration"
     meta, meta_source = metadata_from_model(record, packaging, llm, channel)
-    meta = enforce_grounded_terminology(meta, record)
+    meta = normalize_metadata_strategy(enforce_grounded_terminology(meta, record), record, packaging, title, channel)
+    title = _aligned_title(title, packaging, (meta.get("thumbnail_variants") or [{}])[0].get("text", "") or _packaging_hook(packaging))
     search_terms = [meta.get("primary_query", ""), *meta.get("secondary_queries", []),
                     *meta.get("tags", []), title]
     chapter_plan, label_source = chapter_labels(
@@ -633,12 +770,14 @@ def build_package(record: dict[str, Any], *, master: Path, plan_path: Path, port
     ranked_tags = _ranked_tags(meta, title, packaging, channel)
     if channel.thumbnail_mode == "original":
         variants = [{k: v for k, v in row.items() if k != "sonia_expression"} for row in variants]
+    strategy_audit = seo_strategy_audit(record, title, meta, ranked_tags, variants[0]["text"])
     package = {
-        "schema_version": "1.1", "owner": "ARES" if channel == SONIA else "LYRA", "brand": channel.brand,
+        "schema_version": "1.2", "owner": "ARES" if channel == SONIA else "LYRA", "brand": channel.brand,
         "handoff": "IRIS -> ARES -> IRIS upload gate" if channel == SONIA else "HELIOS -> LYRA -> ECHO approval gate", "master": str(master),
         "recommended_title": title, "title_variants": title_variants,
         "primary_query": primary_query, "secondary_queries": secondary,
         "description": description, "description_audit": description_audit(description, primary_query, ranked_tags, channel),
+        "seo_strategy_audit": strategy_audit,
         "chapters": chapters, "tags": ranked_tags,
         "destination": destination,
         "thumbnail": {

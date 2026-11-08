@@ -61,6 +61,13 @@ def media_metadata_blockers(pkg: dict[str, Any]) -> list[str]:
         lead = str(pkg.get("description") or "")[:500].casefold()
         if title_words and not any(word in lead for word in title_words):
             blockers.append("MEDIA topic-integrity gate: description does not match the video title")
+    if str(pkg.get("schema_version") or "") >= "1.2":
+        strategy = pkg.get("seo_strategy_audit")
+        if not isinstance(strategy, dict):
+            blockers.append("MEDIA metadata gate requires seo_strategy_audit for schema 1.2+")
+        elif not strategy.get("ok"):
+            failed = [name for name, passed in (strategy.get("checks") or {}).items() if not passed]
+            blockers.append("MEDIA SEO strategy audit failed: " + (", ".join(failed) or "unknown check"))
     provenance = pkg.get("footage_provenance")
     if pkg.get("content_format") == "youtube_short":
         if not isinstance(provenance, dict) or not provenance.get("fresh_for_this_run"):
