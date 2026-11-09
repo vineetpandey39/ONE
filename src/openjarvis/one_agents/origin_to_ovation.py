@@ -620,6 +620,15 @@ def run_stage(job, *, enqueue):
                     "master": str(master_dir / "master.mp4"), "seo": str(path / "runtime" / "seo.json")}
 
         # An upload is never inferred from a generated thumbnail.
+        from openjarvis.one_agents.chandan_release import editorial_ready
+        editorial_path = path / 'runtime' / 'editorial-qc.json'
+        technical_path = master_dir / 'technical-qc.json'
+        if not editorial_ready(read(technical_path) if technical_path.is_file() else {},
+                               read(editorial_path) if editorial_path.is_file() else {},
+                               digest(master_dir / 'master.mp4')):
+            return {'_blocked': True, 'status': 'editorial_review_required',
+                    'reason': 'Publication handoff requires a passed editorial review bound to this master',
+                    'mission_id': path.name}
         receipt = path / "runtime" / "upload-receipt.json"
         if receipt.is_file():
             upload = read(receipt)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-VERSION = 1
+VERSION = 2
 KINDS = {'subject_reveal','environment_depth','timeline','map','stat','action_path','impact_pulse','light_sweep','typography','sport_graphic'}
 PRESETS = {
  'discovery': ('slow_push', ['subject_reveal']),
@@ -89,11 +89,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         elif kind=='sport_graphic':
             sport=effect['sport']
             if sport=='athletics':
-                drawing=' '.join(f'm {x} 330 l {x+250} 710 {x+254} 710 {x+4} 330' for x in range(180,1500,230))
-            elif sport=='cricket':drawing='m 860 320 l 1060 320 1060 720 860 720 860 320 m 820 370 l 1100 370 m 820 670 l 1100 670'
-            else:drawing='m 440 320 l 1480 320 1480 720 440 720 440 320 m 960 320 l 960 720'
-            vector(a,b,drawing,'\\alpha&H50&\\bord2\\org(960,520)\\fscx85\\fscy85\\t(0,650,\\fscx100\\fscy100)')
-            event(a,b,'{\\an7\\pos(135,760)\\fs26}'+sport.title()+' — schematic')
+                segments=[(x,330,x+250,710) for x in range(440,1250,200)]
+            elif sport=='cricket':
+                segments=[(860,320,1060,320),(1060,320,1060,720),(1060,720,860,720),(860,720,860,320),(820,370,1100,370),(820,670,1100,670)]
+            else:
+                segments=[(440,320,1480,320),(1480,320,1480,720),(1480,720,440,720),(440,720,440,320),(960,320,960,720)]
+            # Each segment is its own narrow quad, never a filled court polygon.
+            for x,y,xx,yy in segments:
+                length=math.hypot(xx-x,yy-y);dx,dy=-(yy-y)*3/length,(xx-x)*3/length
+                drawing=f'm {x+dx:g} {y+dy:g} l {xx+dx:g} {yy+dy:g} {xx-dx:g} {yy-dy:g} {x-dx:g} {y-dy:g}'
+                vector(a,b,drawing,'\\alpha&H40&\\org(960,520)\\fscx85\\fscy85\\t(0,650,\\fscx100\\fscy100)')
+            event(a,b,'{\\an7\\pos(135,760)\\fs36}'+sport.title()+' — schematic')
         elif kind=='impact_pulse':
             vector(a,min(b,a+.5),'m 870 470 l 1050 470 1050 475 870 475',f'\\org(960,475)\\fscx20\\t(0,350,\\fscx180\\alpha&HFF&)')
         elif kind=='light_sweep':
@@ -104,6 +110,38 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             vector(a,min(b,a+.65),'m 0 0 l 1920 0 1920 850 0 850',f'\\1c&H000000&\\alpha&H70&\\t(0,600,\\alpha&HFF&)')
     path.write_text(header+'\n'.join(lines)+'\n',encoding='utf-8')
     return path
+
+
+def frame_qa(ass_path, spec, duration, run):
+    """Decode mobile-sized overlay-only samples; reject fills and caption intrusion.
+
+    This technical screen does not grant editorial approval of the composite.
+    """
+    import tempfile
+    from PIL import Image
+    checked=[]
+    spatial={'sport_graphic','map','action_path','timeline','stat','typography'}
+    effects=[e for e in spec['effects'] if e['kind'] in spatial]
+    with tempfile.TemporaryDirectory(prefix='chandan-overlay-qa-') as folder:
+        for index,effect in enumerate(effects):
+            # Isolate each effect so an intentional light sweep cannot mask a filled court.
+            single=Path(folder)/'overlay.ass'
+            write_ass(single,{**spec,'effects':[effect]},duration)
+            escaped=single.as_posix().replace(':',r'\:')
+            for fraction in (.35,.65):
+                at=(effect['start']+(effect['end']-effect['start'])*fraction)*duration
+                frame=Path(folder)/'frame.png'
+                run(['ffmpeg','-v','error','-y','-f','lavfi','-i',f'color=c=black:s=640x360:r=24:d={duration}',
+                     '-vf',f"ass=filename='{escaped}'",'-ss',str(at),'-frames:v','1',str(frame)])
+                with Image.open(frame) as image:
+                    mask=image.convert('L').point(lambda value:255 if value>30 else 0)
+                    coverage=sum(mask.histogram()[1:])/(640*360)
+                    caption=sum(mask.crop((0,300,640,360)).histogram()[1:])
+                    edge=sum(mask.crop((625,0,640,360)).histogram()[1:])
+                if coverage==0 or coverage>.10 or caption or edge:
+                    raise ValueError(f'Overlay frame QA failed: {effect["kind"]}, coverage={coverage:.3f}, caption={caption}, edge={edge}')
+                checked.append({'kind':effect['kind'],'seconds':at,'coverage':coverage})
+    return {'status':'passed','samples':checked,'editorial_status':'awaiting_review'}
 
 # Only visibly animated graphic families count; zoom, fades and static depth do not.
 CODED_MOTION = {'timeline','map','stat','action_path','impact_pulse','light_sweep','typography','sport_graphic'}

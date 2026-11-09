@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-VERSION = 2
+VERSION = 3
 FPS = 24
 TEMPO = 1.02
 
@@ -222,7 +222,7 @@ def _render(root: Path, *, expected_shots: int = 75, size: tuple[int,int] = (192
         frames=round(float(s['end_seconds'])/tempo*FPS)-round(float(s['start_seconds'])/tempo*FPS)
         if frames < 1: raise ValueError('Shot shorter than one frame')
         director=s.get('director',{})
-        from openjarvis.one_agents.chandan_effects import resolve, write_ass
+        from openjarvis.one_agents.chandan_effects import resolve, write_ass, frame_qa
         effects = resolve(s)
         transition=director.get('transition','hard_cut')
         dissolve=transition in {'measured_dissolve','dip_to_black'}
@@ -230,6 +230,7 @@ def _render(root: Path, *, expected_shots: int = 75, size: tuple[int,int] = (192
                    'transition':transition,'sound_cue':director.get('sound_cue','none'),'kinetic_text':director.get('kinetic_text',''),
                    'chapter_start':i==0 or s['chapter']!=shots[i-1]['chapter'], 'chapter_end':i==len(shots)-1 or s['chapter']!=shots[i+1]['chapter']}
         if effects['intent'] is not None or effects['effects']:
+            signature['effects_renderer_version'] = effects['version']
             signature['visual_effects'] = effects
             signature['motion'] = effects['motion']
         digest=hashlib.sha256(json.dumps(signature,sort_keys=True).encode()).hexdigest()
@@ -238,16 +239,20 @@ def _render(root: Path, *, expected_shots: int = 75, size: tuple[int,int] = (192
         if not (clip.exists() and cached.get('input_sha256')==digest and cached.get('output_sha256')==_sha(clip)):
             pending=cache/f"{s['shot_id']}.pending.mp4"
             filters=_motion_filter(signature['motion'],frames,signature['chapter_start'] or dissolve,signature['chapter_end'] or dissolve,size,signature['kinetic_text'])
+            overlay_qa = {'status':'not_applicable'}
             if effects['effects']:
                 effect_file = write_ass(cache/f"{s['shot_id']}-effects.ass", effects, frames/FPS)
+                overlay_qa = frame_qa(effect_file, effects, frames/FPS, _run)
                 effect_path = effect_file.as_posix().replace(':', r'\:').replace("'", r"\'")
                 filters += f",ass=filename='{effect_path}'"
             _run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',s['image'],'-vf',filters,'-frames:v',str(frames),'-an','-c:v','libx264','-preset','fast','-crf','19','-pix_fmt','yuv420p','-threads','4',str(pending)])
             pending.replace(clip)
-            _write(receipt,{'input_sha256':digest,'output_sha256':_sha(clip),'frames':frames})
+            _write(receipt,{'input_sha256':digest,'output_sha256':_sha(clip),'frames':frames,'overlay_qa':overlay_qa})
         clips.append(clip); identities.append(digest)
         print(json.dumps({'stage':'render_clip','shot':s['shot_id'],'complete':i+1,'total':len(shots)}),flush=True)
-    master_input = hashlib.sha256(json.dumps({'version':VERSION,'clips':identities,'voice':_sha(voice),'captions':_sha(ass),'tempo':tempo},sort_keys=True).encode()).hexdigest()
+    audio_direction = [s.get('director', {}).get('audio_design', {}) for s in shots]
+    master_input = hashlib.sha256(json.dumps({'version':VERSION,'clips':identities,'voice':_sha(voice),
+        'captions':_sha(srt),'tempo':tempo,'audio_direction':audio_direction},sort_keys=True).encode()).hexdigest()
     previous_qc=root/'technical-qc.json'
     previous_master=root/'master.mp4'
     if previous_qc.exists() and previous_master.exists():
@@ -278,15 +283,35 @@ def _render(root: Path, *, expected_shots: int = 75, size: tuple[int,int] = (192
     )
     score=score.replace(',', r'\,')
     _run(['ffmpeg','-hide_banner','-loglevel','error','-y','-f','lavfi','-i',f"aevalsrc={score}:s=48000:d={duration}",'-af',f'lowpass=f=1800,highpass=f=45,afade=t=in:d=3,afade=t=out:st={max(0,duration-4)}:d=4','-c:a','pcm_s16le',str(bed)])
-    cue_starts=[float(s['start_seconds'])/tempo for i,s in enumerate(shots) if i and s.get('director',{}).get('sound_cue') in {'whoosh','impact'}]
-    windows='+'.join(f'if(between(t,{max(0,t-.20):.3f},{t+.24:.3f}),0.007*sin(PI*(t-{max(0,t-.20):.3f})/0.44)^2,0)' for t in cue_starts) or '0'
+    def cue_times(kind):
+        return [float(s['start_seconds'])/tempo for i,s in enumerate(shots) if i and s.get('director',{}).get('sound_cue')==kind]
+    whooshes=cue_times('whoosh'); impacts=cue_times('impact'); crowds=cue_times('crowd_lift')
+    locations=cue_times('location_bed'); silences=cue_times('silence_drop')
+    noise_parts=[]
+    noise_parts += [f'if(between(t,{max(0,t-.22):.3f},{t+.30:.3f}),0.020*sin(PI*(t-{max(0,t-.22):.3f})/.52)^2,0)' for t in whooshes]
+    noise_parts += [f'if(between(t,{t:.3f},{t+1.8:.3f}),0.010*sin(PI*(t-{t:.3f})/1.8)^2,0)' for t in crowds]
+    noise_parts += [f'if(between(t,{t:.3f},{t+1.2:.3f}),0.0025,0)' for t in locations]
+    noise_windows='+'.join(noise_parts) or '0'
+    impact_parts=[f'if(between(t,{t:.3f},{t+.32:.3f}),0.055*sin(2*PI*118*(t-{t:.3f}))*exp(-18*(t-{t:.3f})),0)' for t in impacts]
+    impact_wave=('+'.join(impact_parts) or '0').replace(',', r'\,')
+    silence_parts=[f'if(between(t,{t:.3f},{t+.65:.3f}),0.22,1)' for t in silences]
+    music_shape='*'.join(silence_parts) or '1'
     # Narration is nearly continuous, so sidechain compression suppressed the
     # score for the entire film.  Keep the music at a consistent documentary
     # level (about 11 dB below the voice) and let the final loudness pass
     # control peaks instead of ducking it into inaudibility.
-    filters=f"[1:a]atempo={tempo},apad,atrim=duration={duration}[voice];[2:a]volume=2.0[bed];[3:a]highpass=f=700,lowpass=f=5500,volume='{windows}':eval=frame[sfx];[voice][bed][sfx]amix=inputs=3:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11,atrim=duration={duration}[audio]"
+    filters=(f"[1:a]atempo={tempo},apad,atrim=duration={duration}[voice];"
+             f"[2:a]volume='2.0*({music_shape})':eval=frame[bed];"
+             f"[3:a]highpass=f=500,lowpass=f=6500,volume='{noise_windows}':eval=frame[air];"
+             f"[4:a]highpass=f=70,lowpass=f=1800,volume=1.0[contact];"
+             "[voice][bed][air][contact]amix=inputs=4:normalize=0,"
+             f"loudnorm=I=-16:TP=-1.5:LRA=11,atrim=duration={duration}[audio]")
     final=root/'master.mp4'; pending=root/'master.pending.mp4'
-    _run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',str(video),'-i',str(voice),'-i',str(bed),'-f','lavfi','-i',f'anoisesrc=color=pink:sample_rate=48000:duration={duration}', '-filter_complex',filters,'-map','0:v:0','-map','[audio]','-vf','ass=captions.ass','-c:v','libx264','-preset','fast','-crf','19','-threads','4','-c:a','aac','-b:a','192k','-ar','48000','-movflags','+faststart','-t',str(duration),str(pending)],root)
+    _run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',str(video),'-i',str(voice),'-i',str(bed),
+          '-f','lavfi','-i',f'anoisesrc=color=pink:sample_rate=48000:duration={duration}',
+          '-f','lavfi','-i',f'aevalsrc={impact_wave}:s=48000:d={duration}',
+          '-filter_complex',filters,'-map','0:v:0','-map','[audio]',
+          '-c:v','copy','-c:a','aac','-b:a','256k','-ar','48000','-movflags','+faststart','-t',str(duration),str(pending)],root)
     _run(['ffmpeg','-v','error','-xerror','-i',str(pending),'-f','null','-'])
     info=_probe(pending); picture=next(s for s in info['streams'] if s['codec_type']=='video')
     if (picture['width'],picture['height']) != size or abs(float(info['format']['duration'])-duration)>.15:
@@ -301,7 +326,7 @@ def _render(root: Path, *, expected_shots: int = 75, size: tuple[int,int] = (192
     if not -18 <= float(levels['input_i']) <= -14 or float(levels['input_tp']) > -.5:
         raise RuntimeError('Final loudness out of bounds: '+json.dumps(levels))
     pending.replace(final)
-    result={'status':'technical_passed','input_sha256':master_input,'measured_loudness':levels,'editorial_status':'awaiting_review','master':str(final),'master_sha256':_sha(final),'duration_seconds':float(info['format']['duration']), 'shot_count':len(shots),'fps':FPS,'size':list(size),'tempo':tempo,'full_decode':'passed','captions':str(srt),'image_animation':'camera movement over original still scenes; not character animation','direction_system':'shot-level zoom/pan, motivated transitions, selective sound cues and factual kinetic text','soundtrack':'original synthesized ambient bed and selective transition noise; narration remains primary','loudness_target_lufs':-16,'true_peak_target_db':-1.5,'input_clip_signatures':identities}
+    result={'status':'technical_passed','input_sha256':master_input,'measured_loudness':levels,'editorial_status':'awaiting_review','master':str(final),'master_sha256':_sha(final),'duration_seconds':float(info['format']['duration']), 'shot_count':len(shots),'fps':FPS,'size':list(size),'tempo':tempo,'full_decode':'passed','captions':str(srt),'caption_delivery':'external_selectable_srt_only','burned_captions':False,'image_animation':'camera movement over original still scenes; not character animation','direction_system':'shot-level zoom/pan, motivated transitions, selective sound cues and factual kinetic text','soundtrack':'original cinematic score with scene-directed tennis ambience, selective racket contacts, crowd lifts, transitions and deliberate silence; narration remains primary','sound_cue_counts':{kind:sum(s.get('director',{}).get('sound_cue')==kind for s in shots) for kind in {'none','location_bed','crowd_lift','impact','whoosh','silence_drop'}},'loudness_target_lufs':-16,'true_peak_target_db':-1.5,'input_clip_signatures':identities}
     _write(root/'technical-qc.json',result)
     return result
 
