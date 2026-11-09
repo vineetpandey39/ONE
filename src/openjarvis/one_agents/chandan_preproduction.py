@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+from copy import deepcopy
 from pathlib import Path
 
 from . import origin_to_ovation as pipeline
@@ -18,6 +19,7 @@ SHOT_TYPES = ("three_quarter_closeup", "side_action", "dynamic_action", "establi
               "crowd_reaction", "quiet_aftermath")
 MOTIONS = ("slow_push", "slow_pullback", "lateral_drift", "focus_detail", "wide_hold", "vertical_reveal", "prime_ramp")
 TRANSITIONS = ("hard_cut", "match_cut", "measured_dissolve", "dip_to_black", "whip_cut", "sound_bridge")
+FACTUAL_EFFECTS = {"timeline", "map", "stat", "typography"}
 ORIENTATION = {
     "three_quarter_closeup": "three_quarter", "side_action": "side_profile",
     "dynamic_action": "front", "establishing_wide": "environment", "low_angle": "three_quarter",
@@ -60,20 +62,106 @@ MESSI_ROADMAP = (
     "Verified records, legacy and a natural CTA",
 )
 
+SERENA_ROADMAP = (
+    "Record-pressure cold open: twenty-four pursued, twenty-three earned",
+    "Compton childhood context without invented hardship or private routine",
+    "Tennis development, discipline and a game taking shape",
+    "The 1999 first-major breakthrough at seventeen",
+    "Expectation, scrutiny and the cost of sustained excellence",
+    "The 2002–03 Serena Slam and a new level of dominance",
+    "Competitive resistance and pressure at the top",
+    "Documented setbacks without speculative medical or private detail",
+    "Reinvention and the work of returning",
+    "The 2012 Career Golden Slam",
+    "The 2017 twenty-third major",
+    "Motherhood, change and a new competitive chapter",
+    "The comeback as repeated effort rather than a single moment",
+    "The documented 2026 return and an unfinished future",
+    "Verified records, human meaning and a natural CTA",
+)
+
+SPORT_PROFILES = {
+    "serena-williams": {
+        "sport": "tennis",
+        "mechanics": "tennis anatomy, hands, footwork, racket grip, right-handed serve, two-handed backhand and ball contact",
+        "equipment": "racket and tennis-ball",
+    },
+    "lionel-messi": {"sport": "football", "mechanics": "football anatomy, hands, feet, running, ball contact and kicking mechanics", "equipment": "football"},
+    "cristiano-ronaldo": {"sport": "football", "mechanics": "football anatomy, hands, feet, running, ball contact and kicking mechanics", "equipment": "football"},
+}
+
 
 def _roadmap(manifest: dict) -> tuple[str, ...]:
-    return MESSI_ROADMAP if manifest.get("subject_id") == "lionel-messi" else ROADMAP
+    subject = manifest.get("subject_id")
+    if subject == "lionel-messi":
+        return MESSI_ROADMAP
+    if subject == "serena-williams":
+        return SERENA_ROADMAP
+    return ROADMAP
+
+
+def _sport_profile(manifest: dict, brief: dict) -> dict:
+    """Return commission-specific language; never silently turn another sport into football."""
+    subject = str(manifest.get("subject_id") or "")
+    if subject in SPORT_PROFILES:
+        return SPORT_PROFILES[subject]
+    haystack = " ".join(
+        str(value) for value in (
+            brief.get("selection", ""),
+            (brief.get("direction_requirements") or {}).get("animation_system", ""),
+            brief.get("working_title", ""),
+        )
+    ).casefold()
+    for sport in ("tennis", "badminton", "cricket", "basketball", "athletics", "football"):
+        if sport in haystack:
+            return {"sport": sport, "mechanics": f"physically correct {sport} anatomy, equipment handling and action mechanics", "equipment": f"{sport} equipment"}
+    return {"sport": "the commissioned sport", "mechanics": "physically correct sport-specific anatomy, equipment handling and action mechanics", "equipment": "sport-specific equipment"}
+
+
+def _effects_slots(master: Path) -> dict[str, dict]:
+    """Read an optional, additive scene-effects board without changing checkpoints."""
+    path = master / "effects-direction.json"
+    if not path.is_file():
+        return {}
+    board = pipeline.read(path)
+    scenes = board.get("scenes") or []
+    slots = {str(scene.get("scene_id")): scene for scene in scenes}
+    expected = {f"S{i:02d}" for i in range(1, 76)}
+    if len(scenes) != 75 or set(slots) != expected:
+        raise ValueError("Effects direction must contain exactly S01-S75")
+    return slots
+
+
+def _bind_effects(slot: dict | None, claim_ids: list[str]) -> dict:
+    """Bind planned effects to the generated shot's real ledger claims."""
+    if not slot:
+        return {}
+    effects = deepcopy(slot.get("effects") or [])
+    for effect in effects:
+        if effect.get("kind") in FACTUAL_EFFECTS:
+            effect["claim_ids"] = list(claim_ids)
+        if effect.get("kind") in {"map", "action_path"}:
+            effect["schematic"] = True
+    reason = str(slot.get("narrative_intent") or slot.get("edit_note") or "").strip()
+    if effects and not reason:
+        raise ValueError("Effects direction needs a narrative intent/effect reason for every coded-motion scene")
+    return {
+        "scene_intent": slot.get("scene_intent"),
+        "effect_reason": reason,
+        "effects": effects,
+    }
 
 
 def _prompt(manifest: dict, brief: dict) -> str:
     sources = brief.get("sources") or {}
+    profile = _sport_profile(manifest, brief)
     return f"""Act as CHANDAN, a world-class factual sports-biography writer and director.
 Create the complete English preproduction pack for {manifest['subject']} for Origin to Ovation.
 Return JSON only between {BEGIN} and {END}.
 
 Story contract: exactly 15 chronological chapters and exactly 5 shots per chapter. Each shot narration is 35-48 words, emotionally human, third-person, connected to the previous line, documentary-cinematic rather than a list of statistics. Begin with a high-stakes cold open, plant a clear question, use setbacks/reinvention/open loops, and end with verified records plus a natural CTA. Never invent dialogue, private thoughts, childhood routines, travel routes, poverty, injuries or match actions. Use only claims supported by the official sources below. If a detail is not supported, keep it atmospheric and non-specific.
 
-Visual contract: photoreal cinematic CGI, recognisable age-appropriate editorial likeness without claiming archival authenticity. Front, three-quarter and true side angles dominate. Rear views are transitional only, maximum 15 percent and never consecutive. Every chapter includes an emotionally legible face angle. Use varied lenses and the supplied shot types. Plain era-correct kit; zero crests, logos, sponsors, maker marks or readable venue text. Correct football anatomy, hands, feet, running, ball contact and kicking mechanics.
+Visual contract: photoreal cinematic CGI, recognisable age-appropriate editorial likeness without claiming archival authenticity. Front, three-quarter and true side angles dominate. Rear views are transitional only, maximum 15 percent and never consecutive. Every chapter includes an emotionally legible face angle. Use varied lenses and the supplied shot types. Plain era-correct kit; zero crests, logos, sponsors, maker marks or readable venue text. Preserve {profile['mechanics']}.
 
 Direction contract: every shot needs a concise visual brief and one shot_type chosen from {list(SHOT_TYPES)}. Reserve whooshes for motivated high-energy transitions; use silence drops before major turning points and kinetic text only for verified prime facts.
 
@@ -89,6 +177,7 @@ def _chunk_prompt(manifest: dict, brief: dict, start: int, end: int) -> tuple[st
     finish = f"END_OTO_PACK_{start:02d}_{end:02d}"
     roadmap = "\n".join(f"{i + 1}. {title}" for i, title in enumerate(_roadmap(manifest)))
     sources = brief.get("sources") or {}
+    profile = _sport_profile(manifest, brief)
     prompt = f"""Continue as CHANDAN, factual sports-biography writer and director for {manifest['subject']}.
 Return ONLY valid JSON between {begin} and {finish}; no markdown fences or commentary.
 Write chapters {start} through {end} from this locked 15-chapter roadmap:
@@ -97,7 +186,7 @@ Write chapters {start} through {end} from this locked 15-chapter roadmap:
 Schema: {{"chapters":[{{"chapter_number":{start},"title":"...","age":18,"era":"...","claim_id":"C{start:02d}","source_key":"one allowed key","shots":[{{"narration":"35-48 words","visual":"concise cinematic visual brief","shot_type":"one allowed type","kinetic_text":"verified fact or empty"}}]}}]}}
 Return exactly {end-start+1} chapters and exactly five shots per chapter. Each narration must be 35-48 words, emotionally human, third-person English and connected end-to-end. No invented dialogue, thoughts, childhood routine, travel, hardship, injury or match action. Every factual sentence must remain within the official source represented by source_key.
 Allowed source keys/URLs: {json.dumps(sources, ensure_ascii=False)}
-Allowed shot types: {json.dumps(SHOT_TYPES)}. Use recognisable front, three-quarter and true side views; rear views only as rare transitions, never consecutive. Every chapter needs an emotionally legible face shot. Photoreal cinematic CGI, age/era accurate, plain kit, zero logos/crests/sponsors/maker marks/readable venue text, correct football anatomy and mechanics. Use selective whoosh only through visual energy; kinetic_text only for a verified prime fact.
+Allowed shot types: {json.dumps(SHOT_TYPES)}. Use recognisable front, three-quarter and true side views; rear views only as rare transitions, never consecutive. Every chapter needs an emotionally legible face shot. Photoreal cinematic CGI, age/era accurate, plain kit, zero logos/crests/sponsors/maker marks/readable venue text; preserve {profile['mechanics']}. Use selective whoosh only through visual energy; kinetic_text only for a verified prime fact.
 Commissioned hook: {brief.get('opening_hook')}
 Central question: {brief.get('central_dramatic_question')}
 Prime facts: {json.dumps((brief.get('direction_requirements') or {}).get('prime_kinetic_facts', []))}
@@ -108,6 +197,7 @@ Close chapter {end} so the next numbered chapter follows naturally. End with {fi
 def generate(path: Path) -> dict:
     manifest = pipeline.read(path / "mission.json")
     brief = pipeline.read(path / "research/commission-brief.json")
+    profile = _sport_profile(manifest, brief)
     reference = Path(manifest["character_reference"])
     review = pipeline.read(path / "runtime/reference-review.json")
     if review.get("status") != "passed" or review.get("reference_sha256") != pipeline.digest(reference):
@@ -134,13 +224,14 @@ def generate(path: Path) -> dict:
     pack = {"title": brief.get("working_title") or f"{manifest['subject']}: The Full Journey",
             "central_dramatic_question": brief["central_dramatic_question"],
             "description_lead": f"{manifest['subject']} biography — a source-linked journey of reinvention, pressure, records and longevity.",
-            "tags": [manifest['subject'], f"{manifest['subject']} biography", "football documentary", "sports biography", "Origin to Ovation"],
-            "thumbnail": {"headline": "BUILT TO ADAPT", "prompt": "Recognisable emotional three-quarter face, football foreground, Madeira-to-stadium contrast, no logos or crests."},
+            "tags": [manifest['subject'], f"{manifest['subject']} biography", f"{profile['sport']} documentary", "sports biography", "Origin to Ovation"],
+            "thumbnail": {"headline": "BUILT TO ADAPT", "prompt": f"Recognisable emotional three-quarter face, {profile['equipment']} foreground, origin-to-arena contrast, no logos or crests."},
             "chapters": chapters}
     if len(chapters) != 15 or any(len(ch.get("shots") or []) != 5 for ch in chapters):
         raise ValueError("CHANDAN pack must contain exactly 15 chapters and 75 shots")
     sources = brief.get("sources") or {}
     master = path / "production/master-v1"
+    effect_slots = _effects_slots(master)
     images = master / "images"
     images.mkdir(parents=True, exist_ok=True)
     plan = []
@@ -170,14 +261,16 @@ def generate(path: Path) -> dict:
                            f"Subject {manifest['subject']}, age {chapter['age']}, era {chapter['era']}. Preserve the approved canonical identity from the attached reference. "
                            "Use a recognisable front, three-quarter or true side-profile angle appropriate to the requested shot; rear view only when explicitly requested and never as the default. "
                            "Plain period-correct kit with zero logos, crests, sponsors, maker marks, signatures, watermarks, flags, scoreboards or readable venue text. "
-                           "Football anatomy, hands, feet, running posture, ball contact and kicking mechanics must be physically correct. Output one widescreen image.")
+                           f"{profile['mechanics'].capitalize()} must remain physically correct. Output one widescreen image.")
+            director = {"shot_type": shot_type, "faceless": False, "transition": TRANSITIONS[(number - 1) % len(TRANSITIONS)],
+                        "sound_cue": "whoosh" if shot_type in {"dynamic_action", "low_angle"} and number % 3 == 0 else ("silence_drop" if number in {1, 26, 46, 71} else "location_bed"),
+                        "kinetic_text": str(shot.get("kinetic_text") or "")}
+            director.update(_bind_effects(effect_slots.get(f"S{number:02d}"), [claim_id]))
             plan.append({"shot_id": shot_id, "chapter": chapter_index, "chapter_title": chapter["title"],
                          "narration": narration, "claim_ids": [claim_id], "age": chapter["age"], "era": chapter["era"],
                          "visual": visual, "shot_type": shot_type, "prompt": prompt_text, "reference": str(reference),
                          "image": str(images / f"{shot_id}.png"), "motion": MOTIONS[(number - 1) % len(MOTIONS)],
-                         "director": {"shot_type": shot_type, "faceless": False, "transition": TRANSITIONS[(number - 1) % len(TRANSITIONS)],
-                                      "sound_cue": "whoosh" if shot_type in {"dynamic_action", "low_angle"} and number % 3 == 0 else ("silence_drop" if number in {1, 26, 46, 71} else "location_bed"),
-                                      "kinetic_text": str(shot.get("kinetic_text") or "")},
+                         "director": director,
                          "camera_orientation": ORIENTATION[shot_type], "status": "planned", "story": {"role": "cold_open" if number <= 5 else "chronological_payoff",
                          "open_loop": number in {1, 6, 26, 46}, "must_pay_off_with_documented_fact": True,
                          "pattern_interrupt": "camera_or_sound_shift", "retention_checkpoint": round((number - 1) / 75, 3)}})

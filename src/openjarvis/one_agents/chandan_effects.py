@@ -92,7 +92,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 drawing=' '.join(f'm {x} 330 l {x+250} 710 {x+254} 710 {x+4} 330' for x in range(180,1500,230))
             elif sport=='cricket':drawing='m 860 320 l 1060 320 1060 720 860 720 860 320 m 820 370 l 1100 370 m 820 670 l 1100 670'
             else:drawing='m 440 320 l 1480 320 1480 720 440 720 440 320 m 960 320 l 960 720'
-            vector(a,b,drawing,'\\alpha&H50&\\bord2')
+            vector(a,b,drawing,'\\alpha&H50&\\bord2\\org(960,520)\\fscx85\\fscy85\\t(0,650,\\fscx100\\fscy100)')
             event(a,b,'{\\an7\\pos(135,760)\\fs26}'+sport.title()+' — schematic')
         elif kind=='impact_pulse':
             vector(a,min(b,a+.5),'m 870 470 l 1050 470 1050 475 870 475',f'\\org(960,475)\\fscx20\\t(0,350,\\fscx180\\alpha&HFF&)')
@@ -104,3 +104,39 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             vector(a,min(b,a+.65),'m 0 0 l 1920 0 1920 850 0 850',f'\\1c&H000000&\\alpha&H70&\\t(0,600,\\alpha&HFF&)')
     path.write_text(header+'\n'.join(lines)+'\n',encoding='utf-8')
     return path
+
+# Only visibly animated graphic families count; zoom, fades and static depth do not.
+CODED_MOTION = {'timeline','map','stat','action_path','impact_pulse','light_sweep','typography','sport_graphic'}
+INTENT_EFFECTS = {
+ 'discovery': {'typography','light_sweep'},
+ 'journey': {'map','timeline','typography'},
+ 'training': {'action_path','sport_graphic','typography'},
+ 'turning_point': {'impact_pulse','light_sweep','timeline','typography'},
+ 'competition': {'action_path','sport_graphic','impact_pulse','stat','typography'},
+ 'record': {'stat','timeline','light_sweep','typography'},
+ 'reflection': {'timeline','typography'},
+}
+
+
+def validate_coverage(plan):
+    """Long-form preflight: relevant coded graphics, not an effect pasted everywhere."""
+    if len(plan)<40:return []
+    errors=[];covered=0;families=set();path_count=0
+    for shot in plan:
+        name=shot.get('shot_id','unknown')
+        try:spec=resolve(shot)
+        except (ValueError,TypeError,KeyError) as exc:
+            errors.append(f'{name}: invalid effects: {exc}');continue
+        kinds={e['kind'] for e in spec['effects']} & CODED_MOTION
+        if not kinds:continue
+        allowed=INTENT_EFFECTS.get(spec['intent'],set())
+        if not kinds<=allowed:
+            errors.append(f'{name}: graphics do not match a supported scene intent');continue
+        if not str(shot.get('director',{}).get('effect_reason','')).strip():
+            errors.append(f'{name}: coded motion needs a scene-specific effect_reason');continue
+        covered+=1;families.update(kinds);path_count+=int('action_path' in kinds)
+    needed=math.ceil(len(plan)*.35)
+    if covered<needed:errors.append(f'coded motion covers {covered}/{len(plan)} scenes; minimum is {needed} (35%); camera zoom/fades/static depth do not count')
+    if covered and len(families)<3:errors.append('coded motion needs at least three relevant graphic families')
+    if path_count/len(plan)>.20:errors.append('action paths exceed 20%; do not apply a blanket ball/trajectory effect')
+    return errors

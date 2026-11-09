@@ -204,6 +204,8 @@ def validate(plan: list[dict[str, Any]], contract: dict[str, Any]) -> list[str]:
         prime = [s for s in plan if s.get("story", {}).get("role") in {"cold_open_payoff", "turning_point", "records_payoff"}]
         if not any(str(s.get("director", {}).get("kinetic_text") or "").strip() for s in prime):
             errors.append("prime scenes need at least one factual kinetic-text payoff")
+    from openjarvis.one_agents.chandan_effects import validate_coverage
+    errors.extend(validate_coverage(plan))
     return errors
 
 
