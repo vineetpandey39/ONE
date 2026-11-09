@@ -228,6 +228,10 @@ class ProductionServices:
         if channel.brand == "planexium":
             prompt += ("\nCONCEPT ARCHETYPE: " + str(chosen.get("archetype") or chosen.get("name") or "phenomenon")
                        + ". This candidate must differ in subject and composition, not merely crop, colour, or style.")
+            prompt += ("\nFINAL BACKGROUND-ONLY REQUIREMENT: Any text or headline mentioned in the creative "
+                       "direction or composition is a placement note for a later compositor. Do not render "
+                       "those words. Generate zero letters, words, numbers, captions, logos or watermarks. "
+                       "Leave the headline lane empty; exact hook lettering is added once after generation.")
         folder = self.context.artifact(f"thumbnail/variant-{variant + 1}")
         folder.mkdir(parents=True, exist_ok=True)
         generated = generate(prompt=prompt, output=folder / "base.png", brand=channel.brand)
