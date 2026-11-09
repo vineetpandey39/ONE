@@ -11059,7 +11059,7 @@ def _yatra_render_director(asset_root: Path, run=None) -> tuple[dict[str, Any], 
     return fallback, v3_failure or outcome
 
 
-def _yatra_cut_video(plan_file: Path, asset_folder: str, run=None) -> dict[str, Any]:
+def _yatra_cut_video(plan_file: Path, asset_folder: str, run=None, *, director_checkpoint=None) -> dict[str, Any]:
     """Draw the cards, cut the picture to the voice, then check the result.
 
     Half a YATRA video has no footage behind it -- the plan marks those scenes
@@ -11101,6 +11101,26 @@ def _yatra_cut_video(plan_file: Path, asset_folder: str, run=None) -> dict[str, 
         ("assemble", _YATRA_EDIT_TOOLS / "assemble.py", [str(plan_file), asset_folder], 90),
         ("qc", _YATRA_EDIT_TOOLS / "qc.py", [asset_folder], 30),
     ]
+    if director_checkpoint:
+        from openjarvis.one_agents.yatra_obs import sha256_file
+        frozen = Path(str(director_checkpoint.get('path') or '')).resolve()
+        frozen.relative_to(asset_root.resolve())
+        if (sha256_file(frozen) != director_checkpoint.get('sha256')
+                or sha256_file(local_plan) != director_checkpoint.get('plan_sha256')):
+            raise ValueError('Reviewed director checkpoint or plan hash changed')
+        checked = runner(_YATRA_EDIT_TOOLS / 'director_manifest.py', [str(frozen), '--filled'], minutes=2)
+        if not checked.get('ok'):
+            return {'ok': False, 'failed_at': 'reviewed_director', 'reviewed_director': checked}
+        frozen_data = json.loads(frozen.read_text(encoding='utf-8'))
+        for scene in frozen_data.get('scenes') or []:
+            for beat in scene.get('beats') or []:
+                expected = beat.get('map_sha256') or beat.get('media_sha256')
+                if expected and sha256_file(Path(beat['media'])) != expected:
+                    raise ValueError('Reviewed director media hash changed: '+str(beat.get('id')))
+        (asset_root / 'director-manifest.json').write_bytes(frozen.read_bytes())
+        # The reviewed timeline is the checkpoint. Re-running scene-point
+        # synthesis here can change its cuts and invalidate the prior review.
+        steps = [step for step in steps if step[0] in {'director_render', 'assemble', 'qc'}]
     result: dict[str, Any] = {"ok": True}
     for name, script, args, minutes in steps:
         if name == "director_render":
@@ -12019,7 +12039,10 @@ def _run_yatra_render(job: dict[str, Any]) -> dict[str, Any]:
         visuals_receipt=visuals_receipt)
     stages.set_stage("yatra", stages.EXECUTING,
                      "Rendering only from the verified YATRA and OCULUS checkpoints")
-    cut = _yatra_cut_video(plan_file, asset_folder)
+    if payload.get('director_checkpoint'):
+        cut = _yatra_cut_video(plan_file, asset_folder, director_checkpoint=payload['director_checkpoint'])
+    else:
+        cut = _yatra_cut_video(plan_file, asset_folder)
     if not cut.get("ok"):
         # A cut that failed (or failed QC) is not a deliverable. Handing it on
         # sent ARES to build SEO for a master that did not exist (2026-10-06).
