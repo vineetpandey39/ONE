@@ -94,14 +94,30 @@ def apply_targeted_repair(source: Path, repair_file: Path) -> dict[str, Any]:
         record["director_manifest_draft"] = json.dumps(manifest, ensure_ascii=False, indent=2)
     map_overrides = repair.get("opening_map_overrides") or {}
     if map_overrides:
-        allowed = {"focus_place", "context_place", "context_label", "wide_headline", "close_headline"}
+        allowed = {"focus_place", "context_place", "context_label", "wide_headline", "close_headline",
+                   "focus_region", "context_region", "require_exact_places", "narrative_maps"}
         if set(map_overrides) - allowed:
             raise RuntimeError("Editorial repair tried to change map identity or map-shot count")
         raw_map = record["opening_map_spec"]
         if isinstance(raw_map, str):
             raw_map = re.sub(r"^\s*(?:```json\s*|json\s+)", "", raw_map,
                              flags=re.IGNORECASE).strip().removesuffix("```").strip()
+            raw_map = raw_map.removesuffix('<escape>').rstrip()
         map_spec = json.loads(raw_map) if isinstance(raw_map, str) else dict(raw_map)
+        if 'narrative_maps' in map_overrides:
+            old_maps, new_maps = map_spec.get('narrative_maps') or [], map_overrides['narrative_maps']
+            if not isinstance(new_maps, list) or len(old_maps) != len(new_maps):
+                raise RuntimeError('Map repair cannot change authored map count')
+            mutable = {'focus_place', 'context_place', 'context_label', 'destination_label',
+                       'wide_headline', 'close_headline', 'viewer_subtitle', 'travel_mode',
+                       'focus_region', 'context_region', 'require_exact_places'}
+            for old, new in zip(old_maps, new_maps):
+                if {k:v for k,v in old.items() if k not in mutable} != {k:v for k,v in new.items() if k not in mutable}:
+                    raise RuntimeError('Map repair cannot change scene, narration cue or country identity')
+                if new.get('require_exact_places') is not True:
+                    raise RuntimeError('Reviewed narrative maps require exact location resolution')
+        if 'require_exact_places' in map_overrides and map_overrides['require_exact_places'] is not True:
+            raise RuntimeError('Map repair cannot disable exact location resolution')
         map_spec.update(map_overrides)
         record["opening_map_spec"] = json.dumps(map_spec, ensure_ascii=False, separators=(",", ":"))
     capture_plan = str(record.get("browser_capture_plan") or "")
