@@ -169,6 +169,28 @@ def preserve_envato_download_modal(steps):
     return steps
 
 
+def dismiss_music_search_overlay(steps):
+    """Dismiss stale panels before selection, never before download."""
+    result = []
+    for step in steps:
+        if step.get('args', {}).get('as') == 'selected_music_asset':
+            result.append({'action': 'press', 'args': {'key': 'Escape'}})
+        result.append(step)
+    return result
+
+
+def music_overlay_failure(receipt):
+    if not receipt.is_file():
+        return False
+    saved = json.loads(receipt.read_text(encoding='utf-8'))
+    error = saved.get('provider_error', '')
+    return (saved.get('terminal_status') == 'Failed'
+            and 'waiting for locator(":nth-match(a[data-cy=' in error
+            and 'item-detail-link' in error
+            and 'floating-ui-portal' in error
+            and 'intercepts pointer events' in error)
+
+
 def download_music(draft, steps, query, context, *, failure_limit=10):
     """Advance only past confirmed pre-download failures, preserving receipts."""
     limit=max(1,int(failure_limit))
@@ -189,9 +211,17 @@ def download_music(draft, steps, query, context, *, failure_limit=10):
         resumed=receipt.is_file()
         inputs={'envatoQuery':query,'envatoQueryUrl':quote_plus(query),
             'assetFolder':context.mission_id,'resultIndex':str(candidate),'enablePaidDownload':True}
+        # One persistent retry only for proven failure before asset selection.
+        # In-flight and ambiguous download receipts must never be replaced.
+        selected_steps = steps
+        if music_overlay_failure(receipt):
+            receipt = receipt.with_name(receipt.stem + '-overlay-recovery.json')
+            selected_steps = dismiss_music_search_overlay(steps)
         try:
-            return draft.run('planexium-envato-music',steps,inputs,receipt,timeout=10800)
+            return draft.run('planexium-envato-music',selected_steps,inputs,receipt,timeout=10800)
         except RuntimeError:
+            if selected_steps is steps and music_overlay_failure(receipt):
+                continue
             if not draft.subject_rejected(receipt):
                 raise
             if not resumed:
