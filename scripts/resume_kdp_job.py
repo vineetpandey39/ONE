@@ -10,16 +10,24 @@ from openjarvis.one_agents import runtime, job_recovery
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("job_id")
+    parser.add_argument("--retry-content-refused", action="store_true",
+                        help="Re-evaluate a previous content refusal using the current safety rules")
     args = parser.parse_args()
     original = runtime.get_job(args.job_id)
     if not original or original["agent_id"] != "imprimatur":
         raise SystemExit("Expected an existing IMPRIMATUR job")
+    allowed = ("failed", "awaiting_login")
+    if args.retry_content_refused:
+        result = json.loads(original.get("result") or "{}")
+        if result.get("phase") != "content_refused" or original["status"] not in {"blocked", "completed"}:
+            raise SystemExit("Expected a recorded content refusal; nothing executed")
+        allowed = (original["status"],)
     with runtime._connect() as db:
         changed = db.execute(
             "UPDATE jobs SET status='reserved', error='', updated_at=?, "
             "resume_count=COALESCE(resume_count,0)+1 "
-            "WHERE id=? AND status IN ('failed','awaiting_login')",
-            (runtime._now(), args.job_id),
+            "WHERE id=? AND status IN (" + ",".join("?" for _ in allowed) + ")",
+            (runtime._now(), args.job_id, *allowed),
         ).rowcount
     if not changed:
         raise SystemExit("Job is not in a resumable hold; nothing executed")

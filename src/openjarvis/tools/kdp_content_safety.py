@@ -119,7 +119,8 @@ _INCITEMENT = (
 # so the presence of these is a block rather than a flag - a romance can carry
 # desire, tension and a closed door without them.
 _EXPLICIT_SEXUAL = (
-    r"penetrat\w*|thrust\w*\s+into|genitals?|erection|orgasm\w*|climax\w+\s+inside"
+    # Exclude only the cybersecurity term, not an entire technical passage.
+    r"penetrat\w*\b(?![\s\-\u2010-\u2014]+test(?:s|ing)?\b)|thrust\w*\s+into|genitals?|erection|orgasm\w*|climax\w+\s+inside"
     r"|nipples?|aroused\s+flesh|between\s+her\s+thighs|between\s+his\s+thighs"
 )
 

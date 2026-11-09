@@ -4836,15 +4836,36 @@ def _content_safety_gate(job: dict[str, Any], run_dir: str, packet: Any) -> dict
     except OSError as exc:
         # Not a silent pass. A manuscript nobody can read is a manuscript
         # nobody has checked, and that is the state this gate exists to end.
-        return {"agent": "IMPRIMATUR", "phase": "content_refused",
+        return {"agent": "IMPRIMATUR", "phase": "content_refused", "_blocked": True,
+                "blocked_reason": f"Manuscript unavailable for content review: {exc}",
                 "reason": f"the manuscript could not be read for review: {exc}",
                 "content": "Publishing stopped: the manuscript could not be read for review."}
 
-    report = safety.scan(manuscript, marketing=str(getattr(packet, "description", "") or ""))
+    metadata = json.loads(Path(run_dir, "kdp_metadata.json").read_text(encoding="utf-8")) if Path(run_dir, "kdp_metadata.json").is_file() else {}
+    payload = _json_task(job)
+    source_job = get_job(payload["scribe_job_id"]) if payload.get("scribe_job_id") else None
+    source_payload = _json_task(source_job) if source_job else {}
+    raw_kind = str(metadata.get("mode") or metadata.get("kdp_mode") or metadata.get("kind")
+                   or payload.get("kdp_mode") or source_payload.get("kdp_mode") or "unknown")
+    kind = re.sub(r"[\s_-]+", "", raw_kind).lower()
+    report = safety.scan(manuscript, kind=kind,
+                         marketing=str(getattr(packet, "description", "") or ""))
     allowed, note = safety.may_publish(report)
     checksum = str((getattr(packet, "checksums", {}) or {}).get("manuscript", ""))
 
     if allowed:
+        # A corrected policy can clear an earlier false positive. Retire only
+        # that manuscript's pending override; never grant a blanket override.
+        from openjarvis.tools.approval_store import STATUS_EXPIRED
+        store = ApprovalStore()
+        for prior in store.list_pending():
+            if (prior.action_type == CONTENT_OVERRIDE_ACTION
+                    and prior.permission_key == f"{CONTENT_OVERRIDE_ACTION}:{checksum}"):
+                store.update_status(prior.id, STATUS_EXPIRED)
+                _publishing_event(
+                    job, agent="IMPRIMATUR", event_type="content_block_cleared",
+                    stage="content_policy", summary="Current content scan passed; obsolete override retired",
+                    details={"approval_id": prior.id, "report": report.to_dict()}, status="completed")
         if report.verdict == safety.REVIEW:
             _publishing_event(
                 job, agent="IMPRIMATUR", event_type="content_findings_raised",
@@ -4877,12 +4898,17 @@ def _content_safety_gate(job: dict[str, Any], run_dir: str, packet: Any) -> dict
     )
     stages.set_stage("imprimatur", stages.AWAITING_UPLOAD,
                      f"Content policy blocked: {packet.title}")
+    from openjarvis.tools.kdp_browser_publisher import write_state
+    write_state(packet, "BLOCKED", error=note, block_type="content_policy",
+                scribe_job_id=payload.get("scribe_job_id"), content_report=report.to_dict())
+    stages.scribe_waits_for_kdp(run_dir, packet.title, payload.get("scribe_job_id", ""))
     _publishing_event(
         job, agent="IMPRIMATUR", event_type="content_policy_blocked",
         stage="content_policy", summary=note,
         details={"approval_id": action.id, "report": report.to_dict()},
         status="blocked")
-    return {"agent": "IMPRIMATUR", "phase": "content_refused",
+    return {"agent": "IMPRIMATUR", "phase": "content_refused", "_blocked": True,
+            "blocked_reason": note,
             "approval_id": action.id, "report": report.to_dict(),
             "reason": note,
             "content": (f"{note} Nothing was uploaded. The passages are on the "
