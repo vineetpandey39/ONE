@@ -713,7 +713,12 @@ def stock_context_matches(request, metadata):
         for key in ("title", "tags", "description")
     ).casefold()
     blocked = ["fantasy", "surreal", "alien", *request.get("blocked_keywords", [])]
-    if any(str(word).casefold() in text for word in blocked):
+    # Catalogue prose uses "alien landscape" for lifeless Mars terrain.
+    # This does not permit alien life/civilizations or relax authored negatives.
+    generic_text = text
+    if str(request.get("subject", "")).casefold() == "mars":
+        generic_text = re.sub(r"\balien landscape\b", "landscape", text)
+    if any(str(word).casefold() in (generic_text if word == "alien" and word not in request.get("blocked_keywords", []) else text) for word in blocked):
         return False
     query = str(request["query"]).casefold()
     if re.search(r"\b(interior|core|cross[ -]?section)\b", query):
