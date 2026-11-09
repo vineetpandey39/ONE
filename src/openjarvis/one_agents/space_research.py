@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import re
+import socket
+import time
 import urllib.request
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -53,9 +56,44 @@ class _Redirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, _http_url(newurl))
 
 
+def _public_connection(address, timeout=45, source_address=None, **kwargs):
+    """Prefer working IPv4 without changing process-wide DNS or TLS policy."""
+    candidates = socket.getaddrinfo(*address, type=socket.SOCK_STREAM)
+    candidates.sort(key=lambda row: row[0] != socket.AF_INET)
+    deadline = time.monotonic() + timeout
+    error = TimeoutError('Public source connection deadline exceeded')
+    for family, kind, protocol, _, endpoint in candidates:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        connection = socket.socket(family, kind, protocol)
+        try:
+            connection.settimeout(min(5, remaining))
+            if source_address:
+                connection.bind(source_address)
+            connection.connect(endpoint)
+            connection.settimeout(timeout)
+            return connection
+        except OSError as exc:
+            error = exc
+            connection.close()
+    raise error
+
+
+class _PublicHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._create_connection = _public_connection
+
+
+class _PublicHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_PublicHTTPSConnection, req, context=self._context)
+
+
 def read_public(url: str, *, limit: int = 4_000_000) -> bytes:
     request = urllib.request.Request(_http_url(url), headers={"User-Agent": "ONE-PLANEXIUM/1.0 (science evidence)"})
-    with urllib.request.build_opener(_Redirect()).open(request, timeout=45) as response:
+    with urllib.request.build_opener(_Redirect(), _PublicHTTPSHandler()).open(request, timeout=45) as response:
         validate_url(response.url, MEDIA_HOSTS)
         data = response.read(limit + 1)
     if len(data) > limit:
@@ -311,7 +349,12 @@ def nasa_image(query: str, directory: Path, *, read=read_public, exclude_sha256=
     subjects = [w for w in words if w in {
         "phobos", "deimos", "mmx", "europa", "ganymede", "titan", "enceladus",
         "triton", "ceres", "bennu", "osiris", "juno"}]
+    # The provider name is provenance, not a depicted subject. Many NASA
+    # records omit "NASA" from searchable metadata (e.g. lunar vehicle tests).
+    # Keep the full authored query for candidate validation below.
+    catalog_words = words[1:] if words and words[0] == 'nasa' else words
     searches = list(dict.fromkeys([query] + subjects +
+        [" ".join(catalog_words[:n]) for n in range(len(catalog_words), 1, -1)] +
         [" ".join(words[:n]) for n in range(len(words) - 1, 1, -1)]))
     for search in searches:
         catalog = json.loads(read("https://images-api.nasa.gov/search?" + urlencode({"q": search, "media_type": "image", "page_size": 50})))
