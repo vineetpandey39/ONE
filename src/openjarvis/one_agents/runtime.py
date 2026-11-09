@@ -12034,6 +12034,18 @@ def _run_yatra_render(job: dict[str, Any]) -> dict[str, Any]:
     if not master.is_file():
         raise RuntimeError("YATRA QC passed without a concrete master file")
     master_sha256 = yatra_obs.sha256_file(master)
+    if payload.get('hold_for_editorial_qc') is True:
+        # A repaired master still needs visual review. Technical QC must not
+        # release it automatically to packaging or an upload descendant.
+        _require_active_job(job, 'save repaired master for editorial review')
+        held = {'agent': 'YATRA', 'stage': 'render', 'published': False,
+                'lao_job': checkpoint, 'asset_folder': asset_folder,
+                'master_sha256': master_sha256, 'cut': cut,
+                'status': 'awaiting_editorial_qc', 'handed_to': None}
+        (asset_root / 'editorial-rerender-receipt.json').write_text(
+            json.dumps(held, ensure_ascii=False, indent=2), encoding='utf-8')
+        stages.clear_stage('yatra')
+        return held
     stages.set_stage("yatra", stages.CARRYING_TO_HEAD,
                      "Taking the verified master and production receipt back to HELIOS")
     _require_active_job(job, "deliver the verified master to HELIOS")
