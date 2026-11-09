@@ -222,17 +222,26 @@ def _render(root: Path, *, expected_shots: int = 75, size: tuple[int,int] = (192
         frames=round(float(s['end_seconds'])/tempo*FPS)-round(float(s['start_seconds'])/tempo*FPS)
         if frames < 1: raise ValueError('Shot shorter than one frame')
         director=s.get('director',{})
+        from openjarvis.one_agents.chandan_effects import resolve, write_ass
+        effects = resolve(s)
         transition=director.get('transition','hard_cut')
         dissolve=transition in {'measured_dissolve','dip_to_black'}
         signature={'version':VERSION,'image_sha256':_sha(Path(s['image'])),'frames':frames,'motion':s.get('motion','slow_push'),'size':size,
                    'transition':transition,'sound_cue':director.get('sound_cue','none'),'kinetic_text':director.get('kinetic_text',''),
                    'chapter_start':i==0 or s['chapter']!=shots[i-1]['chapter'], 'chapter_end':i==len(shots)-1 or s['chapter']!=shots[i+1]['chapter']}
+        if effects['intent'] is not None or effects['effects']:
+            signature['visual_effects'] = effects
+            signature['motion'] = effects['motion']
         digest=hashlib.sha256(json.dumps(signature,sort_keys=True).encode()).hexdigest()
         clip=cache/f"{s['shot_id']}.mp4"; receipt=clip.with_suffix('.json')
         cached=json.loads(receipt.read_text()) if receipt.exists() else {}
         if not (clip.exists() and cached.get('input_sha256')==digest and cached.get('output_sha256')==_sha(clip)):
             pending=cache/f"{s['shot_id']}.pending.mp4"
             filters=_motion_filter(signature['motion'],frames,signature['chapter_start'] or dissolve,signature['chapter_end'] or dissolve,size,signature['kinetic_text'])
+            if effects['effects']:
+                effect_file = write_ass(cache/f"{s['shot_id']}-effects.ass", effects, frames/FPS)
+                effect_path = effect_file.as_posix().replace(':', r'\:').replace("'", r"\'")
+                filters += f",ass=filename='{effect_path}'"
             _run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',s['image'],'-vf',filters,'-frames:v',str(frames),'-an','-c:v','libx264','-preset','fast','-crf','19','-pix_fmt','yuv420p','-threads','4',str(pending)])
             pending.replace(clip)
             _write(receipt,{'input_sha256':digest,'output_sha256':_sha(clip),'frames':frames})
