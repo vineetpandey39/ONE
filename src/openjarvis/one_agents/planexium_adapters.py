@@ -548,6 +548,10 @@ def student_inflection_recovery(receipt):
         alternate = "students" if match[1] == "student" else "student"
         if re.search(r"\b" + alternate + r"\b", match[2], re.I):
             return receipt.with_name(receipt.stem + "-student-inflection.json")
+    match = re.match(r"Rejected asset: visual subject '(prototype|habitat)' absent from (.*)", error, re.S)
+    if saved.get("terminal_status") == "Failed" and match:
+        if re.search(r"\b" + match[1] + r"s\b", match[2], re.I):
+            return receipt.with_name(receipt.stem + "-subject-inflection.json")
     return receipt
 
 
