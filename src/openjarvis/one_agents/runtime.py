@@ -10532,7 +10532,8 @@ def _normalize_yatra_json_block(value: Any) -> Any:
         return value
     cleaned = re.sub(r"^\s*(?:```json\s*|json\s+)", "", value,
                      flags=re.IGNORECASE).strip()
-    return cleaned.removesuffix("```").strip()
+    cleaned = cleaned.removesuffix("<escape>").strip().removesuffix("```").strip()
+    return cleaned
 
 
 def _normalize_yatra_scene_plan(value: Any) -> Any:
@@ -11433,6 +11434,7 @@ def _travel_checkpoint(payload: dict[str, Any]) -> tuple[Path, dict[str, Any], s
                 raise
         if repaired["editorial_repair"]["status"] != "approved_for_voice":
             raise RuntimeError("Targeted YATRA repair is structurally ready but not approved for Sonia voice credits")
+        repaired["opening_map_spec"] = _normalize_yatra_json_block(repaired.get("opening_map_spec"))
         _validate_yatra_contract(repaired, _YATRA_EXPECTED_SCENES)
         if (narration_dir / "narration.segments.json").exists() and (
                 existing is None or existing.get("full_script") != repaired.get("full_script")):
