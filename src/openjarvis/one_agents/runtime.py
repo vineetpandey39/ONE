@@ -11609,6 +11609,19 @@ def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, 
         "the country into a generic itinerary, visa, hotel, attractions, budget or complete-travel-guide video. "
         "Mention such planning only when cited evidence proves the incident changed that decision, and state the "
         "causal link. The quality_gate must include `topic_fidelity: PASS` or `topic_fidelity: REWRITE`."
+        "\n\nPREPRODUCTION GATE SCOPE (mandatory): This review approves a script and feasible plan, "
+        "not a finished production. Reject unsupported narration, repetition, missing exact evidence URLs "
+        "for required demonstrations, impossible visual plans and invalid draft beat durations. Repair "
+        "these in the draft before returning it; do not leave one-second filler beats for a later stage. "
+        "Use only relevant demonstrations supported by the brief; do not add a hotel-policy demo or "
+        "live road-status claim merely to fill time. Preserve the required adjacent opening stock and "
+        "map beats as explicit opening exceptions. List not-yet-downloaded stock/licences, actual OBS "
+        "recordings, verified rendered map geometry and measured voice timing as downstream acceptance "
+        "gates, not as editorial failures solely because those stages have not run. Paid narration "
+        "follows script approval; measured durations then drive acquisition and editing. Never claim "
+        "these downstream checks passed, never invent assets or sources, and never waive final QC. "
+        "Keep unresolved factual or source-feasibility blockers as REWRITE. State the editorial verdict "
+        "separately from pending production checks."
     )
 
     stages.worker_confirms_receipt(owner, "Received HELIOS's travel TrendBrief")
