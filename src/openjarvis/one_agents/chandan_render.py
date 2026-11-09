@@ -187,8 +187,8 @@ def _motion_filter(motion: str, frames: int, fade_in: bool, fade_out: bool, size
         if not fontfile:
             raise RuntimeError('Kinetic text requires an installed Arial, Segoe UI, or compatible font file')
         filters.append(
-            "drawtext=fontfile='" + fontfile + "':text='" + text + "':fontcolor=white:fontsize=h/15:"
-            "borderw=3:bordercolor=black@0.85:x=(w-text_w)/2:y=h*0.72:"
+            "drawtext=fontfile='" + fontfile + "':text='" + text + "':fontcolor=white:fontsize=h/22:"
+            "borderw=2:bordercolor=black@0.85:x=(w-text_w)/2:y=h*0.76:"
             f"enable='between(t,{start:.3f},{end:.3f})'"
         )
     return ','.join(filters)
@@ -229,6 +229,8 @@ def _render(root: Path, *, expected_shots: int = 75, size: tuple[int,int] = (192
         signature={'version':VERSION,'image_sha256':_sha(Path(s['image'])),'frames':frames,'motion':s.get('motion','slow_push'),'size':size,
                    'transition':transition,'sound_cue':director.get('sound_cue','none'),'kinetic_text':director.get('kinetic_text',''),
                    'chapter_start':i==0 or s['chapter']!=shots[i-1]['chapter'], 'chapter_end':i==len(shots)-1 or s['chapter']!=shots[i+1]['chapter']}
+        if signature['kinetic_text']:
+            signature['kinetic_style_version'] = 2
         if effects['intent'] is not None or effects['effects']:
             signature['effects_renderer_version'] = effects['version']
             signature['visual_effects'] = effects
