@@ -9375,17 +9375,18 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                     "content": "Sonia Travel Vlogs stopped: Sanjeevani is unavailable.",
                     "blocked_reason": "Sanjeevani unavailable", "handed_to": None}
         try:
-            # Scored, news-led discovery first (Sanjeevani travel_discovery, 2026-10-05): the latest travel news from
-            # ANY country is pooled live, clustered, scored for how likely it is to go viral for Indian viewers,
-            # age-verified and corroborated by fresh YouTube velocity; code picks the winner, the model only writes
-            # it up. The old single-query dump (which produced a brief about thirteen countries) is the fallback
-            # for when that module cannot run at all.
-            story = _sonia_story_pick(reusable, prior, job["id"],
-                                      check_all_prior=bool(is_vista_short),
-                                      recent_stories=recent_stories)
+            # vidIQ supplies demand evidence for both normal commissioning and
+            # rejected-topic fallbacks. Sanjeevani and preproduction QC still
+            # verify factual claims; MCP failure cannot silently become a
+            # news-only commission or trigger paid narration.
+            from openjarvis.one_agents.vidiq_research import collect_story, validate_keyword
+            story = collect_story(
+                job["id"], recent_stories if is_vista_short else prior,
+                short=bool(is_vista_short),
+                keyword=str(request_payload.get("research_keyword") or ""))
             no_news_reason = story.get("reason", "") if story["status"] == "none" else ""
             travel_query = "Indian travellers international trip visa flight hotel"
-            if story["status"] == "picked":
+            if story["status"] in {"picked", "vidiq"}:
                 eligible = story["evidence"]
                 synthesis_prompt = story["prompt"]
                 synthesis_evidence = story["synthesis_evidence"]
@@ -9432,6 +9433,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                         "blocked_reason": "No usable Google Trends/news or YouTube metadata signals",
                         "evidence_count": 0, "research_diagnostic_path": str(diagnostic_file),
                         "handed_to": None}
+            synthesis_prompt += "\nCommission request (constraints only, not verified facts): " + task[:6000]
             brief, note = _research_synthesis(synthesis_prompt, evidence=synthesis_evidence)
             if story["status"] != "picked" and brief and "COMMISSION: NO" not in brief.upper():
                 brief, note, repeat, reselection_attempts = _sonia_unique_evergreen_brief(
@@ -9507,6 +9509,15 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                     "rejected_brief_path": str(rejection_file),
                     "handed_to": None,
                 }
+            if story["status"] == "vidiq":
+                keyword_receipt = validate_keyword(brief)
+                from openjarvis.one_agents.vidiq_research import evidence_text
+                brief += ("\n\n## vidIQ MCP research receipt\n"
+                          + story["ranking_path"] + "\n"
+                          + evidence_text(keyword_receipt)
+                          + "\nDemand evidence is not official travel-rule evidence. "
+                            "Verify volatile facts with official sources before paid narration.\n")
+                video_language = "hinglish"
             if story["status"] == "picked":
                 # The model never saw the (very long) news URLs; attach the real ones and the scoring receipt so
                 # the brief that travels on to the script writer carries its own proof.
