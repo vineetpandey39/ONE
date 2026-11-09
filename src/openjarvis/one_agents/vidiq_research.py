@@ -158,9 +158,10 @@ def collect_story(job_id: str, prior: list[str], *, short: bool = False,
                 "No keyword data is not evidence of rising demand. Do not expand an incident into an "
                 "unrelated itinerary. Avoid unsupported claims or implying Sonia personally visited. "
                 "Choose a practical searchable travel decision when breaking news is weak. "
-                "Use exactly these standalone fields: Destination/Topic: <place>; "
-                "Chosen headline: <one truthful title>; Search keyword: <short relevant phrase>; "
-                "COMMISSION: YES or NO. Also explain alternatives rejected, why now, hook, "
+                "Use these four plain-text fields on SEPARATE LINES, no bullets, bold or semicolon separators:\n"
+                "Destination/Topic: <place>\nChosen headline: <one truthful title>\n"
+                "Search keyword: <short relevant phrase>\nCOMMISSION: YES or NO\n"
+                "Also explain alternatives rejected, why now, hook, "
                 "viewer payoff, scenes, official claims requiring verification BEFORE paid narration, "
                 "and exclusions. Do not put internal tool names in viewer-facing keywords. "
                 + (f"Requested research seed: {keyword}. " if keyword else "")

@@ -2477,6 +2477,13 @@ def _sonia_brief_repeat(brief: str, prior: list[str], *, window: int = 120) -> s
     return ""
 
 
+def _sonia_normalize_brief_fields(brief: str) -> str:
+    """Normalize explicit selection labels without inventing missing content."""
+    labels = r"Destination/Topic|Chosen headline|Search keyword|COMMISSION"
+    text = re.sub(r"(?i);[ \t]*(?=(?:\*{1,2})?(?:" + labels + r")(?:\*{1,2})?[ \t]*:)", "\n", str(brief or ""))
+    return re.sub(r"(?im)^[ \t]*(?:[-*][ \t]+|#{1,6}[ \t]+)?(?:\*{1,2})?(" + labels + r")(?:\*{1,2})?[ \t]*:(?:\*{1,2})?[ \t]*", lambda m: m.group(1) + ": ", text)
+
+
 def _sonia_brief_headline_error(brief: str) -> str:
     """Return a deterministic error when HELIOS did not select a story.
 
@@ -2511,7 +2518,7 @@ def _sonia_unique_evergreen_brief(
     """Reselect a unique evergreen candidate from the collected evidence."""
     synthesize = synthesize or _research_synthesis
     attempts: list[dict[str, str]] = []
-    current_brief, current_note = brief or "", note or ""
+    current_brief, current_note = _sonia_normalize_brief_fields(brief), note or ""
     forbidden: list[str] = []
     total = max(1, int(max_attempts))
     for attempt_number in range(1, total + 1):
@@ -2529,7 +2536,7 @@ def _sonia_unique_evergreen_brief(
         destination = ""
         if destination_match:
             destination = re.split(r"\s*[|–—(]\s*", destination_match.group(1), maxsplit=1)[0].strip()
-        if destination and destination.casefold() not in {value.casefold() for value in forbidden}:
+        if repeat and destination and destination.casefold() not in {value.casefold() for value in forbidden}:
             forbidden.append(destination)
         attempts.append({
             "attempt": str(attempt_number),
@@ -2548,13 +2555,16 @@ def _sonia_unique_evergreen_brief(
         retry_prompt = (
             prompt
             + "\n\nCANDIDATE REJECTION: " + rejection_context
-            + ". Select a complete, materially different destination AND topic using ONLY the same supplied evidence. "
-            + "Do not return any previously rejected destination in this run. Forbidden destinations: "
+            + (". Select a complete, materially different destination AND topic using ONLY the same supplied evidence. "
+               "Do not return any previously rejected destination in this run. Forbidden destinations: " if repeat else
+               ". Repair formatting of the SAME candidate; do not change its topic or facts. "
+               "Put Destination/Topic, Chosen headline, Search keyword and COMMISSION on separate lines. Forbidden destinations: ")
             + json.dumps(forbidden, ensure_ascii=False)
             + ". Preserve the mandatory explicit Destination/Topic and Chosen headline fields. "
             + "If the evidence cannot support a unique alternative, end with COMMISSION: NO."
         )
         current_brief, current_note = synthesize(retry_prompt, evidence=evidence)
+        current_brief = _sonia_normalize_brief_fields(current_brief)
     return current_brief, current_note, "", attempts
 
 
