@@ -116,7 +116,37 @@ def apply_targeted_repair(source: Path, repair_file: Path) -> dict[str, Any]:
         capture_plan = capture_plan.replace(old, new)
     if repair.get("capture_url_overrides"):
         record["browser_capture_plan"] = capture_plan
+    # Exact, reviewed edits to a frozen plan; never permit a sidecar to replace
+    # identity, script, approval verdict or arbitrary top-level fields.
+    plan_edits = repair.get("plan_text_edits") or []
+    allowed_fields = {"scene_plan", "director_manifest_draft", "browser_capture_plan", "claim_ledger"}
+    for edit in plan_edits:
+        field = edit.get("field")
+        before, after = edit.get("before"), edit.get("after")
+        if (field not in allowed_fields or not isinstance(before, str) or not before
+                or not isinstance(after, str) or not str(edit.get("reason") or "").strip()):
+            raise RuntimeError("Plan repair requires an allowed field, exact text and review reason")
+        value = record.get(field)
+        if not isinstance(value, str) or value.count(before) != 1:
+            raise RuntimeError("Plan repair text must match exactly once")
+        record[field] = value.replace(before, after, 1)
+    if any(edit["field"] == "director_manifest_draft" for edit in plan_edits):
+        original = json.loads(json.loads(raw.decode("utf-8"))[0]["director_manifest_draft"])
+        revised = json.loads(record["director_manifest_draft"])
+        if [s["scene_id"] for s in original["scenes"]] != [s["scene_id"] for s in revised["scenes"]]:
+            raise RuntimeError("Plan repair cannot change director scene identity or order")
+        for scene in revised["scenes"]:
+            end = 0
+            for beat in scene["beats"]:
+                if beat["relative_start"] != end or beat["relative_end"] <= end:
+                    raise RuntimeError("Plan repair has a gap, overlap or invalid beat duration")
+                end = beat["relative_end"]
+            old = next(s for s in original["scenes"] if s["scene_id"] == scene["scene_id"])
+            if end != old["beats"][-1]["relative_end"]:
+                raise RuntimeError("Plan repair cannot change scene duration")
     audit = []
+    if plan_edits:
+        audit.append("reviewed exact plan edits: " + ",".join(sorted({e["field"] for e in plan_edits})))
     if repair.get("cue_overrides"):
         cue_ids = ",".join(sorted(repair["cue_overrides"], key=lambda value: int(value)))
         audit.append(f"timed cue overrides {cue_ids}")
