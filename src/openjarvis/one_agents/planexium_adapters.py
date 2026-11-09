@@ -537,6 +537,20 @@ def materialize_stock_download(path: Path) -> Path:
     return path
 
 
+def student_inflection_recovery(receipt):
+    """Retry only a confirmed pre-download singular/plural false rejection."""
+    if not receipt.is_file():
+        return receipt
+    saved = json.loads(receipt.read_text(encoding="utf-8"))
+    error = str(saved.get("provider_error") or "")
+    match = re.match(r"Rejected asset: destination phrase '(student|students)' absent from (.*)", error, re.S)
+    if saved.get("terminal_status") == "Failed" and match:
+        alternate = "students" if match[1] == "student" else "student"
+        if re.search(r"\b" + alternate + r"\b", match[2], re.I):
+            return receipt.with_name(receipt.stem + "-student-inflection.json")
+    return receipt
+
+
 def stock_context(request):
     """Bind two independent facts from the authored science stock brief.
 
@@ -927,6 +941,7 @@ class EnvatoAdapter:
                     receipt = self.context.artifact(
                         f"receipts/envato-{ENVATO_RECEIPT_REVISION}-{index}.json" if candidate == first_candidate
                         else f"receipts/envato-{ENVATO_RECEIPT_REVISION}-{index}-candidate-{candidate}.json")
+                    receipt = student_inflection_recovery(receipt)
                     try:
                         out, job = self.draft.run("planexium-envato", asset_steps, inputs, receipt, timeout=10800)
                         query_positions[query] = candidate
