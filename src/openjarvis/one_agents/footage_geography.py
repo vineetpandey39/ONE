@@ -22,6 +22,17 @@ def contains(text, phrase):
     return bool(norm(phrase)) and (' ' + norm(phrase) + ' ') in (' ' + norm(text) + ' ')
 
 
+def acquisition_gate(requirement):
+    if not requirement.get('place') or not requirement.get('subject'):
+        raise ValueError('Cannot enable acquisition without place and subject')
+    # Workflow assert_destination_subject reads alternateTitleKeyword as the
+    # subject. Leaving it blank silently drops the landmark-specific check.
+    return {'requiredTitleKeyword': requirement['place'],
+            'alternateTitleKeyword': requirement['subject'],
+            'locationMatch': False, 'subjectMatch': True,
+            'regionalContext': False, 'regionalContextLabel': ''}
+
+
 def requirements(spec):
     rows = spec.get('footage_requirements')
     queries = spec.get('stock_queries') or []
