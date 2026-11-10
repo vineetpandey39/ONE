@@ -158,6 +158,17 @@ class LaoDraft:
                 and ("locator.screenshot: timeout" in lowered or "taking element screenshot" in lowered)
                 and not any(term in lowered for term in ("download", "sign in", "authentication", "payment")))
 
+    def stalled_native_download(self, receipt: Path) -> bool:
+        """Only a terminal Chrome transfer timeout permits one same-candidate retry."""
+        if not receipt.is_file():
+            return False
+        saved = json.loads(receipt.read_text(encoding='utf-8'))
+        error = str(saved.get('provider_error') or '')
+        return (saved.get('terminal_status') == 'Failed'
+                and 'Chrome did not finish a download into ' in error
+                and re.search(r'within \d+ ms', error) is not None
+                and not any(word in error.casefold() for word in ('authentication','payment','sign in')))
+
     def artifact(self, outputs: dict, job_id: str, filename: str) -> Path:
         # Reuse the same artifact lookup as current Sonia production. Never
         # inspect unrelated browser profiles or credential files.
@@ -964,6 +975,15 @@ class EnvatoAdapter:
                         query_positions[query] = candidate
                         break
                     except RuntimeError:
+                        if getattr(self.draft, 'stalled_native_download', lambda _receipt: False)(receipt):
+                            # Keep the original partial transfer and immutable
+                            # receipt. A stable retry receipt prevents repeated
+                            # downloads on later resumes; never advance to an
+                            # unverified asset or retry an active transfer.
+                            retry_receipt = receipt.with_name(receipt.stem + '-download-retry.json')
+                            out, job = self.draft.run('planexium-envato', asset_steps, inputs, retry_receipt, timeout=10800)
+                            query_positions[query] = candidate
+                            break
                         if getattr(self.draft, "transient_pre_download_failure", lambda _receipt: False)(receipt):
                             retry_receipt = self.context.artifact(
                                 f"receipts/envato-{ENVATO_RECEIPT_REVISION}-{index}-candidate-{candidate}-browser-retry.json")
