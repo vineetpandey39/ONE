@@ -99,6 +99,10 @@ class ResearchClient:
             conn.execute("INSERT INTO calls VALUES (?,?,?,NULL)", (day,digest,name))
         result = self.rpc("tools/call", {"name": name, "arguments": arguments})
         if result.get("isError"):
+            # Preserve the provider's public research error without headers or
+            # credentials, so recovery can diagnose rather than blindly retry.
+            error_path = self.root / f"{day}-{digest}-error.json"
+            error_path.write_text(json.dumps({'tool':name,'arguments':arguments,'result':result},indent=2),encoding='utf-8')
             raise ResearchUnavailable(f"{name} returned an error; see account health before retry")
         receipt = {"source": "vidiq_mcp", "retrieved_at": datetime.now(timezone.utc).isoformat(),
                    "tool": name, "arguments": arguments, "result": result}

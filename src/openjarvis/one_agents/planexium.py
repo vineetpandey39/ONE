@@ -285,7 +285,11 @@ class Pipeline:
         def write_script():
             if plan is None and self.writer is None:
                 raise RuntimeError("Science writer binding required")
-            result = plan if plan is not None else self.writer(space_research.writer_prompt(commission["topic"], evidence))
+            prompt = space_research.writer_prompt(commission["topic"], evidence)
+            if commission.get('demand_selection'):
+                prompt += ('\nAudience commissioning context (not scientific evidence; factual claims still require primary-source quotes):\n'
+                           + json.dumps(commission['demand_selection'], ensure_ascii=False))
+            result = plan if plan is not None else self.writer(prompt)
             # Preserve rejected provider output so HELIOS can diagnose the
             # actual claim/scene instead of receiving only a generic traceback.
             _write(self.context.artifact("script-draft.json"), result)
@@ -633,14 +637,8 @@ def run_job(job: dict) -> dict:
     else:
         if commission.get("auto_discover"):
             recent = {row.get("topic", "") for row in ledger.values()}
-            try:
-                commission.update(space_research.discover_topic(recent))
-            except space_research.NoUnusedTopicError:
-                # Daily commissions carry a curated evergreen topic and
-                # authoritative sources so an exhausted news feed need not
-                # turn a valid production slot into a failed job.
-                if not str(commission.get("topic") or "").strip() or not commission.get("sources"):
-                    raise
+            from .planexium_demand import select_topic
+            commission.update(select_topic(context.root / 'research-demand', recent))
         _write(commission_path, commission)
     if job.get("id"):
         from openjarvis.one_agents import runtime
