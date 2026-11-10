@@ -87,7 +87,7 @@ def validate_run(root):
 
 
 def package_blockers(pkg):
-    if pkg.get('content_format') != 'youtube_short':
+    if pkg.get('content_format') != 'youtube_short' or pkg.get('brand') == 'planexium':
         return []
     try:
         root = Path(str(pkg.get('master') or '')).parent.parent
