@@ -111,6 +111,9 @@ def cleanup_after_upload(gate: dict[str, Any]) -> dict[str, Any]:
     FAIL, every path stays inside the video folder) and keeps the final video, narration, thumbnail and SEO. Intermediates
     go at once, the Envato clips after the policy's stock_retention_days; earlier finished videos whose retention
     has now ended are swept in the same pass."""
+    master = Path(str(gate.get("master") or ""))
+    if (master.parent.parent / "preserve-production-assets.json").is_file():
+        return {"skipped": "owner preservation hold: keep this video's assets and skip the unrelated-video sweep"}
     if _is_vista_package(gate):
         return {
             "skipped": "automatic cleanup disabled for VISTA mission; explicit cleanup authorization required",
