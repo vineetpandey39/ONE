@@ -30,6 +30,9 @@ from openjarvis.one_agents import (
 
 
 AGENTS: dict[str, dict[str, str]] = {
+    'naad': {'name': 'NAAD', 'role': 'Devotional production coordination and package QA', 'floor_id': '12', 'floor_name': 'YouTube Studio', 'division': 'youtube_studio', 'seat': 'worker', 'reports_to': 'helios'},
+    'raag': {'name': 'RAAG', 'role': 'Devotional lyrics, source review, music direction and audio audit', 'floor_id': '12', 'floor_name': 'YouTube Studio', 'division': 'youtube_studio', 'seat': 'worker', 'reports_to': 'helios'},
+    'alankaar': {'name': 'ALANKAAR', 'role': 'Devotional imagery, local animation, complex-script captions and beat-aligned Shorts', 'floor_id': '12', 'floor_name': 'YouTube Studio', 'division': 'youtube_studio', 'seat': 'worker', 'reports_to': 'helios'},
     "helios": {"name": "HELIOS", "role": "Multi-channel YouTube commissioning, resource coordination, monetization governance and delivery reconciliation head", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "head"},
     "zeus": {"name": "ZEUS", "role": "Cross-division orchestration, escalation, and resource-allocation operator", "floor_id": "11", "floor_name": "ONE-JARVIS Executive Command", "division": "executive"},
     "athena": {"name": "ATHENA", "role": "Opportunity discovery, research, and scoring operator", "floor_id": "10", "floor_name": "Venture & Opportunity Lab", "division": "venture_lab"},
@@ -7992,11 +7995,19 @@ def _iris_community_poll(job: dict[str, Any], *, head_id: str = "ia",
             "content": f"Today's poll is a {brief['format'].replace('_', ' ')} poll; ECHO writes, illustrates and posts it."}
 
 
+def _run_shloka(job: dict[str, Any]) -> dict[str, Any]:
+    from openjarvis.one_agents.divya.floor12 import run_job
+    return run_job(job)
+
+
 def _run_helios(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 12 head for all YouTube channel flows."""
     task = str(job.get("task") or "")
     mode = str(job.get("mode") or "plan").strip().lower()
     payload = _json_task(job)
+    if payload.get("brand") == "shloka_by_shloka":
+        from openjarvis.one_agents.divya.floor12 import head_job
+        return head_job(job, enqueue=enqueue_job)
     if payload.get("brand") == "origin_to_ovation":
         from openjarvis.one_agents.origin_to_ovation import run_stage
         return run_stage(job, enqueue=enqueue_job)
@@ -12287,6 +12298,9 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
         "themis": _run_themis,
         "nuntius": _run_nuntius,
         "hestia": _run_hestia,
+        "naad": _run_shloka,
+        "raag": _run_shloka,
+        "alankaar": _run_shloka,
         "chandan": _run_chandan,
         "planexium": _run_planexium,
         "yatra": _run_yatra,

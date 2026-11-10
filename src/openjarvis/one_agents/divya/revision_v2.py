@@ -8,7 +8,8 @@ from .render import loudness
 from openjarvis.one_agents.chandan_render import _run,_probe,_ffmpeg_env,_timestamp
 
 class Revision(Motion):
-    def __init__(self,root):
+    def __init__(self,root,brand_label='D I V Y A'):
+        self.brand_label=brand_label
         self.atlas={}
         for item in read(root/'edit/v2/caption-atlas.json'):
             tile=cv2.imread(str(root/item['file']),cv2.IMREAD_UNCHANGED)
@@ -100,7 +101,8 @@ class Revision(Motion):
             self.paste_text(frame,current['text'],1450,1000)
             cv2.line(frame,(385,1660),(695,1660),(100,183,229),2,cv2.LINE_AA)
         if t<6.4:self.paste_text(frame,'शिव शरण',1400,1000)
-        cv2.putText(frame,'D I V Y A',(55,100),cv2.FONT_HERSHEY_SIMPLEX,.8,(220,225,232),1,cv2.LINE_AA)
+        if self.brand_label:
+            cv2.putText(frame,self.brand_label,(55,100),cv2.FONT_HERSHEY_SIMPLEX,.8,(220,225,232),1,cv2.LINE_AA)
         return frame
 
 def encode_frames(target,width,height,frames,seconds,log):
@@ -113,13 +115,13 @@ def encode_frames(target,width,height,frames,seconds,log):
         if proc.wait():raise RuntimeError('NVENC render failed; inspect '+str(log))
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--root',type=Path,required=True);ap.add_argument('--proof',action='store_true');args=ap.parse_args()
-    root=args.root.resolve();out=root/'edit/v2';motion=Revision(root);beatmap=read(out/'beat-map.json')
+    ap=argparse.ArgumentParser();ap.add_argument('--root',type=Path,required=True);ap.add_argument('--proof',action='store_true');ap.add_argument('--unbranded',action='store_true');args=ap.parse_args()
+    root=args.root.resolve();out=root/('edit/unbranded' if args.unbranded else 'edit/v2');out.mkdir(parents=True,exist_ok=True);motion=Revision(root,'' if args.unbranded else 'D I V Y A');beatmap=read(root/'edit/v2/beat-map.json')
     write(out/'scene-manifest.json',{'distinct_images':len(motion.bank),'shots':[{'start':a,'end':b,'asset':str(motion.bank[i]),'sha256':digest(motion.bank[i])} for a,b,i in zip(motion.bounds,motion.bounds[1:],motion.order)],'source_music':digest(root/'audio/composition.mp3'),'additional_music_credits':0})
     for t in [3,9,20,27,34,40,49,60,80,92,130,160]:cv2.imwrite(str(out/f'proof-{t:03}.jpg'),motion.frame(t))
     cv2.imwrite(str(out/'portrait-proof.jpg'),motion.portrait(52))
     if args.proof:return
-    signature=fingerprint({'code':digest(Path(__file__)),'parent':digest(Path(__file__).with_name('local_finish.py')),'images':[digest(p) for p in motion.bank],'atlas':read(out/'caption-atlas.json'),'beats':beatmap,'cues':motion.cues})
+    signature=fingerprint({'code':digest(Path(__file__)),'parent':digest(Path(__file__).with_name('local_finish.py')),'brand_label':motion.brand_label,'images':[digest(p) for p in motion.bank],'atlas':read(root/'edit/v2/caption-atlas.json'),'beats':beatmap,'cues':motion.cues})
     chunks=out/'chunks';chunks.mkdir(exist_ok=True);paths=[]
     for start in range(0,180,15):
         p=chunks/f'part-{start:03}.mp4';rec=p.with_suffix('.json');paths.append(p)
@@ -149,7 +151,7 @@ def main():
         reports.append({'path':str(p),'duration':info['format']['duration'],'sha256':digest(p),'loudness':level,'full_decode':'PASS'})
     thumb=motion.images[1].copy();thumb[810:1080]=(thumb[810:1080]*.18).astype(np.uint8)
     motion.paste_text(thumb,'शिव शरण',820,1680)
-    cv2.putText(thumb,'D I V Y A  |  ORIGINAL SHIVA BHAJAN',(635,1045),cv2.FONT_HERSHEY_SIMPLEX,.7,(225,230,238),1,cv2.LINE_AA)
+    cv2.putText(thumb,('D I V Y A  |  ' if motion.brand_label else '')+'ORIGINAL SHIVA BHAJAN',(635,1045),cv2.FONT_HERSHEY_SIMPLEX,.7,(225,230,238),1,cv2.LINE_AA)
     cv2.imwrite(str(out/'thumbnail-v2.jpg'),cv2.resize(thumb,(1280,720)))
     (out/'lyrics.hi.srt').write_text('\n\n'.join(f"{i}\n{_timestamp(c['start'],True)} --> {_timestamp(c['end'],True)}\n{c['text']}" for i,c in enumerate(motion.cues,1))+'\n',encoding='utf-8')
     write(out/'qa.json',{'outputs':reports,'caption_renderer':'Chromium complex-script shaping','distinct_images':len(motion.bank),'shots':len(motion.order),'shorts':beatmap['shorts'],'listening_review':'PENDING','published':False,'additional_music_credits':0})

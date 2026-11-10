@@ -107,7 +107,8 @@ class Motion:
         sparks=cv2.GaussianBlur(sparks,(5,5),0)
         frame=cv2.addWeighted(frame,1,cv2.resize(sparks,(W,H)),.6,0)
         # Quiet corner identity, lyric-safe image area, no large technical labels.
-        cv2.putText(frame,'D I V Y A',(75,76),cv2.FONT_HERSHEY_SIMPLEX,.58,(205,215,225),1,cv2.LINE_AA)
+        if getattr(self,'brand_label','D I V Y A'):
+            cv2.putText(frame,getattr(self,'brand_label','D I V Y A'),(75,76),cv2.FONT_HERSHEY_SIMPLEX,.58,(205,215,225),1,cv2.LINE_AA)
         if caption:
             current=next((c for c in self.cues if c['start']<=t<c['end']),None)
             if current:
