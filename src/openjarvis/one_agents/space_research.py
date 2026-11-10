@@ -8,6 +8,7 @@ import re
 import socket
 import time
 import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
@@ -93,9 +94,23 @@ class _PublicHTTPSHandler(urllib.request.HTTPSHandler):
 
 def read_public(url: str, *, limit: int = 4_000_000) -> bytes:
     request = urllib.request.Request(_http_url(url), headers={"User-Agent": "ONE-PLANEXIUM/1.0 (science evidence)"})
-    with urllib.request.build_opener(_Redirect(), _PublicHTTPSHandler()).open(request, timeout=45) as response:
-        validate_url(response.url, MEDIA_HOSTS)
-        data = response.read(limit + 1)
+    for attempt in range(3):
+        try:
+            with urllib.request.build_opener(_Redirect(), _PublicHTTPSHandler()).open(request, timeout=45) as response:
+                validate_url(response.url, MEDIA_HOSTS)
+                data = response.read(limit + 1)
+            break
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            # Retry only transient public GET failures; never relax URL, TLS,
+            # evidence or size checks, and never retry paid provider actions.
+            if isinstance(exc, urllib.error.HTTPError):
+                transient = exc.code in {408, 429, 500, 502, 503, 504}
+            else:
+                reason = getattr(exc, 'reason', exc)
+                transient = isinstance(reason, (TimeoutError, ConnectionError, socket.gaierror))
+            if not transient or attempt == 2:
+                raise
+            time.sleep(2 ** attempt)
     if len(data) > limit:
         raise ValueError("Public source exceeds the bounded download size")
     return data
