@@ -16,7 +16,7 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-ENVATO_RECEIPT_REVISION = "v16"
+ENVATO_RECEIPT_REVISION = "v17"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -577,7 +577,15 @@ def concrete_stock_brief(request):
     request = {**request, "blocked_keywords": list(request.get("blocked_keywords", []))}
     subject = request["subject"].casefold().strip()
     query = request["query"].casefold()
-    if subject in {"email", "emailing"}:
+    if (subject == 'telescope' and re.search(r'\b(saturn|mars|jupiter|venus|moon)\b', query)
+            and re.search(r'\b(observatory|equipment|astronomer)\b', query)
+            and not re.search(r'\b(occultation|transit|eclipse|through|closeup)\b', query)):
+        # An exterior instrument shot cannot prove which object it observes.
+        # Preserve its illustrative purpose and two independent visible facts;
+        # actual planet/occultation shots keep their exact celestial subject.
+        request.update(query='astronomy telescope observatory night', subject='telescope',
+                       illustrative_context='astronomy instrument; not footage of the named celestial event')
+    elif subject in {"email", "emailing"}:
         request.update(query="hands typing laptop", subject="laptop")
     elif subject == "exercise" and "astronaut" in query:
         request.update(query="woman treadmill exercise", subject="treadmill")
