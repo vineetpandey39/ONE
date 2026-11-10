@@ -44,7 +44,8 @@ PUBLIC_CHECKLIST = [
 
 def media_metadata_blockers(pkg: dict[str, Any]) -> list[str]:
     """Floor 12 acceptance contract for LYRA's YouTube package."""
-    blockers: list[str] = []
+    from openjarvis.one_agents.footage_geography import package_blockers
+    blockers: list[str] = package_blockers(pkg)
     chapters = list(pkg.get("chapters") or [])
     audit = pkg.get("description_audit")
     if str(pkg.get("schema_version") or "") >= "1.1":
