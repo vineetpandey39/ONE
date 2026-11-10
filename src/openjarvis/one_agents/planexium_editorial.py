@@ -203,7 +203,10 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
             row={'asset':{**asset,'seconds':3600},'kind':'primary'}
             rows.append(row);pictures.append(row);remember(asset)
         queries = editorial.get('scene_visuals', {}).get(str(number), [])
-        for index, query in enumerate(queries, 1):
+        # One authored query may yield several distinct relevant images. A
+        # bounded second pass uses the accumulated exclusion set instead of
+        # stretching a scarce archive still past its renderer duration cap.
+        for index, query in enumerate(queries + queries, 1):
             if len(pictures) >= needed:
                 break
             directory = root / f'sources/editorial-{number}-{index}'
@@ -291,9 +294,9 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
         # stills retain the tighter fifteen-second density rule.
         primary_hold = commissioned_figure_hold_seconds(scene, rows)
         source_figure_hold_ok = (pictures and any(row['kind'] == 'primary' for row in pictures)
-                                 and (sum(primary_hold if row['kind'] == 'primary' else 15
-                                          for row in pictures) >= remaining
-                                      or remaining / len(pictures) <= primary_hold))
+                                 and all(remaining / len(pictures) <=
+                                         (20 if row['kind'] == 'primary' else archive_hold)
+                                         for row in pictures))
         if len(pictures) < needed and not source_figure_hold_ok:
             raise ValueError(f'Scene {number} lacks distinct relevant imagery; shorten narration or revise its visual brief')
         if pictures:
