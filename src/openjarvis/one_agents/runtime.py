@@ -8706,6 +8706,7 @@ def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any], *,
     if (brand.get("slug") == "sonia_travel_vlogs"
             and payload.get("format") == "travel_video_production"
             and payload.get("stage") != "seo_complete"):
+        from openjarvis.one_agents.travel_editorial import preview_message
         stages.set_stage(head_id, stages.CARRYING_TO_WORKER,
                          "Taking YATRA's verified master to LYRA for YouTube packaging",
                          worker="lyra")
@@ -8717,7 +8718,8 @@ def _iris_report_brand(job: dict[str, Any], brand: dict[str, Any], *,
         return {"agent": head_name, "mode": "handoff", "brand": brand["slug"],
                 "production_complete": True, "published": False,
                 "handed_to": {"agent": "LYRA", "job_id": follow["id"]},
-                "content": f"YATRA production passed QC; {head_name} handed the verified master to LYRA."}
+                "content": f"YATRA production passed QC; {head_name} handed the verified master to LYRA."
+                           + preview_message(payload.get('visual_review'))}
 
     if (brand.get("slug") == "sonia_travel_vlogs"
             and payload.get("stage") == "seo_complete"
@@ -11126,6 +11128,7 @@ def _yatra_cut_video(plan_file: Path, asset_folder: str, run=None, *, director_c
         ("director_render", None, [str(asset_root)], 0),  # drawn by _yatra_render_director below
         ("assemble", _YATRA_EDIT_TOOLS / "assemble.py", [str(plan_file), asset_folder], 90),
         ("qc", _YATRA_EDIT_TOOLS / "qc.py", [asset_folder], 30),
+        ("visual_handoff", _YATRA_EDIT_TOOLS / "visual_handoff.py", [str(asset_root)], 15),
     ]
     if director_checkpoint:
         from openjarvis.one_agents.yatra_obs import sha256_file
@@ -11146,7 +11149,7 @@ def _yatra_cut_video(plan_file: Path, asset_folder: str, run=None, *, director_c
         (asset_root / 'director-manifest.json').write_bytes(frozen.read_bytes())
         # The reviewed timeline is the checkpoint. Re-running scene-point
         # synthesis here can change its cuts and invalidate the prior review.
-        steps = [step for step in steps if step[0] in {'director_render', 'assemble', 'qc'}]
+        steps = [step for step in steps if step[0] in {'director_render', 'assemble', 'qc', 'visual_handoff'}]
     result: dict[str, Any] = {"ok": True}
     for name, script, args, minutes in steps:
         if name == "director_render":
@@ -11672,6 +11675,8 @@ def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, 
         "separately from pending production checks."
     )
 
+    from openjarvis.one_agents.travel_editorial import INSTRUCTION as editorial_instruction
+    lao_trend_brief += '\n\n' + editorial_instruction.encode('ascii', 'ignore').decode('ascii')
     stages.worker_confirms_receipt(owner, "Received HELIOS's travel TrendBrief")
     # ChatGPT runs in the robots' Chrome, which the robots never launch themselves; bring it up if it is down
     # (both were closed on 2026-10-08). Best effort: if it cannot start, LAO's own step says why.
@@ -12083,13 +12088,15 @@ def _run_yatra_render(job: dict[str, Any]) -> dict[str, Any]:
     if not master.is_file():
         raise RuntimeError("YATRA QC passed without a concrete master file")
     master_sha256 = yatra_obs.sha256_file(master)
+    from openjarvis.one_agents.travel_editorial import visual_handoff
+    visual_review = visual_handoff(asset_root, master_sha256)
     if payload.get('hold_for_editorial_qc') is True:
         # A repaired master still needs visual review. Technical QC must not
         # release it automatically to packaging or an upload descendant.
         _require_active_job(job, 'save repaired master for editorial review')
         held = {'agent': 'YATRA', 'stage': 'render', 'published': False,
                 'lao_job': checkpoint, 'asset_folder': asset_folder,
-                'master_sha256': master_sha256, 'cut': cut,
+                'master_sha256': master_sha256, 'cut': cut, 'visual_review': visual_review,
                 'status': 'awaiting_editorial_qc', 'handed_to': None}
         (asset_root / 'editorial-rerender-receipt.json').write_text(
             json.dumps(held, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -12102,6 +12109,7 @@ def _run_yatra_render(job: dict[str, Any]) -> dict[str, Any]:
     report = enqueue_job("helios", json.dumps({
         "brand": "sonia_travel_vlogs", "worker": "yatra",
         "title": context.get("video_title"), "format": "travel_video_production",
+        "visual_review": visual_review,
         "published": False, "output": f"LAO job {checkpoint}",
         "lao_job": checkpoint,
         "asset_folder": asset_folder, "opening_map": context.get("opening_map"),
@@ -12122,6 +12130,7 @@ def _run_yatra_render(job: dict[str, Any]) -> dict[str, Any]:
             "music": context.get("music"),
             "master_sha256": master_sha256,
             "cut": cut,
+            "visual_review": visual_review,
             "handed_to": {"agent": "HELIOS", "job_id": report["id"]}}
 
 
