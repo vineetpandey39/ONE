@@ -789,8 +789,11 @@ def _page_errors(page: Any) -> list[str]:
     for selector in ("[role=alert]", ".a-alert-content", "[class*=error-message]"):
         try:
             found = page.locator(selector)
-            for index in range(min(found.count(), 8)):
-                text = " ".join((found.nth(index).inner_text() or "").split())
+            for index in range(min(found.count(), 100)):
+                item = found.nth(index)
+                if not item.is_visible():
+                    continue
+                text = " ".join((item.inner_text() or "").split())
                 if text and text not in messages:
                     messages.append(text[:240])
         except Exception:  # noqa: BLE001
