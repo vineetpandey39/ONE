@@ -9417,7 +9417,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
             # rejected-topic fallbacks. Sanjeevani and preproduction QC still
             # verify factual claims; MCP failure cannot silently become a
             # news-only commission or trigger paid narration.
-            from openjarvis.one_agents.vidiq_research import collect_story, validate_keyword
+            from openjarvis.one_agents.vidiq_research import collect_story, validate_keyword, research_label
             story = collect_story(
                 job["id"], recent_stories if is_vista_short else prior,
                 short=bool(is_vista_short),
@@ -9632,7 +9632,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
             evidence_file = output_dir / f"{job['id']}-{'vista-slot' if is_vista_short else 'yatra-trend'}-brief.md"
             evidence_file.write_text(
                 f"# {head_name} -> {'VISTA SlotBrief' if is_vista_short else 'YATRA TrendBrief'}\n\nRequest: {task}\n\n"
-                f"Researched by: Sanjeevani\n\n{grounded_angle}\n", encoding="utf-8")
+                f"Researched by: {research_label(story)}\n\n{grounded_angle}\n", encoding="utf-8")
             evidence_path = str(evidence_file)
             memory_body = grounded_angle
             if story.get("status") == "picked":

@@ -26,6 +26,13 @@ DAILY_CALL_LIMIT = 8  # Shared across jobs and fallback models, including failed
 SONIA_CHANNEL = "UCyqSprXlCEpBXMQRdkstLqA"
 
 
+def research_label(story: dict) -> str:
+    """Name the real demand provider in the visible commissioning receipt."""
+    if story.get('status') == 'vidiq':
+        return 'vidIQ MCP (trending, keyword demand, outliers); official sources verify travel facts'
+    return 'Sanjeevani / verified source evidence'
+
+
 class ResearchUnavailable(RuntimeError):
     pass
 
