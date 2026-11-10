@@ -24,7 +24,7 @@ def main():
         allowed = (original["status"],)
     with runtime._connect() as db:
         changed = db.execute(
-            "UPDATE jobs SET status='reserved', error='', updated_at=?, "
+            "UPDATE jobs SET status='reserved', error='', result='', updated_at=?, "
             "resume_count=COALESCE(resume_count,0)+1 "
             "WHERE id=? AND status IN (" + ",".join("?" for _ in allowed) + ")",
             (runtime._now(), args.job_id, *allowed),

@@ -433,8 +433,11 @@ def _capture_failure(page: Any, packet: "SubmissionPacket", label: str) -> dict[
     for selector in ("[role=alert]", ".a-alert-content", "[class*=error-message]"):
         try:
             found = page.locator(selector)
-            for index in range(min(found.count(), 8)):
-                text = " ".join((found.nth(index).inner_text() or "").split())
+            for index in range(min(found.count(), 100)):
+                item = found.nth(index)
+                if not item.is_visible():
+                    continue
+                text = " ".join((item.inner_text() or "").split())
                 if text and text not in messages:
                     messages.append(text[:300])
         except Exception:  # noqa: BLE001
@@ -798,6 +801,22 @@ def _page_errors(page: Any) -> list[str]:
 AI_QUESTION = "Did you use AI tools"
 
 
+def _wait_for_content_processing(page: Any, timeout_seconds: float = 1200) -> None:
+    """Uploaded is not converted; only visible processing messages keep us waiting."""
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        _refuse_if_challenged(page)
+        pending = page.get_by_text(re.compile(
+            r"processing your (?:file|manuscript|book cover)|"
+            r"KDP is processing|Maybe time to grab some coffee", re.I))
+        if not any(pending.nth(i).is_visible() for i in range(pending.count())):
+            return
+        if time.monotonic() >= deadline:
+            raise TimeoutError("KDP is still processing the uploaded files after 20 minutes; "
+                               "resume this saved draft without regenerating the book")
+        page.wait_for_timeout(5000)
+
+
 def _ai_question_section(page: Any) -> Any:
     """The block KDP renders the AI question in, found by the question itself.
 
@@ -940,6 +959,7 @@ def _complete_ebook_content(page: Any, packet: "SubmissionPacket") -> dict[str, 
     content step, and the failure read as a missing 70% royalty option.
     """
     done: dict[str, Any] = {}
+    _wait_for_content_processing(page)
     drm = os.environ.get("ONE_KDP_DRM", "yes").strip().lower() not in {"0", "no", "false"}
     drm_radio = page.locator(f"input[name='data[is_drm]-radio'][value='{'true' if drm else 'false'}']")
     if drm_radio.count():
@@ -1026,6 +1046,7 @@ def _complete_ebook_content(page: Any, packet: "SubmissionPacket") -> dict[str, 
     done["confirmations"] = confirms.count() + custom_confirms.count()
 
     _click(page, (r"Save and Continue",))
+    _wait_for_content_processing(page)
     try:
         page.wait_for_url(re.compile(r"/title-setup/kindle/[^/]+/pricing"), timeout=90_000)
     except Exception:
