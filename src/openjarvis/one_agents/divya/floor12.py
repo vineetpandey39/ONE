@@ -12,6 +12,7 @@ BRAND='shloka_by_shloka'
 CHANNEL='UCBT4mvZShb768lDFc6NcUvw'
 ROLES={'naad':'Production coordination and package QA','raag':'Lyrics, music direction and existing audio audit','alankaar':'Consistent imagery, local animation, captions and Shorts'}
 ROLES.update(ares='Shloka Unicode-safe metadata',lyra='Shloka verified local package')
+ROLES['echo']='Channel-bound publisher preflight and read-only channel counters'
 
 def _run_local(job):
     payload=json.loads(job.get('task') or '{}')
@@ -27,12 +28,16 @@ def _run_local(job):
     allowed['alankaar'].add('thumbnails')
     allowed['alankaar'].add('prepare_edit')
     allowed.update(ares={'metadata'},lyra={'assemble'})
+    allowed['echo']={'publisher_preflight','analytics'}
     if action not in allowed.get(agent,set()):
         raise ValueError('Action not assigned to this seat; music spending and publishing require separate approval')
     journal=Journal(root)
     with mission_lock(root):
         if action=='status':
             result={'status':'READY','stages':journal.data.get('stages',{}),'render_qa':read(root/'edit/unbranded/qa.json') if (root/'edit/unbranded/qa.json').is_file() else None}
+        elif action in {'publisher_preflight','analytics'}:
+            from .publishing import preflight,analytics
+            result=(preflight if action=='publisher_preflight' else analytics)(root)
         elif action=='prepare_edit':
             from .editorial import prepare
             result=prepare(root)
@@ -198,7 +203,7 @@ def head_job(job,enqueue):
     payload=bound_payload(job)
     action=payload.get('action','status')
     seat={'shorts_plan':'raag','shorts_qa':'naad','scripture':'raag','audio_audit':'raag','render':'alankaar','proof':'alankaar','short_labels':'alankaar','status':'naad','audit':'naad','verify_pipeline':'naad'}.get(action)
-    seat=seat or {'prepare_edit':'alankaar','finish_pipeline':'raag','thumbnails':'alankaar','metadata':'ares','assemble':'lyra','package_pipeline':'alankaar'}.get(action)
+    seat=seat or {'publisher_preflight':'echo','analytics':'echo','prepare_edit':'alankaar','finish_pipeline':'raag','thumbnails':'alankaar','metadata':'ares','assemble':'lyra','package_pipeline':'alankaar'}.get(action)
     if not seat:raise ValueError('Unknown devotional action')
     follow=handoff(job,payload,seat,enqueue)
     return {'agent':'HELIOS','brand':BRAND,'mission_id':payload['mission_id'],'handed_to':{'agent':seat.upper(),'job_id':follow['id']},'published':False}

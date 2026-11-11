@@ -7195,6 +7195,9 @@ def _require_private_delivery_receipt(uploader: Any, package: Path, master: Path
 def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
     """Finish Sonia's private YouTube draft after LYRA returns its package to HELIOS."""
     payload = _json_task(job)
+    if payload.get("brand") == "shloka_by_shloka":
+        from openjarvis.one_agents.divya.floor12 import run_job
+        return run_job(job)
     if payload.get("brand") == "origin_to_ovation":
         from openjarvis.one_agents.origin_to_ovation import run_stage
         return run_stage(job, enqueue=enqueue_job)

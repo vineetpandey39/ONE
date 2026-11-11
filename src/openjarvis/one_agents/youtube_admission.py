@@ -15,7 +15,7 @@ def segregate_task(agent_id,task):
     if agent_id in {'naad','raag','alankaar'} and not shloka:
         raise ValueError('Dedicated Shloka seat cannot accept another brand')
     if not shloka:return task
-    if agent_id not in {'helios','naad','raag','alankaar','ares','lyra'}:
+    if agent_id not in {'helios','naad','raag','alankaar','ares','lyra','echo'}:
         raise ValueError('Shloka adapter not wired for this shared seat; refusing cross-channel fallback')
     from openjarvis.one_agents.divya.floor12 import bound_payload
     return json.dumps(bound_payload({'task':task}),ensure_ascii=False)
