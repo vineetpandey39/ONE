@@ -1,5 +1,6 @@
 """Editorial repair: expanded scene bank, shaped Devanagari and musical Shorts."""
 import argparse,json,math,subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import cv2,numpy as np
 from .local_finish import Motion,W,H,FPS
@@ -125,6 +126,12 @@ class Revision(Motion):
             cv2.putText(frame,self.brand_label,(55,100),cv2.FONT_HERSHEY_SIMPLEX,.8,(220,225,232),1,cv2.LINE_AA)
         return frame
 
+def frame_sequence(fn,start,count):
+    """Bound frame buffers and CPU workers inside the one admitted render job."""
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for offset in range(0,count,12):
+            yield from pool.map(fn,(start+n/30 for n in range(offset,min(count,offset+12))))
+
 def encode_frames(target,width,height,frames,seconds,log):
     cmd=['ffmpeg','-y','-v','error','-f','rawvideo','-pix_fmt','bgr24','-s',f'{width}x{height}','-r','30','-i','-','-an','-t',f'{seconds:.6f}','-c:v','h264_nvenc','-preset','p5','-cq','19','-b:v','0','-pix_fmt','yuv420p','-movflags','+faststart',str(target)]
     with log.open('a') as err:
@@ -135,6 +142,7 @@ def encode_frames(target,width,height,frames,seconds,log):
         if proc.wait():raise RuntimeError('NVENC render failed; inspect '+str(log))
 
 def main():
+    cv2.setNumThreads(1)
     ap=argparse.ArgumentParser();ap.add_argument('--root',type=Path,required=True);ap.add_argument('--proof',action='store_true');ap.add_argument('--unbranded',action='store_true');args=ap.parse_args()
     root=args.root.resolve();out=root/('edit/unbranded' if args.unbranded else 'edit/v2');out.mkdir(parents=True,exist_ok=True);motion=Revision(root,'' if args.unbranded else 'D I V Y A');beatmap=read(root/'edit/v2/beat-map.json')
     write(out/'scene-manifest.json',{'distinct_images':len(motion.bank),'shots':[{'start':a,'end':b,'asset':str(motion.bank[i]),'sha256':digest(motion.bank[i])} for a,b,i in zip(motion.bounds,motion.bounds[1:],motion.order)],'source_music':digest(root/'audio/composition.mp3'),'additional_music_credits':0})
@@ -160,7 +168,7 @@ def main():
         if p.exists() and rec.exists() and read(rec).get('signature')==signature and read(rec).get('sha256')==digest(p):continue
         print(f'V2 rendering {start}–{start+15}s',flush=True)
         tmp=p.with_name(p.stem+'.partial.mp4')
-        encode_frames(tmp,W,H,(motion.frame(start+n/30) for n in range(math.ceil(seconds*30))),seconds,out/'encode.log')
+        encode_frames(tmp,W,H,frame_sequence(motion.frame,start,math.ceil(seconds*30)),seconds,out/'encode.log')
         tmp.replace(p);write(rec,{'signature':signature,'sha256':digest(p),'additional_credits':0})
     listing=chunks/'concat.txt';listing.write_text('\n'.join("file '"+p.name+"'" for p in paths),encoding='utf-8')
     target=out/('master.mp4' if motion.profile else 'shiva-sharan-v2.mp4')
@@ -170,7 +178,7 @@ def main():
         start=short['start'];end=short['end'];duration=end-start
         silent=out/(short['id']+'-silent.mp4');dest=out/(short['id']+'-v2.mp4')
         print(f"Rendering {short['id']} musical excerpt {start:.3f}–{end:.3f}",flush=True)
-        encode_frames(silent,1080,1920,(motion.portrait(start+n/30) for n in range(math.ceil(duration*30))),duration,out/'encode.log')
+        encode_frames(silent,1080,1920,frame_sequence(motion.portrait,start,math.ceil(duration*30)),duration,out/'encode.log')
         # Tiny entrance fade avoids clicks; ending fade starts only after complete vocal release.
         last_release=max(c['end'] for c in motion.cues if c['start']>=start and c['end']<=end)
         tail=max(0.0,end-last_release)
