@@ -26,7 +26,7 @@ ORIENTATION = {
     "overhead": "overhead", "equipment_macro": "detail", "environmental_pov": "pov",
     "crowd_reaction": "environment", "quiet_aftermath": "side_profile",
 }
-ROADMAP = (
+RONALDO_ROADMAP = (
     "Record-pressure cold open and the question of reinvention",
     "Madeira childhood context without invented hardship or routines",
     "Sporting youth development and leaving home",
@@ -42,6 +42,42 @@ ROADMAP = (
     "Later-career setbacks and another reinvention",
     "International longevity, six World Cups and 146 goals",
     "Verified records, meaning of longevity and natural CTA",
+)
+
+GENERIC_ROADMAP = (
+    "Career-defining pressure cold open and the central question",
+    "Childhood context without invented hardship or private routine",
+    "First documented contact with the commissioned sport",
+    "Youth development and the first verified breakthrough",
+    "Technique, discipline and an early transformation",
+    "First senior-stage test and rising expectations",
+    "A documented setback without speculative private detail",
+    "Adaptation and the work of returning",
+    "A career-defining competitive breakthrough",
+    "Record pressure and sustained excellence",
+    "Leadership, responsibility and changing expectations",
+    "Later-career adversity and reinvention",
+    "A final major competitive chapter",
+    "Verified record scale and sporting legacy",
+    "Human meaning, open future and natural CTA",
+)
+
+PHELPS_ROADMAP = (
+    "Comeback-pressure cold open: what remained after eight Beijing golds",
+    "Baltimore childhood context and beginning swimming at seven",
+    "Age-group development without invented training folklore",
+    "Sydney 2000: the Olympics at fifteen",
+    "The first world-level breakthrough and rising expectations",
+    "Athens 2004: eight medals and unfinished ambition",
+    "Beijing preparation without disputed diet or private-routine claims",
+    "Beijing 2008: eight events, eight gold medals",
+    "The burden of following a seemingly perfect Games",
+    "London 2012 and the first retirement",
+    "The documented decision to return",
+    "Rebuilding for Rio without speculative private scenes",
+    "Rio 2016 and the comeback resolution",
+    "Twenty-eight Olympic medals and twenty-three golds",
+    "Verified legacy, life beyond competition and natural CTA",
 )
 
 MESSI_ROADMAP = (
@@ -88,6 +124,7 @@ SPORT_PROFILES = {
     },
     "lionel-messi": {"sport": "football", "mechanics": "football anatomy, hands, feet, running, ball contact and kicking mechanics", "equipment": "football"},
     "cristiano-ronaldo": {"sport": "football", "mechanics": "football anatomy, hands, feet, running, ball contact and kicking mechanics", "equipment": "football"},
+    "michael-phelps": {"sport": "swimming", "mechanics": "competitive-swimming anatomy, shoulder rotation, butterfly timing, freestyle recovery, starts, turns and physically correct water interaction", "equipment": "pool lanes, starting block, goggles and swim cap"},
 }
 
 
@@ -97,7 +134,11 @@ def _roadmap(manifest: dict) -> tuple[str, ...]:
         return MESSI_ROADMAP
     if subject == "serena-williams":
         return SERENA_ROADMAP
-    return ROADMAP
+    if subject == "cristiano-ronaldo":
+        return RONALDO_ROADMAP
+    if subject == "michael-phelps":
+        return PHELPS_ROADMAP
+    return GENERIC_ROADMAP
 
 
 def _sport_profile(manifest: dict, brief: dict) -> dict:
@@ -112,7 +153,7 @@ def _sport_profile(manifest: dict, brief: dict) -> dict:
             brief.get("working_title", ""),
         )
     ).casefold()
-    for sport in ("tennis", "badminton", "cricket", "basketball", "athletics", "football"):
+    for sport in ("swimming", "tennis", "badminton", "cricket", "basketball", "athletics", "football"):
         if sport in haystack:
             return {"sport": sport, "mechanics": f"physically correct {sport} anatomy, equipment handling and action mechanics", "equipment": f"{sport} equipment"}
     return {"sport": "the commissioned sport", "mechanics": "physically correct sport-specific anatomy, equipment handling and action mechanics", "equipment": "sport-specific equipment"}

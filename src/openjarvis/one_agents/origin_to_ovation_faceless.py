@@ -142,102 +142,41 @@ def reject_faces(plan: list[dict[str, Any]], rejected_dir: Path) -> list[dict[st
 def enforce_prompt(text: str) -> str:
     """Enforce the current channel visual policy at every provider boundary."""
     safe = str(text)
-    if re.search(r"\b(?:sprinter|sprint|starting blocks|athletics stadium|running track)\b", safe, flags=re.I):
-        safe = re.sub(r"\bUsain Bolt\b", "the fictional sprint protagonist", safe, flags=re.I)
-        safe = safe.replace("recognisable", "internally consistent")
-        return (
-            safe.rstrip() + "\nMANDATORY ORIGINAL-CGI SPRINT RULE: Use the attached fictional CGI sprint "
-            "character only for internal continuity. Preserve the same tall lean proportions, skin tone, face "
-            "geometry and era-appropriate hair across panels without naming or cloning a real person. Use plain "
-            "unbranded sprint clothing, realistic starting-block placement and physically correct sprint anatomy. "
-            "No logos, flags, bib text, sponsors, event branding, readable text or watermarks. Output only one image."
-        )
     production_prefix = (
         "Create ONE full-frame 16:9 photoreal cinematic CGI biography scene, "
         "original illustrative reconstruction, not archival footage."
     )
-    # Public-figure names and event/kit mimicry can turn an otherwise original
-    # CGI reconstruction into a third-party-similarity request.  The attached,
-    # hash-approved fictional reference carries continuity; narration carries
-    # the factual identity.  Keep image prompts neutral and provider-safe.
-    substitutions = {
-        "Subject Lionel Messi": "Subject: the fictional adult football protagonist from the attached reference",
-        "Lionel Messi": "the fictional football protagonist",
-        "Messi-inspired editorial likeness": "fictional editorial character from the attached reference",
-        "Argentina-colour": "plain pale-blue and white training",
-        "Qatar World Cup": "international tournament",
-        "World Cup": "international tournament",
-        "recognisable": "emotionally legible",
-    }
-    for old, new in substitutions.items():
-        safe = safe.replace(old, new)
-    safe = re.sub(r"\bMessi[- ]?inspired\b", "fictional", safe, flags=re.I)
-    if str(text).startswith(production_prefix):
-        # Send only the visual instruction to the image provider.  Repeating
-        # biography, identity, policy and legal qualifiers caused false-positive
-        # refusals even though the approved reference is an original CGI design.
-        # Factual names, dates and achievements belong in narration, not pixels.
-        visual = safe.split(" Subject:", 1)[0]
-        visual = visual.replace(production_prefix, "", 1).strip()
-        visual = re.sub(r"\b(?:Lionel\s+)?Messi(?:[- ]?inspired)?\b", "fictional football character", visual,
-                        flags=re.I)
-        visual = re.sub(r"\beditorial likeness\b", "fictional character", visual, flags=re.I)
-        visual = re.sub(r"\bAge[- ]?\d+\b", "adult", visual, flags=re.I)
-        visual = visual.replace("international tournament", "fictional football match")
-        visual = visual.replace("pale-blue-and-white", "neutral")
-        visual = visual.replace("pale-blue and white", "neutral")
-        visual = visual.replace("Barcelona-colour", "neutral")
-        visual = visual.replace("dark-red-and-blue", "neutral")
-        visual = visual.replace("Argentina", "fictional team")
-        # Direct face-recreation language is the remaining likeness trigger in
-        # long persistent chats.  Preserve emotional visibility through true
-        # side profiles and medium coverage instead of reverting to repetitive
-        # rear views.
-        visual = re.sub(r"\bfront[- ]three-quarter\b", "true side-profile", visual, flags=re.I)
-        visual = re.sub(r"\bfront-facing\b", "side-facing at medium distance", visual, flags=re.I)
-        visual = re.sub(r"\bthree-quarter facial (?:view|angle|geometry)\b",
-                        "true side-profile facial view", visual, flags=re.I)
-        visual = re.sub(r"\bfacial close-up\b", "medium true side-profile shot", visual, flags=re.I)
-        visual = re.sub(r"\bthree-quarter\b", "true side-profile", visual, flags=re.I)
-        visual = re.sub(r"\bclose-up\b", "medium shot", visual, flags=re.I)
-        visual = re.sub(r"\brecognisable\b|\brecognizable\b", "emotionally legible", visual, flags=re.I)
-        if re.match(r"P02:", visual, flags=re.I):
-            visual = (
-                "P02: Wide establishing view of a fictional football stadium with symmetrical pitch geometry, "
-                "realistic floodlights, distant spectators and one small generic player near the centre circle; "
-                "the player's face is too distant to identify. Slow descending crane composition."
-            )
-        return (
-            "Create one 16:9 cinematic CGI illustration. Scene: " + visual + " "
-            "Use neutral unbranded sportswear, realistic lighting, physically correct football anatomy and "
-            "natural hands and feet. No logos, flags, readable text or watermarks. Output only the image."
-        )
-    # Provider refusals can still be triggered by a cluster of biographical,
-    # tournament, age and national-kit cues even after the subject name is
-    # removed.  Scenes are illustrations, while the sourced narration carries
-    # the real-world facts, so neutralise those cues at the image boundary.
-    safe = safe.replace(
-        "Create ONE full-frame 16:9 photoreal cinematic CGI biography scene, original illustrative reconstruction, not archival footage.",
-        "Create one full-frame 16:9 original cinematic CGI football illustration.",
+    sport_patterns = (
+        ("swimming", r"\b(swim|swimmer|pool|aquatic|butterfly|freestyle|medley|goggles|starting block|lane rope)\b"),
+        ("tennis", r"\b(tennis|racket|baseline|serve|backhand|forehand)\b"),
+        ("cricket", r"\b(cricket|wicket|batter|bowler|crease|stumps)\b"),
+        ("athletics", r"\b(sprint|sprinter|running track|starting blocks|athletics)\b"),
+        ("badminton", r"\b(badminton|shuttlecock)\b"),
+        ("basketball", r"\b(basketball|hoop|three-point)\b"),
+        ("football", r"\b(football|soccer|goalkeeper|centre circle|goal mouth)\b"),
     )
-    safe = re.sub(r"\bAge[- ]?\d+ protagonist\b", "adult fictional football protagonist", safe, flags=re.I)
-    safe = re.sub(r"\bage\s+\d+\b", "adult", safe, flags=re.I)
-    safe = re.sub(r"\bera\s+\d{4}\s*[·|:-]?", "", safe, flags=re.I)
-    safe = safe.replace("international tournament", "large fictional football match")
-    safe = safe.replace("pale-blue-and-white kit", "plain neutral training kit")
-    safe = safe.replace("pale-blue and white training", "plain neutral training")
-    safe = safe.replace("Preserve the approved canonical identity from the attached reference.",
-                        "Use the attached original character design only for internal visual continuity.")
+    sport = next((name for name, pattern in sport_patterns if re.search(pattern, safe, flags=re.I)),
+                 "the commissioned sport")
+    if safe.startswith(production_prefix):
+        # The shot's visual brief is authoritative. Remove biography/name policy
+        # suffixes while retaining its sport, action, setting and camera grammar.
+        visual = safe.replace(production_prefix, "", 1)
+        visual = re.split(r"\s+Episode subject\s+", visual, maxsplit=1, flags=re.I)[0].strip()
+    else:
+        visual = safe.strip()
+    visual = re.sub(r"\b(recognisable|recognizable)\b", "internally consistent", visual, flags=re.I)
+    visual = re.sub(r"\b(Lionel Messi|Cristiano Ronaldo|Serena Williams|Usain Bolt|Michael Phelps|Virat Kohli|MS Dhoni|Sachin Tendulkar)\b",
+                    "the fictional editorial protagonist from the attached reference", visual, flags=re.I)
     rules = (
-        "This overrides hidden-face instructions while keeping the character wholly fictional. "
-        "Use the attached fictional CGI character as the only continuity reference. "
-        "Keep the character design and wardrobe progression internally consistent without depicting or naming any real person. "
+        f"Use only {sport}-specific environments, equipment and physically correct mechanics; never import another sport. "
+        "Use the attached approved fictional CGI character only for internal visual continuity. "
+        "Keep character design and wardrobe progression internally consistent without naming a real person. "
         "Use varied front, three-quarter, true side-profile, close-up, medium and wide coverage; rear views are rare "
         "transitions only and must stay below 15 percent of the episode. Keep framing dignified. No logos, crests, sponsors, signatures, watermarks, flags, event "
-        "branding, scoreboards, venue lettering or readable text. Hands, feet, joints, ball contact and football "
-        "mechanics must be physically correct. Render original cinematic CGI, not a photograph or archival frame."
+        "branding, venue lettering or readable text. Anatomy, contact, reflections and equipment interaction "
+        "must be physically correct. Render one full-frame original cinematic CGI image, not a photograph, collage or archival frame."
     )
-    return safe.rstrip() + "\nMANDATORY ORIGINAL-CGI RULE: " + rules
+    return "Create one full-frame 16:9 cinematic CGI illustration. Scene: " + visual + "\nMANDATORY SPORT-LOCK RULE: " + rules
 
 
 def scene_qa(image: Path, *, age, era, reviewer=None) -> dict:

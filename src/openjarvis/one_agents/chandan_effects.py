@@ -41,7 +41,7 @@ def resolve(shot):
                 raise ValueError('Paths require 2–12 normalized finite points')
             # Paths are schematic unless independently measured; never label them actual trajectory.
             effect['schematic']=True
-        if kind=='sport_graphic' and effect.get('sport') not in {'athletics','cricket','tennis','badminton','football','basketball'}:
+        if kind=='sport_graphic' and effect.get('sport') not in {'athletics','cricket','tennis','badminton','football','basketball','swimming'}:
             raise ValueError('Explicit supported sport required')
         normalized.append(effect)
     motion=director.get('camera_motion',motion)
@@ -92,6 +92,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 segments=[(x,330,x+250,710) for x in range(440,1250,200)]
             elif sport=='cricket':
                 segments=[(860,320,1060,320),(1060,320,1060,720),(1060,720,860,720),(860,720,860,320),(820,370,1100,370),(820,670,1100,670)]
+            elif sport=='swimming':
+                segments=[(440,y,1480,y) for y in (340,420,500,580,660)]
             else:
                 segments=[(440,320,1480,320),(1480,320,1480,720),(1480,720,440,720),(440,720,440,320),(960,320,960,720)]
             # Each segment is its own narrow quad, never a filled court polygon.

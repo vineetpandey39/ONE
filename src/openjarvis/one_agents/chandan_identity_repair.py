@@ -4,6 +4,8 @@ def run(path,job):
  from openjarvis.one_agents.origin_to_ovation import read,write,image_provider,digest
  from openjarvis.one_agents import stages
  m=read(path/'mission.json');plan=read(path/'production/master-v1/shot-plan.json')
+ if m.get('subject_id')!='virat-kohli':
+  raise ValueError('Legacy P12 cricket identity repair is restricted to the Virat Kohli mission')
  outputs=[]
  for shotid in ['P12']:
   shot=next(s for s in plan if s['shot_id']==shotid)

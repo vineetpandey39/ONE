@@ -52,6 +52,16 @@ def reference_prompt(manifest, brief):
                            'plain unbranded swimmer warm-up top, neutral aquatic-centre background'),
         'serena-williams': ('tennis protagonist',
                             'plain unbranded tennis training top, neutral tennis-centre background'),
+        'ms-dhoni': ('cricket protagonist',
+                     'plain unbranded cricket training shirt, neutral cricket-ground background'),
+        'virat-kohli': ('cricket protagonist',
+                        'plain unbranded cricket training shirt, neutral cricket-ground background'),
+        'sachin-tendulkar': ('cricket protagonist',
+                             'plain unbranded cricket training shirt, neutral cricket-ground background'),
+        'lionel-messi': ('football protagonist',
+                         'plain unbranded football training shirt, neutral football-ground background'),
+        'cristiano-ronaldo': ('football protagonist',
+                              'plain unbranded football training shirt, neutral football-ground background'),
     }
     protagonist, activity = sport_profiles.get(
         subject_id,
@@ -75,8 +85,8 @@ def reference_prompt(manifest, brief):
     # and camera rules are enforced later by the reviewed scene pack.
     return (f"Generate an image based on this description. Do not ask follow-up questions. Description: "
             f"A cinematic CGI editorial character-design sheet for a fictional adult {protagonist}. "
-            "Create one clean three-panel adult career progression, clearly CGI artwork rather than a photograph. "
-            "Each panel is a respectful head-and-shoulders three-quarter portrait with a simple neutral stadium "
+            f"Create one clean {len(adult_stages)}-panel adult career progression, clearly CGI artwork rather than a photograph. "
+            "Each panel is a respectful head-and-shoulders three-quarter portrait with a simple neutral sport-appropriate "
             "background and natural expression. Keep the same clearly fictionalised editorial character across "
             "the panels, with stylised CGI features and painterly skin texture. "
             + ' '.join(lines) +
