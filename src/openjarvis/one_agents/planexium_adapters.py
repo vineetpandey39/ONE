@@ -16,7 +16,7 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-ENVATO_RECEIPT_REVISION = "v18"
+ENVATO_RECEIPT_REVISION = "v19"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 

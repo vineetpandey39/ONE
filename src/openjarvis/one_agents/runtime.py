@@ -12274,7 +12274,11 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
                 from openjarvis.one_agents import helios_self_heal
                 importlib.reload(floor_watch)
                 importlib.reload(helios_self_heal)
-            return floor_watch.watch_floor(_connect, head_id)
+            report = floor_watch.watch_floor(_connect, head_id)
+            if head_id == "ares":
+                report["linkedin_readiness"] = linkedin_engage.readiness(_home())
+                report["content"] += "\n" + report["linkedin_readiness"]["content"]
+            return report
         finally:
             stages.clear_stage(head_id)
 

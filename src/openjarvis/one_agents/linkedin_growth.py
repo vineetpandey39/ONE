@@ -8,8 +8,8 @@ the runtime hands in what it owns.
 Safety shape, in the order it matters
   1. Nothing is published unless the quality gate passed AND the scheduler's
      fire receipt granted publish authority AND the channel is in "auto" mode.
-  2. Any failure BEFORE the publish job starts falls back to the v1 post, so a
-     bad day for v2 costs nothing: the slot still posts.
+  2. A terminal failure BEFORE publishing may fall back to v1. An unfinished
+     draft is stopped and held; it must not overlap another browser job.
   3. Once the publish job has started there is no fallback. The outcome is
      unknown (it may have posted), and a second post would be worse than none.
 """
@@ -114,7 +114,7 @@ def _poll(tool: Any, process: str, lao_job: str, *, max_wait: float, poll: float
 
 
 def run_draft(tool: Any, prompt: str, roots: tuple[Path, ...], *, max_wait: float, poll: float,
-              sleep: Callable[[float], None]) -> dict[str, Any]:
+              sleep: Callable[[float], None], status_path: Path | None = None) -> dict[str, Any]:
     started = tool.execute(action="start", mode="publish", process_name=DRAFT_PROCESS, scope="production",
                            confirm_publish=True,
                            input_args={"prompt": prompt, "chatgptCredentialAssetName": "chatgptLogin"})
@@ -123,7 +123,11 @@ def run_draft(tool: Any, prompt: str, roots: tuple[Path, ...], *, max_wait: floa
     lao_job = str(((started.metadata or {}).get("job") or {}).get("id") or "")
     if not lao_job:
         return {"status": "no_job", "lao_job": "", "raw": "", "error": "LAO returned no job id"}
+    if status_path:
+        status_path.write_text(json.dumps({"lao_job": lao_job, "status": "started"}), encoding="utf-8")
     status, _ = _poll(tool, DRAFT_PROCESS, lao_job, max_wait=max_wait, poll=poll, sleep=sleep)
+    if status_path:
+        status_path.write_text(json.dumps({"lao_job": lao_job, "status": status}), encoding="utf-8")
     if status not in TERMINAL:
         # A polling timeout is not a failed job. Never start another browser job
         # (including the legacy fallback) while this one still owns the browser.
@@ -177,7 +181,8 @@ def produce(*, v2_payload: dict[str, Any], job_id: str, tool: Any, home: Path, r
         stages.set_stage("herald", stages.EXECUTING, f"Writing the {fmt} in ChatGPT (attempt {attempt}/{attempts})")
         prompt = bundle.v2.writer_prompt(story, lane_label, fmt, shape=shape, ending=ending,
                                          avoid_openers=openers, recent_shapes=recent_shapes, fix=fix)
-        result = run_draft(tool, prompt, roots, max_wait=max_wait, poll=poll, sleep=sleep)
+        result = run_draft(tool, prompt, roots, max_wait=max_wait, poll=poll, sleep=sleep,
+                           status_path=out_dir / f"attempt-{attempt}-status.json")
         (out_dir / f"attempt-{attempt}-raw.txt").write_text(result.get("raw", ""), encoding="utf-8")
         (out_dir / f"attempt-{attempt}-status.json").write_text(
             json.dumps({k: v for k, v in result.items() if k != "raw"}, indent=2), encoding="utf-8")

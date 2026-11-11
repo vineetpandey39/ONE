@@ -544,6 +544,42 @@ def run_triage(cycle: dict[str, Any], home: Path, *, read_api: Callable[[], list
     return cycle
 
 
+def readiness(home: Path) -> dict[str, Any]:
+    """ARES's recurring watch reads evidence, not an optimistic readiness label."""
+    bundle = libs()
+    if bundle is None:
+        return {"status": "blocked", "content": "LinkedIn engagement policy unavailable"}
+    policy = bundle.policy.load_policy()
+    rows = comments_ledger(home)
+    read = _load(engage_dir(home) / "read_capability.json", {})
+    token = _load(engage_dir(home) / "token_health.json", {})
+    remaining = bundle.policy.shadow_remaining(rows, policy)
+    notes = []
+    if token.get("auth_status") == 401:
+        notes.append("LinkedIn token rejected: renew linkedinApiToken in LAO Assets")
+    elif token.get("renewal_warning"):
+        notes.append("LinkedIn token reached the 55-day renewal threshold")
+    elif not token or time.time() - float(token.get("checked_at", 0)) > 86400:
+        notes.append("LinkedIn token preflight not checked in the last day")
+    if policy.get("mode") == "shadow":
+        notes.append("Engagement remains shadow: comments are not sent")
+        if remaining == 0:
+            notes.append("Shadow review quota reached; review required before activation")
+    if read.get("status") != 200:
+        notes.append(read.get("reason") or "Live comment-read capability not yet verified")
+    elif time.time() - float(read.get("checked_at", 0)) > 86400:
+        notes.append("Comment-read capability check is stale")
+    denied = [r for r in rows if "ACCESS_DENIED" in str(r.get("error", ""))]
+    if denied:
+        notes.append("Comment sending has a recorded ACCESS_DENIED; token posting success does not prove comment access")
+    result = {"status": "attention" if notes else "ready", "mode": policy.get("mode"),
+              "shadow_remaining": remaining, "read_capability": read, "token_health": token,
+              "content": "; ".join(notes) or "LinkedIn engagement readiness checks passed",
+              "checked_at": time.time()}
+    _save(engage_dir(home) / "readiness.json", result)
+    return result
+
+
 def read_own_comments(home: Path, tool: Any, *, heartbeat: Callable[[], None],
                       sleep: Callable[[float], None] = time.sleep) -> list[dict[str, Any]]:
     """Read only posts with a completed HERALD publish receipt. Never supplies send arguments."""
