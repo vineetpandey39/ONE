@@ -1,6 +1,7 @@
 """Durable render child ownership: resume a live child, never spawn a duplicate."""
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -76,7 +77,10 @@ def run_render(root,tools,*,motion_format=None,on_progress=None,timeout=14400,re
         args+=['--resolve-settings',str(settings_path)]
     if motion_format:args+=['--format',motion_format]
     with (work/'render.log').open('a',encoding='utf-8') as log:
-        child=subprocess.Popen(args,stdout=log,stderr=subprocess.STDOUT)
+        # Logs and the floor progress receipt are the UI. An empty Windows
+        # console invites a close event that can abort this durable child.
+        child=subprocess.Popen(args,stdout=log,stderr=subprocess.STDOUT,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
         state={'pid':child.pid,'boot':psutil.Process(child.pid).create_time(),'signature':signature}
         temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps(state),encoding='utf-8');temporary.replace(path)
         wait(child)
