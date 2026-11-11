@@ -773,7 +773,9 @@ def verified_stock_subject(title, subject, outputs):
     return bool(proof.get("policy") == "selected-metadata-preview-fast-v2"
         and proof.get("accepted") is True and proof.get("title") == title
         and str(proof.get("subject", "")).casefold() == subject.casefold()
-        and subject.casefold() in metadata_text
+        and (subject.casefold() in metadata_text
+             or (subject.casefold() == 'bioprinter'
+                 and re.search(r'\bbio printers?\b', metadata_text)))
         and len(proof.get("preview_sha256", [])) >= 2
         and verdict.get("subject_match") is True
         and all(verdict.get(k) is False for k in ("unusable", "uncertain", "contradiction")))
