@@ -381,6 +381,8 @@ def enqueue_job(agent_id: str, task: str, mode: str = "plan", tier: str = "fast"
     agent_id = agent_id.strip().lower()
     if agent_id not in AGENTS:
         raise ValueError(f"Unknown agent: {agent_id}")
+    from openjarvis.one_agents.youtube_admission import segregate_task
+    task = segregate_task(agent_id, task)
 
     # Every job in ONE passes through here, which makes it the one place where
     # "an agent must be defined on a floor before it can work" can be true by

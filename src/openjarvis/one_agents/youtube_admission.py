@@ -4,6 +4,21 @@ Serialize a seat across brands, and a Shloka mission across its specialist
 seats. Unrelated agents/missions remain eligible rather than starving behind
 the first busy queue row. This is admission, not provider/browser ownership.
 """
+import json
+
+def segregate_task(agent_id,task):
+    """Fail before queueing if a shared handler has no Shloka adapter yet."""
+    try:payload=json.loads(task)
+    except (ValueError,TypeError):payload={}
+    if not isinstance(payload,dict):payload={}
+    shloka=payload.get('brand')=='shloka_by_shloka'
+    if agent_id in {'naad','raag','alankaar'} and not shloka:
+        raise ValueError('Dedicated Shloka seat cannot accept another brand')
+    if not shloka:return task
+    if agent_id not in {'helios','naad','raag','alankaar'}:
+        raise ValueError('Shloka adapter not wired for this shared seat; refusing cross-channel fallback')
+    from openjarvis.one_agents.divya.floor12 import bound_payload
+    return json.dumps(bound_payload({'task':task}),ensure_ascii=False)
 
 def predicate(agents):
     seats=sorted(k for k,v in agents.items() if str(v.get('floor_id'))=='12' or k=='ares')
