@@ -17,24 +17,38 @@ def shot_plan(scenes,beats,duration):
     bounds.append(duration)
     return [{'start':a,'end':b,'image':scenes[i%len(scenes)]['image']} for i,(a,b) in enumerate(zip(bounds,bounds[1:]))]
 
-def prepare(root):
+def prepare(root, draft=False):
     from .render import _probe,cards_module
     m=read(root/'mission.json');config=read(root/'config.json')
     audio=root/'audio/master.wav'
     duration=float(_probe(audio)['format']['duration'])
     cs=read(root/'lyrics-cues.json')
-    validate_cues(cs,duration,lyric_fragments(m['lyrics']))
-    require_review(root,'lyric-timing',{'audio_sha256':digest(audio),'cues':cs})
+    if draft:
+        # Local review exports retain truthful ASR provenance; never mint human approval.
+        import math
+        previous=0
+        for c in cs:
+            a,b=float(c['start']),float(c['end'])
+            if not all(math.isfinite(v) for v in (a,b)) or not previous<=a<b<=duration:
+                raise Blocked('Invalid draft caption bounds')
+            if c['text'] not in lyric_fragments(m['lyrics']) or c.get('timing_source')!='local_faster_whisper':
+                raise Blocked('Draft captions need approved spelling and explicit ASR provenance')
+            previous=b
+        if not cs:raise Blocked('Draft has no measured captions')
+        write(root/'reviews/draft-export-status.json',{'human_verified':False,'publish_authorized':False,'status':'AWAITING_TIMING_AND_PRONUNCIATION_REVIEW','audio_sha256':digest(audio)})
+    else:
+        validate_cues(cs,duration,lyric_fragments(m['lyrics']))
+        require_review(root,'lyric-timing',{'audio_sha256':digest(audio),'cues':cs})
     beatmap=read(root/'edit/v2/beat-map.json')
     if beatmap['source_sha256']!=digest(root/'audio/composition.mp3'):raise Blocked('Stale beats')
     images=[]
     for scene in m['scenes']:
         p=artifact(root,scene['image'])
         if digest(p)!=read(p.with_suffix('.json'))['sha256']:raise Blocked('Image provenance mismatch')
-        require_review(root,'image-'+scene['id'],{'image_sha256':digest(p),'prompt':scene['prompt']})
+        if not draft:require_review(root,'image-'+scene['id'],{'image_sha256':digest(p),'prompt':scene['prompt']})
         images.append(digest(p))
     if len(set(images))<6:raise Blocked('Six distinct images required, not duplicate files')
-    profile={'duration':duration,'title':m['display_title'],'shots':shot_plan(m['scenes'],beatmap['beats'],duration),
+    profile={'duration':duration,'review_status':'DRAFT_UNREVIEWED' if draft else 'REVIEWED','title':m['display_title'],'shots':shot_plan(m['scenes'],beatmap['beats'],duration),
              'audio_sha256':digest(audio),'image_sha256':images,
              'camera_modes':[s.get('camera_mode','motion') for s in m['scenes']]}
     write(root/'edit/v2/editorial-profile.json',profile)

@@ -132,7 +132,7 @@ class Motion:
                 region=frame[H-210:H-10];region[:]=np.clip(region*(1-alpha*k)+tile*alpha*k,0,255).astype(np.uint8)
             if 1<t<12:
                 tile,alpha=self.title;k=min(1,(t-1)/2,(12-t)/2);region=frame[800:1000];region[:]=(region*(1-alpha*k)+tile*alpha*k).astype(np.uint8)
-        fade=min(1,t/1.5,(180-t)/2)
+        fade=min(1,t/1.5,(getattr(self,'duration',180.0)-t)/2)
         return cv2.convertScaleAbs(frame,alpha=max(0,fade))
 
 def main():

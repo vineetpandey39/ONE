@@ -27,6 +27,7 @@ def _run_local(job):
     allowed={'naad':{'status','audit','shorts_qa'},'raag':{'status','scripture','audio_audit','shorts_plan'},'alankaar':{'status','render','proof','short_labels'}}
     allowed['alankaar'].add('thumbnails')
     allowed['alankaar'].add('prepare_edit')
+    allowed['alankaar'].add('prepare_draft')
     allowed.update(ares={'metadata'},lyra={'assemble'})
     allowed['echo']={'publisher_preflight','analytics'}
     if action not in allowed.get(agent,set()):
@@ -38,9 +39,9 @@ def _run_local(job):
         elif action in {'publisher_preflight','analytics'}:
             from .publishing import preflight,analytics
             result=(preflight if action=='publisher_preflight' else analytics)(root)
-        elif action=='prepare_edit':
+        elif action in {'prepare_edit','prepare_draft'}:
             from .editorial import prepare
-            result=prepare(root)
+            result=prepare(root,draft=action=='prepare_draft')
         elif action in {'metadata','thumbnails','assemble'}:
             from . import packaging
             result=getattr(packaging,action)(root)
@@ -203,7 +204,7 @@ def head_job(job,enqueue):
     payload=bound_payload(job)
     action=payload.get('action','status')
     seat={'shorts_plan':'raag','shorts_qa':'naad','scripture':'raag','audio_audit':'raag','render':'alankaar','proof':'alankaar','short_labels':'alankaar','status':'naad','audit':'naad','verify_pipeline':'naad'}.get(action)
-    seat=seat or {'publisher_preflight':'echo','analytics':'echo','prepare_edit':'alankaar','finish_pipeline':'raag','thumbnails':'alankaar','metadata':'ares','assemble':'lyra','package_pipeline':'alankaar'}.get(action)
+    seat=seat or {'publisher_preflight':'echo','analytics':'echo','prepare_edit':'alankaar','prepare_draft':'alankaar','finish_pipeline':'raag','thumbnails':'alankaar','metadata':'ares','assemble':'lyra','package_pipeline':'alankaar'}.get(action)
     if not seat:raise ValueError('Unknown devotional action')
     follow=handoff(job,payload,seat,enqueue)
     return {'agent':'HELIOS','brand':BRAND,'mission_id':payload['mission_id'],'handed_to':{'agent':seat.upper(),'job_id':follow['id']},'published':False}

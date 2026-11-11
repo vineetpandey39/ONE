@@ -172,7 +172,12 @@ def main():
         print(f"Rendering {short['id']} musical excerpt {start:.3f}–{end:.3f}",flush=True)
         encode_frames(silent,1080,1920,(motion.portrait(start+n/30) for n in range(math.ceil(duration*30))),duration,out/'encode.log')
         # Tiny entrance fade avoids clicks; ending fade starts only after complete vocal release.
-        af=f'afade=t=in:d=0.04,afade=t=out:st={duration-.65}:d=0.65'
+        last_release=max(c['end'] for c in motion.cues if c['start']>=start and c['end']<=end)
+        tail=max(0.0,end-last_release)
+        af='afade=t=in:d=0.04'
+        if tail>.01:
+            fade_seconds=min(.65,tail)
+            af+=f',afade=t=out:st={duration-fade_seconds}:d={fade_seconds}'
         _run(['ffmpeg','-y','-v','error','-i',str(silent),'-ss',str(start),'-i',str(root/'audio/master.wav'),'-t',str(duration),'-map','0:v','-map','1:a','-c:v','copy','-af',af,'-c:a','aac','-b:a','256k','-movflags','+faststart',str(dest)])
         outputs.append(dest)
     reports=[]
