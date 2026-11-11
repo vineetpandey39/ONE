@@ -31,6 +31,7 @@ def _run_local(job):
     allowed['alankaar'].add('reframe_shorts')
     allowed.update(ares={'metadata'},lyra={'assemble'})
     allowed['echo']={'publisher_preflight','analytics'}
+    allowed['raag'].add('lyric_audit')
     if action not in allowed.get(agent,set()):
         raise ValueError('Action not assigned to this seat; music spending and publishing require separate approval')
     journal=Journal(root)
@@ -66,6 +67,9 @@ def _run_local(job):
             from .worker import scripture, lyrics_binding
             mission=read(root/'mission.json')
             result=journal.stage('SCRIPTURE_VERIFICATION',lyrics_binding(mission),lambda:scripture(root,mission))
+        elif action=='lyric_audit':
+            from .lyric_audit import audit
+            result=audit(root)
         elif action=='audio_audit':
             from .render import _probe
             p=root/'audio/composition.mp3'
@@ -210,7 +214,7 @@ def head_job(job,enqueue):
     payload=bound_payload(job)
     action=payload.get('action','status')
     seat={'shorts_plan':'raag','shorts_qa':'naad','scripture':'raag','audio_audit':'raag','render':'alankaar','proof':'alankaar','short_labels':'alankaar','status':'naad','audit':'naad','verify_pipeline':'naad'}.get(action)
-    seat=seat or {'publisher_preflight':'echo','analytics':'echo','prepare_edit':'alankaar','prepare_draft':'alankaar','reframe_shorts':'alankaar','finish_pipeline':'raag','thumbnails':'alankaar','metadata':'ares','assemble':'lyra','package_pipeline':'alankaar'}.get(action)
+    seat=seat or {'lyric_audit':'raag','publisher_preflight':'echo','analytics':'echo','prepare_edit':'alankaar','prepare_draft':'alankaar','reframe_shorts':'alankaar','finish_pipeline':'raag','thumbnails':'alankaar','metadata':'ares','assemble':'lyra','package_pipeline':'alankaar'}.get(action)
     if not seat:raise ValueError('Unknown devotional action')
     follow=handoff(job,payload,seat,enqueue)
     return {'agent':'HELIOS','brand':BRAND,'mission_id':payload['mission_id'],'handed_to':{'agent':seat.upper(),'job_id':follow['id']},'published':False}

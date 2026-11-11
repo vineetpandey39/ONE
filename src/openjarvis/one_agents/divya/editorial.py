@@ -9,12 +9,30 @@ def lyric_fragments(lines):
 def shot_plan(scenes,beats,duration):
     if len(scenes)<6:raise Blocked('At least six distinct approved images required for visual variety')
     if duration<=0:raise Blocked('Measured audio duration required')
+    if duration>=300:
+        import math
+        minimum=math.ceil(duration/20)
+        if len(set(s['image'] for s in scenes))<minimum:
+            raise Blocked(f'Long-form requires at least {minimum} distinct narrative scene assets')
+        if len(set(s.get('motion_treatment') for s in scenes)-{None})<4:
+            raise Blocked('Long-form needs at least four scene-specific motion treatments')
     bounds=[0.0]
     while bounds[-1]+9<duration:
         target=bounds[-1]+7
         candidates=[b for b in beats if bounds[-1]+5<=b<=bounds[-1]+9]
         bounds.append(min(candidates,key=lambda b:abs(b-target)) if candidates else target)
     bounds.append(duration)
+    if all('narrative_section' in s for s in scenes):
+        section_ids=sorted(set(s['narrative_section'] for s in scenes))
+        if section_ids!=list(range(len(section_ids))):raise Blocked('Narrative sections must be consecutive from zero')
+        used={sid:0 for sid in section_ids};shots=[]
+        for a,b in zip(bounds,bounds[1:]):
+            sid=min(int(a/duration*len(section_ids)),len(section_ids)-1)
+            bank=[s for s in scenes if s['narrative_section']==sid]
+            scene=bank[used[sid]%len(bank)];used[sid]+=1
+            shots.append({'start':a,'end':b,'image':scene['image'],'narrative_section':sid,
+                          'motion_treatment':scene.get('motion_treatment')})
+        return shots
     return [{'start':a,'end':b,'image':scenes[i%len(scenes)]['image']} for i,(a,b) in enumerate(zip(bounds,bounds[1:]))]
 
 def prepare(root, draft=False):
@@ -49,7 +67,9 @@ def prepare(root, draft=False):
         if digest(p)!=read(p.with_suffix('.json'))['sha256']:raise Blocked('Image provenance mismatch')
         if not draft:require_review(root,'image-'+scene['id'],{'image_sha256':digest(p),'prompt':scene['prompt']})
         images.append(digest(p))
-    if len(set(images))<6:raise Blocked('Six distinct images required, not duplicate files')
+    import math
+    minimum=max(6,math.ceil(duration/20)) if duration>=300 else 6
+    if len(set(images))<minimum:raise Blocked(f'{minimum} distinct image hashes required, not duplicate files')
     profile={'duration':duration,'review_status':'DRAFT_UNREVIEWED' if draft else 'REVIEWED','title':m['display_title'],'shots':shot_plan(m['scenes'],beatmap['beats'],duration),
              'audio_sha256':digest(audio),'image_sha256':images,
              'camera_modes':[s.get('camera_mode','motion') for s in m['scenes']]}

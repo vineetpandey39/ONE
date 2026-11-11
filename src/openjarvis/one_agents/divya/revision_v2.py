@@ -73,6 +73,7 @@ class Revision(Motion):
         frame=super().frame(t,False)
         idx=min(np.searchsorted(self.bounds,t,side='right')-1,len(self.order)-1)
         asset=self.order[idx]; energy=float(self.energy[min(int(t*30),len(self.energy)-1)])
+        treatment=self.portrait_scenes[asset].get('motion_treatment') if self.profile else None
         # Ornaments, petals and restrained light streaks occupy image edges, not the sacred face.
         overlay=np.zeros_like(frame)
         gold=(100,183,229)
@@ -89,14 +90,23 @@ class Revision(Motion):
         for j in range(3):
             xx=int((t*35+j*650)%2400)-250
             cv2.line(overlay,(xx,0),(xx+200,310),(66,115,150),3,cv2.LINE_AA)
-        frame=cv2.addWeighted(frame,1,overlay,.32,0)
+        # Commissioned scenes do not receive the same decorative overlay on every shot.
+        if treatment is None:
+            frame=cv2.addWeighted(frame,1,overlay,.32,0)
+        elif treatment=='petals':
+            petals=np.zeros_like(frame)
+            for j in range(12):
+                x=int((j*183+t*(12+j%3))%2100)-90
+                y=int((j*137+t*(18+j%4))%1280)-100
+                cv2.ellipse(petals,(x,y),(5+j%3,12),t*12+j*29,0,360,(145,170,225),-1,cv2.LINE_AA)
+            frame=cv2.addWeighted(frame,1,petals,.38,0)
         # Moving water shimmer on object/landscape inserts only, avoiding deity deformation.
-        if not self.profile and asset in (4,7):
+        if (not self.profile and asset in (4,7)) or treatment=='water':
             roi=frame[650:1080];rh,rw=roi.shape[:2]
             yy,xx=np.mgrid[:rh,:rw].astype(np.float32)
             mapx=xx+2.5*np.sin(yy*.055-t*2.4)*np.clip(yy/180,0,1)
             frame[650:1080]=cv2.remap(roi,mapx,yy,cv2.INTER_LINEAR,borderMode=cv2.BORDER_REFLECT_101)
-        if not self.profile and asset==3:
+        if (not self.profile and asset==3) or treatment=='flame':
             # Warm flame-driven bloom, smoothly varying rather than flashing.
             x,y=self.sx,self.sy
             glow=np.exp(-((x-240)**2/1000+(y-80)**2/2200))*(.06+.025*math.sin(t*5.1)+.015*math.sin(t*8.2))

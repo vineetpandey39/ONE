@@ -21,6 +21,17 @@ def vault_key(config):
 
 def music_payload(mission):
     style = VOCAL_STYLES[mission['vocal_style']]['direction']
+    direction=mission.get('music_direction')
+    if (mission.get('brand')=='shloka_by_shloka'
+            and sum(s['duration'] for s in mission['sections'])>=300 and not direction):
+        raise Blocked('Long-form Shloka composition requires reviewed lyrics plus music direction')
+    if direction:
+        required=('bpm','rhythm','phrasing','instruments','vocal_delivery','sync')
+        if any(not direction.get(k) for k in required):raise Blocked('Incomplete music direction')
+        musical_styles=[str(direction['bpm'])+' BPM',direction['rhythm'],direction['phrasing'],
+                        direction['vocal_delivery'],direction['sync']]+direction['instruments']
+    else:
+        musical_styles=['72 BPM','tanpura drone','natural acoustic instruments']
     model=mission.get('music_model','music_v2_5')
     if model in ('music_v2','music_v2_5'):
         chunks=[]
@@ -29,12 +40,14 @@ def music_payload(mission):
             if not 3000<=duration<=120000:raise ValueError('Music v2 chunk duration must be 3–120 seconds')
             text='['+section['name']+']\n'+('\n'.join(section['lines']) if section['lines'] else '{instrumental; no vocals}')
             chunks.append({'text':text,'duration_ms':duration,
-                'positive_styles':['original Hindu devotional music',style,'72 BPM','tanpura drone','natural acoustic instruments','clear Hindi diction']+section['styles'],
+                'positive_styles':['original Hindu devotional music',style,'clear Hindi diction']+musical_styles+section['styles'],
                 'negative_styles':['spoken narration','artist imitation','distorted vocals']})
+        if len(chunks)>30 or not 3000<=sum(c['duration_ms'] for c in chunks)<=600000:
+            raise Blocked('Music plan exceeds supported chunk count or total duration')
         return {'model_id':model,'composition_plan':{'chunks':chunks}}
     if model!='music_v1':raise ValueError('Unsupported music model')
     return {'model_id':model, 'composition_plan':{
-        'positive_global_styles':['original Hindu devotional music',style,'clear natural pronunciation'],
+        'positive_global_styles':['original Hindu devotional music',style,'clear natural pronunciation']+musical_styles,
         'negative_global_styles':['spoken narration','artist imitation','distorted vocals'],
         'sections':[{'section_name':s['name'],'duration_ms':round(s['duration']*1000),
                      'positive_local_styles':s['styles'],'negative_local_styles':[], 'lines':s['lines']}
