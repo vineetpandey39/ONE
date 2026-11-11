@@ -429,12 +429,15 @@ class Pipeline:
                 tools = Path(self.config.get("edit_tools") or Path.home() / "Documents" / "LAO" / "yatra-edit")
                 from openjarvis.one_agents.planexium_render_job import run_render
                 from openjarvis.one_agents import stages
+                def report_progress(progress):
+                    phase = str(progress.get('status') or 'rendering')
+                    detail = str(progress.get('detail') or
+                        f"{phase.replace('_', ' ')}: scene {progress.get('scene',0)} / {progress.get('total_scenes',0)}")
+                    self.health("running", stage=phase)
+                    if self.config.get("_agent_job_id"):
+                        stages.set_stage("planexium", stages.EXECUTING, detail)
                 result = run_render(root, tools, motion_format=self.config.get("motion_format"),
-                    resolve_settings=resolve_settings,
-                    on_progress=(lambda progress: stages.set_stage("planexium", stages.EXECUTING,
-                        str(progress.get('detail') or
-                            f"{progress.get('status','rendering').replace('_',' ')}: scene {progress.get('scene',0)} / {progress.get('total_scenes',0)}")))
-                        if self.config.get("_agent_job_id") else None)
+                    resolve_settings=resolve_settings, on_progress=report_progress)
             expected_master = self.context.artifact("edit/master.mp4")
             if Path(result["master"]).resolve() != expected_master or not expected_master.stat().st_size:
                 raise ValueError("Renderer did not produce the mission's own master")
