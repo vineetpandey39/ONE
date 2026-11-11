@@ -167,6 +167,9 @@ class LaoDraft:
         startup_probe_timeout = ("get-ciminstance win32_process" in lowered
                                  and "--remote-debugging-port=" in lowered
                                  and "timed out after 15 seconds" in lowered)
+        startup_probe_timeout = startup_probe_timeout or (
+            "browsertype.connect_over_cdp: timeout" in lowered
+            and "http://127.0.0.1:" in lowered)
         if "page.screenshot: timeout" in lowered or startup_probe_timeout:
             # Page captures also occur after download. Require provider logs
             # proving this failure was the search-results evidence capture.
