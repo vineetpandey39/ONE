@@ -16,7 +16,7 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-ENVATO_RECEIPT_REVISION = "v19"
+ENVATO_RECEIPT_REVISION = "v20"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -618,6 +618,12 @@ def concrete_stock_brief(request):
         # Keep two visible subjects and label the substitution on screen.
         request.update(query='audience auditorium presentation',
                        contextual_label='Illustrative audience - not NASA event footage')
+    elif subject == 'bioprinter' and query.strip() == 'tissue bioprinter laboratory machine':
+        # Require the specific biological printer and its laboratory setting.
+        # Tissue is the intended output; a stock preview cannot establish its
+        # exact composition or claim this is the actual ISS experiment.
+        request.update(query='laboratory tissue bio printer',
+                       contextual_label='Illustrative bioprinter - not ISS experiment footage')
     elif (subject == 'telescope' and re.search(r'\b(saturn|mars|jupiter|venus|moon)\b', query)
             and re.search(r'\b(observatory|equipment|astronomer)\b', query)
             and not re.search(r'\b(occultation|transit|eclipse|through|closeup)\b', query)):
