@@ -178,7 +178,8 @@ def main():
         _run(['ffmpeg','-v','error','-xerror','-i',str(p),'-f','null','-'])
         info=_probe(p);level=loudness(p);assert float(level['input_tp'])<-.9
         assert any(s['codec_type']=='audio' for s in info['streams'])
-        reports.append({'path':str(p),'duration':info['format']['duration'],'sha256':digest(p),'loudness':level,'full_decode':'PASS'})
+        from .video_qa import audit
+        reports.append({'path':str(p),'duration':info['format']['duration'],'sha256':digest(p),'loudness':level,'full_decode':'PASS','av_motion_qa':audit(p,portrait=p!=target)})
     thumb=motion.images[1].copy();thumb[810:1080]=(thumb[810:1080]*.18).astype(np.uint8)
     motion.paste_text(thumb,motion.display_title,820,1680)
     cv2.putText(thumb,('D I V Y A  |  ' if motion.brand_label else '')+'ORIGINAL SHIVA BHAJAN',(635,1045),cv2.FONT_HERSHEY_SIMPLEX,.7,(225,230,238),1,cv2.LINE_AA)

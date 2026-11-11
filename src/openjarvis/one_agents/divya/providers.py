@@ -64,6 +64,8 @@ def compose(root, config, mission):
         if saved.get('status') == 'COMPLETE' and target.is_file() and digest(target) == saved.get('audio_sha256'):
             return {'files':[str(target),str(receipt_path)],'reused':True}
         raise Blocked('Previous Music attempt exists. Reconcile provider charge/result before any retry')
+    if target.exists():
+        raise Blocked('Music audio already exists without an API receipt. Reconcile imported song provenance; never spend again to replace it.')
     key = vault_key(config)
     target.parent.mkdir(parents=True,exist_ok=True)
     receipt = {'status':'SUBMITTING','request_sha256':fingerprint(payload),'estimated_usd':estimate,
@@ -146,6 +148,7 @@ def generate_image(root, config, scene, reference=None):
             # This verified failure precedes browser acquisition and all generation.
             # Keep it immutable; the reviewed registration change permits one new job.
             receipt=receipt.with_name(receipt.stem+'-registered.json')
+    receipt=unsent_image_recovery_receipt(receipt)
     result, job = provider.run('DIVYA - '+scene['id'],steps,{},receipt,timeout=1800)
     source = provider.artifact(result,job,target.name)
     from PIL import Image
@@ -161,3 +164,19 @@ def generate_image(root, config, scene, reference=None):
                    'request_sha256':fingerprint(request),'request':request,'chat_url':result.get('episode_chat_url'),
                    'visual_review':'PENDING','incremental_api_cost_usd':0,'cost_basis':'existing ChatGPT subscription workflow; quota usage not measured'})
     return {'files':[str(target),str(sidecar),str(receipt)]}
+
+
+def unsent_image_recovery_receipt(receipt):
+    """One fresh job only when the shared transport proved no prompt was sent.
+
+    Unknown outcomes, timeouts, rate limits and a second failed recovery are
+    never retried here. Keep the original failed receipt for reconciliation.
+    """
+    if receipt.exists():
+        previous=read(receipt)
+        error=str(previous.get('provider_error',''))
+        if (previous.get('terminal_status')=='Failed'
+            and 'ChatGPT prompt remained in the composer after 3 verified submission attempts.' in error
+            and 'unsent prompt' in error):
+            return receipt.with_name(receipt.stem+'-unsent-recovery1.json')
+    return receipt
