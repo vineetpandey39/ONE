@@ -45,10 +45,17 @@ def reference_prompt(manifest, brief):
         if any(stage.get(k) in (None,'',[]) for k in required):raise ValueError('Incomplete sourced reference stage')
         if not all(str(u).startswith('https://') for u in stage['source_urls']):raise ValueError('Reference sources must be HTTPS links')
     subject_id = str(manifest.get('subject_id') or '')
-    is_sprinter = subject_id == 'usain-bolt'
-    protagonist = 'sprint protagonist' if is_sprinter else 'football protagonist'
-    activity = ('plain unbranded sprint training singlet, neutral athletics-stadium background'
-                if is_sprinter else 'plain unbranded training shirt, neutral studio background')
+    sport_profiles = {
+        'usain-bolt': ('sprint protagonist',
+                       'plain unbranded sprint training singlet, neutral athletics-stadium background'),
+        'michael-phelps': ('competitive-swimming protagonist',
+                           'plain unbranded swimmer warm-up top, neutral aquatic-centre background'),
+        'serena-williams': ('tennis protagonist',
+                            'plain unbranded tennis training top, neutral tennis-centre background'),
+    }
+    protagonist, activity = sport_profiles.get(
+        subject_id,
+        ('elite-sport protagonist', 'plain unbranded athletic training top, neutral sport-specific background'))
     lines=[]
     adult_stages=[stage for stage in stages if int(stage['age']) >= 18]
     if len(adult_stages) < 2:
