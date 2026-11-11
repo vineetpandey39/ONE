@@ -54,7 +54,7 @@ class Motion:
         self.titlefont=ImageFont.truetype('C:/Windows/Fonts/Nirmala.ttc',96)
         self.roman=ImageFont.truetype('C:/Windows/Fonts/seguisb.ttf',24)
         self.tiles={c['text']:self.text_tile(c['text']) for c in cues}
-        self.title=self.text_tile('शिव शरण',title=True)
+        self.title=self.text_tile(mission.get('display_title','शिव शरण'),title=True)
         yy,xx=np.mgrid[0:H,0:W].astype(np.float32)
         self.vignette=np.clip(1-.22*((xx-W/2)/(W/2))**2-.15*((yy-H/2)/(H/2))**2,.65,1)[...,None]
         self.foreground=np.clip((yy/H-.78)/.22,0,1)*np.clip((abs(xx/W-.5)-.28)/.2,0,1)

@@ -62,7 +62,7 @@ def render_thumbnails(config, art_path, out, title_lines, subtitle, hooks):
             html,body{{width:1080px;height:1920px}}
             .art{{position:absolute;inset:0;background:url('{art}') 8% top/auto 1480px no-repeat}}
             .shade{{position:absolute;inset:0;background:linear-gradient(0deg,#03284e 0%,#03284ef5 20%,transparent 55%)}}
-            .part{{position:absolute;left:60px;top:70px;padding:16px 35px;border:3px solid #ffdc62;border-radius:20px;background:linear-gradient(120deg,#7822b7,#bb216c);font:900 72px 'Segoe UI';color:#ffe475}}
+            .part{{position:absolute;left:90px;top:320px;padding:16px 35px;border:3px solid #ffdc62;border-radius:20px;background:linear-gradient(120deg,#7822b7,#bb216c);font:900 72px 'Segoe UI';color:#ffe475}}
             .copy{{position:absolute;left:45px;right:45px;top:1250px;text-align:center}}
             .title{{font-size:166px;line-height:1.4}}.hook{{font:600 48px 'Nirmala UI';color:white;line-height:1.6;margin-top:24px}}
             .brand{{font-size:26px;margin-top:50px}}

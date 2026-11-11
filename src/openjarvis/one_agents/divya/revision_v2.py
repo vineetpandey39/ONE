@@ -15,6 +15,21 @@ class Revision(Motion):
             tile=cv2.imread(str(root/item['file']),cv2.IMREAD_UNCHANGED)
             self.atlas[item['text']]=tile
         super().__init__(root,read(root/'mission.json'),read(root/'edit/v2/caption-cues.json'))
+        self.profile=read(root/'edit/v2/editorial-profile.json') if (root/'edit/v2/editorial-profile.json').exists() else None
+        self.display_title=read(root/'mission.json').get('display_title','शिव शरण')
+        if self.profile:
+            from .core import artifact, Blocked
+            self.bank=[artifact(root,s['image']) for s in read(root/'mission.json')['scenes']]
+            if self.profile['audio_sha256']!=digest(root/'audio/master.wav') or self.profile['image_sha256']!=[digest(p) for p in self.bank]:
+                raise Blocked('Editorial profile is stale')
+            self.duration=float(self.profile['duration'])
+            shots=self.profile['shots']
+            self.bounds=[s['start'] for s in shots]+[shots[-1]['end']]
+            self.order=[self.bank.index(artifact(root,s['image'])) for s in shots]
+            self.beats=np.array(read(root/'edit/v2/beat-map.json')['beats'])
+            self.smallgray=np.zeros((270,480),np.float32)
+            return
+        self.duration=180.0
         self.bank=[root/f'images/shiva-{i:02}.png' for i in range(1,4)]
         for item in read(root/'review-package/v2-image-prompts.json'):
             p=root/item['image'];assert p.exists(),f'Missing new scene {p.name}'
@@ -28,7 +43,7 @@ class Revision(Motion):
         self.smallgray=np.zeros((270,480),np.float32)
 
     def camera(self,index,t):
-        if self.order[index]==6:
+        if not self.profile and self.order[index]==6:
             # Preserve all three trident tips: the source framing has no zoom headroom.
             return self.images[6].copy()
         return super().camera(index,t)
@@ -69,12 +84,12 @@ class Revision(Motion):
             cv2.line(overlay,(xx,0),(xx+200,310),(66,115,150),3,cv2.LINE_AA)
         frame=cv2.addWeighted(frame,1,overlay,.32,0)
         # Moving water shimmer on object/landscape inserts only, avoiding deity deformation.
-        if asset in (4,7):
+        if not self.profile and asset in (4,7):
             roi=frame[650:1080];rh,rw=roi.shape[:2]
             yy,xx=np.mgrid[:rh,:rw].astype(np.float32)
             mapx=xx+2.5*np.sin(yy*.055-t*2.4)*np.clip(yy/180,0,1)
             frame[650:1080]=cv2.remap(roi,mapx,yy,cv2.INTER_LINEAR,borderMode=cv2.BORDER_REFLECT_101)
-        if asset==3:
+        if not self.profile and asset==3:
             # Warm flame-driven bloom, smoothly varying rather than flashing.
             x,y=self.sx,self.sy
             glow=np.exp(-((x-240)**2/1000+(y-80)**2/2200))*(.06+.025*math.sin(t*5.1)+.015*math.sin(t*8.2))
@@ -88,7 +103,7 @@ class Revision(Motion):
                 self.paste_text(frame,current['text'],880,1440,min(1,(t-current['start'])*7,(current['end']-t)*7))
                 cv2.line(frame,(790,1045),(1130,1045),gold,1,cv2.LINE_AA)
             if 1<t<6.4:
-                self.paste_text(frame,'शिव शरण',780,1680,min(1,(t-1),6.4-t))
+                self.paste_text(frame,self.display_title,780,1680,min(1,(t-1),6.4-t))
         return frame
 
     def portrait(self,t):
@@ -100,7 +115,7 @@ class Revision(Motion):
             frame[1420:1690]=(frame[1420:1690]*.55).astype(np.uint8)
             self.paste_text(frame,current['text'],1450,1000)
             cv2.line(frame,(385,1660),(695,1660),(100,183,229),2,cv2.LINE_AA)
-        if t<6.4:self.paste_text(frame,'शिव शरण',1400,1000)
+        if t<6.4 and not current:self.paste_text(frame,self.display_title,1400,1000)
         if self.brand_label:
             cv2.putText(frame,self.brand_label,(55,100),cv2.FONT_HERSHEY_SIMPLEX,.8,(220,225,232),1,cv2.LINE_AA)
         return frame
@@ -118,21 +133,33 @@ def main():
     ap=argparse.ArgumentParser();ap.add_argument('--root',type=Path,required=True);ap.add_argument('--proof',action='store_true');ap.add_argument('--unbranded',action='store_true');args=ap.parse_args()
     root=args.root.resolve();out=root/('edit/unbranded' if args.unbranded else 'edit/v2');out.mkdir(parents=True,exist_ok=True);motion=Revision(root,'' if args.unbranded else 'D I V Y A');beatmap=read(root/'edit/v2/beat-map.json')
     write(out/'scene-manifest.json',{'distinct_images':len(motion.bank),'shots':[{'start':a,'end':b,'asset':str(motion.bank[i]),'sha256':digest(motion.bank[i])} for a,b,i in zip(motion.bounds,motion.bounds[1:],motion.order)],'source_music':digest(root/'audio/composition.mp3'),'additional_music_credits':0})
-    for t in [3,9,20,27,34,40,49,60,80,92,130,160]:cv2.imwrite(str(out/f'proof-{t:03}.jpg'),motion.frame(t))
-    cv2.imwrite(str(out/'portrait-proof.jpg'),motion.portrait(52))
+    for t in [3,9,20,27,34,40,49,60,80,92,130,160]:
+        if t<motion.duration:cv2.imwrite(str(out/f'proof-{t:03}.jpg'),motion.frame(t))
+    cv2.imwrite(str(out/'portrait-proof.jpg'),motion.portrait(min(52,motion.duration/2)))
     if args.proof:return
-    signature=fingerprint({'code':digest(Path(__file__)),'parent':digest(Path(__file__).with_name('local_finish.py')),'brand_label':motion.brand_label,'images':[digest(p) for p in motion.bank],'atlas':read(root/'edit/v2/caption-atlas.json'),'beats':beatmap,'cues':motion.cues})
+    # New renders must use the measured vocal-first plan; historic exports stay intact.
+    from .shorts_policy import validate_cut
+    from .core import Blocked
+    plan_path=root/'edit/v2/vocals-first-plan.json'
+    if not plan_path.exists():raise Blocked('RAAG shorts_plan required before rendering')
+    plan=read(plan_path)
+    if plan.get('source_sha256')!=digest(root/'audio/composition.mp3') or plan.get('cue_sha256')!=digest(root/'edit/v2/caption-cues.json'):
+        raise Blocked('Vocal-first plan is stale')
+    for cut in plan['shorts']:validate_cut(cut,motion.cues,plan['beats'],float(_probe(root/'audio/composition.mp3')['format']['duration']))
+    beatmap=plan
+    signature=fingerprint({'editorial_profile':motion.profile,'code':digest(Path(__file__)),'parent':digest(Path(__file__).with_name('local_finish.py')),'brand_label':motion.brand_label,'images':[digest(p) for p in motion.bank],'atlas':read(root/'edit/v2/caption-atlas.json'),'beats':beatmap,'cues':motion.cues})
     chunks=out/'chunks';chunks.mkdir(exist_ok=True);paths=[]
-    for start in range(0,180,15):
+    for start in range(0,math.ceil(motion.duration),15):
+        seconds=min(15,motion.duration-start)
         p=chunks/f'part-{start:03}.mp4';rec=p.with_suffix('.json');paths.append(p)
         if p.exists() and rec.exists() and read(rec).get('signature')==signature and read(rec).get('sha256')==digest(p):continue
         print(f'V2 rendering {start}–{start+15}s',flush=True)
         tmp=p.with_name(p.stem+'.partial.mp4')
-        encode_frames(tmp,W,H,(motion.frame(start+n/30) for n in range(450)),15,out/'encode.log')
+        encode_frames(tmp,W,H,(motion.frame(start+n/30) for n in range(math.ceil(seconds*30))),seconds,out/'encode.log')
         tmp.replace(p);write(rec,{'signature':signature,'sha256':digest(p),'additional_credits':0})
     listing=chunks/'concat.txt';listing.write_text('\n'.join("file '"+p.name+"'" for p in paths),encoding='utf-8')
-    target=out/'shiva-sharan-v2.mp4'
-    _run(['ffmpeg','-y','-v','error','-f','concat','-safe','0','-i',str(listing),'-i',str(root/'audio/master.wav'),'-t','180','-map','0:v','-map','1:a','-c:v','copy','-c:a','aac','-b:a','320k','-movflags','+faststart',str(target)])
+    target=out/('master.mp4' if motion.profile else 'shiva-sharan-v2.mp4')
+    _run(['ffmpeg','-y','-v','error','-f','concat','-safe','0','-i',str(listing),'-i',str(root/'audio/master.wav'),'-t',str(motion.duration),'-map','0:v','-map','1:a','-c:v','copy','-c:a','aac','-b:a','320k','-movflags','+faststart',str(target)])
     outputs=[target]
     for short in beatmap['shorts']:
         start=short['start'];end=short['end'];duration=end-start
@@ -150,11 +177,11 @@ def main():
         assert any(s['codec_type']=='audio' for s in info['streams'])
         reports.append({'path':str(p),'duration':info['format']['duration'],'sha256':digest(p),'loudness':level,'full_decode':'PASS'})
     thumb=motion.images[1].copy();thumb[810:1080]=(thumb[810:1080]*.18).astype(np.uint8)
-    motion.paste_text(thumb,'शिव शरण',820,1680)
+    motion.paste_text(thumb,motion.display_title,820,1680)
     cv2.putText(thumb,('D I V Y A  |  ' if motion.brand_label else '')+'ORIGINAL SHIVA BHAJAN',(635,1045),cv2.FONT_HERSHEY_SIMPLEX,.7,(225,230,238),1,cv2.LINE_AA)
     cv2.imwrite(str(out/'thumbnail-v2.jpg'),cv2.resize(thumb,(1280,720)))
     (out/'lyrics.hi.srt').write_text('\n\n'.join(f"{i}\n{_timestamp(c['start'],True)} --> {_timestamp(c['end'],True)}\n{c['text']}" for i,c in enumerate(motion.cues,1))+'\n',encoding='utf-8')
-    write(out/'qa.json',{'outputs':reports,'caption_renderer':'Chromium complex-script shaping','distinct_images':len(motion.bank),'shots':len(motion.order),'shorts':beatmap['shorts'],'listening_review':'PENDING','published':False,'additional_music_credits':0})
+    write(out/'qa.json',{'outputs':reports,'shorts_plan_sha256':digest(plan_path),'caption_renderer':'Chromium complex-script shaping','distinct_images':len(motion.bank),'shots':len(motion.order),'shorts':beatmap['shorts'],'listening_review':'PENDING','published':False,'additional_music_credits':0})
     print('V2 exports complete',flush=True)
 
 if __name__=='__main__':main()

@@ -15,6 +15,6 @@ def label_shorts(root):
             _run(['ffmpeg','-y','-v','error','-i',str(src),'-i',str(png),'-filter_complex','[0:v][1:v]overlay=0:0:format=auto,format=yuv420p[v]','-map','[v]','-map','0:a','-c:v','h264_nvenc','-preset','p5','-cq','19','-b:v','0','-c:a','copy','-movflags','+faststart',str(dst)])
             _run(['ffmpeg','-v','error','-xerror','-i',str(dst),'-f','null','-'])
             _run(['ffmpeg','-y','-v','error','-ss','8','-i',str(dst),'-frames:v','1',str(out/f'part-{n}-proof.jpg')])
-            records.append({'path':str(dst),'sha256':digest(dst),'probe':_probe(dst),'full_decode':'PASS','audio':'copied unchanged; original beat-aligned segment retained','additional_music_credits':0})
+            records.append({'path':str(dst),'sha256':digest(dst),'source_sha256':digest(src),'probe':_probe(dst),'full_decode':'PASS','audio':'copied unchanged; original beat-aligned segment retained','additional_music_credits':0})
     write(out/'short-labels-qa.json',records)
     return {"status":"COMPLETE","files":[x["path"] for x in records],"additional_music_credits":0}

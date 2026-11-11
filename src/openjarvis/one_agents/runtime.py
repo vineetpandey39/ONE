@@ -30,9 +30,9 @@ from openjarvis.one_agents import (
 
 
 AGENTS: dict[str, dict[str, str]] = {
-    'naad': {'name': 'NAAD', 'role': 'Devotional production coordination and package QA', 'floor_id': '12', 'floor_name': 'YouTube Studio', 'division': 'youtube_studio', 'seat': 'worker', 'reports_to': 'helios'},
-    'raag': {'name': 'RAAG', 'role': 'Devotional lyrics, source review, music direction and audio audit', 'floor_id': '12', 'floor_name': 'YouTube Studio', 'division': 'youtube_studio', 'seat': 'worker', 'reports_to': 'helios'},
-    'alankaar': {'name': 'ALANKAAR', 'role': 'Devotional imagery, local animation, complex-script captions and beat-aligned Shorts', 'floor_id': '12', 'floor_name': 'YouTube Studio', 'division': 'youtube_studio', 'seat': 'worker', 'reports_to': 'helios'},
+    "naad": {'name': 'NAAD', 'role': 'Devotional production coordination and package QA', 'floor_id': '12', 'floor_name': 'YouTube Studio', 'division': 'youtube_studio', 'seat': 'worker', 'reports_to': 'helios'},
+    "raag": {'name': 'RAAG', 'role': 'Devotional lyrics, source review, music direction and audio audit', 'floor_id': '12', 'floor_name': 'YouTube Studio', 'division': 'youtube_studio', 'seat': 'worker', 'reports_to': 'helios'},
+    "alankaar": {'name': 'ALANKAAR', 'role': 'Devotional imagery, local animation, complex-script captions and beat-aligned Shorts', 'floor_id': '12', 'floor_name': 'YouTube Studio', 'division': 'youtube_studio', 'seat': 'worker', 'reports_to': 'helios'},
     "helios": {"name": "HELIOS", "role": "Multi-channel YouTube commissioning, resource coordination, monetization governance and delivery reconciliation head", "floor_id": "12", "floor_name": "YouTube Studio", "division": "youtube_studio", "seat": "head"},
     "zeus": {"name": "ZEUS", "role": "Cross-division orchestration, escalation, and resource-allocation operator", "floor_id": "11", "floor_name": "ONE-JARVIS Executive Command", "division": "executive"},
     "athena": {"name": "ATHENA", "role": "Opportunity discovery, research, and scoring operator", "floor_id": "10", "floor_name": "Venture & Opportunity Lab", "division": "venture_lab"},
@@ -6859,6 +6859,9 @@ def _run_lyra(job: dict[str, Any]) -> dict[str, Any]:
     an in-flight production can resume across the migration.
     """
     payload = _json_task(job)
+    if payload.get("brand") == "shloka_by_shloka":
+        from openjarvis.one_agents.divya.floor12 import run_job
+        return run_job(job)
     if payload.get("brand") == "planexium":
         from openjarvis.one_agents.planexium import repackage_job
         result = repackage_job(payload)
@@ -6946,6 +6949,9 @@ def _run_chandan(job: dict[str, Any]) -> dict[str, Any]:
 def _run_ares(job: dict[str, Any]) -> dict[str, Any]:
     """Floor 3 - organic publishing distribution or the existing local plan."""
     payload = _json_task(job)
+    if payload.get("brand") == "shloka_by_shloka":
+        from openjarvis.one_agents.divya.floor12 import run_job
+        return run_job(job)
     if payload.get("brand") == "planexium":
         from openjarvis.one_agents.planexium_seo import run_job
         return run_job(job)
