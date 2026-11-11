@@ -18,6 +18,8 @@ def shot_plan(scenes,beats,duration):
     return [{'start':a,'end':b,'image':scenes[i%len(scenes)]['image']} for i,(a,b) in enumerate(zip(bounds,bounds[1:]))]
 
 def prepare(root, draft=False):
+    from .release_quality import require_no_hold
+    require_no_hold(root)
     from .render import _probe,cards_module
     m=read(root/'mission.json');config=read(root/'config.json')
     audio=root/'audio/master.wav'

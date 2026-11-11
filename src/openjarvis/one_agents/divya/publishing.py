@@ -23,6 +23,8 @@ def client(root):
     return module,access,scopes,channel
 
 def preflight(root):
+    from .release_quality import require_no_hold
+    require_no_hold(root)
     _,_,scopes,channel=client(root)
     result={'status':'CHANNEL_VERIFIED','channel_id':channel['id'],
             'upload_scope':'https://www.googleapis.com/auth/youtube.upload' in scopes,

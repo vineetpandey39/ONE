@@ -156,7 +156,10 @@ def encode_frames(target,width,height,frames,seconds,log):
 def main():
     cv2.setNumThreads(1)
     ap=argparse.ArgumentParser();ap.add_argument('--root',type=Path,required=True);ap.add_argument('--proof',action='store_true');ap.add_argument('--unbranded',action='store_true');ap.add_argument('--shorts-only',action='store_true');args=ap.parse_args()
-    root=args.root.resolve();out=root/('edit/unbranded' if args.unbranded else 'edit/v2');out.mkdir(parents=True,exist_ok=True);motion=Revision(root,'' if args.unbranded else 'D I V Y A');beatmap=read(root/'edit/v2/beat-map.json')
+    root=args.root.resolve()
+    from .release_quality import require_no_hold
+    require_no_hold(root)
+    out=root/('edit/unbranded' if args.unbranded else 'edit/v2');out.mkdir(parents=True,exist_ok=True);motion=Revision(root,'' if args.unbranded else 'D I V Y A');beatmap=read(root/'edit/v2/beat-map.json')
     write(out/'scene-manifest.json',{'distinct_images':len(motion.bank),'shots':[{'start':a,'end':b,'asset':str(motion.bank[i]),'sha256':digest(motion.bank[i])} for a,b,i in zip(motion.bounds,motion.bounds[1:],motion.order)],'source_music':digest(root/'audio/composition.mp3'),'additional_music_credits':0})
     for t in [3,9,20,27,34,40,49,60,80,92,130,160]:
         if t<motion.duration:cv2.imwrite(str(out/f'proof-{t:03}.jpg'),motion.frame(t))

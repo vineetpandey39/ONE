@@ -41,6 +41,8 @@ def thumbnails(root):
     return {'status':'REVIEW_READY','manifest':result,'visual_review':'PENDING'}
 
 def assemble(root):
+    from .release_quality import require_no_hold
+    require_no_hold(root)
     qa=read(root/'edit/unbranded/qa.json')
     labels=read(root/'edit/unbranded/short-labels-qa.json')
     if qa.get('shorts_plan_sha256')!=digest(root/'edit/v2/vocals-first-plan.json'):

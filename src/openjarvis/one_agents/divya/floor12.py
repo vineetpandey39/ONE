@@ -36,7 +36,11 @@ def _run_local(job):
     journal=Journal(root)
     with mission_lock(root):
         if action=='status':
-            result={'status':'READY','stages':journal.data.get('stages',{}),'render_qa':read(root/'edit/unbranded/qa.json') if (root/'edit/unbranded/qa.json').is_file() else None}
+            from .release_quality import remote_status
+            hold=read(root/'reviews/release-hold.json') if (root/'reviews/release-hold.json').exists() else None
+            result={'status':'BLOCKED' if hold and hold.get('active') is not False else 'READY',
+                    'release_hold':hold,'youtube_changes':remote_status(root),
+                    'stages':journal.data.get('stages',{}),'render_qa':read(root/'edit/unbranded/qa.json') if (root/'edit/unbranded/qa.json').is_file() else None}
         elif action in {'publisher_preflight','analytics'}:
             from .publishing import preflight,analytics
             result=(preflight if action=='publisher_preflight' else analytics)(root)
