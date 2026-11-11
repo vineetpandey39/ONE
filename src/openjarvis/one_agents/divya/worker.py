@@ -70,7 +70,7 @@ def images(root, config, mission, limit=None):
     scenes=mission['scenes'][:limit] if limit else mission['scenes']
     reference=None
     for scene in scenes:
-        result=generate_image(root,config,scene,reference)
+        result=generate_image(root,config,scene,None if scene.get('reference_mode')=='none' else reference)
         files.extend(result['files'])
         if reference is None:
             reference=artifact(root,scene['image'])
