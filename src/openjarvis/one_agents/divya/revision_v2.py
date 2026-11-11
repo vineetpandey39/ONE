@@ -16,6 +16,9 @@ class Revision(Motion):
             self.atlas[item['text']]=tile
         super().__init__(root,read(root/'mission.json'),read(root/'edit/v2/caption-cues.json'))
         self.profile=read(root/'edit/v2/editorial-profile.json') if (root/'edit/v2/editorial-profile.json').exists() else None
+        if root.name!='shiva-pilot' and not self.profile:
+            from .core import Blocked
+            raise Blocked('New missions require a reviewed editorial profile; pilot defaults are forbidden')
         self.display_title=read(root/'mission.json').get('display_title','शिव शरण')
         if self.profile:
             from .core import artifact, Blocked

@@ -58,16 +58,20 @@ def render_thumbnails(config, art_path, out, title_lines, subtitle, hooks):
         p.set_viewport_size({'width':320,'height':180})
         p.screenshot(path=str(out/'thumbnail-golden-blue-mobile.jpg'),type='jpeg',quality=94)
         for n,hook in enumerate(hooks,1):
+            long_title=len(' '.join(title_lines))>12
+            portrait_title=title if long_title else escape(' '.join(title_lines))
+            copy_top=1100 if long_title else 1250
+            title_size=130 if long_title else 166
             portrait=f'''<html lang="hi"><meta charset="utf-8"><style>{common}
             html,body{{width:1080px;height:1920px}}
             .art{{position:absolute;inset:0;background:url('{art}') 8% top/auto 1480px no-repeat}}
             .shade{{position:absolute;inset:0;background:linear-gradient(0deg,#03284e 0%,#03284ef5 20%,transparent 55%)}}
-            .part{{position:absolute;left:90px;top:320px;padding:16px 35px;border:3px solid #ffdc62;border-radius:20px;background:linear-gradient(120deg,#7822b7,#bb216c);font:900 72px 'Segoe UI';color:#ffe475}}
-            .copy{{position:absolute;left:45px;right:45px;top:1250px;text-align:center}}
-            .title{{font-size:166px;line-height:1.4}}.hook{{font:600 48px 'Nirmala UI';color:white;line-height:1.6;margin-top:24px}}
+            .part{{position:absolute;left:90px;top:460px;padding:16px 35px;border:3px solid #ffdc62;border-radius:20px;background:linear-gradient(120deg,#7822b7,#bb216c);font:900 72px 'Segoe UI';color:#ffe475}}
+            .copy{{position:absolute;left:45px;right:45px;top:{copy_top}px;text-align:center}}
+            .title{{font-size:{title_size}px;line-height:1.3}}.hook{{font:600 48px 'Nirmala UI';color:white;line-height:1.6;margin-top:24px}}
             .brand{{font-size:26px;margin-top:50px}}
             </style><div class="art"></div><div class="shade"></div><div class="part">PART {n}</div>
-            <div class="copy"><div class="title">{escape(' '.join(title_lines))}</div><div class="hook">{escape(hook)}</div>
+            <div class="copy"><div class="title">{portrait_title}</div><div class="hook">{escape(hook)}</div>
             <div class="brand">SHLOKA BY SHLOKA</div></div></html>'''
             capture(f'short-{n}-thumbnail-golden-blue-v2',portrait,1080,1920)
     manifest={'style':STYLE,'art_path':str(art_path),'art_sha256':digest(art_path),'outputs':files,
