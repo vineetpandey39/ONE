@@ -161,9 +161,21 @@ class LaoDraft:
         saved = json.loads(receipt.read_text(encoding="utf-8"))
         error = str(saved.get("provider_error") or "")
         lowered = error.casefold()
-        return (saved.get("terminal_status") == "Failed"
-                and ("locator.screenshot: timeout" in lowered or "taking element screenshot" in lowered)
-                and not any(term in lowered for term in ("download", "sign in", "authentication", "payment")))
+        if saved.get("terminal_status") != "Failed" or any(
+                term in lowered for term in ("download", "sign in", "authentication", "payment")):
+            return False
+        if "page.screenshot: timeout" in lowered:
+            # Page captures also occur after download. Require provider logs
+            # proving this failure was the search-results evidence capture.
+            response = self.tool.execute(action="logs", job_id=saved["job_id"], process_name="")
+            if not response.success:
+                return False
+            payload = response.metadata or json.loads(response.content)
+            messages = [str(row.get("message") or "") for row in payload.get("logs", [])]
+            steps = [message for message in messages if re.match(r"Step \d+: ", message)]
+            return bool(steps and "save_artifact" in steps[-1]
+                        and "envato_results_proof" in steps[-1])
+        return "locator.screenshot: timeout" in lowered or "taking element screenshot" in lowered
 
     def stalled_native_download(self, receipt: Path) -> bool:
         """Only a terminal Chrome transfer timeout permits one same-candidate retry."""
@@ -1000,9 +1012,16 @@ class EnvatoAdapter:
                         if getattr(self.draft, "transient_pre_download_failure", lambda _receipt: False)(receipt):
                             retry_receipt = self.context.artifact(
                                 f"receipts/envato-{ENVATO_RECEIPT_REVISION}-{index}-candidate-{candidate}-browser-retry.json")
-                            out, job = self.draft.run("planexium-envato", asset_steps, inputs, retry_receipt, timeout=10800)
-                            query_positions[query] = candidate
-                            break
+                            try:
+                                out, job = self.draft.run("planexium-envato", asset_steps, inputs, retry_receipt, timeout=10800)
+                            except RuntimeError:
+                                # A recovered browser can now verify and reject
+                                # this candidate. Classify that terminal receipt
+                                # so normal bounded candidate fallback continues.
+                                receipt = retry_receipt
+                            else:
+                                query_positions[query] = candidate
+                                break
                         if not self.draft.subject_rejected(receipt):
                             raise
                         if candidate == first_candidate + self.failure_limit - 1:
