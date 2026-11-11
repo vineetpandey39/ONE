@@ -160,6 +160,20 @@ def normalize_comment(value):
     return comment
 
 
+def grounded_entity_title(package, science, hook):
+    """Bind a factual celestial noun-list hook without inventing a claim."""
+    words = str(hook).casefold().split()
+    entities = {'moon', 'saturn', 'jupiter', 'mars', 'venus', 'earth', 'sun', 'star', 'galaxy'}
+    if not 2 <= len(words) <= 4 or len(set(words)) != len(words) or not set(words) <= entities:
+        return None
+    claims = ' '.join(str(row.get('statement', '')) for row in science.get('claims', []))
+    if not all(re.search(r'\b' + re.escape(word) + r'\b', claims, re.I) for word in words):
+        return None
+    prefix = ', '.join(word.title() for word in words[:-1]) + ' & ' + words[-1].title()
+    title = prefix + ': ' + str(package.get('recommended_title') or '').strip()
+    return title if len(title) <= 100 and title_matches_thumbnail_promise(title, hook) else None
+
+
 def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=None):
     prompt = (
         "You are ARES, the SEO agent for The Planexium science YouTube channel. "
@@ -199,6 +213,10 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
     preferred_hook = str(concepts.get(preferred.get("name"), {}).get("text") or "") if preferred else ""
     required_titles = [str(t) for t in package.get("title_variants", [])
                        if title_matches_thumbnail_promise(str(t), preferred_hook)] if preferred_hook else []
+    if preferred_hook and not required_titles:
+        grounded = grounded_entity_title(package, science, preferred_hook)
+        if grounded:
+            required_titles = [grounded]
     thumbnails = [{"name": v["name"], "text": concepts[v["name"]].get("text"),
                    "idea": concepts[v["name"]].get("left_usp")} for v in rendered]
     errors = None
