@@ -46,6 +46,8 @@ class Revision(Motion):
         self.smallgray=np.zeros((270,480),np.float32)
 
     def camera(self,index,t):
+        if self.profile and self.profile.get('camera_modes',['motion']*len(self.images))[self.order[index]]=='preserve_full_frame':
+            return self.images[self.order[index]].copy()
         if not self.profile and self.order[index]==6:
             # Preserve all three trident tips: the source framing has no zoom headroom.
             return self.images[6].copy()

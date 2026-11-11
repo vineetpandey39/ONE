@@ -1,5 +1,10 @@
 """Mission-driven scene planning and shaped caption preparation."""
 from .core import read,write,digest,artifact,Blocked,validate_cues,require_review
+import re
+
+def lyric_fragments(lines):
+    """Keep authored punctuation/Devanagari intact when captioning clauses."""
+    return list(dict.fromkeys(lines+[part.strip() for line in lines for part in re.split(r'(?<=[,।॥])\s+',line) if part.strip()]))
 
 def shot_plan(scenes,beats,duration):
     if len(scenes)<6:raise Blocked('At least six distinct approved images required for visual variety')
@@ -18,7 +23,7 @@ def prepare(root):
     audio=root/'audio/master.wav'
     duration=float(_probe(audio)['format']['duration'])
     cs=read(root/'lyrics-cues.json')
-    validate_cues(cs,duration,m['lyrics'])
+    validate_cues(cs,duration,lyric_fragments(m['lyrics']))
     require_review(root,'lyric-timing',{'audio_sha256':digest(audio),'cues':cs})
     beatmap=read(root/'edit/v2/beat-map.json')
     if beatmap['source_sha256']!=digest(root/'audio/composition.mp3'):raise Blocked('Stale beats')
@@ -30,7 +35,8 @@ def prepare(root):
         images.append(digest(p))
     if len(set(images))<6:raise Blocked('Six distinct images required, not duplicate files')
     profile={'duration':duration,'title':m['display_title'],'shots':shot_plan(m['scenes'],beatmap['beats'],duration),
-             'audio_sha256':digest(audio),'image_sha256':images}
+             'audio_sha256':digest(audio),'image_sha256':images,
+             'camera_modes':[s.get('camera_mode','motion') for s in m['scenes']]}
     write(root/'edit/v2/editorial-profile.json',profile)
     write(root/'edit/v2/caption-cues.json',cs)
     atlas=[]
