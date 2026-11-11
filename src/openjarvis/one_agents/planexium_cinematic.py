@@ -334,6 +334,8 @@ def acquire(root, tools):
         'canonical_plan_sha256': sha(root/'cinematic-plan.json'),
         'narration_sha256': sha(root/'narration/narration.segments.json'),
         'plan': plan}, indent=2), encoding='utf-8')
+    from openjarvis.one_agents.planexium_context import bind_pipeline_context
+    bind_pipeline_context(root, plan, stock)
     result={'stock':stock,'music':{'path':str(track),'sha256':sha(track),'provider':'Envato'},'revision':plan['revision']}
     if (music/'reuse-receipt.json').exists():
         result['music']['reuse']=json.loads((music/'reuse-receipt.json').read_text(encoding='utf-8'))

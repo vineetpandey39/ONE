@@ -1,6 +1,7 @@
 """Hash-bound editorial context labels; they do not establish scientific evidence."""
 from __future__ import annotations
 import hashlib
+import json
 from pathlib import Path
 
 LABELS = {
@@ -21,6 +22,48 @@ ARCHIVE_LABELS = {
     "3:1": ("PIA02865", "727 nm cloud-depth view", "scientific_observation"),
     "9:1": ("PIA22949", "Cloud tops - core not visible", "archival_context"),
 }
+
+PIPELINE_LABELS = {
+    'Illustrative audience - not NASA event footage',
+    'Illustrative capsule descent - not actual Soyuz footage',
+    'Illustrative bioprinter - not ISS experiment footage',
+    'Illustrative inspection - not Expedition 74 footage',
+}
+
+
+def bind_pipeline_context(root, plan, stock):
+    """Bind code-authored disclosures to the sealed brief, scene and asset bytes."""
+    from openjarvis.one_agents.planexium_adapters import concrete_stock_brief
+    from openjarvis.one_agents.planexium_cinematic import bind_illustrative_stock_requests
+    root = Path(root)
+    science_path = root / 'science-plan.json'
+    science = json.loads(science_path.read_text(encoding='utf-8'))
+    original = json.loads((root / 'cinematic-plan.json').read_text(encoding='utf-8'))
+    original = bind_illustrative_stock_requests(original, science)
+    def fingerprint(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+    approved = {}
+    for index, request in enumerate(original['stock_requests']):
+        brief = concrete_stock_brief(request)
+        if brief.get('contextual_label') in PIPELINE_LABELS:
+            scenes = {int(n) for n, indices in original['scene_assets'].items() if index in indices}
+            approved.setdefault(fingerprint(brief), set()).update(scenes)
+    for index, asset in enumerate(stock):
+        label = asset.get('contextual_label')
+        if not label:
+            continue
+        brief = concrete_stock_brief(plan['stock_requests'][index])
+        identity = fingerprint(brief)
+        scenes = {int(n) for n, indices in plan['scene_assets'].items() if index in indices}
+        if (label not in PIPELINE_LABELS or brief.get('contextual_label') != label
+                or not scenes or not scenes.issubset(approved.get(identity, set()))
+                or not all(science['scenes'][n-1].get('illustrative') is True for n in scenes)
+                or hashlib.sha256(Path(asset['path']).read_bytes()).hexdigest() != asset['sha256']):
+            raise ValueError('Pipeline context disclosure is not bound to verified authored illustration')
+        asset['context_label_proof'] = {
+            'policy': 'authored-illustration-v1', 'label': label,
+            'asset_sha256': asset['sha256'], 'science_sha256': hashlib.sha256(science_path.read_bytes()).hexdigest(),
+            'brief_sha256': identity, 'scenes': sorted(scenes)}
 
 def bind_archive_context(root, bundle, archives):
     if any(a.get("contextual_label") or a.get("contextual_role") for a in archives.values()):
@@ -102,7 +145,11 @@ def context_filter(asset, directory, ordinal, font):
     label = asset.get("contextual_label")
     if not label:
         return ""
-    if label not in ({row[1] for row in LABELS.values()} | {row[1] for row in ARCHIVE_LABELS.values()}):
+    proof = asset.get('context_label_proof') or {}
+    pipeline_label = (label in PIPELINE_LABELS and proof.get('policy') == 'authored-illustration-v1'
+        and proof.get('label') == label and proof.get('asset_sha256') == asset.get('sha256')
+        and bool(proof.get('science_sha256')) and bool(proof.get('brief_sha256')) and bool(proof.get('scenes')))
+    if not pipeline_label and label not in ({row[1] for row in LABELS.values()} | {row[1] for row in ARCHIVE_LABELS.values()}):
         raise ValueError("Unvalidated context label")
     path = Path(directory)/f"context-{ordinal}.txt"
     path.write_text(label, encoding="utf-8")
