@@ -319,14 +319,21 @@ class MCP:
         reply = await self.session.call_tool(tool, {"action": action, "params": params})
         data = reply.structuredContent
         if data is None:
-            data = json.loads(next(c.text for c in reply.content if c.type == "text"))
+            try:
+                data = json.loads(next(c.text for c in reply.content if c.type == "text"))
+            except (ValueError, StopIteration):
+                # MCP error replies may be plain text. Preserve the failed action
+                # without exposing opaque tool output or masking it as JSON failure.
+                data = {"error": {"code": "MALFORMED_MCP_REPLY"}}
         if isinstance(data, dict) and "result" in data:
             data = data["result"]
         ok = (isinstance(data, dict) and not reply.isError and not data.get("error")
               and data.get("success") is not False
               and data.get("_operation", {}).get("status") not in {"failed", "error", "blocked"})
         with self.events.open("a", encoding="utf-8") as log:
-            log.write(json.dumps({"at": time.time(), "tool": tool, "action": action, "ok": ok})+"\n")
+            log.write(json.dumps({"at": time.time(), "tool": tool, "action": action, "ok": ok,
+                "error_code": ((data.get("error") or {}).get("code")
+                    if isinstance(data, dict) and isinstance(data.get("error"), dict) else None)})+"\n")
         if not ok:
             # Do not propagate opaque MCP objects, credentials or arbitrary tool dumps.
             raise RuntimeError(f"Resolve MCP rejected {tool}.{action}; checkpoint retained")
