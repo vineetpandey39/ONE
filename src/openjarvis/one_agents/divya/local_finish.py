@@ -114,10 +114,16 @@ class Motion:
         angle=np.arctan2(x-240,y-70)
         rays=np.maximum(0,np.cos(angle*14+t*.13))**10*np.exp(-((y-110)/200)**2)*.025*(.8+.2*energy)
         glow=np.exp(-((x-240)**2/6500+(y-100)**2/11000))*.025*(.7+.3*energy)
+        scenes=getattr(self,'portrait_scenes',[])
+        treatment=scenes[self.order[idx]].get('motion_treatment') if getattr(self,'profile',None) and scenes else None
+        if treatment is not None:
+            fog*=1.0 if treatment=='mist' else 0.0
+            rays*=1.0 if treatment=='rays' else 0.0
+            glow*=.35 if treatment in ('flame','rays') else .1
         strength=cv2.resize((fog+rays+glow).astype(np.float32),(W,H))[:,:,None]
         frame=np.clip(frame*self.vignette+(255-frame)*strength,0,255).astype(np.uint8)
         sparks=np.zeros((270,480,3),dtype=np.uint8)
-        for p in self.particles:
+        for p in (self.particles if treatment in (None,'stars') else []):
             px=int((p[0]*480+9*math.sin(t*.25+p[2]*6))%480);py=int((p[1]*300-t*(3+p[2]*9))%300)-15
             r=1+int(p[3]*2);br=int(70+110*p[4]); cv2.circle(sparks,(px,py),r,(br,br,int(br*.8)), -1,cv2.LINE_AA)
         sparks=cv2.GaussianBlur(sparks,(5,5),0)
