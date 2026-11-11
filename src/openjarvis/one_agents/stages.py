@@ -229,6 +229,7 @@ def head_briefs_worker(
     enqueue: Callable[[], dict[str, Any]],
     receiving_detail: str | None = None,
     extra_awaiting: dict[str, Any] | None = None,
+    announce_receiving: bool = True,
 ) -> dict[str, Any]:
     """The ONE correct way to animate a head handing a brief to a worker.
     Every floor's head-to-worker handoff (IRIS->MUSE, HERMES->SCRIBE, and
@@ -262,7 +263,10 @@ def head_briefs_worker(
     time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
 
     set_stage(head_id, BRIEFING, briefing_detail, worker=worker_id)
-    set_stage(worker_id, RECEIVING, receiving_detail or briefing_detail)
+    # Shared seats can already be executing another channel's job. A queued
+    # handoff must not replace their live bubble; they announce on claim.
+    if announce_receiving:
+        set_stage(worker_id, RECEIVING, receiving_detail or briefing_detail)
     time.sleep(float(os.environ.get("ONE_BRIEFING_SECONDS", "8")))
 
     worker_job = enqueue()

@@ -721,12 +721,8 @@ def claim_job(job_id: str | None = None) -> dict[str, Any] | None:
         # that second row fail at the lease boundary.  Keep it queued instead;
         # BEGIN IMMEDIATE makes this admission check and the claim atomic even
         # when more than one worker process is polling the queue.
-        planexium_available = (
-            "(jobs.agent_id != 'planexium' OR NOT EXISTS ("
-            "SELECT 1 FROM jobs AS active_planexium "
-            "WHERE active_planexium.agent_id = 'planexium' "
-            "AND active_planexium.status = 'running'))"
-        )
+        from openjarvis.one_agents.youtube_admission import predicate
+        planexium_available = '(' + predicate(AGENTS) + ')'
         row = (db.execute(
                    "SELECT * FROM jobs WHERE status IN ('queued','reserved') AND id = ? AND "
                    + planexium_available, (job_id,)).fetchone()
