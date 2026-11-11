@@ -14,6 +14,22 @@ from openjarvis.one_agents.chandan_render import _run, _probe, _timestamp, _ffmp
 
 W,H,FPS=1920,1080,30
 
+def fit_scene(image,width=W,height=H):
+    """Preserve anatomy/aspect ratio; portrait inserts get a soft scene backdrop."""
+    ih,iw=image.shape[:2]
+    if abs(iw/ih-width/height)<.02:
+        return cv2.resize(image,(width,height),interpolation=cv2.INTER_LANCZOS4)
+    cover=max(width/iw,height/ih)
+    back=cv2.resize(image,(math.ceil(iw*cover),math.ceil(ih*cover)))
+    y=(back.shape[0]-height)//2;x=(back.shape[1]-width)//2
+    back=cv2.GaussianBlur(back[y:y+height,x:x+width],(0,0),30)
+    back=(back*.45).astype(np.uint8)
+    scale=min(width/iw,height/ih)
+    front=cv2.resize(image,(round(iw*scale),round(ih*scale)),interpolation=cv2.INTER_LANCZOS4)
+    y=(height-front.shape[0])//2;x=(width-front.shape[1])//2
+    back[y:y+front.shape[0],x:x+front.shape[1]]=front
+    return back
+
 def master(root):
     src=root/'audio/composition.mp3'; dst=root/'audio/master.wav'
     measure=loudness(src)
@@ -47,7 +63,7 @@ class Motion:
         self.images=[]
         for s in mission['scenes']:
             p=root/s['image']; assert digest(p)==read(p.with_suffix('.json'))['sha256']
-            self.images.append(cv2.resize(cv2.imread(str(p)),(W,H),interpolation=cv2.INTER_LANCZOS4))
+            self.images.append(fit_scene(cv2.imread(str(p))))
         self.bounds=[0,18,31,45,58,70,88,101,115,128,141,154,180]
         self.order=[0,1,0,1,2,0,1,2,1,2,1,2]
         self.font=ImageFont.truetype('C:/Windows/Fonts/Nirmala.ttc',46)
