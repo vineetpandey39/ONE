@@ -384,8 +384,10 @@ def render(root, tools, *, resolve_settings=None):
         assets = local_repair['assets']
     else:
         assets=acquire(root,tools)
-    for asset in assets['stock']:
+    for number, asset in enumerate(assets['stock'], 1):
+        progress(root, 'inspecting_downloaded_footage', detail=f"Checking clip {number}/{len(assets['stock'])} for black leaders")
         asset['usable_in']=usable_start(asset)
+    progress(root, 'building_edit', detail='All footage accepted; preparing authored scene shots')
     voice_path=root/'narration/narration.segments.json';voice=json.loads(voice_path.read_text(encoding='utf-8'))
     media=json.loads((root/'media-manifest.json').read_text(encoding='utf-8'))['scenes']
     source=next((a['source_video'] for row in media.values() for a in row.get('assets',[]) if a.get('source_video')),None)
