@@ -575,6 +575,23 @@ def materialize_stock_download(path: Path) -> Path:
     return path
 
 
+def verified_browser_reset_receipt(receipt):
+    """One new attempt after a recorded, isolated repair; keep failed receipts immutable."""
+    proof_path = receipt.with_suffix('.browser-reset.json')
+    if not receipt.is_file() or not proof_path.is_file():
+        return receipt
+    saved = json.loads(receipt.read_text(encoding='utf-8'))
+    proof = json.loads(proof_path.read_text(encoding='utf-8'))
+    if (saved.get('terminal_status') != 'Failed'
+            or 'BrowserType.connect_over_cdp: Timeout' not in str(saved.get('provider_error', ''))
+            or proof.get('receipt_sha256') != hashlib.sha256(receipt.read_bytes()).hexdigest()
+            or proof.get('provider_job_id') != saved.get('job_id')
+            or proof.get('verified_isolated_profile_reset') is not True
+            or proof.get('profile') != 'planexium-envato'):
+        return receipt
+    return receipt.with_name(receipt.stem + '-profile-reset.json')
+
+
 def student_inflection_recovery(receipt):
     """Retry only a confirmed pre-download singular/plural false rejection."""
     if not receipt.is_file():
@@ -1008,7 +1025,7 @@ class EnvatoAdapter:
                     receipt = self.context.artifact(
                         f"receipts/envato-{ENVATO_RECEIPT_REVISION}-{index}.json" if candidate == first_candidate
                         else f"receipts/envato-{ENVATO_RECEIPT_REVISION}-{index}-candidate-{candidate}.json")
-                    receipt = student_inflection_recovery(receipt)
+                    receipt = verified_browser_reset_receipt(student_inflection_recovery(receipt))
                     try:
                         out, job = self.draft.run("planexium-envato", asset_steps, inputs, receipt, timeout=10800)
                         query_positions[query] = candidate
