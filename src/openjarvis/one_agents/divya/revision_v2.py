@@ -16,6 +16,7 @@ class Revision(Motion):
             tile=cv2.imread(str(root/item['file']),cv2.IMREAD_UNCHANGED)
             self.atlas[item['text']]=tile
         super().__init__(root,read(root/'mission.json'),read(root/'edit/v2/caption-cues.json'))
+        self.portrait_scenes=read(root/'mission.json')['scenes']
         self.profile=read(root/'edit/v2/editorial-profile.json') if (root/'edit/v2/editorial-profile.json').exists() else None
         if root.name!='shiva-pilot' and not self.profile:
             from .core import Blocked
@@ -114,7 +115,18 @@ class Revision(Motion):
 
     def portrait(self,t):
         frame=self.frame(t,False)
-        frame=cv2.resize(frame[:,656:1264],(1080,1920),interpolation=cv2.INTER_LANCZOS4)
+        scenes=self.portrait_scenes
+        idx=min(np.searchsorted(self.bounds,t,side='right')-1,len(self.order)-1)
+        def focal(shot):
+            asset=self.order[shot]
+            return float(scenes[asset].get('portrait_focus_x',.5)) if asset<len(scenes) else .5
+        focus=focal(idx)
+        if idx and t-self.bounds[idx]<1.2:
+            u=(t-self.bounds[idx])/1.2;u=u*u*(3-2*u)
+            prior=focal(idx-1)
+            focus=prior*(1-u)+focus*u
+        left=int(np.clip(W*focus-304,0,W-608))
+        frame=cv2.resize(frame[:,left:left+608],(1080,1920),interpolation=cv2.INTER_LANCZOS4)
         # Full-width subtitle safe panel with original shaped glyphs, never basic-layout text.
         current=next((c for c in self.cues if c['start']<=t<c['end']),None)
         if current:
@@ -143,7 +155,7 @@ def encode_frames(target,width,height,frames,seconds,log):
 
 def main():
     cv2.setNumThreads(1)
-    ap=argparse.ArgumentParser();ap.add_argument('--root',type=Path,required=True);ap.add_argument('--proof',action='store_true');ap.add_argument('--unbranded',action='store_true');args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--root',type=Path,required=True);ap.add_argument('--proof',action='store_true');ap.add_argument('--unbranded',action='store_true');ap.add_argument('--shorts-only',action='store_true');args=ap.parse_args()
     root=args.root.resolve();out=root/('edit/unbranded' if args.unbranded else 'edit/v2');out.mkdir(parents=True,exist_ok=True);motion=Revision(root,'' if args.unbranded else 'D I V Y A');beatmap=read(root/'edit/v2/beat-map.json')
     write(out/'scene-manifest.json',{'distinct_images':len(motion.bank),'shots':[{'start':a,'end':b,'asset':str(motion.bank[i]),'sha256':digest(motion.bank[i])} for a,b,i in zip(motion.bounds,motion.bounds[1:],motion.order)],'source_music':digest(root/'audio/composition.mp3'),'additional_music_credits':0})
     for t in [3,9,20,27,34,40,49,60,80,92,130,160]:
@@ -162,7 +174,7 @@ def main():
     beatmap=plan
     signature=fingerprint({'editorial_profile':motion.profile,'code':digest(Path(__file__)),'parent':digest(Path(__file__).with_name('local_finish.py')),'brand_label':motion.brand_label,'images':[digest(p) for p in motion.bank],'atlas':read(root/'edit/v2/caption-atlas.json'),'beats':beatmap,'cues':motion.cues})
     chunks=out/'chunks';chunks.mkdir(exist_ok=True);paths=[]
-    for start in range(0,math.ceil(motion.duration),15):
+    for start in ([] if args.shorts_only else range(0,math.ceil(motion.duration),15)):
         seconds=min(15,motion.duration-start)
         p=chunks/f'part-{start:03}.mp4';rec=p.with_suffix('.json');paths.append(p)
         if p.exists() and rec.exists() and read(rec).get('signature')==signature and read(rec).get('sha256')==digest(p):continue
@@ -170,9 +182,11 @@ def main():
         tmp=p.with_name(p.stem+'.partial.mp4')
         encode_frames(tmp,W,H,frame_sequence(motion.frame,start,math.ceil(seconds*30)),seconds,out/'encode.log')
         tmp.replace(p);write(rec,{'signature':signature,'sha256':digest(p),'additional_credits':0})
-    listing=chunks/'concat.txt';listing.write_text('\n'.join("file '"+p.name+"'" for p in paths),encoding='utf-8')
     target=out/('master.mp4' if motion.profile else 'shiva-sharan-v2.mp4')
-    _run(['ffmpeg','-y','-v','error','-f','concat','-safe','0','-i',str(listing),'-i',str(root/'audio/master.wav'),'-t',str(motion.duration),'-map','0:v','-map','1:a','-c:v','copy','-c:a','aac','-b:a','320k','-movflags','+faststart',str(target)])
+    if not args.shorts_only:
+        listing=chunks/'concat.txt';listing.write_text('\n'.join("file '"+p.name+"'" for p in paths),encoding='utf-8')
+        _run(['ffmpeg','-y','-v','error','-f','concat','-safe','0','-i',str(listing),'-i',str(root/'audio/master.wav'),'-t',str(motion.duration),'-map','0:v','-map','1:a','-c:v','copy','-c:a','aac','-b:a','320k','-movflags','+faststart',str(target)])
+    elif not target.exists():raise Blocked('Existing long-form required for Shorts-only correction')
     outputs=[target]
     for short in beatmap['shorts']:
         start=short['start'];end=short['end'];duration=end-start

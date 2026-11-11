@@ -28,6 +28,7 @@ def _run_local(job):
     allowed['alankaar'].add('thumbnails')
     allowed['alankaar'].add('prepare_edit')
     allowed['alankaar'].add('prepare_draft')
+    allowed['alankaar'].add('reframe_shorts')
     allowed.update(ares={'metadata'},lyra={'assemble'})
     allowed['echo']={'publisher_preflight','analytics'}
     if action not in allowed.get(agent,set()):
@@ -68,9 +69,10 @@ def _run_local(job):
         elif action=='short_labels':
             from .short_labels import label_shorts
             result=label_shorts(root)
-        elif action in {'proof','render'}:
+        elif action in {'proof','render','reframe_shorts'}:
             cmd=[sys.executable,'-m','openjarvis.one_agents.divya.revision_v2','--root',str(root),'--unbranded']
             if action=='proof':cmd.append('--proof')
+            if action=='reframe_shorts':cmd.append('--shorts-only')
             log=root/'runtime/floor12-render.log';log.parent.mkdir(exist_ok=True)
             with log.open('a',encoding='utf-8') as stream:
                 subprocess.run(cmd,stdout=stream,stderr=stream,check=True)
@@ -204,7 +206,7 @@ def head_job(job,enqueue):
     payload=bound_payload(job)
     action=payload.get('action','status')
     seat={'shorts_plan':'raag','shorts_qa':'naad','scripture':'raag','audio_audit':'raag','render':'alankaar','proof':'alankaar','short_labels':'alankaar','status':'naad','audit':'naad','verify_pipeline':'naad'}.get(action)
-    seat=seat or {'publisher_preflight':'echo','analytics':'echo','prepare_edit':'alankaar','prepare_draft':'alankaar','finish_pipeline':'raag','thumbnails':'alankaar','metadata':'ares','assemble':'lyra','package_pipeline':'alankaar'}.get(action)
+    seat=seat or {'publisher_preflight':'echo','analytics':'echo','prepare_edit':'alankaar','prepare_draft':'alankaar','reframe_shorts':'alankaar','finish_pipeline':'raag','thumbnails':'alankaar','metadata':'ares','assemble':'lyra','package_pipeline':'alankaar'}.get(action)
     if not seat:raise ValueError('Unknown devotional action')
     follow=handoff(job,payload,seat,enqueue)
     return {'agent':'HELIOS','brand':BRAND,'mission_id':payload['mission_id'],'handed_to':{'agent':seat.upper(),'job_id':follow['id']},'published':False}

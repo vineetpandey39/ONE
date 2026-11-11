@@ -18,9 +18,17 @@ def metadata(root):
     if m['composition_type']=='original_bhajan' and 'original' not in description.casefold():
         raise Blocked('Original lyrics disclosure missing')
     p=root/'publishing/seo.json'
+    short_metadata=[]
+    for n in (1,2):
+        short_title=f"{m.get('display_title',title)} | {keyword} | PART {n} #Shorts"
+        if len(short_title)>100:raise Blocked('Short title budget exceeded')
+        short_metadata.append({'id':f'short-0{n}','title':short_title,
+            'description':f"{keyword} — {m.get('display_title',title)} | PART {n}\nOriginal Hindi devotional song. AI-assisted music and imagery. Shloka By Shloka.\n\n#ShivBhajan #Mahadev #ShlokaByShloka #Shorts",
+            'tags':valid_tags(tags+['shorts']),'privacy':'private','language':'hi',
+            'thumbnail':f'publishing/thumbnails/short-{n}-thumbnail-golden-blue-v2.jpg'})
     write(p,{'title':title,'description':description,'tags':tags,'tag_characters':tag_characters(tags),
         'channel_id':m['channel_id'],'language':'hi','category_id':'10','made_for_kids':False,
-        'contains_synthetic_media':True,'privacy':'private','keyword':keyword,'status':'DRAFT'})
+        'contains_synthetic_media':True,'privacy':'private','keyword':keyword,'status':'DRAFT','shorts':short_metadata})
     return {'status':'DRAFT','files':[str(p)]}
 
 def thumbnails(root):
