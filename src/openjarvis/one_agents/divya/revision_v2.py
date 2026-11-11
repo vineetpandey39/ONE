@@ -101,11 +101,20 @@ class Revision(Motion):
                 cv2.ellipse(petals,(x,y),(5+j%3,12),t*12+j*29,0,360,(145,170,225),-1,cv2.LINE_AA)
             frame=cv2.addWeighted(frame,1,petals,.38,0)
         # Moving water shimmer on object/landscape inserts only, avoiding deity deformation.
-        if (not self.profile and asset in (4,7)) or treatment=='water':
+        if not self.profile and asset in (4,7):
             roi=frame[650:1080];rh,rw=roi.shape[:2]
             yy,xx=np.mgrid[:rh,:rw].astype(np.float32)
             mapx=xx+2.5*np.sin(yy*.055-t*2.4)*np.clip(yy/180,0,1)
             frame[650:1080]=cv2.remap(roi,mapx,yy,cv2.INTER_LINEAR,borderMode=cv2.BORDER_REFLECT_101)
+        elif treatment=='water':
+            # Only explicitly reviewed water rectangles; never warp a deity or shrine by default.
+            for x0,y0,x1,y1 in self.portrait_scenes[asset].get('water_regions',[]):
+                xa,ya,xb,yb=int(x0*W),int(y0*H),int(x1*W),int(y1*H)
+                roi=frame[ya:yb,xa:xb];rh,rw=roi.shape[:2]
+                yy,xx=np.mgrid[:rh,:rw].astype(np.float32)
+                edge=np.sin(np.pi*xx/max(1,rw-1))*np.sin(np.pi*yy/max(1,rh-1))
+                mx=xx+1.8*np.sin(yy*.055-t*2.4)*edge
+                frame[ya:yb,xa:xb]=cv2.remap(roi,mx,yy,cv2.INTER_LINEAR,borderMode=cv2.BORDER_REFLECT_101)
         if (not self.profile and asset==3) or treatment=='flame':
             # Warm flame-driven bloom, smoothly varying rather than flashing.
             x,y=self.sx,self.sy
@@ -146,6 +155,11 @@ class Revision(Motion):
         if t<6.4 and not current:self.paste_text(frame,self.display_title,1400,1000)
         if self.brand_label:
             cv2.putText(frame,self.brand_label,(55,100),cv2.FONT_HERSHEY_SIMPLEX,.8,(220,225,232),1,cv2.LINE_AA)
+        part=getattr(self,'active_short_number',None)
+        if part:
+            cv2.rectangle(frame,(60,240),(435,350),(130,30,105),-1)
+            cv2.rectangle(frame,(60,240),(435,350),(60,210,255),3)
+            cv2.putText(frame,f'PART {part}',(90,316),cv2.FONT_HERSHEY_DUPLEX,1.85,(60,225,255),4,cv2.LINE_AA)
         return frame
 
 def frame_sequence(fn,start,count):
@@ -201,7 +215,8 @@ def main():
         _run(['ffmpeg','-y','-v','error','-f','concat','-safe','0','-i',str(listing),'-i',str(root/'audio/master.wav'),'-t',str(motion.duration),'-map','0:v','-map','1:a','-c:v','copy','-c:a','aac','-b:a','320k','-movflags','+faststart',str(target)])
     elif not target.exists():raise Blocked('Existing long-form required for Shorts-only correction')
     outputs=[target]
-    for short in beatmap['shorts']:
+    for short_number,short in enumerate(beatmap['shorts'],1):
+        motion.active_short_number=short_number
         start=short['start'];end=short['end'];duration=end-start
         silent=out/(short['id']+'-silent.mp4');dest=out/(short['id']+'-v2.mp4')
         print(f"Rendering {short['id']} musical excerpt {start:.3f}–{end:.3f}",flush=True)
@@ -227,7 +242,10 @@ def main():
     cv2.putText(thumb,('D I V Y A  |  ' if motion.brand_label else '')+'ORIGINAL SHIVA BHAJAN',(635,1045),cv2.FONT_HERSHEY_SIMPLEX,.7,(225,230,238),1,cv2.LINE_AA)
     cv2.imwrite(str(out/'thumbnail-v2.jpg'),cv2.resize(thumb,(1280,720)))
     (out/'lyrics.hi.srt').write_text('\n\n'.join(f"{i}\n{_timestamp(c['start'],True)} --> {_timestamp(c['end'],True)}\n{c['text']}" for i,c in enumerate(motion.cues,1))+'\n',encoding='utf-8')
-    write(out/'qa.json',{'outputs':reports,'shorts_plan_sha256':digest(plan_path),'caption_renderer':'Chromium complex-script shaping','distinct_images':len(motion.bank),'shots':len(motion.order),'shorts':beatmap['shorts'],'listening_review':'PENDING','published':False,'additional_music_credits':0})
+    approval_path=root/'reviews/user-pronunciation-approval.json'
+    approval=read(approval_path) if approval_path.exists() else {}
+    listening_review='USER_APPROVED' if approval.get('approved') and approval.get('audio_sha256')==beatmap.get('source_sha256') else 'PENDING'
+    write(out/'qa.json',{'outputs':reports,'shorts_plan_sha256':digest(plan_path),'caption_renderer':'Chromium complex-script shaping','distinct_images':len(motion.bank),'shots':len(motion.order),'shorts':beatmap['shorts'],'listening_review':listening_review,'listening_review_receipt':str(approval_path.relative_to(root)) if listening_review=='USER_APPROVED' else None,'published':False,'additional_music_credits':0})
     print('V2 exports complete',flush=True)
 
 if __name__=='__main__':main()

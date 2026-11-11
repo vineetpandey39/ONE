@@ -123,7 +123,7 @@ def compose(root, config, mission):
         write(receipt_path,receipt)
         raise Blocked('Music outcome unknown; do not resubmit until reconciled') from None
 
-def image_steps(prompt, filename, marker, reference=None, reuse_session=False):
+def image_steps(prompt, filename, marker, reference=None, reuse_session=False, context_url=None):
     from openjarvis.one_agents.chandan_reference import CHATGPT_IMAGE_RETRY
     args = {**CHATGPT_IMAGE_RETRY,'max_attempts':1,'prompt':prompt+' Request marker: '+marker,
             'request_marker':marker,'filename':filename,'as':'image_path'}
@@ -133,7 +133,7 @@ def image_steps(prompt, filename, marker, reference=None, reuse_session=False):
             {'action':'get_credential','args':{'assetName':'chatgptLogin','as':'credential'}},
             {'action':'chatgpt_login_with_credential','args':{'credential':'{{credential}}'}}]
     return [{'action':'open_browser'}, *login,
-            {'action':'open_tab','args':{'name':'divya_scene','url':'https://chatgpt.com/'}},
+            {'action':'open_tab','args':{'name':'divya_scene','url':context_url or 'https://chatgpt.com/'}},
             {'action':'wait_for_any_selector','args':{'selectors':['#prompt-textarea',"[contenteditable='true']",'textarea'],'timeout_ms':60000}},
             {'action':'generate_and_download_chatgpt_image','args':args},
             {'action':'switch_tab','args':{'name':'divya_scene','as':'episode_chat_url'}}]
@@ -146,6 +146,13 @@ def generate_image(root, config, scene, reference=None):
     root = Path(root)
     target = artifact(root, scene['image'])
     request = {'prompt':scene['prompt'],'reference_sha256':digest(reference) if reference else None}
+    context_url=config.get('image_context_url')
+    if context_url:
+        from urllib.parse import urlsplit
+        parsed=urlsplit(context_url)
+        if parsed.scheme!='https' or parsed.netloc!='chatgpt.com' or not parsed.path.startswith('/c/'):
+            raise Blocked('Image context must be an existing ChatGPT conversation')
+        request['context_url']=context_url
     sidecar = target.with_suffix('.json')
     if target.is_file() and sidecar.is_file():
         saved = read(sidecar)
@@ -155,7 +162,7 @@ def generate_image(root, config, scene, reference=None):
     provider = LaoDraft(LaoOrchestratorTool(),config['lao_folder_id'],tuple(Path(p) for p in config['artifact_roots']))
     marker = 'DIVYA-'+fingerprint(request)[:16]
     steps = image_steps(scene['prompt'],target.name,marker,reference,
-                        reuse_session=config.get('reuse_logged_in_image_session',False))
+                        reuse_session=config.get('reuse_logged_in_image_session',False),context_url=context_url)
     receipt = root/'runtime/providers'/f'{marker}.json'
     if receipt.exists():
         prior=read(receipt)

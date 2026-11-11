@@ -66,7 +66,12 @@ def assemble(root):
     if plan['source_sha256']!=digest(root/'audio/composition.mp3'):
         raise Blocked('Stale song in Shorts plan')
     p=root/'publishing/package.json'
-    write(p,{'brand':'shloka_by_shloka','channel_id':read(root/'channel-binding.json')['channel_id'],
-        'outputs':files,'status':'AWAITING_REVIEW','privacy':'private','pronunciation_review':'PENDING',
-        'visual_review':'PENDING','published':False,'additional_music_credits':0})
+    mission=read(root/'mission.json')
+    pronunciation_review='USER_APPROVED' if qa.get('listening_review')=='USER_APPROVED' else 'PENDING'
+    visual_review=mission.get('visual_review',{}).get('status','PENDING')
+    binding_path=root/'channel-binding.json'
+    channel_id=(read(binding_path)['channel_id'] if binding_path.exists() else mission['channel_id'])
+    write(p,{'brand':'shloka_by_shloka','channel_id':channel_id,
+        'outputs':files,'status':'AWAITING_REVIEW','privacy':'private','pronunciation_review':pronunciation_review,
+        'visual_review':visual_review,'published':False,'additional_music_credits':0})
     return {'status':'AWAITING_REVIEW','files':[str(p)]}
