@@ -123,16 +123,18 @@ def compose(root, config, mission):
         write(receipt_path,receipt)
         raise Blocked('Music outcome unknown; do not resubmit until reconciled') from None
 
-def image_steps(prompt, filename, marker, reference=None):
+def image_steps(prompt, filename, marker, reference=None, reuse_session=False):
     from openjarvis.one_agents.chandan_reference import CHATGPT_IMAGE_RETRY
     args = {**CHATGPT_IMAGE_RETRY,'max_attempts':1,'prompt':prompt+' Request marker: '+marker,
             'request_marker':marker,'filename':filename,'as':'image_path'}
     if reference:
         args.update(reference_image_path=str(reference),reference_settle_seconds=12)
-    return [{'action':'open_browser'},
+    login = [] if reuse_session else [
             {'action':'get_credential','args':{'assetName':'chatgptLogin','as':'credential'}},
-            {'action':'chatgpt_login_with_credential','args':{'credential':'{{credential}}'}},
+            {'action':'chatgpt_login_with_credential','args':{'credential':'{{credential}}'}}]
+    return [{'action':'open_browser'}, *login,
             {'action':'open_tab','args':{'name':'divya_scene','url':'https://chatgpt.com/'}},
+            {'action':'wait_for_any_selector','args':{'selectors':['#prompt-textarea',"[contenteditable='true']",'textarea'],'timeout_ms':60000}},
             {'action':'generate_and_download_chatgpt_image','args':args},
             {'action':'switch_tab','args':{'name':'divya_scene','as':'episode_chat_url'}}]
 
@@ -152,10 +154,16 @@ def generate_image(root, config, scene, reference=None):
         raise Blocked('Existing image differs from request; use a new scene revision')
     provider = LaoDraft(LaoOrchestratorTool(),config['lao_folder_id'],tuple(Path(p) for p in config['artifact_roots']))
     marker = 'DIVYA-'+fingerprint(request)[:16]
-    steps = image_steps(scene['prompt'],target.name,marker,reference)
+    steps = image_steps(scene['prompt'],target.name,marker,reference,
+                        reuse_session=config.get('reuse_logged_in_image_session',False))
     receipt = root/'runtime/providers'/f'{marker}.json'
     if receipt.exists():
         prior=read(receipt)
+        if (config.get('reuse_logged_in_image_session') and
+                prior.get('terminal_status')=='Stopped' and
+                prior.get('job_id') in config.get('image_session_recovery_jobs',[])):
+            # Explicitly reconciled pre-generation stop; retain original receipt.
+            receipt=receipt.with_name(receipt.stem+'-session-recovery1.json')
         if (prior.get('terminal_status')=='Failed' and
                 str(prior.get('provider_error','')).startswith('No browser-session owner is registered')):
             # This verified failure precedes browser acquisition and all generation.
