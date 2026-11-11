@@ -231,23 +231,33 @@ def download_music(draft, steps, query, context, *, failure_limit=10):
             candidate+=1
 
 
-def bind_illustrative_capsule_requests(plan, science):
-    """Generalize a named capsule only when every consuming scene disclaims actuality."""
+def bind_illustrative_stock_requests(plan, science):
+    """Bind visible subjects only when every consuming scene explicitly allows the illustration."""
+    rules = {
+        ('soyuz', 'soyuz capsule parachute descent'): (
+            ('illustrative reconstructions, not recordings of the actual returns',),
+            {'query': 'parachute spacecraft capsule descent', 'subject': 'capsule',
+             'contextual_label': 'Illustrative capsule descent - not actual Soyuz footage'}),
+        ('maintenance', 'spacecraft maintenance equipment technician'): (
+            ('technicians inspecting complex machinery', 'not verified scenes from expedition 74'),
+            {'query': 'technician machinery inspection', 'subject': 'machinery',
+             'contextual_label': 'Illustrative inspection - not Expedition 74 footage'}),
+    }
     requests = [dict(row) for row in plan['stock_requests']]
     for index, request in enumerate(requests):
-        if (request.get('subject', '').casefold() != 'soyuz'
-                or request.get('query', '').casefold() != 'soyuz capsule parachute descent'):
+        rule = rules.get((request.get('subject', '').casefold(), request.get('query', '').casefold()))
+        if not rule:
             continue
+        phrases, brief = rule
         consumers = [int(number) - 1 for number, indices in plan.get('scene_assets', {}).items()
                      if index in indices]
         scenes = science.get('scenes', [])
         if not consumers or not all(0 <= n < len(scenes)
                 and scenes[n].get('illustrative') is True
-                and 'illustrative reconstructions, not recordings of the actual returns' in
-                    scenes[n].get('narration', '').casefold() for n in consumers):
+                and all(phrase in scenes[n].get('narration', '').casefold() for phrase in phrases)
+                for n in consumers):
             continue
-        request.update(query='parachute spacecraft capsule descent', subject='capsule',
-                       contextual_label='Illustrative capsule descent - not actual Soyuz footage')
+        request.update(brief)
     return {**plan, 'stock_requests': requests}
 
 
@@ -260,7 +270,7 @@ def acquire(root, tools):
     from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
     config=load_config();lao=Path(config['lao_root'])
     plan=json.loads((root/'cinematic-plan.json').read_text(encoding='utf-8'))
-    plan=bind_illustrative_capsule_requests(plan, json.loads((root/'science-plan.json').read_text(encoding='utf-8')))
+    plan=bind_illustrative_stock_requests(plan, json.loads((root/'science-plan.json').read_text(encoding='utf-8')))
     ctx=ProductionContext(PLANEXIUM,root/'cinematic-assets',plan['revision'])
     ctx.root.mkdir(parents=True,exist_ok=True)
     draft=LaoDraft(LaoOrchestratorTool(),config.get('lao_folder_id') or runtime._PEITHO_LAO_FOLDER_ID,
