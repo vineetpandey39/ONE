@@ -144,6 +144,13 @@ class LaoDraft:
             or ("Rejected asset: destination phrase " in error and " absent from " in error)
             or "Rejected asset: preview does not confidently support selected-item metadata and subject" in error
             or "Asset preview unavailable" in error
+            # The selected item cannot be verified when its description never
+            # appears. This locator is read by assert_destination_subject,
+            # before preview admission and every download action.
+            or ("Locator.inner_text: Timeout" in error
+                and "[data-cy='idp-description']" in error
+                and not any(term in error.casefold() for term in
+                            ("download", "sign in", "authentication", "payment")))
             or ("started no download within 60s" in error
                 and "account most likely already holds this asset" in error)))
 
