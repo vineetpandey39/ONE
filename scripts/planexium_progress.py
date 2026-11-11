@@ -20,6 +20,7 @@ def snapshot(root, queue):
     progress_path = root / "edit/render-progress.json"
     progress = read(progress_path)
     plan = read(root / "cinematic-plan.json")
+    plan = read(root / "edit/cinematic-coverage-plan.json").get("plan", plan)
     assets = root / "cinematic-assets/planexium" / str(plan.get("revision", "motion-rich-v3"))
     receipts = sorted((assets / "receipts").glob("envato-v*.json"),
                       key=lambda p: p.stat().st_mtime, reverse=True)

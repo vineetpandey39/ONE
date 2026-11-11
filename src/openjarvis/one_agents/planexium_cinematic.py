@@ -307,6 +307,33 @@ def acquire(root, tools):
         if len({row['sha256'] for row in stock})!=len(stock):raise ValueError('Duplicate cached editorial footage')
     else:
         stock=adapter(brand='planexium',mission_id=ctx.mission_id,output_root=ctx.root,requests=plan['stock_requests'])['assets']
+    from openjarvis.one_agents.planexium_motion_coverage import supplement
+    voice = json.loads((root/'narration/narration.segments.json').read_text(encoding='utf-8'))
+    original_count = len(plan['stock_requests'])
+    inspected = {}
+    while True:
+        for number, asset in enumerate(stock, 1):
+            identity = asset['sha256']
+            if identity not in inspected:
+                progress(root, 'inspecting_downloaded_footage', detail=f'Checking clip {number}/{len(stock)} for black leaders')
+                inspected[identity] = usable_start(asset)
+            asset['usable_in'] = inspected[identity]
+        extra = supplement(plan, voice, stock, original_count=original_count)
+        if extra is None:
+            break
+        plan = extra
+        (root/'edit/cinematic-coverage-plan.json').write_text(json.dumps({
+            'canonical_plan_sha256': sha(root/'cinematic-plan.json'),
+            'narration_sha256': sha(root/'narration/narration.segments.json'),
+            'plan': plan}, indent=2), encoding='utf-8')
+        progress(root, 'acquiring_coverage_footage',
+                 detail=f'Acquiring additional distinct licensed clip {len(plan["stock_requests"])-original_count}/4 for measured narration coverage')
+        stock = adapter(brand='planexium', mission_id=ctx.mission_id, output_root=ctx.root,
+                        requests=plan['stock_requests'])['assets']
+    (root/'edit/cinematic-coverage-plan.json').write_text(json.dumps({
+        'canonical_plan_sha256': sha(root/'cinematic-plan.json'),
+        'narration_sha256': sha(root/'narration/narration.segments.json'),
+        'plan': plan}, indent=2), encoding='utf-8')
     result={'stock':stock,'music':{'path':str(track),'sha256':sha(track),'provider':'Envato'},'revision':plan['revision']}
     if (music/'reuse-receipt.json').exists():
         result['music']['reuse']=json.loads((music/'reuse-receipt.json').read_text(encoding='utf-8'))
@@ -386,7 +413,8 @@ def render(root, tools, *, resolve_settings=None):
         assets=acquire(root,tools)
     for number, asset in enumerate(assets['stock'], 1):
         progress(root, 'inspecting_downloaded_footage', detail=f"Checking clip {number}/{len(assets['stock'])} for black leaders")
-        asset['usable_in']=usable_start(asset)
+        if 'usable_in' not in asset:
+            asset['usable_in']=usable_start(asset)
     progress(root, 'building_edit', detail='All footage accepted; preparing authored scene shots')
     voice_path=root/'narration/narration.segments.json';voice=json.loads(voice_path.read_text(encoding='utf-8'))
     media=json.loads((root/'media-manifest.json').read_text(encoding='utf-8'))['scenes']
@@ -407,7 +435,11 @@ def render(root, tools, *, resolve_settings=None):
         if image is None:image=space_research.nasa_image(science['video_title'],root/'sources/cinematic-primary')
         original=Path(image['path']);original_info={'seconds':3600};credit=image.get('credit','NASA archive imagery')
     if not local_repair:
-        editorial=json.loads((root/'cinematic-plan.json').read_text(encoding='utf-8'))
+        coverage_plan = json.loads((root/'edit/cinematic-coverage-plan.json').read_text(encoding='utf-8'))
+        if (coverage_plan['canonical_plan_sha256'] != sha(root/'cinematic-plan.json')
+                or coverage_plan['narration_sha256'] != sha(root/'narration/narration.segments.json')):
+            raise ValueError('Measured coverage plan no longer matches sealed inputs')
+        editorial = coverage_plan['plan']
     primary_offsets=None if editorial.get('revision')=='retention-v1' else {i:0 for i,s in enumerate(science['scenes'],1) if s.get('visual_kind') in {'obs','image'}}
     if not editorial.get('scene_shots'):
         from openjarvis.one_agents.planexium_editorial import build_scene_shots

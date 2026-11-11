@@ -28,6 +28,7 @@ def render_signature(root,tools,motion_format,resolve_settings=None):
         values['context_labels']=digest(Path(__file__).with_name('planexium_context.py'))
         values['authored_motion']=digest(Path(__file__).with_name('planexium_authored_motion.py'))
         values['editorial_planner']=digest(Path(__file__).with_name('planexium_editorial.py'))
+        values['motion_coverage']=digest(Path(__file__).with_name('planexium_motion_coverage.py'))
         values['science_overlays']=digest(Path(__file__).with_name('youtube_science_overlays.py'))
         values['footage_styles']=digest(Path(__file__).with_name('youtube_footage_styles.py'))
     return hashlib.sha256(json.dumps(values,sort_keys=True).encode()).hexdigest()
