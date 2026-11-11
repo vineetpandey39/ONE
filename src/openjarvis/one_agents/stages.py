@@ -259,10 +259,11 @@ def head_briefs_worker(
     ``set_stage(worker_id, RECEIVING, ...)`` directly there, so nobody
     re-adds a redundant second sleep on the worker's side.
     """
-    set_stage(head_id, CARRYING_TO_WORKER, carrying_detail, worker=worker_id)
+    context = {k:v for k,v in (extra_awaiting or {}).items() if k not in {'worker','worker_job'}}
+    set_stage(head_id, CARRYING_TO_WORKER, carrying_detail, worker=worker_id, **context)
     time.sleep(float(os.environ.get("ONE_HANDOFF_SECONDS", "6")))
 
-    set_stage(head_id, BRIEFING, briefing_detail, worker=worker_id)
+    set_stage(head_id, BRIEFING, briefing_detail, worker=worker_id, **context)
     # Shared seats can already be executing another channel's job. A queued
     # handoff must not replace their live bubble; they announce on claim.
     if announce_receiving:

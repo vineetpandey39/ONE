@@ -2,6 +2,9 @@
 import json
 import subprocess
 import sys
+import hashlib
+import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from .core import Blocked, Journal, read, write, digest, mission_lock
 
@@ -9,7 +12,7 @@ BRAND='shloka_by_shloka'
 CHANNEL='UCBT4mvZShb768lDFc6NcUvw'
 ROLES={'naad':'Production coordination and package QA','raag':'Lyrics, music direction and existing audio audit','alankaar':'Consistent imagery, local animation, captions and Shorts'}
 
-def run_job(job):
+def _run_local(job):
     payload=json.loads(job.get('task') or '{}')
     if payload.get('brand')!=BRAND:
         raise ValueError('Explicit Shloka By Shloka brand required')
@@ -54,10 +57,103 @@ def run_job(job):
         write(root/f'runtime/floor12-{agent}-{action}.json',result)
         return result
 
-def head_job(job,enqueue):
+def bound_payload(job):
     payload=json.loads(job.get('task') or '{}')
+    if payload.get('brand')!=BRAND or payload.get('channel_id',CHANNEL)!=CHANNEL:
+        raise ValueError('Shloka brand/channel mismatch')
+    root=Path(payload['root']).resolve()
+    mission=read(root/'mission.json')
+    binding=read(root/'channel-binding.json')
+    if binding.get('brand')!=BRAND or binding.get('channel_id')!=CHANNEL:
+        raise ValueError('Mission belongs to a different channel')
+    if binding.get('mission_id')!=mission.get('mission_id'):
+        raise ValueError('Mission binding mismatch')
+    if payload.get('mission_id',mission['mission_id'])!=mission['mission_id']:
+        raise ValueError('Payload mission mismatch')
+    payload.update(root=str(root),channel_id=CHANNEL,mission_id=mission['mission_id'])
+    return payload
+
+
+def event(root,job,event_type,**details):
+    """Append-only job-scoped trace; no shared last-task file is authoritative."""
+    folder=Path(root)/'runtime';folder.mkdir(exist_ok=True)
+    with sqlite3.connect(folder/'handoffs.sqlite3',timeout=30) as db:
+        db.execute('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, created_at TEXT, job_id TEXT, agent_id TEXT, event_type TEXT, details TEXT)')
+        db.execute('INSERT INTO events(created_at,job_id,agent_id,event_type,details) VALUES (?,?,?,?,?)',
+            (datetime.now(timezone.utc).isoformat(),job.get('id'),job.get('agent_id'),event_type,json.dumps(details,ensure_ascii=False)))
+
+
+def handoff(job,payload,seat,enqueue):
+    from openjarvis.one_agents import stages
+    from openjarvis.one_agents import runtime
+    runtime._require_active_job(job,'handoff a Shloka task')
+    origin=str(payload.get('origin_job') or job.get('id') or '')
+    if not origin:raise ValueError('Handoff requires durable origin job ID')
+    payload={**payload,'origin_job':origin,'parent_job':job['id']}
+    key='shloka:'+hashlib.sha256(json.dumps([origin,payload['root'],CHANNEL,seat,payload.get('action')]).encode()).hexdigest()
+    event(payload['root'],job,'handoff_requested',target=seat,mission_id=payload['mission_id'],channel_id=CHANNEL)
+    try:
+        follow=stages.head_briefs_worker(job['agent_id'],seat,
+        carrying_detail=f"Shloka / {payload['mission_id']}: handing {payload.get('action')} to {seat.upper()}",
+        briefing_detail=f"{seat.upper()}: scoped Shloka mission; queue if occupied",
+        awaiting_detail=f"Shloka / {payload['mission_id']}: queued with {seat.upper()}",
+        enqueue=lambda:enqueue(seat,json.dumps(payload,ensure_ascii=False),mode='execute',tier='fast',dedupe_key=key),
+        announce_receiving=False,
+            extra_awaiting={'job_id':job['id'],'brand':BRAND,'mission_id':payload['mission_id']})
+    except Exception:
+        if stages.get_stages().get(job['agent_id'],{}).get('job_id')==job['id']:
+            stages.clear_stage(job['agent_id'])
+        event(payload['root'],job,'handoff_failed',target=seat)
+        raise
+    event(payload['root'],job,'handoff_queued',target=seat,child_job=follow['id'],dedupe_key=key)
+    return follow
+
+
+def run_job(job):
+    from openjarvis.one_agents import stages
+    from openjarvis.one_agents import runtime
+    payload=bound_payload(job);agent=job['agent_id'];action=payload.get('action','status')
+    if agent not in ROLES:raise ValueError('Unassigned Shloka seat')
+    pipeline=action=='verify_pipeline'
+    if pipeline:
+        # This is a real no-spend audit chain, not simulated music production.
+        payload={**payload,'action':{'naad':'audit','raag':'audio_audit','alankaar':'audit'}[agent]}
+        if agent=='alankaar':
+            local_job={**job,'agent_id':'naad','task':json.dumps(payload)}
+        else:local_job={**job,'task':json.dumps(payload)}
+    else:local_job={**job,'task':json.dumps(payload)}
+    event(payload['root'],job,'started',action=action,brand=BRAND,mission_id=payload['mission_id'])
+    stages.set_stage(agent,stages.EXECUTING,f"Shloka / {payload['mission_id']}: {action}",job_id=job.get('id'),brand=BRAND,mission_id=payload['mission_id'])
+    handed=False
+    try:
+        result=_run_local(local_job);result['agent']=agent.upper()
+        event(payload['root'],job,'completed',action=action,status=result.get('status'))
+        # Unique immutable-per-job result prevents concurrent missions from
+        # presenting the previous agent/action result as this job's output.
+        job_key=hashlib.sha256(str(job.get('id')).encode()).hexdigest()[:24]
+        write(Path(payload['root'])/f'runtime/jobs/{job_key}.json',{'job_id':job.get('id'),'mission_id':payload['mission_id'],**result})
+        if pipeline and agent!='alankaar':
+            runtime._require_active_job(job,'handoff Shloka verification')
+            seat={'naad':'raag','raag':'alankaar'}[agent]
+            follow=handoff(job,{**payload,'action':'verify_pipeline'},seat,runtime.enqueue_job)
+            result['handed_to']={'agent':seat.upper(),'job_id':follow['id']};handed=True
+        return result
+    except Exception as exc:
+        event(payload['root'],job,'failed',action=action,error_type=type(exc).__name__)
+        raise
+    finally:
+        entry=stages.get_stages().get(agent,{})
+        if not handed and entry.get('job_id')==job.get('id'):
+            stages.clear_stage(agent)
+        # Only release the parent that is waiting for this exact queue row.
+        for parent in ['helios','naad','raag']:
+            stages.worker_finished(parent,str(job.get('id')))
+
+
+def head_job(job,enqueue):
+    payload=bound_payload(job)
     action=payload.get('action','status')
-    seat={'scripture':'raag','audio_audit':'raag','render':'alankaar','proof':'alankaar','short_labels':'alankaar','status':'naad','audit':'naad'}.get(action)
+    seat={'scripture':'raag','audio_audit':'raag','render':'alankaar','proof':'alankaar','short_labels':'alankaar','status':'naad','audit':'naad','verify_pipeline':'naad'}.get(action)
     if not seat:raise ValueError('Unknown devotional action')
-    follow=enqueue(seat,json.dumps(payload),mode='execute',tier='fast')
-    return {'agent':'HELIOS','brand':BRAND,'handed_to':{'agent':seat.upper(),'job_id':follow['id']},'published':False}
+    follow=handoff(job,payload,seat,enqueue)
+    return {'agent':'HELIOS','brand':BRAND,'mission_id':payload['mission_id'],'handed_to':{'agent':seat.upper(),'job_id':follow['id']},'published':False}
