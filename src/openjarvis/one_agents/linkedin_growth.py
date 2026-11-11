@@ -124,6 +124,12 @@ def run_draft(tool: Any, prompt: str, roots: tuple[Path, ...], *, max_wait: floa
     if not lao_job:
         return {"status": "no_job", "lao_job": "", "raw": "", "error": "LAO returned no job id"}
     status, _ = _poll(tool, DRAFT_PROCESS, lao_job, max_wait=max_wait, poll=poll, sleep=sleep)
+    if status not in TERMINAL:
+        # A polling timeout is not a failed job. Never start another browser job
+        # (including the legacy fallback) while this one still owns the browser.
+        tool.execute(action="stop", process_name=DRAFT_PROCESS, scope="production", job_id=lao_job)
+        raise RuntimeError(f"LinkedIn draft {lao_job} exceeded its wait budget ({status}); stop requested. "
+                           "Retry/fallback held until the worker releases its browser. No post was started.")
     raw = ""
     if status == "Successful":
         found = _find_artifact(roots, lao_job, "linkedin_v2_draft.json")
@@ -173,6 +179,8 @@ def produce(*, v2_payload: dict[str, Any], job_id: str, tool: Any, home: Path, r
                                          avoid_openers=openers, recent_shapes=recent_shapes, fix=fix)
         result = run_draft(tool, prompt, roots, max_wait=max_wait, poll=poll, sleep=sleep)
         (out_dir / f"attempt-{attempt}-raw.txt").write_text(result.get("raw", ""), encoding="utf-8")
+        (out_dir / f"attempt-{attempt}-status.json").write_text(
+            json.dumps({k: v for k, v in result.items() if k != "raw"}, indent=2), encoding="utf-8")
         if not result["raw"]:
             problems = [f"the ChatGPT draft job gave nothing ({result['status']}: {result.get('error', '')})"]
             fix = None

@@ -26,6 +26,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import time
 import urllib.request
@@ -507,12 +508,14 @@ def run_triage(cycle: dict[str, Any], home: Path, *, read_api: Callable[[], list
     policy = bundle.policy.load_policy()
     gathered: list[dict[str, Any]] = []
     source = "inbox"
+    read_error = ""
     if read_api is not None:
         try:
             gathered = read_api()
             source = "api"
         except Exception as exc:  # noqa: BLE001 - fall back to the inbox, say so
-            cycle.setdefault("notes", []).append(f"API read failed: {type(exc).__name__}: {str(exc)[:120]}")
+            read_error = f"API read unavailable: {type(exc).__name__}: {str(exc)[:160]}"
+            cycle.setdefault("notes", []).append(read_error)
     inbox_file = engage_dir(home) / "inbox" / "replies.txt"
     if inbox_file.is_file():
         for line in inbox_file.read_text(encoding="utf-8").splitlines():
@@ -536,8 +539,66 @@ def run_triage(cycle: dict[str, Any], home: Path, *, read_api: Callable[[], list
     if cycle["to_reply"]:
         cycle["stage"] = "triaged"
     else:
-        close(cycle, "no comment on the Chairman's posts needs a reply right now")
+        close(cycle, read_error or ("no comment on the Chairman's posts needs a reply right now" if source == "api"
+                                   else "reply inbox empty; live comments were not checked"))
     return cycle
+
+
+def read_own_comments(home: Path, tool: Any, *, heartbeat: Callable[[], None],
+                      sleep: Callable[[float], None] = time.sleep) -> list[dict[str, Any]]:
+    """Read only posts with a completed HERALD publish receipt. Never supplies send arguments."""
+    state_path = engage_dir(home) / "read_capability.json"
+    previous = _load(state_path, {})
+    if previous.get("retry_after", 0) > time.time():
+        raise RuntimeError(previous.get("reason", "read capability cooling down"))
+    posts = []
+    with sqlite3.connect(f"file:{(home / 'agent_queue.db').as_posix()}?mode=ro", uri=True) as db:
+        for (raw,) in db.execute("SELECT result FROM jobs WHERE agent_id='herald' AND status='completed' "
+                                 "ORDER BY created_at DESC LIMIT 8"):
+            try:
+                result = json.loads(raw or '{}')
+            except ValueError:
+                continue
+            if not result.get("published") or not result.get("lao_job"):
+                continue
+            probe = tool.execute(action="status", process_name="", scope="production",
+                                 job_id=result["lao_job"], include_logs=True)
+            if not probe.success:
+                continue
+            # Match only the publisher's confirmation, never URNs in prompts or credentials.
+            for urn in re.findall(r"LinkedIn post published through API: (urn:li:(?:share|ugcPost|activity):\d+)",
+                                  json.dumps(probe.metadata or {})):
+                if urn not in posts:
+                    posts.append(urn)
+    if not posts:
+        raise RuntimeError("no verified own-post receipts available for reading")
+    comments = []
+    for urn in posts[:3]:
+        started = tool.execute(action="start", mode="publish", process_name=ENGAGE_PROCESS, scope="production",
+                               confirm_publish=True, input_args={"readPostUrn": urn, "postUrn": "", "text": "",
+                                                                 "parentComment": "", "dryRun": "true"})
+        job_id = str(((started.metadata or {}).get("job") or {}).get("id") or "")
+        if not started.success or not job_id:
+            raise RuntimeError("LAO read-only probe could not start")
+        status, last = linkedin_growth._poll(tool, ENGAGE_PROCESS, job_id, max_wait=90, poll=3,
+                                             sleep=sleep, heartbeat=heartbeat)
+        if status not in linkedin_growth.TERMINAL:
+            tool.execute(action="stop", process_name=ENGAGE_PROCESS, scope="production", job_id=job_id)
+            raise RuntimeError("LAO read probe timed out; stop requested")
+        output = (last.get("job") or {}).get("output_result") or {}
+        receipt = output.get("linkedin_read_result") or {}
+        if status != "Successful" or not receipt.get("readable"):
+            code = receipt.get("status", status)
+            reason = f"LinkedIn comments read unavailable ({code}); r_member_social_feed access required for 403"
+            _save(state_path, {"checked_at": time.time(), "status": code, "reason": reason,
+                               "retry_after": time.time() + (86400 if code == 403 else 1800)})
+            raise RuntimeError(reason)
+        for row in receipt.get("comments") or []:
+            comments.append({"post_urn": urn, "commenter": row.get("actor", ""), "comment": row.get("text", ""),
+                             "parent_comment": row.get("comment_urn") or (f"urn:li:comment:({urn},{row['id']})" if row.get("id") else ""),
+                             "created_ts": float(row.get("created") or 0) / 1000})
+    _save(state_path, {"checked_at": time.time(), "status": 200, "posts_checked": len(posts[:3])})
+    return comments
 
 
 # --------------------------------------------------------------------------- voices (the four models)

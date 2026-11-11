@@ -6829,7 +6829,11 @@ def _run_nuntius(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_hestia(job: dict[str, Any]) -> dict[str, Any]:
-    return _engage_worker(job, "hestia", lambda c: linkedin_engage.run_triage(c, _home(), read_api=None),
+    from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+    def read_comments():
+        return linkedin_engage.read_own_comments(
+            _home(), LaoOrchestratorTool(), heartbeat=lambda: job_recovery.heartbeat(_connect, job["id"]))
+    return _engage_worker(job, "hestia", lambda c: linkedin_engage.run_triage(c, _home(), read_api=read_comments),
                           "Reading the comments on the Chairman's recent posts")
 
 def _travel_handoff_key(payload: dict[str, Any], stage: str) -> str:

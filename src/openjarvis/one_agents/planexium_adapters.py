@@ -164,7 +164,10 @@ class LaoDraft:
         if saved.get("terminal_status") != "Failed" or any(
                 term in lowered for term in ("download", "sign in", "authentication", "payment")):
             return False
-        if "page.screenshot: timeout" in lowered:
+        startup_probe_timeout = ("get-ciminstance win32_process" in lowered
+                                 and "--remote-debugging-port=" in lowered
+                                 and "timed out after 15 seconds" in lowered)
+        if "page.screenshot: timeout" in lowered or startup_probe_timeout:
             # Page captures also occur after download. Require provider logs
             # proving this failure was the search-results evidence capture.
             response = self.tool.execute(action="logs", job_id=saved["job_id"], process_name="")
@@ -173,6 +176,8 @@ class LaoDraft:
             payload = response.metadata or json.loads(response.content)
             messages = [str(row.get("message") or "") for row in payload.get("logs", [])]
             steps = [message for message in messages if re.match(r"Step \d+: ", message)]
+            if startup_probe_timeout:
+                return bool(steps and steps[-1].startswith("Step 1: open_browser "))
             return bool(steps and "save_artifact" in steps[-1]
                         and "envato_results_proof" in steps[-1])
         return "locator.screenshot: timeout" in lowered or "taking element screenshot" in lowered
