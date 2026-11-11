@@ -16,7 +16,7 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-ENVATO_RECEIPT_REVISION = "v17"
+ENVATO_RECEIPT_REVISION = "v18"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -588,7 +588,13 @@ def concrete_stock_brief(request):
     request = {**request, "blocked_keywords": list(request.get("blocked_keywords", []))}
     subject = request["subject"].casefold().strip()
     query = request["query"].casefold()
-    if (subject == 'telescope' and re.search(r'\b(saturn|mars|jupiter|venus|moon)\b', query)
+    if subject == 'auditorium' and query.strip() == 'houston science auditorium audience':
+        # This commissioned opening explicitly imagines an audience cutaway;
+        # it does not require a recording of the announced NASA homecoming.
+        # Keep two visible subjects and label the substitution on screen.
+        request.update(query='audience auditorium presentation',
+                       contextual_label='Illustrative audience - not NASA event footage')
+    elif (subject == 'telescope' and re.search(r'\b(saturn|mars|jupiter|venus|moon)\b', query)
             and re.search(r'\b(observatory|equipment|astronomer)\b', query)
             and not re.search(r'\b(occultation|transit|eclipse|through|closeup)\b', query)):
         # An exterior instrument shot cannot prove which object it observes.
@@ -1004,6 +1010,8 @@ class EnvatoAdapter:
                     if fallback_row["sha256"] in hashes:
                         raise ValueError("Free-stock fallback returned a duplicate source")
                     hashes.add(fallback_row["sha256"]); titles.append(fallback_row["title"])
+                    if request.get('contextual_label'):
+                        fallback_row['contextual_label'] = request['contextual_label']
                     saved = self.context.artifact(f"acquired/stock-{index}.json")
                     saved.parent.mkdir(parents=True, exist_ok=True)
                     saved.write_text(json.dumps({"request_hash": fingerprint(original_request), "asset": fallback_row,
@@ -1037,6 +1045,8 @@ class EnvatoAdapter:
                        "title": str(out.get("selected_asset_title") or ""), "catalog_query": catalog_query, "illustrative": True,
                        "rights_review_required": True, "subject_evidence": subject_evidence,
                        "sha256": sha, **probe_stock(path)}
+                if request.get('contextual_label'):
+                    row['contextual_label'] = request['contextual_label']
                 saved = self.context.artifact(f"acquired/stock-{index}.json")
                 saved.parent.mkdir(parents=True, exist_ok=True)
                 saved.write_text(json.dumps({"request_hash": fingerprint(original_request), "asset": row,

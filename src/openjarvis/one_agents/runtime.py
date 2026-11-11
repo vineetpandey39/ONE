@@ -5095,7 +5095,14 @@ def _run_imprimatur(job: dict[str, Any]) -> dict[str, Any]:
         stages.set_stage("imprimatur", stages.EXECUTING, f"Checking KDP status for {packet.title}")
         status = poll_asin(packet, headless=True)
         asin = str(status.get("asin") or "")
-        if asin:
+        if str(status.get("kdp_status", "")).lower() in {"blocked", "draft"}:
+            reason = f"Amazon reports {status['kdp_status']} for {packet.title}; submission needs attention"
+            write_state(packet, "BLOCKED", error=reason, scribe_job_id=scribe_job_id,
+                        kdp_status=status["kdp_status"])
+            stages.scribe_waits_for_kdp(run_dir, packet.title, scribe_job_id)
+            return {"agent": "IMPRIMATUR", "phase": "needs_attention", "_blocked": True,
+                    "blocked_reason": reason, "content": reason}
+        if asin and str(status.get("kdp_status", "")).lower() == "live":
             evidence = {
                 "asin": asin,
                 "title": packet.title,
@@ -5126,10 +5133,7 @@ def _run_imprimatur(job: dict[str, Any]) -> dict[str, Any]:
                     "kdp_status": status.get("kdp_status"), "handoff": confirmed,
                     "content": f"ASIN {asin} verified; publishing lifecycle released."}
         # Do not occupy the single ONE worker while Amazon reviews the title.
-        # A daemon timer re-enqueues the lightweight check; the on-disk publish
-        # state remains the recovery source if ONE is restarted between checks.
-        import threading
-
+        # The worker's durable continuation sweep enqueues the next check.
         try:
             delay = max(300.0, float(os.environ.get("ONE_KDP_ASIN_POLL_SECONDS", "1800")))
         except ValueError:
@@ -5138,9 +5142,7 @@ def _run_imprimatur(job: dict[str, Any]) -> dict[str, Any]:
             "phase": "poll", "run_dir": run_dir, "scribe_job_id": scribe_job_id,
             "approval_id": approval_id, "poll_attempt": int(payload.get("poll_attempt") or 0) + 1,
         }
-        # Persist the continuation inputs before scheduling the in-process
-        # timer. Worker startup can reconstruct this poll after a reboot or
-        # power loss instead of leaving the title parked forever.
+        # Persist continuation inputs before returning; no process-local timer.
         write_state(
             packet,
             "AWAITING_ASIN",
@@ -5150,12 +5152,6 @@ def _run_imprimatur(job: dict[str, Any]) -> dict[str, Any]:
             poll_attempt=next_payload["poll_attempt"],
             next_check_seconds=delay,
         )
-        timer = threading.Timer(
-            delay,
-            lambda: enqueue_job("imprimatur", json.dumps(next_payload), mode="execute", tier="fast"),
-        )
-        timer.daemon = True
-        timer.start()
         stages.set_stage("imprimatur", stages.AWAITING_WORKER,
                          f"Amazon is still processing {packet.title}; ASIN not assigned yet")
         stages.scribe_waits_for_kdp(run_dir, packet.title, scribe_job_id)
@@ -5170,7 +5166,8 @@ def _run_leda(job: dict[str, Any]) -> dict[str, Any]:
     payload = _json_task(job); logic = _publishing_growth_logic()
     title = str(payload.get("title") or "(untitled)")
     stages.worker_confirms_receipt("leda", f"Preparing owned-audience plan for {title}")
-    plan = logic.audience_plan(title)
+    from openjarvis.one_agents.publishing_growth import audience_assets
+    plan = audience_assets(payload)
     _publishing_event(job, agent="LEDA", event_type="audience_plan",
                       stage="owned_audience", summary="Consent-safe audience draft prepared",
                       details={"status": plan.get("status"), "segments": plan.get("segments")})
@@ -5180,7 +5177,7 @@ def _run_leda(job: dict[str, Any]) -> dict[str, Any]:
     stages.clear_stage("leda")
     return {"agent": "LEDA", "audience": plan,
             "handed_to": {"agent": "ARES", "job_id": ares_job["id"]},
-            "content": "Reader-magnet and consent-safe segments drafted; nothing sent."}
+            "content": "Source-backed reader companion and email draft saved; delivery awaits sender/consent configuration."}
 
 
 def _run_metron(job: dict[str, Any]) -> dict[str, Any]:
@@ -5193,14 +5190,14 @@ def _run_metron(job: dict[str, Any]) -> dict[str, Any]:
 
     payload = _json_task(job); logic = _publishing_growth_logic()
     stages.worker_confirms_receipt("metron", "Establishing the seven-day performance baseline")
-    report = logic.measurement_baseline(str(payload.get("title") or "(untitled)"),
-                                        payload.get("metrics"))
+    from openjarvis.one_agents.publishing_growth import measurement
+    report = measurement(payload, logic.measurement_baseline)
     _publishing_event(job, agent="METRON", event_type="measurement_baseline",
                       stage="measurement", summary="Seven-day measurement loop opened",
                       details=report, status="completed")
     stages.clear_stage("metron")
     return {"agent": "METRON", "measurement": report,
-            "content": "Measurement loop opened; missing storefront data remains unknown, never zero."}
+            "content": f"Seven-day review checkpoint saved; measurement status: {report['status']}. Missing data is not zero."}
 
 
 def _run_peitho(job: dict[str, Any]) -> dict[str, Any]:
@@ -12647,42 +12644,10 @@ def run_worker(poll_seconds: float = 2.0) -> None:
     """
     import threading
 
-    # IMPRIMATUR's ordinary 30-minute retry uses a lightweight daemon timer,
-    # but a Windows restart/power loss destroys that timer. The durable state
-    # file is the recovery source: reconstruct one poll job per pending title
-    # before normal queue claiming starts.
+    # Queue identities survive profile relocation, restart and diagnostic reads.
     try:
-        output_root = Path.home() / "Documents" / "LAO" / "kdp-book-factory" / "output"
-        with _connect() as db:
-            active_imprimatur = [
-                json.loads(row["task"])
-                for row in db.execute(
-                    "SELECT task FROM jobs WHERE agent_id = 'imprimatur' "
-                    "AND status IN ('queued', 'running')"
-                ).fetchall()
-                if row["task"].lstrip().startswith("{")
-            ]
-        active_dirs = {str(item.get("run_dir") or "") for item in active_imprimatur}
-        resumed_polls = 0
-        for state_file in output_root.glob("*/kdp_publish_state.json"):
-            state = json.loads(state_file.read_text(encoding="utf-8"))
-            run_dir = str(state_file.parent)
-            if state.get("stage") != "AWAITING_ASIN" or run_dir in active_dirs:
-                continue
-            scribe_job_id = str(state.get("scribe_job_id") or "")
-            if not scribe_job_id:
-                continue
-            enqueue_job("imprimatur", json.dumps({
-                "phase": "poll",
-                "run_dir": run_dir,
-                "scribe_job_id": scribe_job_id,
-                "approval_id": str(state.get("approval_id") or ""),
-                "poll_attempt": int(state.get("poll_attempt") or 0),
-                "recovered_after_restart": True,
-            }), mode="execute", tier="fast")
-            resumed_polls += 1
-        if resumed_polls:
-            print(f"[one-agents] resumed {resumed_polls} pending KDP ASIN poll(s)", flush=True)
+        from openjarvis.one_agents.publishing_continuations import tick
+        print(f"[publishing-continuations] startup {tick(_connect, enqueue_job)}", flush=True)
     except Exception as exc:  # noqa: BLE001 - recovery must never stop the worker
         print(f"[one-agents] KDP poll recovery skipped: {exc}", flush=True)
 
@@ -12731,6 +12696,13 @@ def run_worker(poll_seconds: float = 2.0) -> None:
                 print(f"[one-agents] periodic recovery skipped: {type(exc).__name__}", flush=True)
             last_recovery_check = time.time()
         if time.time() - last_schedule_check >= 30:
+            try:
+                from openjarvis.one_agents.publishing_continuations import tick
+                continuation = tick(_connect, enqueue_job)
+                if continuation["queued"] or continuation["errors"]:
+                    print(f"[publishing-continuations] {continuation}", flush=True)
+            except Exception as exc:
+                print(f"[publishing-continuations] deferred: {exc}", flush=True)
             try:
                 _resume_kdp_login_jobs()
             except Exception as exc:

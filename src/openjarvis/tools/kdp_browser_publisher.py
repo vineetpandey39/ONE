@@ -237,12 +237,17 @@ def state_path(packet: SubmissionPacket) -> Path:
 
 
 def write_state(packet: SubmissionPacket, stage: str, **extra: Any) -> dict[str, Any]:
+    target = state_path(packet)
+    previous = json.loads(target.read_text(encoding="utf-8")) if target.exists() else {}
+    # Diagnostic reads must not erase the durable continuation's identity.
+    carry = {key: previous[key] for key in (
+        "scribe_job_id", "approval_id", "poll_attempt", "next_check_seconds", "submitted_at"
+    ) if key in previous and previous.get("checksums") == packet.checksums}
     state = {
         "schema_version": 1, "stage": stage, "updated_at": _now(),
         "title": packet.title, "checksums": packet.checksums,
-        **extra,
+        **carry, **extra,
     }
-    target = state_path(packet)
     tmp = target.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(target)
@@ -1983,7 +1988,7 @@ def poll_asin(packet: SubmissionPacket, *, headless: bool = True) -> dict[str, A
         match = ASIN_RE.search(nearby)
         status_match = re.search(r"\b(Draft|In Review|Publishing|Live|Blocked)\b", nearby, re.I)
         if match:
-            return write_state(packet, "ASIN_ASSIGNED", asin=match.group(0).upper(),
+            return write_state(packet, "ASIN_ASSIGNED" if status_match and status_match.group(0).lower() == "live" else "AWAITING_ASIN", asin=match.group(0).upper(),
                                kdp_status=status_match.group(0) if status_match else "unknown")
         return write_state(packet, "AWAITING_ASIN",
                            kdp_status=status_match.group(0) if status_match else "unknown")
