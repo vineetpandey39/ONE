@@ -1,6 +1,82 @@
 """Channel-specific metadata and export packaging; no publishing side effects."""
+import re
 from .core import read, write, digest, artifact, Blocked
 from .seo_tags import valid_tags, tag_characters
+
+_CHANNEL_VIDEOS='https://www.youtube.com/@shlokabyshloka/videos'
+_SUBSCRIBE='https://www.youtube.com/@shlokabyshloka?sub_confirmation=1'
+_GENERIC_DESCRIPTION_MARKERS=('हर श्लोक में भक्ति','Explore bhajans, shlokas')
+_DEITY_TERMS={
+    'shiva':['shiv bhajan shorts','shiva shorts','mahadev shorts','hindi bhajan shorts','शिव भजन','महादेव','भोलेनाथ','shiv song 2026','powerful shiv bhajan','peaceful shiv bhajan','lord shiva','kailash','om namah shivaya'],
+    'krishna':['krishna bhajan shorts','radha krishna shorts','kanha bhajan','कृष्ण भजन','राधा कृष्ण','हरे कृष्ण','vrindavan bhajan','lord krishna'],
+    'hanuman':['hanuman bhajan shorts','hanuman chalisa shorts','bajrangbali bhajan','हनुमान भजन','बजरंगबली','jai hanuman'],
+    'durga':['durga bhajan shorts','mata rani shorts','devi bhajan','दुर्गा भजन','माता रानी भजन','jai mata di'],
+}
+
+def _clean_hook(value):
+    return re.sub(r'\s+',' ',str(value or '')).strip().rstrip('।.!? ')
+
+def _short_hook(root,m,number):
+    cues_path=root/'edit/v2/caption-cues.json'
+    plan_path=root/'edit/v2/vocals-first-plan.json'
+    if cues_path.exists() and plan_path.exists():
+        cues=read(cues_path);cuts=read(plan_path).get('shorts',[])
+        if len(cuts)>=number:
+            cut=cuts[number-1]
+            inside=[c for c in cues if float(c['start'])>=float(cut['start'])-0.05 and float(c['start'])<float(cut['end'])]
+            if inside:return _clean_hook(min(inside,key=lambda c:float(c['start']))['text'])
+    lyrics=m.get('lyrics') or []
+    if lyrics:return _clean_hook(lyrics[min(number-1,len(lyrics)-1)])
+    return _clean_hook(m.get('display_title') or m['title'].split('|',1)[0])
+
+def _short_title(hook,keyword,number):
+    candidates=[f'{hook} 🔱 | {keyword} | Part {number} #Shorts',
+                f'{hook} | {keyword} | Part {number} #Shorts',
+                f'{hook} | Part {number} #Shorts']
+    for title in candidates:
+        if len(title)<=100:return title
+    suffix=f' | Part {number} #Shorts'
+    return hook[:100-len(suffix)].rstrip()+suffix
+
+def _visible_hashtags(m):
+    deity=str(m.get('deity','Shiva')).casefold()
+    first={'shiva':'#ShivBhajan','krishna':'#KrishnaBhajan','hanuman':'#HanumanBhajan','durga':'#DurgaBhajan'}.get(deity,'#Bhakti')
+    second={'shiva':'#Mahadev','krishna':'#RadhaKrishna','hanuman':'#Bajrangbali','durga':'#MataRani'}.get(deity,'#Devotional')
+    return [first,second,'#Shorts']
+
+def _short_description(m,keyword,hook,number):
+    display=m.get('display_title') or m['title'].split('|',1)[0].strip()
+    full_song=m.get('long_video_url') or _CHANNEL_VIDEOS
+    hashtags=' '.join(_visible_hashtags(m))
+    return (f'{keyword} “{display}” • PART {number}\n'
+            f'{hook} — हमारे मूल हिंदी devotional bhajan का यह beat-synced अंश सुनें।\n\n'
+            f'पूरा गीत / Full song:\n{full_song}\n\n'
+            'यह मूल भक्ति-गीत है, धर्मग्रंथ का उद्धरण नहीं। AI-assisted music, vocals and imagery; '
+            'edited with Hindi lyrics by Shloka By Shloka.\n\n'
+            'कौन-सी पंक्ति आपके मन को छू गई?\n'
+            f'Subscribe: {_SUBSCRIBE}\n\n{hashtags}')
+
+def _short_tags(m,tags,keyword,hook,number):
+    deity=str(m.get('deity','Shiva')).casefold()
+    additions=[f'{keyword} shorts',hook,'devotional shorts','bhakti shorts','hindi devotional song',
+               'morning bhajan','spiritual music','Shloka By Shloka','shlokabyshloka',f'part {number}']
+    additions+=_DEITY_TERMS.get(deity,[f'{deity} bhajan shorts','hindi bhajan shorts'])
+    return valid_tags(additions+tags)
+
+def _validate_short_seo(item,hook,keyword):
+    title=item['title'];description=item['description'];tags=item['tags']
+    hashtags=[w for w in description.split() if w.startswith('#')]
+    problems=[]
+    if re.match(r'^short[\s_-]*\d',title,re.I):problems.append('raw filename title')
+    if not title.startswith(hook):problems.append('title is not lyric-hook first')
+    if keyword.casefold() not in title.casefold():problems.append('keyword missing from title')
+    if title.casefold().count('#shorts')!=1:problems.append('title must contain one #Shorts')
+    if hook not in description:problems.append('hook missing from description')
+    if 'Full song:' not in description or 'Subscribe:' not in description:problems.append('conversion links missing')
+    if not 3<=len(hashtags)<=5:problems.append('visible hashtag count must be 3-5')
+    if len(tags)<18 or tag_characters(tags)<300:problems.append('search tag coverage too thin')
+    if any(marker.casefold() in description.casefold() for marker in _GENERIC_DESCRIPTION_MARKERS):problems.append('generic channel boilerplate')
+    if problems:raise Blocked('Short SEO gate: '+', '.join(problems))
 
 def metadata(root):
     m=read(root/'mission.json')
@@ -20,12 +96,13 @@ def metadata(root):
     p=root/'publishing/seo.json'
     short_metadata=[]
     for n in (1,2):
-        short_title=f"{m.get('display_title',title)} | {keyword} | PART {n} #Shorts"
-        if len(short_title)>100:raise Blocked('Short title budget exceeded')
-        short_metadata.append({'id':f'short-0{n}','title':short_title,
-            'description':f"{keyword} — {m.get('display_title',title)} | PART {n}\nOriginal Hindi devotional song. AI-assisted music and imagery. Shloka By Shloka.\n\n#ShivBhajan #Mahadev #ShlokaByShloka #Shorts",
-            'tags':valid_tags(tags+['shorts']),'privacy':'private','language':'hi',
-            'thumbnail':f'publishing/thumbnails/short-{n}-thumbnail-golden-blue-v2.jpg'})
+        hook=_short_hook(root,m,n)
+        item={'id':f'short-0{n}','title':_short_title(hook,keyword,n),
+            'description':_short_description(m,keyword,hook,n),
+            'tags':_short_tags(m,tags,keyword,hook,n),'privacy':'private','language':'hi',
+            'thumbnail':f'publishing/thumbnails/short-{n}-thumbnail-golden-blue-v2.jpg'}
+        _validate_short_seo(item,hook,keyword)
+        short_metadata.append(item)
     write(p,{'title':title,'description':description,'tags':tags,'tag_characters':tag_characters(tags),
         'channel_id':m['channel_id'],'language':'hi','category_id':'10','made_for_kids':False,
         'contains_synthetic_media':True,'privacy':'private','keyword':keyword,'status':'DRAFT','shorts':short_metadata})
