@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Callable
 
@@ -259,12 +260,24 @@ def chapter_labels(cues: list, screen_texts: list[str], title: str, llm: LLM | N
     return [(i, labels[i]) for i in indices], "fallback-grouped" if n >= 5 else "fallback"
 
 
+def _search_chars(text: str) -> str:
+    """Keep Unicode letters, digits and combining marks used by search text.
+
+    Python's ``\\w`` does not retain Devanagari vowel signs, so a regex-only
+    sanitizer turns words such as ``शिव``/``शांति`` into broken tokens.
+    """
+    return "".join(
+        ch if ch.isalnum() or unicodedata.category(ch).startswith("M") or ch in "%₹+.'-" else " "
+        for ch in text
+    )
+
+
 def _valid_tags(tags: list[str], limit: int = 500, max_tag_chars: int = 45) -> list[str]:
     """Return unique tags that fit YouTube's exact comma-separated budget."""
     out = []
     for tag in tags:
         tag = _clean(tag, 200).lower()
-        tag = re.sub(r"[^\w%₹+.'-]+", " ", tag, flags=re.UNICODE)
+        tag = _search_chars(tag)
         tag = _cut_words(" ".join(tag.split()), max_tag_chars).strip(" ,.-&+/")
         # Repeated tokens create junk queries such as "travel deals 2026 travel".
         tag = " ".join(dict.fromkeys(tag.split()))
@@ -309,6 +322,19 @@ def _tag_intent_variants(primary: str, channel: ChannelProfile) -> list[str]:
     ]
     if channel == SONIA:
         variants.extend([f"{short_base} india", f"india {short_base}", f"{short_base} for indians"])
+    elif channel.brand == "shloka_by_shloka":
+        # Devotional discovery uses listening intent, deity names and Hindi
+        # transliterations—not the travel-style "guide/update" vocabulary.
+        # Keep every variant grounded in the supplied Shiva query.
+        variants = [
+            *compact,
+            f"{short_base} hindi", f"{short_base} lyrics", f"{short_base} morning prayer",
+            f"{short_base} meditation", f"{short_base} devotional song",
+            f"peaceful {short_base}", f"powerful {short_base}", f"new {short_base} 2026",
+            "shiv bhajan", "shiva bhajan", "mahadev bhajan", "bholenath bhajan",
+            "shiv shankar bhajan", "hindi devotional song", "morning bhajan",
+            "shiv meditation music", "om namah shivaya", "shloka by shloka",
+        ]
     return variants
 
 
@@ -335,7 +361,7 @@ def _viewer_facing(text: str, fallback: str) -> str:
 
 def _query_seed(text: str) -> str:
     value = re.split(r"\s+[|—–]\s+|\s*\|\s*|:\s*", _clean(text, 160))[0]
-    value = re.sub(r"[^\w%₹+.'-]+", " ", value.lower(), flags=re.UNICODE)
+    value = _search_chars(value.lower())
     return " ".join(value.strip(" ,.-?!").split())
 
 

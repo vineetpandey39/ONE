@@ -60,13 +60,19 @@ def _ares_long_form(root,m,brief):
         cues.append(f'[{stamp} – {section.get("name","Bhajan")} ]\n{body}')
         scene_blocks.append(f'{index+1}:\npurpose: {section.get("name","Devotional section")}\non_screen_text: "{_clean_hook((section.get("lines") or [display])[0])}"')
     if not cues:
-        cues=[f'[0:00 – Bhajan]\n{" ".join(m.get("lyrics") or [display])}']
+        # The shared ARES contract requires searchable chapters even when an
+        # older/minimal mission has no explicit section manifest.
+        lyrics=' '.join(m.get('lyrics') or [display])
+        cues=[f'[0:00 – आरंभ]\n{lyrics}',
+              f'[{duration//6//60}:{duration//6%60:02d} – शिव आराधना]\n{lyrics}',
+              f'[{duration//3//60}:{duration//3%60:02d} – ध्यान और प्रार्थना]\n{lyrics}']
+    core_promise=re.sub(r'(?<!\w)#\w+','',brief['description'].splitlines()[0]).strip()
     packaging='\n'.join([
         f'recommended_title: {title}',
         f'title_a_searchable: {title}',
         f'title_b_intriguing: {display} | सुबह की प्रार्थना और ध्यान के लिए {keyword}',
         f'title_c_hybrid: {display} 🔱 | Peaceful Mahadev Bhajan 2026',
-        f'core_promise: {brief["description"].splitlines()[0]}',
+        f'core_promise: {core_promise}',
         'audience: Hindi devotional listeners seeking Shiva prayer, peace and meditation',
         f'thumbnail_concept_a: Text: "{display}"; golden-blue Shiva portrait with clean text-safe area',
         'thumbnail_concept_b: Text: "मन की शांति"; cinematic Kailash and trident with strong mobile contrast',
@@ -83,7 +89,10 @@ def _ares_long_form(root,m,brief):
     if package.get('owner')!='ARES' or 'ECHO' not in package.get('handoff',''):
         raise Blocked('Shared ARES/ECHO SEO ownership was not preserved')
     if not package.get('description_audit',{}).get('ok') or not package.get('seo_strategy_audit',{}).get('ok'):
-        raise Blocked('Shared ARES SEO audit did not pass')
+        failed=[]
+        for audit_name in ('description_audit','seo_strategy_audit'):
+            failed.extend(f'{audit_name}.{name}' for name,ok in package.get(audit_name,{}).get('checks',{}).items() if not ok)
+        raise Blocked('Shared ARES SEO audit did not pass: '+', '.join(failed))
     write(root/'publishing/youtube-seo-package.json',package)
     return package
 
