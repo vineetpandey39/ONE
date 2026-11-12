@@ -24,6 +24,9 @@ ENDPOINT = "https://mcp.vidiq.com/mcp"
 FREE = {"vidiq_balance", "vidiq_user_channels"}
 ALLOWED = FREE | {"vidiq_keyword_research", "vidiq_outliers", "vidiq_trending_videos"}
 DAILY_CALL_LIMIT = 8  # Shared across jobs and fallback models, including failed attempts.
+# The last calls of the day belong to keyword validation, the gate before paid narration. 2026-11-11/12: morning
+# YATRA retries and Planexium spent all 8 on discovery, so the 17:30 VISTA slot was blocked two days running.
+VALIDATION_RESERVE = 2
 SONIA_CHANNEL = "UCyqSprXlCEpBXMQRdkstLqA"
 
 
@@ -81,7 +84,7 @@ class ResearchClient:
         with sqlite3.connect(self.db) as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS calls (day TEXT, digest TEXT, name TEXT, result TEXT, PRIMARY KEY(day,digest))")
 
-    def call(self, name: str, arguments: dict) -> dict:
+    def call(self, name: str, arguments: dict, *, reserved: bool = False) -> dict:
         if name not in ALLOWED or name not in self.catalog:
             raise ResearchUnavailable("Tool is not approved for daily research")
         jsonschema.validate(arguments, self.catalog[name]["inputSchema"])
@@ -95,7 +98,8 @@ class ResearchClient:
                     return json.loads(row[0])
                 raise ResearchUnavailable("Identical vidIQ call is pending or failed; no automatic paid retry")
             used = conn.execute("SELECT count(*) FROM calls WHERE day=? AND name NOT IN (?,?)", (day,*sorted(FREE))).fetchone()[0]
-            if name not in FREE and used >= DAILY_CALL_LIMIT:
+            limit = DAILY_CALL_LIMIT if reserved else DAILY_CALL_LIMIT - VALIDATION_RESERVE
+            if name not in FREE and used >= limit:
                 raise ResearchUnavailable("vidIQ daily research call limit reached")
             conn.execute("INSERT INTO calls VALUES (?,?,?,NULL)", (day,digest,name))
         result = self.rpc("tools/call", {"name": name, "arguments": arguments})
@@ -164,6 +168,23 @@ def cached_trending_supports_keyword(receipt: dict, keyword: str) -> bool:
     return False
 
 
+def _discover(client: "ResearchClient", name: str, arguments: dict) -> dict:
+    """A discovery call, or at the daily cap today's newest real result of the same tool, marked as reused.
+
+    Still vidIQ demand evidence - never a silent news-only commission - so a later slot (VISTA 17:30) can commission
+    from the morning's research instead of stopping."""
+    try:
+        return client.call(name, arguments)
+    except ResearchUnavailable as exc:
+        if "daily research call limit reached" not in str(exc):
+            raise
+        cached = client.cached_today(name)
+        if not cached:
+            raise
+        newest = max(cached, key=lambda row: str(row.get("retrieved_at") or ""))
+        return {**newest, "reused_same_day": True, "requested_arguments": arguments}
+
+
 def collect_story(job_id: str, prior: list[str], *, short: bool = False,
                   keyword: str = "") -> dict:
     """Daily and rejected-topic fallback share this exact research contract."""
@@ -177,7 +198,7 @@ def collect_story(job_id: str, prior: list[str], *, short: bool = False,
         raise ResearchUnavailable("vidIQ credit balance unknown or below 50-credit reserve")
     fmt = "short" if short else "long"
     after = (datetime.now(ZoneInfo("Asia/Kolkata"))-timedelta(days=14)).date().isoformat()
-    receipts = [client.call("vidiq_trending_videos", {
+    receipts = [_discover(client, "vidiq_trending_videos", {
         "videoFormat": fmt, "titleQuery": "India travel visa flight booking budget travel guide",
         "videoTitleLanguage": "all", "videoPublishedAfter": after,
         "limit": 12, "sortBy": "relevance"})]
@@ -192,17 +213,18 @@ def collect_story(job_id: str, prior: list[str], *, short: bool = False,
                     or not cached_trending_supports_keyword(receipts[0], keyword)):
                 raise
     else:
-        receipts += [client.call("vidiq_keyword_research", {
+        receipts += [_discover(client, "vidiq_keyword_research", {
             "mode": "rising", "niche": "Indian travellers train booking flights visas budget holidays",
             "language": "all", "period": "week", "limit": 12}),
-            client.call("vidiq_outliers", {"keyword": "India budget travel guide visa flights",
+            _discover(client, "vidiq_outliers", {"keyword": "India budget travel guide visa flights",
                 "language": "en", "contentType": fmt, "publishedWithin": "thisMonth",
                 "limit": 12, "sort": "vph"})]
     path = get_config_dir() / "agent_outputs" / f"{job_id}-vidiq-research.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"channel_id": SONIA_CHANNEL, "receipts": receipts},
                               ensure_ascii=False, indent=2), encoding="utf-8")
-    eligible = [{"id": f"vidiq-{i}", "source": "vidiq_mcp", "title": row["tool"],
+    eligible = [{"id": f"vidiq-{i}", "source": "vidiq_mcp",
+                 "title": row["tool"] + (" (reused from earlier today; daily cap)" if row.get("reused_same_day") else ""),
                  "retrieved_at": row["retrieved_at"], "evidence": evidence_text(row)}
                 for i, row in enumerate(receipts)]
     return {"status": "vidiq", "ranking_path": str(path), "evidence": eligible,
@@ -237,7 +259,7 @@ def validate_keyword(brief: str) -> dict:
     client = ResearchClient()
     try:
         receipt = client.call("vidiq_keyword_research", {
-            "mode": "research", "keyword": keyword, "country": "IN", "limit": 8})
+            "mode": "research", "keyword": keyword, "country": "IN", "limit": 8}, reserved=True)
     except ResearchUnavailable as exc:
         if "daily research call limit reached" not in str(exc):
             raise
