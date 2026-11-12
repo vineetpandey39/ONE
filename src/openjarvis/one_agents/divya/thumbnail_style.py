@@ -36,12 +36,11 @@ def render_thumbnails(config, art_path, out, title_lines, subtitle, hooks):
     html = f'''<html lang="hi"><meta charset="utf-8"><style>{common}
     html,body{{width:1280px;height:720px}}
     .art{{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}}
-    .shade{{position:absolute;left:755px;right:0;top:0;bottom:0;
-      background:linear-gradient(105deg,#032d58ee 0%,#021d3df8 38%,#01152eff 100%);
-      border-left:2px solid #ffd65c66;box-shadow:-28px 0 55px #01152ebb}}
-    .copy{{position:absolute;left:790px;right:28px;top:145px;text-align:center}}
-    .title{{font-size:122px;line-height:1.3;margin:0}}
-    .sub{{font:700 27px 'Segoe UI';color:white;margin-top:22px;text-shadow:0 3px 9px #000}}
+    .shade{{position:absolute;left:760px;right:0;top:0;bottom:0;
+      background:linear-gradient(90deg,transparent 0%,#021d3d4d 46%,#01152e99 100%)}}
+    .copy{{position:absolute;left:785px;right:22px;top:125px;text-align:center}}
+    .title{{font-size:136px;line-height:1.28;margin:0}}
+    .sub{{font:700 29px 'Segoe UI';color:white;margin-top:20px;text-shadow:0 3px 9px #000}}
     .brand{{position:absolute;right:60px;top:43px}}
     </style><img class="art" src="{art}"><div class="shade"></div>
     <div class="brand">SHLOKA BY SHLOKA</div><div class="copy"><div class="title">{title}</div>
