@@ -274,7 +274,8 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
                 hashtags = ["#"+re.sub(r"\s+", "", str(h).strip().lstrip("#"))
                             for h in hashtags]
             if (not isinstance(hashtags, list) or len(set(hashtags)) != 3
-                    or any(not re.fullmatch(r"#[A-Za-z][A-Za-z0-9_]{1,29}", h) for h in hashtags)):
+                    or any(not re.fullmatch(r"#[A-Za-z0-9_]{2,30}", h)
+                           or not re.search(r"[A-Za-z]", h) for h in hashtags)):
                 raise ValueError("Exactly three valid distinct hashtags required")
             if any(x in title+opening for x in ("â€", "\ufffd")):
                 raise ValueError("Invalid text encoding")
