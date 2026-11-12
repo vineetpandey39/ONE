@@ -2343,6 +2343,23 @@ def _sonia_content_policy() -> dict[str, Any]:
     return {"duplicate_window_days": 30}
 
 
+def _sonia_fallback_context(request_payload: dict[str, Any]) -> dict[str, Any]:
+    """Carry the complete bounded rejected-topic chain into the next worker."""
+    if request_payload.get("stage") != "topic_fallback":
+        return {}
+    excluded: list[str] = []
+    for value in request_payload.get("excluded_topics") or []:
+        value = str(value).strip()
+        if value and value not in excluded:
+            excluded.append(value)
+    return {
+        "stage": "topic_fallback",
+        "topic_attempt": int(request_payload.get("topic_attempt") or 2),
+        "fallback_of": str(request_payload.get("fallback_of") or ""),
+        "excluded_topics": excluded,
+    }
+
+
 def _sonia_recent_topics(prior: list[str], *, limit: int = 25,
                          include_shorts: bool = False,
                          within_days: float | None = None) -> list[str]:
@@ -9711,6 +9728,8 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
             json.dumps({"brand": brand["slug"], "angle": grounded_angle,
                         "trendBrief": grounded_angle if brand["slug"] == "sonia_travel_vlogs" else "",
                         "priority": "", "prior_angles": prior[:15],
+                        **(_sonia_fallback_context(request_payload)
+                           if brand["slug"] == "sonia_travel_vlogs" else {}),
                         **({"language": video_language} if video_language else {}),
                         "origin_job": job["id"], "evidence_path": evidence_path,
                         "evidence_count": evidence_count,
@@ -11842,7 +11861,13 @@ def _run_yatra_prepare(job: dict[str, Any], owner: str = "fabula") -> dict[str, 
                 # gets at most one rewrite and a bad evidence day cannot loop
                 # forever or spend narration credits.
                 _require_active_job(job, "commission the secondary YATRA topic")
-                rejected = [video_title] if video_title else []
+                rejected = []
+                for value in payload.get("excluded_topics") or []:
+                    value = str(value).strip()
+                    if value and value not in rejected:
+                        rejected.append(value)
+                if video_title and video_title not in rejected:
+                    rejected.append(video_title)
                 chosen = re.search(
                     r"(?im)^Chosen from today's scored travel news:\s*(.+?)\s*\(score",
                     trend_brief,
