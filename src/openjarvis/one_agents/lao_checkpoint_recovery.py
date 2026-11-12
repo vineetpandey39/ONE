@@ -198,12 +198,25 @@ def activate_engine(*, revision: str = ""):
         )
         if ancestor.returncode:
             raise RuntimeError("Reviewed engine repair is not based on the current repository HEAD")
+        patch_base = head
+        if resolved == head:
+            # Normal operator flow is test -> commit -> deploy that commit. In
+            # that case HEAD already names the repair, so HEAD..revision is an
+            # empty delta. Layer only the reviewed tip commit onto a divergent
+            # live composite; never overwrite the composite wholesale.
+            parent = subprocess.run(
+                ["git", "rev-parse", "--verify", f"{resolved}^{{commit}}^"],
+                cwd=ENGINE_REPO, capture_output=True, text=True,
+            )
+            if parent.returncode:
+                raise RuntimeError("Current-HEAD engine repair has no parent commit to review")
+            patch_base = parent.stdout.strip()
         reviewed = subprocess.run(
             ["git", "show", f"{resolved}:workflow_engine.py"], cwd=ENGINE_REPO,
             capture_output=True, check=True,
         ).stdout
         base = subprocess.run(
-            ["git", "show", f"{head}:workflow_engine.py"], cwd=ENGINE_REPO,
+            ["git", "show", f"{patch_base}:workflow_engine.py"], cwd=ENGINE_REPO,
             capture_output=True, check=True,
         ).stdout
         current = target.read_bytes()
@@ -213,7 +226,7 @@ def activate_engine(*, revision: str = ""):
             source_label = f"{resolved}:workflow_engine.py"
         else:
             lineage = subprocess.run(
-                ["git", "rev-list", "--ancestry-path", f"{head}..{resolved}"],
+                ["git", "rev-list", "--ancestry-path", f"{patch_base}..{resolved}"],
                 cwd=ENGINE_REPO, capture_output=True, text=True, check=True,
             ).stdout.splitlines()
             preserved = any(
@@ -227,8 +240,8 @@ def activate_engine(*, revision: str = ""):
                 expected = reviewed
                 source_label = f"{resolved}:workflow_engine.py (preserved live baseline)"
             else:
-                expected = _overlay_reviewed_engine_patch(current, head, resolved)
-                source_label = f"live engine + reviewed delta {head[:12]}..{resolved[:12]}"
+                expected = _overlay_reviewed_engine_patch(current, patch_base, resolved)
+                source_label = f"live engine + reviewed delta {patch_base[:12]}..{resolved[:12]}"
     else:
         status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
                                 cwd=ENGINE_REPO, capture_output=True, text=True, check=True)

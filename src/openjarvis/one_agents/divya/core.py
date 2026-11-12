@@ -105,4 +105,3 @@ def validate_cues(cues, duration, lyrics):
         if cue['text'] not in lyrics or cue.get('timing_source') not in ('human_audio_review','provider_word_timestamps'):
             raise ValueError('Cue must match approved lyric exactly and identify measured timing source')
         end = b
-
