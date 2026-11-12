@@ -76,7 +76,9 @@ def _ares_long_form(root,m,brief):
             'packaging':packaging,'claim_ledger':m.get('text_origin','Original devotional lyrics; not a scripture quotation'),
             'original_footage_required':False,'thumbnail_style':'golden-blue devotional cinematic'}
     master=root/'edit/unbranded/master.mp4'
-    package=youtube_seo.build_package(record,master=master,plan_path=root/'mission.json',channel=SHLOKA_BY_SHLOKA)
+    llm=None if m.get('seo_model')=='deterministic_test' else youtube_seo.ollama_json
+    package=youtube_seo.build_package(record,master=master,plan_path=root/'mission.json',
+                                      channel=SHLOKA_BY_SHLOKA,llm=llm)
     package.update(channel_id=m['channel_id'],content_format='long_form',contains_synthetic_media=True)
     if package.get('owner')!='ARES' or 'ECHO' not in package.get('handoff',''):
         raise Blocked('Shared ARES/ECHO SEO ownership was not preserved')
