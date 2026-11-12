@@ -1,4 +1,9 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
+
+# All entry points share one startup lock; process exit releases ownership.
+$oneStartupMutex = New-Object System.Threading.Mutex($false, "Local\ONE-Suite-Startup")
+try { $oneStartupAcquired = $oneStartupMutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $oneStartupAcquired = $true }
+if (-not $oneStartupAcquired) { Write-Host "ONE startup already in progress"; exit 0 }
 
 $oneRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $sourceRoot = Join-Path $oneRoot "src"
@@ -118,47 +123,29 @@ $sanjeevaniLogFile = Join-Path $oneRoot "sanjeevani-server.log"
 $sanjeevaniErrorLogFile = Join-Path $oneRoot "sanjeevani-server-error.log"
 
 function Save-LogHistory {
-    <#
-      Keep the previous run's output before Start-Process overwrites it, and
-      hand back the same path so this can wrap a redirect argument in place.
-
-      Start-Process has no append mode: -RedirectStandardOutput and
-      -RedirectStandardError always truncate. Every restart therefore erased
-      whatever the dying process had just said. On 2026-10-31 a 30-minute
-      HERMES book commission was orphaned by a worker that stopped for reasons
-      nobody can now establish - the next restart, 52 minutes later, had
-      already overwritten one-worker-error.log, and the surviving file held a
-      single urllib3 warning. Not sleep (no Kernel-Power events), not this
-      script's own reload (its gate defers while a job is running), not a
-      watchdog (none of them touch one_agent_worker): the evidence simply no
-      longer existed.
-
-      The live log still belongs to the current run, which keeps it readable.
-      The history file is append-only and capped, because an unbounded log on
-      this machine is its own outage - see the sfx stem that filled C:.
-    #>
     param([Parameter(Mandatory = $true)][string]$Path)
-
+    # Byte streaming avoids PowerShell line parsing of NUL-filled crash logs.
     try {
-        if (Test-Path -LiteralPath $Path) {
-            $existing = Get-Item -LiteralPath $Path
-            if ($existing.Length -gt 0) {
-                $history = [System.IO.Path]::ChangeExtension($Path, $null) + 'history.log'
-                # Trim from the front rather than deleting: the oldest crash is
-                # the one least likely to still matter.
-                if ((Test-Path -LiteralPath $history) -and (Get-Item -LiteralPath $history).Length -gt 8MB) {
-                    $keep = Get-Content -LiteralPath $history -Tail 2000 -ErrorAction SilentlyContinue
-                    Set-Content -LiteralPath $history -Value $keep -Encoding utf8
-                }
-                Add-Content -LiteralPath $history -Encoding utf8 -Value @(
-                    ''
-                    "===== $(Get-Date -Format o)  rotated before restart: $(Split-Path $Path -Leaf) ====="
-                    (Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue)
-                )
+        if ((Test-Path -LiteralPath $Path) -and (Get-Item -LiteralPath $Path).Length -gt 0) {
+            $history = [System.IO.Path]::ChangeExtension($Path, $null) + 'history.log'
+            if ((Test-Path -LiteralPath $history) -and (Get-Item -LiteralPath $history).Length -gt 8MB) {
+                Move-Item -LiteralPath $history -Destination ($history + '.' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '.bak')
+            }
+            $source = $null
+            $destination = $null
+            try {
+                $source = [System.IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+                $destination = [System.IO.File]::Open($history, 'Append', 'Write', 'Read')
+                $marker = [System.Text.Encoding]::UTF8.GetBytes("`r`n===== $(Get-Date -Format o) rotated: $Path =====`r`n")
+                $destination.Write($marker, 0, $marker.Length)
+                $source.CopyTo($destination)
+            } finally {
+                if ($source) { $source.Dispose() }
+                if ($destination) { $destination.Dispose() }
             }
         }
     } catch {
-        # Never let bookkeeping stop ONE from starting.
+        Write-Warning "Log history preservation failed: $($_.Exception.Message)"
     }
     return $Path
 }
