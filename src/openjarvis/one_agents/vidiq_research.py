@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -110,6 +111,24 @@ class ResearchClient:
             conn.execute("UPDATE calls SET result=? WHERE day=? AND digest=?", (json.dumps(receipt), day,digest))
         return receipt
 
+    def cached_today(self, name: str) -> list[dict]:
+        """Return successful current-day receipts without spending a call."""
+        day = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+        with sqlite3.connect(self.db, timeout=10) as conn:
+            rows = conn.execute(
+                "SELECT result FROM calls WHERE day=? AND name=? AND result IS NOT NULL",
+                (day, name),
+            ).fetchall()
+        receipts = []
+        for (payload,) in rows:
+            try:
+                receipt = json.loads(payload)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(receipt, dict):
+                receipts.append(receipt)
+        return receipts
+
 
 def evidence_text(receipt: dict) -> str:
     result = receipt["result"]
@@ -118,6 +137,31 @@ def evidence_text(receipt: dict) -> str:
         return json.dumps(structured, ensure_ascii=False)
     return "\n".join(item.get("text", "") for item in result.get("content", [])
                      if item.get("type") == "text")
+
+
+_GENERIC_TRAVEL_WORDS = {
+    "a", "and", "best", "complete", "do", "for", "guide", "in", "of",
+    "the", "things", "to", "tour", "travel", "trip", "video", "vlog",
+}
+
+
+def cached_trending_supports_keyword(receipt: dict, keyword: str) -> bool:
+    """Accept cached demand only for an exact distinctive-place match and VPH."""
+    tokens = [token for token in re.findall(r"[a-z0-9]+", keyword.casefold())
+              if token not in _GENERIC_TRAVEL_WORDS and not token.isdigit()]
+    if not tokens:
+        return False
+    videos = (receipt.get("result", {}).get("structuredContent", {}).get("videos") or [])
+    for video in videos:
+        if not isinstance(video, dict) or float(video.get("vph") or 0) <= 0:
+            continue
+        haystack = " ".join([
+            str(video.get("videoTitle") or ""),
+            " ".join(str(tag) for tag in video.get("videoTags") or []),
+        ]).casefold()
+        if all(re.search(rf"\b{re.escape(token)}\b", haystack) for token in tokens):
+            return True
+    return False
 
 
 def collect_story(job_id: str, prior: list[str], *, short: bool = False,
@@ -138,10 +182,15 @@ def collect_story(job_id: str, prior: list[str], *, short: bool = False,
         "videoTitleLanguage": "all", "videoPublishedAfter": after,
         "limit": 12, "sortBy": "relevance"})]
     if keyword:
-        receipts += [client.call("vidiq_keyword_research", {
-            "mode": "research", "keyword": keyword, "country": "IN", "limit": 8}),
-            client.call("vidiq_outliers", {"keyword": keyword, "language": "en",
-                "contentType": fmt, "publishedWithin": "thisMonth", "limit": 8, "sort": "vph"})]
+        try:
+            receipts += [client.call("vidiq_keyword_research", {
+                "mode": "research", "keyword": keyword, "country": "IN", "limit": 8}),
+                client.call("vidiq_outliers", {"keyword": keyword, "language": "en",
+                    "contentType": fmt, "publishedWithin": "thisMonth", "limit": 8, "sort": "vph"})]
+        except ResearchUnavailable as exc:
+            if ("daily research call limit reached" not in str(exc)
+                    or not cached_trending_supports_keyword(receipts[0], keyword)):
+                raise
     else:
         receipts += [client.call("vidiq_keyword_research", {
             "mode": "rising", "niche": "Indian travellers train booking flights visas budget holidays",
@@ -185,8 +234,18 @@ def validate_keyword(brief: str) -> dict:
     if not match:
         raise ResearchUnavailable("TrendBrief must name its Search keyword before production")
     keyword = match.group(1).strip().strip("* ")
-    receipt = ResearchClient().call("vidiq_keyword_research", {
-        "mode": "research", "keyword": keyword, "country": "IN", "limit": 8})
+    client = ResearchClient()
+    try:
+        receipt = client.call("vidiq_keyword_research", {
+            "mode": "research", "keyword": keyword, "country": "IN", "limit": 8})
+    except ResearchUnavailable as exc:
+        if "daily research call limit reached" not in str(exc):
+            raise
+        matching = next((row for row in client.cached_today("vidiq_trending_videos")
+                         if cached_trending_supports_keyword(row, keyword)), None)
+        if matching is None:
+            raise
+        return {**matching, "validation_mode": "same_day_cached_trending_vph"}
     if "No keyword data was found" in evidence_text(receipt):
         raise ResearchUnavailable("Selected keyword has no vidIQ demand data; revise topic before narration")
     return receipt

@@ -25,6 +25,13 @@ def client(root):
 def preflight(root):
     from .release_quality import require_no_hold
     require_no_hold(root)
+    seo=read(root/'publishing/youtube-seo-package.json')
+    if seo.get('owner')!='ARES' or 'ECHO' not in seo.get('handoff',''):
+        raise Blocked('ECHO requires the shared ARES SEO handoff')
+    if not seo.get('description_audit',{}).get('ok') or not seo.get('seo_strategy_audit',{}).get('ok'):
+        raise Blocked('ECHO rejected the ARES SEO audit')
+    if seo.get('channel_id')!=CHANNEL:
+        raise Blocked('ARES package channel mismatch')
     _,_,scopes,channel=client(root)
     result={'status':'CHANNEL_VERIFIED','channel_id':channel['id'],
             'upload_scope':'https://www.googleapis.com/auth/youtube.upload' in scopes,

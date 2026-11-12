@@ -87,6 +87,19 @@ PLANEXIUM = ChannelProfile(
                  "simulations and artist concepts; check the linked primary sources."),
 )
 
+SHLOKA_BY_SHLOKA = ChannelProfile(
+    brand="shloka_by_shloka", display_name="Shloka By Shloka",
+    topic="original Hindu devotional music",
+    audience="Hindi-speaking devotional listeners seeking prayer, meditation and peaceful bhajans",
+    subscribe_url="https://www.youtube.com/@shlokabyshloka?sub_confirmation=1",
+    category_id="10", metadata_language="hi", default_audio_language="hi",
+    thumbnail_mode="original", narration_backend="elevenlabs", voice_name="",
+    source_note=("This is an original devotional composition, not a scripture quotation. "
+                 "Hindi lyrics and pronunciation require human review before release."),
+    share_note="इस भजन को उस व्यक्ति के साथ साझा करें जिसे आज शांति और प्रार्थना की आवश्यकता है।",
+    comment="इस भजन की कौन-सी पंक्ति आपके मन को सबसे अधिक छू गई?",
+)
+
 
 def load_profile(path: Path, brand: str) -> ChannelProfile:
     """Load an explicitly selected profile; missing channels never default to Sonia.

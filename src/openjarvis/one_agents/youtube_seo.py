@@ -43,6 +43,8 @@ CHANNEL_SUBSCRIBE_URL = SONIA.subscribe_url
 
 def fallback_hashtags(title: str, channel: ChannelProfile = SONIA) -> list[str]:
     """Three truthful deterministic hashtags when the wording model is unavailable."""
+    if channel.brand == "shloka_by_shloka":
+        return ["#ShivBhajan", "#Mahadev", "#HindiBhajan"]
     title_words = re.findall(r"[A-Za-z0-9]+", _title_head(title))[:3]
     title_tag = "#" + "".join(word[:1].upper() + word[1:] for word in title_words)
     if not re.fullmatch(r"#[A-Za-z][A-Za-z0-9]{1,29}", title_tag):
@@ -347,6 +349,8 @@ def _fallback_queries(title: str, packaging: dict, channel: ChannelProfile) -> l
     candidates = [*heads, without_year]
     if channel == SONIA and base:
         candidates.extend([f"{base} for indian travellers", f"{base} travel guide"])
+    elif channel.brand == "shloka_by_shloka" and base:
+        candidates.extend([f"{base} hindi", f"{base} morning bhajan", f"{base} meditation"])
     if len(tokens) >= 3:
         candidates.extend([" ".join(tokens[:4]), " ".join(tokens[-4:])])
     return list(dict.fromkeys(q for q in candidates if len(q) >= 4))
@@ -388,10 +392,16 @@ def normalize_metadata_strategy(meta: dict, record: dict, packaging: dict, title
     if len(points) < 4:
         clauses = [c.strip() for c in re.split(r"[.;]", promise) if len(c.strip()) > 18]
         points.extend(_viewer_facing(c, "") for c in clauses)
-        points.extend([f"What {primary} means for your trip",
-                       "Which details need same-day official verification",
-                       "How to compare the final payable price and conditions",
-                       "A practical checklist before you book or travel"])
+        if channel.brand == "shloka_by_shloka":
+            points.extend([f"{primary} for morning prayer and meditation",
+                           "Clear Hindi devotional lyrics with a steady bhajan rhythm",
+                           "A peaceful Shiva composition for reflection and worship",
+                           "Original devotional text reviewed for pronunciation"])
+        else:
+            points.extend([f"What {primary} means for your trip",
+                           "Which details need same-day official verification",
+                           "How to compare the final payable price and conditions",
+                           "A practical checklist before you book or travel"])
     result["description_points"] = list(dict.fromkeys(p for p in points if p))[:6]
 
     tags = [*result.get("tags", []), primary, *result["secondary_queries"], *seeds,
@@ -429,7 +439,8 @@ def seo_strategy_audit(record: dict, title: str, meta: dict, tags: list[str], ho
         platform_words = set(_words(platform.group(1)))
         source_match = any(platform_words & _words(url) for url in urls)
     lead = " ".join(meta.get("intro") or [])
-    tag_count_floor = 15 if str(record.get("brand") or "sonia_travel_vlogs") == SONIA.brand else 8
+    record_brand = str(record.get("brand") or "sonia_travel_vlogs")
+    tag_count_floor = 15 if record_brand in {SONIA.brand, "shloka_by_shloka"} else 8
     tag_budget_floor = 350 if tag_count_floor == 15 else 200
     checks = {
         "natural_primary_query": 2 <= len(str(meta.get("primary_query") or "").split()) <= 9,
@@ -517,6 +528,11 @@ def metadata_from_model(record: dict, packaging: dict, llm: LLM | None,
     }
     if channel != SONIA:
         fallback["intro"][1] = "Explore the evidence, the key distinctions and the questions still open in this video."
+    if channel.brand == "shloka_by_shloka":
+        fallback["intro"] = [
+            packaging.get("core_promise") or title,
+            "इस भजन में स्पष्ट हिंदी गायन, शांत शिव आराधना और ध्यान के लिए पूर्ण devotional experience मिलेगा।",
+        ]
     if not llm:
         return fallback, "fallback"
     corpus = " ".join([title, packaging.get("core_promise", ""), packaging.get("audience", ""),
@@ -540,8 +556,9 @@ def metadata_from_model(record: dict, packaging: dict, llm: LLM | None,
         out = llm(
             identity + "Use ONLY facts "
             "present in the input; never add dates, prices, rules or places that are not there. Return JSON with keys: "
-            "destination (string, the place the video is about), intro (array of exactly 2 short paragraphs, plain "
-            "English; first paragraph is a specific search-friendly hook and viewer promise, second creates curiosity "
+            "destination (string, the subject the video is about), intro (array of exactly 2 short paragraphs, plain "
+            + ("Hindi/Hinglish" if channel.brand == "shloka_by_shloka" else "English")
+            + "; first paragraph is a specific search-friendly hook and viewer promise, second creates curiosity "
             "and explains the practical payoff; do not put disclaimers in either paragraph), description_points "
             "(array of 4 to 6 short viewer-facing takeaways that "
             "truthfully describe what the video answers; naturally use relevant search language without repeating "
@@ -606,15 +623,18 @@ def description_audit(description: str, primary_query: str, tags: list[str],
     query = " ".join(primary_query.casefold().split())
     chapter_count = len(re.findall(r"(?m)^\d{1,2}:\d{2}\s+", description))
     tag_chars = _tag_api_chars(tags)
-    tag_count_floor = 15 if channel == SONIA else 5
-    tag_budget_floor = 350 if channel == SONIA else 200
+    full_coverage = channel == SONIA or channel.brand == "shloka_by_shloka"
+    tag_count_floor = 15 if full_coverage else 5
+    tag_budget_floor = 350 if full_coverage else 200
     checks = {
         "unique_description_over_300_chars": len(description) >= 300,
         "primary_query_in_first_200_chars": bool(query and query in first_200),
-        "viewer_payoff_before_fold": "this video" in first_200 or "you'll" in first_200 or "you will" in first_200,
+        "viewer_payoff_before_fold": bool(PAYOFF.search(first_200)),
         "chapters_present": chapter_count >= 3 and bool(re.search(r"(?m)^0:00\s+", description)),
         "search_grouped_chapters": 3 <= chapter_count <= 8,
-        "official_sources_present": "OFFICIAL SOURCES\n" in description,
+        "official_sources_present": ("OFFICIAL SOURCES\n" in description or
+                                     (channel.brand == "shloka_by_shloka" and
+                                      "not a scripture quotation" in description.casefold())),
         "related_playlist_present": not channel.playlist_url or channel.playlist_url in description,
         "subscribe_link_present": not channel.subscribe_url or channel.subscribe_url in description,
         "three_hashtags": len(re.findall(r"(?<!\w)#\w+", description)) == 3,
@@ -697,7 +717,7 @@ PLANEXIUM_THUMBNAIL_PROMPT = (
 
 # Title and description language on YouTube: "English (United States)", not plain "English".
 METADATA_LANGUAGE = "en-US"
-PAYOFF = re.compile(r"this video|you'll|you will", re.I)
+PAYOFF = re.compile(r"this video|you'll|you will|इस (?:वीडियो|भजन) में", re.I)
 # Hosts that aggregate or re-host a story are not "official sources".
 _NOT_OFFICIAL = re.compile(r"news\.google\.|youtube\.com|youtu\.be|bing\.com|facebook\.com|instagram\.com|x\.com/|twitter\.com",
                            re.I)
@@ -781,8 +801,12 @@ def build_package(record: dict[str, Any], *, master: Path, plan_path: Path, port
     if not PAYOFF.search(opening[:200]):
         # The audit (and a viewer deciding whether to watch) needs the payoff before the fold; on 2026-10-13 the
         # model's intro had none, and the Singapore upload was blocked for it.
-        opening = (f"{primary_query.capitalize()}: in this video you'll learn what changed and what to check "
-                   f"{'before you travel' if channel == SONIA else 'about this topic'}. {intro[0]}")
+        if channel.brand == "shloka_by_shloka":
+            opening = (f"{primary_query}: इस भजन में आपको स्पष्ट हिंदी गायन, शांत शिव आराधना और "
+                       f"ध्यान के लिए devotional music मिलेगा। {intro[0]}")
+        else:
+            opening = (f"{primary_query.capitalize()}: in this video you'll learn what changed and what to check "
+                       f"{'before you travel' if channel == SONIA else 'about this topic'}. {intro[0]}")
     description = "\n\n".join(filter(None, [
         opening, intro[1],
         ("IN THIS VIDEO\n" + "\n".join(f"- {p}" for p in points)) if points else "",
@@ -815,9 +839,11 @@ def build_package(record: dict[str, Any], *, master: Path, plan_path: Path, port
     if channel.thumbnail_mode == "original":
         variants = [{k: v for k, v in row.items() if k != "sonia_expression"} for row in variants]
     strategy_audit = seo_strategy_audit(record, title, meta, ranked_tags, variants[0]["text"])
+    shloka = channel.brand == "shloka_by_shloka"
     package = {
-        "schema_version": "1.2", "owner": "ARES" if channel == SONIA else "LYRA", "brand": channel.brand,
-        "handoff": "IRIS -> ARES -> IRIS upload gate" if channel == SONIA else "HELIOS -> LYRA -> ECHO approval gate", "master": str(master),
+        "schema_version": "1.2", "owner": "ARES" if channel == SONIA or shloka else "LYRA", "brand": channel.brand,
+        "handoff": ("IRIS -> ARES -> IRIS upload gate" if channel == SONIA else
+                    "HELIOS -> ARES -> ECHO approval gate" if shloka else "HELIOS -> LYRA -> ECHO approval gate"), "master": str(master),
         "recommended_title": title, "title_variants": title_variants,
         "primary_query": primary_query, "secondary_queries": secondary,
         "description": description, "description_audit": description_audit(description, primary_query, ranked_tags, channel),
@@ -825,7 +851,7 @@ def build_package(record: dict[str, Any], *, master: Path, plan_path: Path, port
         "chapters": chapters, "tags": ranked_tags,
         "destination": destination,
         "thumbnail": {
-            "owner": "ARES" if channel == SONIA else "LYRA", "generator": "chatgpt_image_generation",
+            "owner": "ARES" if channel == SONIA or shloka else "LYRA", "generator": "chatgpt_image_generation",
             "generation_mode": f"edit approved {channel.display_name if channel != SONIA else 'Sonia'} portrait; preserve identity" if channel.thumbnail_mode == "portrait" else "original image; no portrait reference",
             **({"portrait_library": str(portrait_library)} if channel.thumbnail_mode == "portrait" else {}),
             "required_layout": f"{channel.display_name if channel != SONIA else 'Sonia'} close-up on right 32-34%; hook on left 0-38%; unobstructed story USP in centre 38-66%" if channel.thumbnail_mode == "portrait" else "One truthful focal subject on right; clear text area on left",
