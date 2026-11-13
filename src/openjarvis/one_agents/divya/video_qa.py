@@ -1,5 +1,6 @@
 """Measured motion/audio presence, separate from aesthetic and listening review."""
 import math
+import subprocess
 import cv2
 import numpy as np
 from .core import Blocked
@@ -27,7 +28,17 @@ def audit(path, portrait=False):
     try:
         for t in np.linspace(.1,max(.2,duration-.2),min(91,max(3,math.ceil(duration/2)))):
             cap.set(cv2.CAP_PROP_POS_MSEC,float(t*1000));ok,frame=cap.read()
-            if not ok:raise Blocked('Could not decode motion sample')
+            if not ok:
+                # Some NVENC portrait MP4s fully decode in FFmpeg but OpenCV's
+                # random-seek backend cannot land on a sample. Fall back to a
+                # single authoritative FFmpeg frame instead of failing a good
+                # export because of the QA reader.
+                sample=subprocess.run(
+                    ['ffmpeg','-v','error','-ss',f'{float(t):.3f}','-i',str(path),
+                     '-frames:v','1','-f','image2pipe','-vcodec','png','-'],
+                    stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=False)
+                frame=cv2.imdecode(np.frombuffer(sample.stdout,dtype=np.uint8),cv2.IMREAD_COLOR)
+                if frame is None:raise Blocked('Could not decode motion sample')
             frames.append(cv2.resize(cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY),(160,90)))
     finally:cap.release()
     return {'audio_present':True,'duration':duration,'dimensions':list(expected),'loudness':level,'motion':motion_metrics(frames)}

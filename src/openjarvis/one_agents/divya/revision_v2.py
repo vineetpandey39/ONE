@@ -11,17 +11,18 @@ from openjarvis.one_agents.chandan_render import _run,_probe,_ffmpeg_env,_timest
 class Revision(Motion):
     def __init__(self,root,brand_label='D I V Y A'):
         self.brand_label=brand_label
+        self.mission=read(root/'mission.json')
         self.atlas={}
         for item in read(root/'edit/v2/caption-atlas.json'):
             tile=cv2.imread(str(root/item['file']),cv2.IMREAD_UNCHANGED)
             self.atlas[item['text']]=tile
-        super().__init__(root,read(root/'mission.json'),read(root/'edit/v2/caption-cues.json'))
-        self.portrait_scenes=read(root/'mission.json')['scenes']
+        super().__init__(root,self.mission,read(root/'edit/v2/caption-cues.json'))
+        self.portrait_scenes=self.mission['scenes']
         self.profile=read(root/'edit/v2/editorial-profile.json') if (root/'edit/v2/editorial-profile.json').exists() else None
         if root.name!='shiva-pilot' and not self.profile:
             from .core import Blocked
             raise Blocked('New missions require a reviewed editorial profile; pilot defaults are forbidden')
-        self.display_title=read(root/'mission.json').get('display_title','शिव शरण')
+        self.display_title=self.mission.get('display_title','भक्ति संगीत')
         if self.profile:
             from .core import artifact, Blocked
             self.bank=[artifact(root,s['image']) for s in read(root/'mission.json')['scenes']]
@@ -240,7 +241,11 @@ def main():
         reports.append({'path':str(p),'duration':info['format']['duration'],'sha256':digest(p),'loudness':level,'full_decode':'PASS','av_motion_qa':audit(p,portrait=p!=target)})
     thumb=motion.images[1].copy();thumb[810:1080]=(thumb[810:1080]*.18).astype(np.uint8)
     motion.paste_text(thumb,motion.display_title,820,1680)
-    cv2.putText(thumb,('D I V Y A  |  ' if motion.brand_label else '')+'ORIGINAL SHIVA BHAJAN',(635,1045),cv2.FONT_HERSHEY_SIMPLEX,.7,(225,230,238),1,cv2.LINE_AA)
+    devotional_label=(f"{str(motion.mission.get('deity') or 'DEVOTIONAL').upper()} AARTI"
+                      if motion.mission.get('composition_type')=='traditional_aarti' else
+                      f"{str(motion.mission.get('deity') or 'DEVOTIONAL').upper()} DEVOTIONAL")
+    cv2.putText(thumb,('D I V Y A  |  ' if motion.brand_label else '')+devotional_label,
+                (635,1045),cv2.FONT_HERSHEY_SIMPLEX,.7,(225,230,238),1,cv2.LINE_AA)
     cv2.imwrite(str(out/'thumbnail-v2.jpg'),cv2.resize(thumb,(1280,720)))
     (out/'lyrics.hi.srt').write_text('\n\n'.join(f"{i}\n{_timestamp(c['start'],True)} --> {_timestamp(c['end'],True)}\n{c['text']}" for i,c in enumerate(motion.cues,1))+'\n',encoding='utf-8')
     approval_path=root/'reviews/user-pronunciation-approval.json'
