@@ -2,7 +2,7 @@
 import re
 import unicodedata
 from difflib import SequenceMatcher
-from .core import read, write, digest
+from .core import Blocked, read, write, digest
 
 
 def tokens(text):
@@ -48,6 +48,10 @@ def occurrence_audit(mission,transcript):
 
 
 def audit(root):
+    missing=[str(path.relative_to(root)) for path in
+             (root/'audio/composition.mp3',root/'audio/local-transcript.json') if not path.is_file()]
+    if missing:
+        raise Blocked('Post-audio lyric audit requires: '+', '.join(missing))
     transcript=read(root/'audio/local-transcript.json')
     mission=read(root/'mission.json');lines=mission['lyrics']
     findings=[]
