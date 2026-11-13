@@ -29,8 +29,10 @@ def _short_hook(root,m,number):
     if lyrics:return _clean_hook(lyrics[min(number-1,len(lyrics)-1)])
     return _clean_hook(m.get('display_title') or m['title'].split('|',1)[0])
 
-def _short_title(hook,keyword,number):
-    candidates=[f'{hook} 🔱 | {keyword} | Part {number} #Shorts',
+def _short_title(hook,keyword,number,deity=''):
+    deity_emoji={'shiva':'🔱','krishna':'🪈','hanuman':'🚩','durga':'🔴','lakshmi':'🪷'}
+    emoji=deity_emoji.get(str(deity).casefold(),'✨')
+    candidates=[f'{hook} {emoji} | {keyword} | Part {number} #Shorts',
                 f'{hook} | {keyword} | Part {number} #Shorts',
                 f'{hook} | Part {number} #Shorts']
     for title in candidates:
@@ -50,9 +52,17 @@ def _ares_long_form(root,m,brief):
     from openjarvis.one_agents.youtube_channels import SHLOKA_BY_SHLOKA
     display=_clean_hook(m.get('display_title') or m['title'].split('|',1)[0])
     keyword=brief['keyword'].strip()
+    deity=str(m.get('deity') or 'Devotional').strip()
+    deity_key=deity.casefold()
+    deity_emoji={'shiva':'🔱','krishna':'🪈','hanuman':'🚩','durga':'🔴','lakshmi':'🪷'}.get(deity_key,'✨')
+    worship_label={'shiva':'शिव आराधना','krishna':'कृष्ण भक्ति','hanuman':'हनुमान भक्ति',
+                   'durga':'माता की आराधना','lakshmi':'लक्ष्मी आरती'}.get(deity_key,'भक्ति और आराधना')
+    english_hybrid={'shiva':'Peaceful Mahadev Bhajan 2026','krishna':'Peaceful Krishna Bhajan 2026',
+                    'hanuman':'Powerful Hanuman Bhajan 2026','durga':'Powerful Mata Bhajan 2026',
+                    'lakshmi':'Full Lakshmi Aarti with Lyrics'}.get(deity_key,f'Peaceful {deity} Devotional 2026')
     traditional=m.get('composition_type') in {'traditional_aarti','traditional_mantra','traditional_stuti'}
     title=(f'{display} | संपूर्ण {keyword} | Shloka By Shloka' if traditional else
-           f'{display} 🔱 | मन की शांति के लिए Powerful {keyword} 2026')
+           f'{display} {deity_emoji} | मन की शांति के लिए Powerful {keyword} 2026')
     sections=m.get('sections') or []
     duration=max(1,int(m.get('requested_duration_seconds') or 480))
     cues=[];scene_blocks=[]
@@ -67,15 +77,15 @@ def _ares_long_form(root,m,brief):
         # older/minimal mission has no explicit section manifest.
         lyrics=' '.join(m.get('lyrics') or [display])
         cues=[f'[0:00 – आरंभ]\n{lyrics}',
-              f'[{duration//6//60}:{duration//6%60:02d} – शिव आराधना]\n{lyrics}',
+              f'[{duration//6//60}:{duration//6%60:02d} – {worship_label}]\n{lyrics}',
               f'[{duration//3//60}:{duration//3%60:02d} – ध्यान और प्रार्थना]\n{lyrics}']
     core_promise=re.sub(r'(?<!\w)#\w+','',brief['description'].splitlines()[0]).strip()
     packaging='\n'.join([
         f'recommended_title: {title}',
         f'title_a_searchable: {title}',
-        f'title_b_intriguing: {display} | सुबह की प्रार्थना और ध्यान के लिए {keyword}',
+        f'title_b_intriguing: {display} | पूजा, प्रार्थना और ध्यान के लिए {keyword}',
         (f'title_c_hybrid: {display} | Full Hindi Aarti with Lyrics' if traditional else
-         f'title_c_hybrid: {display} 🔱 | Peaceful Mahadev Bhajan 2026'),
+         f'title_c_hybrid: {display} {deity_emoji} | {english_hybrid}'),
         f'core_promise: {core_promise}',
         'audience: Hindi devotional listeners seeking prayer, Aarti, peace and meditation',
         f'thumbnail_concept_a: Text: "{display}"; cinematic deity portrait with clean text-safe area',
@@ -154,7 +164,7 @@ def metadata(root):
     short_metadata=[]
     for n in (1,2):
         hook=_short_hook(root,m,n)
-        item={'id':f'short-0{n}','title':_short_title(hook,keyword,n),
+        item={'id':f'short-0{n}','title':_short_title(hook,keyword,n,m.get('deity')),
             'description':_short_description(m,keyword,hook,n),
             'tags':_short_tags(m,tags,keyword,hook,n),'privacy':'private','language':'hi',
             'thumbnail':f'publishing/thumbnails/short-{n}-thumbnail-golden-blue-v2.jpg'}
