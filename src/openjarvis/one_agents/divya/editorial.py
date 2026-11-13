@@ -13,7 +13,9 @@ def shot_plan(scenes,beats,duration):
         import math
         # Encoders commonly report a few milliseconds beyond the requested
         # duration; do not demand an extra scene for that container padding.
-        minimum=math.ceil(max(0.0,duration-0.1)/20)
+        # Permit a final sub-shot remainder instead of demanding a whole new
+        # approved image for only a couple of seconds beyond a 20s boundary.
+        minimum=max(6, math.floor(duration/20))
         if len(set(s['image'] for s in scenes))<minimum:
             raise Blocked(f'Long-form requires at least {minimum} distinct narrative scene assets')
         if len(set(s.get('motion_treatment') for s in scenes)-{None})<4:
@@ -70,7 +72,7 @@ def prepare(root, draft=False):
         if not draft:require_review(root,'image-'+scene['id'],{'image_sha256':digest(p),'prompt':scene['prompt']})
         images.append(digest(p))
     import math
-    minimum=max(6,math.ceil(max(0.0,duration-0.1)/20)) if duration>=300 else 6
+    minimum=max(6,math.floor(duration/20)) if duration>=300 else 6
     if len(set(images))<minimum:raise Blocked(f'{minimum} distinct image hashes required, not duplicate files')
     profile={'duration':duration,'review_status':'DRAFT_UNREVIEWED' if draft else 'REVIEWED','title':m['display_title'],'shots':shot_plan(m['scenes'],beatmap['beats'],duration),
              'audio_sha256':digest(audio),'image_sha256':images,
