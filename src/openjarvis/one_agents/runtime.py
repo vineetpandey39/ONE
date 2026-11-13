@@ -7345,7 +7345,8 @@ def _run_echo(job: dict[str, Any]) -> dict[str, Any]:
                 # The API creates the private draft and attaches subtitles/SEO, but deliberately does not set the
                 # thumbnail. Shorts must begin with the actual video hook rather than a 0.5 s embedded cover.
                 upload_report = uploader.run(package, video=master, thumbnail=None, synthetic="yes", execute=True,
-                                             caption=caption, caption_language="hi")
+                                             caption=caption, caption_language="hi",
+                                             finish=bool(uploader.ledger_load().get(master_sha256, {}).get("video_id")))
                 temporary = upload_receipt.with_suffix(upload_receipt.suffix + ".tmp")
                 temporary.write_text(json.dumps({"schema": "vista-private-upload/1",
                                                  "master_sha256": master_sha256,
@@ -9456,6 +9457,10 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
             from openjarvis.one_agents.vidiq_research import collect_story, validate_keyword, research_label
             if is_vista_short:
                 from openjarvis.one_agents.vista_research import commission
+                # Read-only research may resume under the original schedule
+                # receipt. The stable child key below prevents duplicate media.
+                job_recovery.attach(_connect, str(job["id"]),
+                                    f"vista-research:{job['id']}", kind="vista_research_checkpoint")
                 story = commission(
                     job["id"], recent_stories, reusable=reusable,
                     synthesize=_research_synthesis,
@@ -9761,6 +9766,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                         )}),
             mode="execute",
             tier="fast",
+            dedupe_key=f"vista:{job['id']}:production" if is_vista_short else "",
         ),
     )
 
