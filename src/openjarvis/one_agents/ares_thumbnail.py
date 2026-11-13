@@ -254,55 +254,81 @@ def reference_sheet(portrait: Path, library: Path, out: Path, *, always_anchor: 
     return {"path": str(out), "panels": len(panels), "face_pixels": faces[0][3] if faces else 0}
 
 
-def restore_reference_face(generated: Path, portrait: Path, library: Path, out: Path) -> dict[str, Any]:
-    """Lock Sonia's facial anatomy to approved source pixels.
+def place_approved_portrait(generated: Path, portrait: Path, library: Path, out: Path, *,
+                            layout: str, variant_index: int = 0) -> dict[str, Any]:
+    """Place an approved real photo of Sonia over the generated host lane.
 
-    Prompt-only identity constraints still let an image model redraw the eyes,
-    jaw and mouth.  This finish aligns the clearest approved face to the
-    generated face and feathers only the inner facial oval.  Hair, clothing,
-    lighting and the destination art remain generated; the anatomy viewers
-    recognise is taken from a real approved photograph, not synthesized.
+    We do not ask a generative model to redraw a real host anymore.  The model
+    supplies only destination art; this deterministic finish uses source photo
+    pixels for Sonia's complete head/upper body.  A soft split, inset card and
+    editorial arch provide three layouts without changing her anatomy.
     """
-    from PIL import Image, ImageDraw, ImageFilter
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 
-    target_image, target_faces = _faces(generated)
-    if not target_faces:
-        raise RuntimeError("generated thumbnail has no detectable Sonia face")
-    candidates: list[tuple[int, Path, Any, tuple[int, int, int, int]]] = []
-    config = library / "portraits.json"
-    names = json.loads(config.read_text(encoding="utf-8")).get("preferred", []) if config.is_file() else []
-    ordered = [portrait, *[library / name for name in names if (library / name).is_file()
-                           and (library / name).resolve() != portrait.resolve()]]
-    for candidate in ordered:
-        image, faces = _faces(candidate)
-        if faces:
-            candidates.append((faces[0][3], candidate, image, faces[0]))
-    if not candidates:
-        raise RuntimeError("approved portrait library has no detectable identity face")
-    _size, source_path, source_image, source_face = max(candidates, key=lambda row: row[0])
-    tx, ty, tw, th = target_faces[0]
-    sx, sy, sw, sh = source_face
+    if layout not in ("left", "right"):
+        raise ValueError("portrait layout must be left or right")
+    source_image, source_faces = _faces(portrait)
+    source_path = portrait
+    if not source_faces or source_faces[0][3] < FACE_MIN_PIXELS // 2:
+        config = library / "portraits.json"
+        names = json.loads(config.read_text(encoding="utf-8")).get("preferred", []) if config.is_file() else []
+        anchors = []
+        for candidate in [library / name for name in names if (library / name).is_file()]:
+            image, faces = _faces(candidate)
+            if faces:
+                anchors.append((faces[0][3], candidate, image, faces[0]))
+        if not anchors:
+            raise RuntimeError("approved portrait library has no detectable identity face")
+        _pixels, source_path, source_image, source_face = max(anchors, key=lambda row: row[0])
+    else:
+        source_face = source_faces[0]
 
-    def crop_box(x: int, y: int, w: int, h: int, width: int, height: int) -> tuple[int, int, int, int]:
-        return (max(0, round(x - 0.14 * w)), max(0, round(y - 0.12 * h)),
-                min(width, round(x + 1.14 * w)), min(height, round(y + 1.18 * h)))
-
-    source_box = crop_box(sx, sy, sw, sh, source_image.width, source_image.height)
-    target_box = crop_box(tx, ty, tw, th, target_image.width, target_image.height)
-    target_w, target_h = target_box[2] - target_box[0], target_box[3] - target_box[1]
-    patch = source_image.crop(source_box).resize((target_w, target_h), Image.Resampling.LANCZOS)
-    mask = Image.new("L", (target_w, target_h), 0)
-    draw = ImageDraw.Draw(mask)
-    inset_x, inset_y = max(2, target_w // 18), max(2, target_h // 22)
-    draw.ellipse((inset_x, inset_y, target_w - inset_x, target_h - inset_y), fill=255)
-    mask = mask.filter(ImageFilter.GaussianBlur(max(4, min(target_w, target_h) // 16)))
-    restored = target_image.copy()
-    restored.paste(patch, (target_box[0], target_box[1]), mask)
+    canvas = thumbnail_compose._cover(ImageOps.exif_transpose(Image.open(generated)).convert("RGB"))
+    # Crop around the detected source face without resizing it non-uniformly.
+    portrait_crop = _crop_around(source_image, source_face, wide=2.8, up=0.72, down=3.0, height=960)
+    mode = max(0, int(variant_index)) % 3
+    if mode == 0:  # cinematic full-height split
+        width, height, top, radius = 460, 720, 0, 0
+    elif mode == 1:  # editorial inset card
+        width, height, top, radius = 410, 650, 35, 34
+    else:  # tall arch/card, visibly different from the full split
+        width, height, top, radius = 430, 680, 20, 96
+    left = 0 if layout == "left" else thumbnail_compose.SIZE[0] - width
+    if mode == 1:
+        left += 22 if layout == "left" else -22
+    fitted = ImageOps.fit(portrait_crop, (width, height), method=Image.Resampling.LANCZOS,
+                          centering=(0.5, 0.42))
+    mask = Image.new("L", (width, height), 255 if radius == 0 else 0)
+    if radius:
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, width - 1, height - 1), radius=radius, fill=255)
+    # Feather only the inside edge so the photo reads as intentional editorial
+    # compositing, while the face itself remains untouched source pixels.
+    feather = Image.new("L", (width, height), 255)
+    fd = ImageDraw.Draw(feather)
+    edge = 24
+    for index in range(edge):
+        value = round(255 * (index + 1) / edge)
+        x = width - edge + index if layout == "left" else edge - index - 1
+        fd.line((x, 0, x, height), fill=value)
+    if radius:
+        mask = ImageChops.multiply(mask, feather)
+    else:
+        mask = feather
+    shadow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    shadow_mask = mask.filter(ImageFilter.GaussianBlur(14))
+    shadow.paste((0, 0, 0, 150), (left + (8 if layout == "left" else -8), top + 8), shadow_mask)
+    composed = Image.alpha_composite(canvas.convert("RGBA"), shadow)
+    composed.paste(fitted.convert("RGBA"), (left, top), mask)
+    if radius:
+        border = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+        box = (left, top, left + width - 1, top + height - 1)
+        ImageDraw.Draw(border).rounded_rectangle(box, radius=radius, outline=(255, 255, 255, 210), width=4)
+        composed = Image.alpha_composite(composed, border)
     out.parent.mkdir(parents=True, exist_ok=True)
-    restored.save(out, "PNG", optimize=True)
-    return {"path": str(out), "mode": "approved_source_face_pixels",
+    composed.convert("RGB").save(out, "PNG", optimize=True)
+    return {"path": str(out), "mode": "approved_source_portrait_pixels",
             "source": str(source_path), "source_face": list(source_face),
-            "target_face": list(target_faces[0])}
+            "layout": layout, "portrait_frame": ("split", "inset", "arch")[mode]}
 
 
 def thumbnail_history(asset_root: Path, exclude: Path | None = None) -> list[dict[str, Any]]:
