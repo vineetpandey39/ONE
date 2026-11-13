@@ -45,6 +45,8 @@ CHANNEL_SUBSCRIBE_URL = SONIA.subscribe_url
 def fallback_hashtags(title: str, channel: ChannelProfile = SONIA) -> list[str]:
     """Three truthful deterministic hashtags when the wording model is unavailable."""
     if channel.brand == "shloka_by_shloka":
+        if re.search(r"lakshmi|laxmi|लक्ष्मी", title, re.I):
+            return ["#LakshmiAarti", "#MaaLakshmi", "#HindiAarti"]
         return ["#ShivBhajan", "#Mahadev", "#HindiBhajan"]
     title_words = re.findall(r"[A-Za-z0-9]+", _title_head(title))[:3]
     title_tag = "#" + "".join(word[:1].upper() + word[1:] for word in title_words)
@@ -325,15 +327,18 @@ def _tag_intent_variants(primary: str, channel: ChannelProfile) -> list[str]:
     elif channel.brand == "shloka_by_shloka":
         # Devotional discovery uses listening intent, deity names and Hindi
         # transliterations—not the travel-style "guide/update" vocabulary.
-        # Keep every variant grounded in the supplied Shiva query.
+        # Keep every variant grounded in the supplied deity/query.
+        deity_terms = (["om jai lakshmi mata", "lakshmi aarti", "mahalakshmi aarti",
+                        "laxmi ji ki aarti", "friday aarti", "hindi aarti"]
+                       if re.search(r"lakshmi|laxmi|लक्ष्मी", short_base, re.I) else
+                       ["shiv bhajan", "shiva bhajan", "mahadev bhajan", "bholenath bhajan",
+                        "shiv shankar bhajan", "shiv meditation music", "om namah shivaya"])
         variants = [
             *compact,
             f"{short_base} hindi", f"{short_base} lyrics", f"{short_base} morning prayer",
             f"{short_base} meditation", f"{short_base} devotional song",
             f"peaceful {short_base}", f"powerful {short_base}", f"new {short_base} 2026",
-            "shiv bhajan", "shiva bhajan", "mahadev bhajan", "bholenath bhajan",
-            "shiv shankar bhajan", "hindi devotional song", "morning bhajan",
-            "shiv meditation music", "om namah shivaya", "shloka by shloka",
+            *deity_terms, "hindi devotional song", "morning bhajan", "shloka by shloka",
         ]
     return variants
 
@@ -660,7 +665,9 @@ def description_audit(description: str, primary_query: str, tags: list[str],
         "search_grouped_chapters": 3 <= chapter_count <= 8,
         "official_sources_present": ("OFFICIAL SOURCES\n" in description or
                                      (channel.brand == "shloka_by_shloka" and
-                                      "not a scripture quotation" in description.casefold())),
+                                      ("not a scripture quotation" in description.casefold() or
+                                       ("traditional text" in description.casefold() and
+                                        "fresh original recording" in description.casefold())))),
         "related_playlist_present": not channel.playlist_url or channel.playlist_url in description,
         "subscribe_link_present": not channel.subscribe_url or channel.subscribe_url in description,
         "three_hashtags": len(re.findall(r"(?<!\w)#\w+", description)) == 3,
@@ -840,7 +847,7 @@ def build_package(record: dict[str, Any], *, master: Path, plan_path: Path, port
         ("OFFICIAL SOURCES\n" + "\n".join(f"- {u}" for u in urls[:8])) if urls else "",
         ("IMPORTANT\nTravel rules, prices, schedules and breaking-news details can change. "
          f"Verify the official sources{' above' if urls else ''} for your dates before acting."
-         if channel == SONIA else "IMPORTANT\n" + channel.source_note),
+         if channel == SONIA else "IMPORTANT\n" + str(record.get("source_note") or channel.source_note)),
         f"{channel.playlist_heading}\n{channel.playlist_url}" if channel.playlist_url else "",
         f"SUBSCRIBE TO {channel.display_name.upper()}\n{channel.subscribe_url}" if channel.subscribe_url else "",
         " ".join(meta["hashtags"]),

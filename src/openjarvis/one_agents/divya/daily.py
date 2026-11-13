@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from .core import Journal, STAGES, fingerprint, write
+from .core import Journal, STAGES, fingerprint, read, write
 from .floor12 import BRAND, CHANNEL
 from .providers import music_payload
 from .worker import lyrics_binding
@@ -67,6 +67,31 @@ LAKSHMI_SCENES = [
     "Night temple exterior reflected in water, Lakshmi visible within the illuminated doorway.",
     "Final lifted tableau, Lakshmi on lotus with expanding warm light and rose-gold clouds.",
     "Closing prayer image, Lakshmi softly lit against a calm dark-blue background with one steady diya.",
+]
+
+LAKSHMI_AARTI = [
+    "ॐ जय लक्ष्मी माता, मैया जय लक्ष्मी माता।",
+    "तुमको निसिदिन सेवत, हर-विष्णु-धाता॥",
+    "उमा, रमा, ब्रह्माणी, तुम ही जग-माता।",
+    "सूर्य-चन्द्रमा ध्यावत, नारद ऋषि गाता॥",
+    "दुर्गारूप निरंजनि, सुख-सम्पति दाता।",
+    "जो कोई तुमको ध्यावत, ऋद्धि-सिद्धि-धन पाता॥",
+    "तुम पाताल-निवासिनि, तुम ही शुभदाता।",
+    "कर्म-प्रभाव-प्रकाशिनि, भवनिधि की त्राता॥",
+    "जिस घर तुम रहती, तहँ सब सद्गुण आता।",
+    "सब सम्भव हो जाता, मन नहिं घबराता॥",
+    "तुम बिन यज्ञ न होते, वस्त्र न हो पाता।",
+    "खान-पान का वैभव, सब तुमसे आता॥",
+    "शुभ-गुण-मन्दिर सुन्दर, क्षीरोदधि-जाता।",
+    "रत्न चतुर्दश तुम बिन, कोई नहिं पाता॥",
+    "महालक्ष्मी जी की आरती, जो कोई नर गाता।",
+    "उर आनन्द समाता, पाप उतर जाता॥",
+]
+
+LAKSHMI_AARTI_SOURCES = [
+    "https://archive.org/ (Gita Press Shri Aarti Sangrah, code 0153, scanned edition)",
+    "https://dailybhakti.app/aarti/om-jai-lakshmi-mata/",
+    "https://jyotishjagat.com/library/om-jai-lakshmi-mata",
 ]
 
 
@@ -174,3 +199,80 @@ def create_daily_mission(root: Path, *, day: date, deity: str = "Lakshmi") -> di
     journal.save()
     return {"status": "REVIEW_READY", "root": str(root), "mission": str(root / "mission.json"),
             "duration_seconds": 480, "paid_attempts_authorized": 0}
+
+
+def switch_to_lakshmi_aarti(root: Path) -> dict:
+    """Preserve the original draft and commission a verified traditional Aarti."""
+    root = Path(root).resolve()
+    mission = read(root / "mission.json")
+    if mission.get("deity") != "Lakshmi":
+        raise ValueError("Lakshmi mission required")
+    if mission.get("composition_type") == "traditional_aarti":
+        return {"status": "existing", "root": str(root)}
+
+    write(root / "review-package/original-bhajan-reserve.json", {
+        "title": mission["title"], "lyrics": mission["lyrics"],
+        "music_direction": mission.get("music_direction"),
+        "status": "PRESERVED_FOR_FUTURE_RELEASE",
+    })
+    refrain = LAKSHMI_AARTI[:2]
+    verses = [LAKSHMI_AARTI[index:index + 2] for index in range(2, len(LAKSHMI_AARTI), 2)]
+    rows = [("Opening Aarti refrain", refrain,
+             "Lead begins within the first second; congregation answers the complete refrain")]
+    rows.extend((f"Aarti verse {index}", verse + refrain,
+                 "Warm female lead with a restrained response chorus; every printed word remains audible")
+                for index, verse in enumerate(verses, 1))
+    rows.extend([
+        ("Devotional lift", verses[3] + refrain,
+         "Full ensemble lift without tempo change or improvised lyric syllables"),
+        ("Closing Aarti refrain", refrain * 2,
+         "Complete final refrain before bells and reverb; no instrumental-only ending"),
+    ])
+    mission.update(
+        title="ॐ जय लक्ष्मी माता | संपूर्ण लक्ष्मी आरती | Shloka By Shloka",
+        display_title="ॐ जय लक्ष्मी माता", composition_type="traditional_aarti",
+        lyrics=LAKSHMI_AARTI,
+        text_origin=("Traditional Lakshmi Aarti; author unknown. Common Gita Press-aligned reading, "
+                     "independently recorded with a fresh arrangement; no third-party recording copied."),
+        scripture_sources=LAKSHMI_AARTI_SOURCES,
+        text_review="PENDING", pronunciation_review="PENDING",
+        sections=[{"name": name, "duration": 48, "lines": lines,
+                   "styles": [style, "76 BPM Keharwa 8-beat Aarti rhythm", "precise Hindi diction"]}
+                  for name, lines, style in rows],
+        music_direction={
+            "bpm": 76, "rhythm": "steady Keharwa 8-beat Aarti cycle",
+            "melodic_language": "Traditional congregational Aarti contour in a fresh independent performance",
+            "vocal_delivery": "Warm female lead, clear response chorus, minimal melisma and exact verified words",
+            "instruments": ["tanpura", "harmonium", "tabla", "veena", "soft manjira", "restrained temple bells"],
+            "phrasing": "Each two-line verse resolves before the full refrain; preserve every compound word",
+            "sync": "Verse cadence and refrain resolve on sam; instrumental answers only between complete lines",
+            "avoid": "No copied commercial recording, long intro, missing words, ad-libs or English lyrics",
+        },
+        pronunciation_notes={
+            "निसिदिन": "ni-si-din", "हर-विष्णु-धाता": "har-vish-nu-dhaa-taa",
+            "निरंजनि": "ni-ran-ja-ni", "भवनिधि": "bha-va-ni-dhi",
+            "क्षीरोदधि-जाता": "kshee-ro-da-dhi jaa-taa", "उर": "ur",
+        },
+    )
+    request = music_payload(mission)
+    write(root / "mission.json", mission)
+    write(root / "review-package/music-request.json", request)
+    write(root / "review-package/metadata-brief.json", {
+        "keyword": "Lakshmi Aarti",
+        "description": "Om Jai Lakshmi Mata full Hindi Aarti with lyrics, fresh vocals and an original devotional arrangement.",
+        "tags": ["om jai lakshmi mata", "lakshmi aarti", "लक्ष्मी माता की आरती", "friday aarti",
+                 "mahalakshmi aarti", "hindi aarti", "laxmi ji ki aarti"],
+    })
+    write(root / "review-package/commission.json", {
+        "duration_seconds": 480, "variants": 1, "paid_attempts_authorized": 0,
+        "credit_quote": None, "automatic_paid_retry": False,
+        "lyrics_review": "PENDING", "pronunciation_review": "PENDING", "publish": False,
+        "rights_basis": "Traditional text; fresh recording and arrangement; source edition review required",
+    })
+    write(root / "review-package/review-templates.json", {
+        purpose: {"approved": False, "reviewer": None, "authorization_reference": None,
+                  "binding_sha256": fingerprint(binding)}
+        for purpose, binding in (("lyrics", lyrics_binding(mission)), ("music-spend-and-rights", request))
+    })
+    return {"status": "REVIEW_READY", "root": str(root), "composition_type": "traditional_aarti",
+            "verses": len(verses), "duration_seconds": 480, "paid_attempts_authorized": 0}

@@ -11,6 +11,7 @@ _DEITY_TERMS={
     'krishna':['krishna bhajan shorts','radha krishna shorts','kanha bhajan','कृष्ण भजन','राधा कृष्ण','हरे कृष्ण','vrindavan bhajan','lord krishna'],
     'hanuman':['hanuman bhajan shorts','hanuman chalisa shorts','bajrangbali bhajan','हनुमान भजन','बजरंगबली','jai hanuman'],
     'durga':['durga bhajan shorts','mata rani shorts','devi bhajan','दुर्गा भजन','माता रानी भजन','jai mata di'],
+    'lakshmi':['lakshmi aarti shorts','om jai lakshmi mata','laxmi ji ki aarti','माँ लक्ष्मी आरती','लक्ष्मी माता की आरती','friday aarti','mahalakshmi aarti'],
 }
 def _clean_hook(value):
     return re.sub(r'\s+',' ',str(value or '')).strip().rstrip('।.!? ')
@@ -39,8 +40,8 @@ def _short_title(hook,keyword,number):
 
 def _visible_hashtags(m):
     deity=str(m.get('deity','Shiva')).casefold()
-    first={'shiva':'#ShivBhajan','krishna':'#KrishnaBhajan','hanuman':'#HanumanBhajan','durga':'#DurgaBhajan'}.get(deity,'#Bhakti')
-    second={'shiva':'#Mahadev','krishna':'#RadhaKrishna','hanuman':'#Bajrangbali','durga':'#MataRani'}.get(deity,'#Devotional')
+    first={'shiva':'#ShivBhajan','krishna':'#KrishnaBhajan','hanuman':'#HanumanBhajan','durga':'#DurgaBhajan','lakshmi':'#LakshmiAarti'}.get(deity,'#Bhakti')
+    second={'shiva':'#Mahadev','krishna':'#RadhaKrishna','hanuman':'#Bajrangbali','durga':'#MataRani','lakshmi':'#MaaLakshmi'}.get(deity,'#Devotional')
     return [first,second,'#Shorts']
 
 def _ares_long_form(root,m,brief):
@@ -49,7 +50,9 @@ def _ares_long_form(root,m,brief):
     from openjarvis.one_agents.youtube_channels import SHLOKA_BY_SHLOKA
     display=_clean_hook(m.get('display_title') or m['title'].split('|',1)[0])
     keyword=brief['keyword'].strip()
-    title=f'{display} 🔱 | मन की शांति के लिए Powerful {keyword} 2026'
+    traditional=m.get('composition_type') in {'traditional_aarti','traditional_mantra','traditional_stuti'}
+    title=(f'{display} | संपूर्ण {keyword} | Shloka By Shloka' if traditional else
+           f'{display} 🔱 | मन की शांति के लिए Powerful {keyword} 2026')
     sections=m.get('sections') or []
     duration=max(1,int(m.get('requested_duration_seconds') or 480))
     cues=[];scene_blocks=[]
@@ -71,15 +74,21 @@ def _ares_long_form(root,m,brief):
         f'recommended_title: {title}',
         f'title_a_searchable: {title}',
         f'title_b_intriguing: {display} | सुबह की प्रार्थना और ध्यान के लिए {keyword}',
-        f'title_c_hybrid: {display} 🔱 | Peaceful Mahadev Bhajan 2026',
+        (f'title_c_hybrid: {display} | Full Hindi Aarti with Lyrics' if traditional else
+         f'title_c_hybrid: {display} 🔱 | Peaceful Mahadev Bhajan 2026'),
         f'core_promise: {core_promise}',
-        'audience: Hindi devotional listeners seeking Shiva prayer, peace and meditation',
-        f'thumbnail_concept_a: Text: "{display}"; golden-blue Shiva portrait with clean text-safe area',
-        'thumbnail_concept_b: Text: "मन की शांति"; cinematic Kailash and trident with strong mobile contrast',
+        'audience: Hindi devotional listeners seeking prayer, Aarti, peace and meditation',
+        f'thumbnail_concept_a: Text: "{display}"; cinematic deity portrait with clean text-safe area',
+        f'thumbnail_concept_b: Text: "{keyword}"; sacred setting with strong mobile contrast',
     ])
+    source_note=("Traditional text verified against the listed source editions. This video uses a fresh original "
+                 "recording and arrangement; no third-party sound recording was copied." if traditional else
+                 "This is an original devotional composition, not a scripture quotation. Pronunciation and final audio require human review.")
     record={'brand':'shloka_by_shloka','language':'hi','video_title':title,
             'full_script':'\n\n'.join(cues),'scene_plan':'\n\n'.join(scene_blocks),
-            'packaging':packaging,'claim_ledger':m.get('text_origin','Original devotional lyrics; not a scripture quotation'),
+            'packaging':packaging,
+            'claim_ledger':m.get('text_origin','')+'\n'+'\n'.join(m.get('scripture_sources') or []),
+            'source_note':source_note,
             'original_footage_required':False,'thumbnail_style':'golden-blue devotional cinematic'}
     master=root/'edit/unbranded/master.mp4'
     llm=None if m.get('seo_model')=='deterministic_test' else youtube_seo.ollama_json
@@ -100,10 +109,15 @@ def _short_description(m,keyword,hook,number):
     display=m.get('display_title') or m['title'].split('|',1)[0].strip()
     full_song=m.get('long_video_url') or _CHANNEL_VIDEOS
     hashtags=' '.join(_visible_hashtags(m))
+    traditional=m.get('composition_type') in {'traditional_aarti','traditional_mantra','traditional_stuti'}
+    format_line=('verified traditional devotional text की fresh recording' if traditional else
+                 'हमारे मूल हिंदी devotional bhajan')
+    rights_line=('यह पारंपरिक पाठ है; recording और arrangement नए हैं, किसी third-party audio को copy नहीं किया गया।' if traditional else
+                 'यह मूल भक्ति-गीत है, धर्मग्रंथ का उद्धरण नहीं।')
     return (f'{keyword} “{display}” • PART {number}\n'
-            f'{hook} — हमारे मूल हिंदी devotional bhajan का यह beat-synced अंश सुनें।\n\n'
+            f'{hook} — {format_line} का यह beat-synced अंश सुनें।\n\n'
             f'पूरा गीत / Full song:\n{full_song}\n\n'
-            'यह मूल भक्ति-गीत है, धर्मग्रंथ का उद्धरण नहीं। AI-assisted music, vocals and imagery; '
+            f'{rights_line} AI-assisted music, vocals and imagery; '
             'edited with Hindi lyrics by Shloka By Shloka.\n\n'
             'कौन-सी पंक्ति आपके मन को छू गई?\n'
             f'Subscribe: {_SUBSCRIBE}\n\n{hashtags}')

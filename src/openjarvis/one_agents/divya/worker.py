@@ -103,7 +103,7 @@ def produce(root):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=['init','new-daily','status','images','run','preview'])
+    parser.add_argument('command',choices=['init','new-daily','use-lakshmi-aarti','status','images','run','preview'])
     parser.add_argument('--root',type=Path,required=True)
     parser.add_argument('--limit',type=int)
     parser.add_argument('--deity',default='Lakshmi')
@@ -115,6 +115,9 @@ def main():
     elif args.command=='new-daily':
         from .daily import create_daily_mission
         result=create_daily_mission(root,day=args.production_date or date.today(),deity=args.deity)
+    elif args.command=='use-lakshmi-aarti':
+        from .daily import switch_to_lakshmi_aarti
+        result=switch_to_lakshmi_aarti(root)
     elif args.command=='status':
         result=Journal(root).data
     else:
