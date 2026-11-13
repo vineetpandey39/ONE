@@ -9465,7 +9465,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                     job["id"], recent_stories, reusable=reusable,
                     synthesize=_research_synthesis,
                     pick_story=lambda: _sonia_story_pick(
-                        reusable, recent_stories, job["id"], check_all_prior=True,
+                        reusable, prior, job["id"], check_all_prior=True,
                         recent_stories=recent_stories),
                     output_dir=_home() / "agent_outputs",
                     unique=lambda brief, note, candidate: _sonia_unique_evergreen_brief(

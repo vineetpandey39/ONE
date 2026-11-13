@@ -96,6 +96,7 @@ def commission(job_id, prior, *, reusable, synthesize, pick_story, output_dir,
         try:
             pack = reusable.collect_travel_video_signals(query, markets=["IN"], youtube_maximum=12)
             rows = list(pack.get("primary_signals") or []) + list(pack.get("context_signals") or [])
+            rows = [{**r, "url": r.get("source_url") or r.get("url") or ""} for r in rows]
             rows = [r for r in rows if str(r.get("url", "")).startswith("https://")
                     and re.search(r"\b(travel|touris\w*|trip|itinerary|holiday|destination|beach|visit|weekend|heritage)\b",
                                   str(r.get("title", "")), re.I)]
