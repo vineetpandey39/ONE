@@ -9454,13 +9454,26 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
             # verify factual claims; MCP failure cannot silently become a
             # news-only commission or trigger paid narration.
             from openjarvis.one_agents.vidiq_research import collect_story, validate_keyword, research_label
-            story = collect_story(
-                job["id"], recent_stories if is_vista_short else prior,
-                short=bool(is_vista_short),
-                keyword=str(request_payload.get("research_keyword") or ""))
+            if is_vista_short:
+                from openjarvis.one_agents.vista_research import commission
+                story = commission(
+                    job["id"], recent_stories, reusable=reusable,
+                    synthesize=_research_synthesis,
+                    pick_story=lambda: _sonia_story_pick(
+                        reusable, recent_stories, job["id"], check_all_prior=True,
+                        recent_stories=recent_stories),
+                    output_dir=_home() / "agent_outputs",
+                    unique=lambda brief, note, candidate: _sonia_unique_evergreen_brief(
+                        brief, note, prompt=candidate["prompt"],
+                        evidence=candidate["synthesis_evidence"], recent=recent_stories),
+                    progress=lambda detail: stages.set_stage(head_id, stages.RESEARCHING, detail),
+                    keyword=str(request_payload.get("research_keyword") or ""))
+            else:
+                story = collect_story(job["id"], prior, short=False,
+                                      keyword=str(request_payload.get("research_keyword") or ""))
             no_news_reason = story.get("reason", "") if story["status"] == "none" else ""
             travel_query = "Indian travellers international trip visa flight hotel"
-            if story["status"] in {"picked", "vidiq"}:
+            if story["status"] in {"picked", "vidiq", "sanjeevani"}:
                 eligible = story["evidence"]
                 synthesis_prompt = story["prompt"]
                 synthesis_evidence = story["synthesis_evidence"]
@@ -9520,8 +9533,12 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                         "evidence_count": 0, "research_diagnostic_path": str(diagnostic_file),
                         "handed_to": None}
             synthesis_prompt += "\nCommission request (constraints only, not verified facts): " + task[:6000]
-            brief, note = _research_synthesis(synthesis_prompt, evidence=synthesis_evidence)
-            if story["status"] != "picked" and brief and "COMMISSION: NO" not in brief.upper():
+            if story.get("_brief"):
+                brief, note = story["_brief"], story.get("_note", "")
+            else:
+                brief, note = _research_synthesis(synthesis_prompt, evidence=synthesis_evidence)
+            if (story["status"] != "picked" and not story.get("_dedupe_checked")
+                    and brief and "COMMISSION: NO" not in brief.upper()):
                 brief, note, repeat, reselection_attempts = _sonia_unique_evergreen_brief(
                     brief,
                     note,
@@ -9598,7 +9615,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                     "handed_to": None,
                 }
             if story["status"] == "vidiq":
-                keyword_receipt = validate_keyword(brief)
+                keyword_receipt = story.get("_keyword_receipt") or validate_keyword(brief)
                 from openjarvis.one_agents.vidiq_research import evidence_text
                 brief += ("\n\n## vidIQ MCP research receipt\n"
                           + story["ranking_path"] + "\n"

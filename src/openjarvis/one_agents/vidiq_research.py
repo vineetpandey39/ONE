@@ -178,7 +178,10 @@ def _discover(client: "ResearchClient", name: str, arguments: dict) -> dict:
     except ResearchUnavailable as exc:
         if "daily research call limit reached" not in str(exc):
             raise
-        cached = client.cached_today(name)
+        # A receipt from another brand/format is not interchangeable merely
+        # because it came from the same tool (e.g. Planexium science vs travel).
+        cached = [row for row in client.cached_today(name)
+                  if row.get("arguments") == arguments]
         if not cached:
             raise
         newest = max(cached, key=lambda row: str(row.get("retrieved_at") or ""))
