@@ -126,7 +126,8 @@ class Revision(Motion):
             if current:
                 alpha=np.linspace(0,.55,200,dtype=np.float32)[:,None,None]
                 frame[880:1080]=(frame[880:1080]*(1-alpha)).astype(np.uint8)
-                self.paste_text(frame,current['text'],880,1440,min(1,(t-current['start'])*7,(current['end']-t)*7))
+                # Keep large mobile-grade caption atlases inside the 1080p safe area.
+                self.paste_text(frame,current['text'],855,1440,min(1,(t-current['start'])*7,(current['end']-t)*7))
                 cv2.line(frame,(790,1045),(1130,1045),gold,1,cv2.LINE_AA)
             if 1<t<6.4:
                 self.paste_text(frame,self.display_title,780,1680,min(1,(t-1),6.4-t))
