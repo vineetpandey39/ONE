@@ -1,6 +1,7 @@
 """CLI/worker entry point. Scheduling and publishing stay disabled until reviewed."""
 import argparse
 import json
+from datetime import date
 from pathlib import Path
 from .core import STAGES, Blocked, Journal, artifact, digest, fingerprint, read, write, mission_lock, require_review
 from .presets import PRESETS, VOCAL_STYLES, VISUAL_BIBLE
@@ -102,13 +103,18 @@ def produce(root):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=['init','status','images','run','preview'])
+    parser.add_argument('command',choices=['init','new-daily','status','images','run','preview'])
     parser.add_argument('--root',type=Path,required=True)
     parser.add_argument('--limit',type=int)
+    parser.add_argument('--deity',default='Lakshmi')
+    parser.add_argument('--date',dest='production_date',type=date.fromisoformat)
     args=parser.parse_args()
     root=args.root.resolve()
     if args.command=='init':
         result=initialize(root)
+    elif args.command=='new-daily':
+        from .daily import create_daily_mission
+        result=create_daily_mission(root,day=args.production_date or date.today(),deity=args.deity)
     elif args.command=='status':
         result=Journal(root).data
     else:
