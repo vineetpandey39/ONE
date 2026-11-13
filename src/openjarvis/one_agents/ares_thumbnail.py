@@ -628,18 +628,22 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
             video_title=pkg["recommended_title"], destination=pkg.get("destination") or "the destination",
             left_usp=variant["left_usp"], sonia_expression=variant["sonia_expression"], thumbnail_text=variant["text"])
         prompt += style_prompt(style, history, variant_index)
-        # Identity is not a creative variable.  The provider generates only
-        # the destination/story plate; Sonia's approved source photo is placed
-        # deterministically over the reserved host lane below.
+        # Identity is not a creative variable. ChatGPT receives both the
+        # selected pose/outfit and the clearest approved face anchor, and must
+        # preserve Sonia naturally in the destination scene. Never turn the
+        # approved photo into a card or framed portrait.
         prompt += ("\n\nVARIANT DIRECTION (mandatory): Composition: "
                    + str(variant.get("composition") or "one unobstructed hero object")
                    + ". Sonia posture: " + str(variant.get("posture") or "close-up")
                    + ". Gesture: " + str(variant.get("gesture") or "point toward the hook")
                    + ". Creative variation belongs in the story object, depth, lighting, layout and typography."
-                   + "\n\nBACKGROUND-ONLY IDENTITY CONTRACT: Do not draw, regenerate, reinterpret or include "
-                     "Sonia or any other person. Keep the reserved host lane free of people, faces, hands, text "
-                     "and important story proof. The attached approved photo is a placement reference only; its "
-                     "real pixels will be composited after generation. Generate zero anatomy.")
+                   + "\n\nCHATGPT IDENTITY CONTRACT (mandatory): Show Sonia naturally integrated into the destination "
+                     "scene with no portrait card, frame, border, arch or split-screen container. Copy her facial "
+                     "identity from the attached approved reference sheet: exact head shape, forehead, eyebrow "
+                     "shape, eye spacing, nose, cheeks, lips, jawline, skin tone, age and natural skin texture. "
+                     "Do not beautify, de-age, reshape or substitute another woman. Preserve anatomically correct "
+                     "hands and the requested gesture. Keep all thumbnail typography out of the generated image; "
+                     "the deterministic compositor adds the exact text afterward.")
         sheet = reference_sheet(portrait, Path(thumb["portrait_library"]),
                                 out_dir / "reference-sheet.jpg", always_anchor=True)
         if sheet["panels"] == 2:
@@ -715,24 +719,18 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
         return approved
     base = out_dir / filename
     shutil.copyfile(found, base)
-    # Compact finish first, then cover the reserved host lane with an approved
-    # real portrait crop.  No synthetic face or body survives into the final.
+    # Compact finish only. Sonia remains naturally integrated in ChatGPT's
+    # scene; never replace her with a framed portrait card after generation.
     try:
         finish = thumbnail_retouch.retouch(base, out_dir / f"variant-{variant_index + 1}-retouched.png")
     except Exception as exc:  # noqa: BLE001 - a retouch problem never costs the thumbnail
         finish = {"path": str(base), "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     try:
-        identity = place_approved_portrait(Path(finish["path"]), portrait, Path(thumb["portrait_library"]),
-                                           out_dir / f"variant-{variant_index + 1}-identity-locked.png",
-                                           layout=layout, variant_index=variant_index)
-    except Exception as exc:  # noqa: BLE001 - never ship synthetic anatomy when the source-photo lock failed
-        return fallback(f"source portrait lock failed: {type(exc).__name__}: {str(exc)[:160]}")
-    try:
         # Each variant writes its own file; only the experiment promotes a QC-passed winner to final.png. A failed
         # variant used to overwrite final.png, and the upload gate shipped it (Air France, 2026-10-09).
         hook_min_font = (84 if len(str(variant["text"]).split()) == 1
                          and len(str(variant["text"])) > 8 else thumbnail_compose.MIN_FONT)
-        composed = thumbnail_compose.compose(Path(identity["path"]), variant["text"],
+        composed = thumbnail_compose.compose(Path(finish["path"]), variant["text"],
                                               out_dir / f"variant-{variant_index + 1}-final.png",
                                               primary=tuple(variant.get("primary_colour", [255, 255, 255])),
                                               accent=tuple(variant.get("accent_colour", [255, 214, 0])),
@@ -744,7 +742,10 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
     receipt = {"ok": composed["qc"]["ok"], "path": composed["path"], "qc": composed["qc"], "base": str(base),
                "lao_job": lao_job, "portrait": str(portrait), "variant": variant["name"], "text": variant["text"],
                "layout": layout, "style": style, "typography": composed["qc"]["typography"],
-               "retouch": finish, "identity_lock": identity}
+               "retouch": finish,
+               "identity_lock": {"mode": "chatgpt_reference_sheet",
+                                 "reference_sheet": sheet["path"], "panels": sheet["panels"],
+                                 "portrait_frames_forbidden": True}}
     approved = valid_editorial_approval(root)
     if approved:
         return approved
