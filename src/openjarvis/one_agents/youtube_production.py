@@ -213,6 +213,15 @@ class ProductionServices:
         if spec.get("portrait_library") or "portrait" in str(spec.get("generation_mode", "")).lower().replace("no portrait reference", ""):
             raise ValueError("Original thumbnail cannot carry portrait inputs")
         chosen = spec["variants"][variant]
+        if channel.brand == "planexium":
+            # Science episodes deliberately rotate composition systems.  A
+            # fixed left hook plus green last word made PLANEXIUM visually
+            # indistinguishable from YATRA despite having no host portrait.
+            text_side = str(chosen.get("text_side") or (("left", "right", "left")[variant % 3]))
+            typography = str(chosen.get("typography") or (("panel", "minimal", "outline")[variant % 3]))
+            vertical_anchor = str(chosen.get("vertical_anchor") or (("top", "adaptive", "bottom")[variant % 3]))
+        else:
+            text_side, typography, vertical_anchor = "left", "outline", "bottom"
         from openjarvis.one_agents.youtube_seo import ORIGINAL_THUMBNAIL_PROMPT, PLANEXIUM_THUMBNAIL_PROMPT
 
         # Use the trusted original-image template, never a package-supplied host template.
@@ -232,6 +241,9 @@ class ProductionServices:
                        "direction or composition is a placement note for a later compositor. Do not render "
                        "those words. Generate zero letters, words, numbers, captions, logos or watermarks. "
                        "Leave the headline lane empty; exact hook lettering is added once after generation.")
+            prompt += (f"\nLAYOUT CONTRACT: reserve the {text_side.upper()} side as the empty low-detail headline "
+                       f"lane. Use a {typography} editorial hierarchy with the story phenomenon occupying the "
+                       "opposite side or centre. Do not default to a host-style travel thumbnail.")
         folder = self.context.artifact(f"thumbnail/variant-{variant + 1}")
         folder.mkdir(parents=True, exist_ok=True)
         generated = generate(prompt=prompt, output=folder / "base.png", brand=channel.brand)
@@ -257,17 +269,21 @@ class ProductionServices:
                         recent.append(tuple(int(value) for value in colour))
                 except (OSError, ValueError, TypeError):
                     continue
-            accent = adaptive_science_accent(base, recent)
+            accent = adaptive_science_accent(base, recent, side=text_side)
         receipt = compose(base, chosen["text"], folder / "final.png",
                           primary=tuple(chosen.get("primary_colour", [255, 255, 255])),
                           accent=accent,
                           text_zone=0.52 if channel.brand == "planexium" else 0.38,
                           min_font=84 if channel.brand == "planexium" else 96,
-                          max_words=4 if channel.brand == "planexium" else 3)
+                          max_words=4 if channel.brand == "planexium" else 3,
+                          side=text_side, vertical_anchor=vertical_anchor,
+                          typography=typography)
         if not receipt.get("qc", {}).get("ok"):
             raise RuntimeError("Original thumbnail failed composition QC")
         receipt.update(brand=channel.brand, mission_id=self.context.mission_id,
-                       generator="chatgpt_image_generation", portrait_used=False)
+                       generator="chatgpt_image_generation", portrait_used=False,
+                       typography=typography, text_side=text_side,
+                       vertical_anchor=vertical_anchor)
         (folder / "receipt.json").write_text(json.dumps(receipt, indent=2), encoding="utf-8")
         return receipt
 
@@ -296,21 +312,24 @@ class ProductionServices:
                 raise ValueError('Thumbnail compositions must differ')
         else:
             directions = [
-                ("cinematic", "Wide cinematic planetary establishing composition; clean warm rim lighting", [255, 214, 0]),
-                ("comparison", "Dramatic close-up subject comparison; contrasting scale and distance; clearly illustrative, not a scale diagram", [80, 220, 255]),
-                ("minimalist", "Minimalist cosmic intrigue; strong silhouette, restrained detail, orange and cyan contrast", [255, 150, 70]),
+                ("cinematic", "Wide cinematic planetary establishing composition; clean warm rim lighting", [255, 214, 0], "left", "panel", "top"),
+                ("comparison", "Dramatic close-up subject comparison; contrasting scale and distance; clearly illustrative, not a scale diagram", [80, 220, 255], "right", "minimal", "adaptive"),
+                ("minimalist", "Minimalist cosmic intrigue; strong silhouette, restrained detail, orange and cyan contrast", [190, 150, 255], "left", "outline", "bottom"),
             ]
             variants = []
-            for i, (name, direction, accent) in enumerate(directions):
+            for i, (name, direction, accent, side, typography, anchor) in enumerate(directions):
                 source = supplied[i] if i < len(supplied) else supplied[0]
-                variants.append({**source, "name": name, "visual_direction": direction, "accent_colour": accent})
+                variants.append({**source, "name": name, "visual_direction": direction,
+                                 "accent_colour": accent, "text_side": side,
+                                 "typography": typography, "vertical_anchor": anchor})
         package["thumbnail"]["variants"] = variants
         results = []
         for index, variant in enumerate(variants):
             folder = self.context.artifact(f"thumbnail/variant-{index + 1}")
             checkpoint = folder / "experiment-checkpoint.json"
             request = hashlib.sha256(json.dumps({"brand": package["brand"], "title": package["recommended_title"],
-                "subject": package["destination"], "variant": variant, "version": 1}, sort_keys=True).encode()).hexdigest()
+                "subject": package["destination"], "variant": variant,
+                "version": 2}, sort_keys=True).encode()).hexdigest()
             prior = json.loads(checkpoint.read_text(encoding="utf-8")) if checkpoint.exists() else None
             if prior:
                 receipt = prior["result"]

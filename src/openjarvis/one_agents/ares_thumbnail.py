@@ -37,18 +37,21 @@ THUMBNAIL_STYLE_ALIASES = {
 }
 
 EXPERIMENT_FORMATS = (
-    {"name": "Single hero", "sonia_expression": "genuinely surprised, raised brows, alert eyes",
-     "posture": "leaning slightly toward the hook", "gesture": "index finger clearly pointing toward the hook text",
+    {"name": "Single hero", "sonia_expression": "preserve the source portrait expression exactly",
+     "posture": "preserve the source portrait posture exactly", "gesture": "preserve only the visible source gesture",
      "composition": "one oversized story object in the protected centre lane; no decorative objects",
-     "primary_colour": [255, 255, 255], "accent_colour": [255, 214, 0]},
-    {"name": "Visual contrast", "sonia_expression": "curious and skeptical, one eyebrow raised",
-     "posture": "upright three-quarter pose", "gesture": "one hand at chin, evaluating the offer",
+     "primary_colour": [255, 255, 255], "accent_colour": [255, 214, 0],
+     "typography": "outline", "vertical_anchor": "adaptive"},
+    {"name": "Visual contrast", "sonia_expression": "preserve the source portrait expression exactly",
+     "posture": "preserve the source portrait posture exactly", "gesture": "preserve only the visible source gesture",
      "composition": "one simple visual contrast using only truthful story elements; hero remains unobstructed",
-     "primary_colour": [255, 255, 255], "accent_colour": [255, 64, 48]},
-    {"name": "Clean curiosity", "sonia_expression": "concerned curiosity, alert eyes",
-     "posture": "slightly forward-facing", "gesture": "open-palm stop or caution gesture beside the hook",
+     "primary_colour": [255, 255, 255], "accent_colour": [255, 64, 48],
+     "typography": "panel", "vertical_anchor": "top"},
+    {"name": "Clean curiosity", "sonia_expression": "preserve the source portrait expression exactly",
+     "posture": "preserve the source portrait posture exactly", "gesture": "preserve only the visible source gesture",
      "composition": "one curiosity object at large scale with a clean silhouette and no collage",
-     "primary_colour": [255, 255, 255], "accent_colour": [151, 255, 45]},
+     "primary_colour": [255, 255, 255], "accent_colour": [178, 126, 255],
+     "typography": "minimal", "vertical_anchor": "middle"},
 )
 
 
@@ -251,6 +254,57 @@ def reference_sheet(portrait: Path, library: Path, out: Path, *, always_anchor: 
     return {"path": str(out), "panels": len(panels), "face_pixels": faces[0][3] if faces else 0}
 
 
+def restore_reference_face(generated: Path, portrait: Path, library: Path, out: Path) -> dict[str, Any]:
+    """Lock Sonia's facial anatomy to approved source pixels.
+
+    Prompt-only identity constraints still let an image model redraw the eyes,
+    jaw and mouth.  This finish aligns the clearest approved face to the
+    generated face and feathers only the inner facial oval.  Hair, clothing,
+    lighting and the destination art remain generated; the anatomy viewers
+    recognise is taken from a real approved photograph, not synthesized.
+    """
+    from PIL import Image, ImageDraw, ImageFilter
+
+    target_image, target_faces = _faces(generated)
+    if not target_faces:
+        raise RuntimeError("generated thumbnail has no detectable Sonia face")
+    candidates: list[tuple[int, Path, Any, tuple[int, int, int, int]]] = []
+    config = library / "portraits.json"
+    names = json.loads(config.read_text(encoding="utf-8")).get("preferred", []) if config.is_file() else []
+    ordered = [portrait, *[library / name for name in names if (library / name).is_file()
+                           and (library / name).resolve() != portrait.resolve()]]
+    for candidate in ordered:
+        image, faces = _faces(candidate)
+        if faces:
+            candidates.append((faces[0][3], candidate, image, faces[0]))
+    if not candidates:
+        raise RuntimeError("approved portrait library has no detectable identity face")
+    _size, source_path, source_image, source_face = max(candidates, key=lambda row: row[0])
+    tx, ty, tw, th = target_faces[0]
+    sx, sy, sw, sh = source_face
+
+    def crop_box(x: int, y: int, w: int, h: int, width: int, height: int) -> tuple[int, int, int, int]:
+        return (max(0, round(x - 0.14 * w)), max(0, round(y - 0.12 * h)),
+                min(width, round(x + 1.14 * w)), min(height, round(y + 1.18 * h)))
+
+    source_box = crop_box(sx, sy, sw, sh, source_image.width, source_image.height)
+    target_box = crop_box(tx, ty, tw, th, target_image.width, target_image.height)
+    target_w, target_h = target_box[2] - target_box[0], target_box[3] - target_box[1]
+    patch = source_image.crop(source_box).resize((target_w, target_h), Image.Resampling.LANCZOS)
+    mask = Image.new("L", (target_w, target_h), 0)
+    draw = ImageDraw.Draw(mask)
+    inset_x, inset_y = max(2, target_w // 18), max(2, target_h // 22)
+    draw.ellipse((inset_x, inset_y, target_w - inset_x, target_h - inset_y), fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(max(4, min(target_w, target_h) // 16)))
+    restored = target_image.copy()
+    restored.paste(patch, (target_box[0], target_box[1]), mask)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    restored.save(out, "PNG", optimize=True)
+    return {"path": str(out), "mode": "approved_source_face_pixels",
+            "source": str(source_path), "source_face": list(source_face),
+            "target_face": list(target_faces[0])}
+
+
 def thumbnail_history(asset_root: Path, exclude: Path | None = None) -> list[dict[str, Any]]:
     """Earlier thumbnails, newest first, including the winning direction and requested style."""
     rows = []
@@ -269,6 +323,7 @@ def thumbnail_history(asset_root: Path, exclude: Path | None = None) -> list[dic
                     "portrait": data.get("portrait") or "",
                     "direction": data.get("winner") or data.get("variant") or "",
                     "style": data.get("style") or DEFAULT_THUMBNAIL_STYLE,
+                    "typography": data.get("typography") or "outline",
                 }))
                 break
     return [row for _, row in sorted(rows, key=lambda r: r[0], reverse=True)]
@@ -536,19 +591,18 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
             video_title=pkg["recommended_title"], destination=pkg.get("destination") or "the destination",
             left_usp=variant["left_usp"], sonia_expression=variant["sonia_expression"], thumbnail_text=variant["text"])
         prompt += style_prompt(style, history, variant_index)
-        # What may change is listed apart from what may not. The identity clause
-        # used to be the tail of a sentence whose verb was "Change the pose,
-        # gesture and expression ... while preserving Sonia's identity, face
-        # geometry, skin tone and age", and an image model reads that as
-        # permission with a caveat: on 2026-10-17 the Qatar thumbnail came back
-        # with a slimmer jaw, a narrower face and poreless skin - recognisably
-        # a beautified version of her rather than her. The prohibitions are
-        # spelled out because that is the drift these models have by default.
+        # Identity is not a creative variable.  Earlier instructions allowed a
+        # new expression/gesture while also asking for exact anatomy; image
+        # models predictably treated the first instruction as permission to
+        # redraw Sonia.  Preserve her source pose here, then bind the final
+        # facial oval to approved source pixels below.
         prompt += ("\n\nVARIANT DIRECTION (mandatory): Composition: "
                    + str(variant.get("composition") or "one unobstructed hero object")
                    + ". Sonia posture: " + str(variant.get("posture") or "close-up")
                    + ". Gesture: " + str(variant.get("gesture") or "point toward the hook")
-                   + ". Only her pose, gesture and expression change for this variant."
+                   + ". Do not change her head angle, facial expression, gaze, pose, hands or gesture from the "
+                     "source portrait. Creative variation belongs in the story object, depth, lighting, layout "
+                     "and typography—not in her anatomy."
                    + "\n\nIDENTITY (do not deviate): this is a real person and the thumbnail goes on "
                      "her own channel, so she must be recognisable to someone who knows her. "
                      "Reproduce the face in the reference portrait exactly: same face shape and "
@@ -561,7 +615,8 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
                      "symmetrical; do NOT give her a different nose, lips or eyes. No beauty filter "
                      "of any kind. She is not a lookalike, a model or an idealised version - she is "
                      "this woman. Keep both hands anatomically correct and keep the gesture clear of text.")
-        sheet = reference_sheet(portrait, Path(thumb["portrait_library"]), out_dir / "reference-sheet.jpg")
+        sheet = reference_sheet(portrait, Path(thumb["portrait_library"]),
+                                out_dir / "reference-sheet.jpg", always_anchor=True)
         if sheet["panels"] == 2:
             prompt += REFERENCE_SHEET_NOTE
     except (RuntimeError, KeyError, IndexError) as exc:
@@ -583,10 +638,13 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
                                                   out_dir / f"variant-{variant_index + 1}-final.png",
                                                   primary=tuple(variant.get("primary_colour", [255, 255, 255])),
                                                   accent=tuple(variant.get("accent_colour", [255, 214, 0])),
-                                                  side=text_side, min_font=hook_min_font)
+                                                  side=text_side, min_font=hook_min_font,
+                                                  vertical_anchor=str(variant.get("vertical_anchor") or "adaptive"),
+                                                  typography=str(variant.get("typography") or "outline"))
             receipt = {"ok": composed["qc"]["ok"], "path": composed["path"], "qc": composed["qc"],
                        "base": str(base), "portrait": str(portrait), "variant": variant["name"], "layout": layout,
-                       "style": style, "text": variant["text"], "source": "local_fallback", "fallback_reason": reason}
+                       "style": style, "typography": composed["qc"]["typography"],
+                       "text": variant["text"], "source": "local_fallback", "fallback_reason": reason}
             (out_dir / "thumbnail-receipt.json").write_text(
                 json.dumps(receipt, indent=2, ensure_ascii=False), encoding="utf-8")
             return receipt
@@ -632,26 +690,36 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
         return approved
     base = out_dir / filename
     shutil.copyfile(found, base)
-    # Identity-safe finish: compact blemish cleanup and natural face balance; never a post-process white glow.
+    # Compact finish first, then replace the synthetic facial oval with actual
+    # approved portrait pixels.  This is the anatomy lock; prompt wording alone
+    # is not accepted as identity evidence.
     try:
         finish = thumbnail_retouch.retouch(base, out_dir / f"variant-{variant_index + 1}-retouched.png")
     except Exception as exc:  # noqa: BLE001 - a retouch problem never costs the thumbnail
         finish = {"path": str(base), "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     try:
+        identity = restore_reference_face(Path(finish["path"]), portrait, Path(thumb["portrait_library"]),
+                                          out_dir / f"variant-{variant_index + 1}-identity-locked.png")
+    except Exception as exc:  # noqa: BLE001 - never ship a face the identity gate could not bind
+        return fallback(f"identity lock failed: {type(exc).__name__}: {str(exc)[:160]}")
+    try:
         # Each variant writes its own file; only the experiment promotes a QC-passed winner to final.png. A failed
         # variant used to overwrite final.png, and the upload gate shipped it (Air France, 2026-10-09).
         hook_min_font = (84 if len(str(variant["text"]).split()) == 1
                          and len(str(variant["text"])) > 8 else thumbnail_compose.MIN_FONT)
-        composed = thumbnail_compose.compose(Path(finish["path"]), variant["text"],
+        composed = thumbnail_compose.compose(Path(identity["path"]), variant["text"],
                                               out_dir / f"variant-{variant_index + 1}-final.png",
                                               primary=tuple(variant.get("primary_colour", [255, 255, 255])),
                                               accent=tuple(variant.get("accent_colour", [255, 214, 0])),
-                                              side=text_side, min_font=hook_min_font)
+                                              side=text_side, min_font=hook_min_font,
+                                              vertical_anchor=str(variant.get("vertical_anchor") or "adaptive"),
+                                              typography=str(variant.get("typography") or "outline"))
     except (ValueError, OSError) as exc:
         return {"ok": False, "stage": "compose", "lao_job": lao_job, "base": str(base), "error": str(exc)}
     receipt = {"ok": composed["qc"]["ok"], "path": composed["path"], "qc": composed["qc"], "base": str(base),
                "lao_job": lao_job, "portrait": str(portrait), "variant": variant["name"], "text": variant["text"],
-               "layout": layout, "style": style, "retouch": finish}
+               "layout": layout, "style": style, "typography": composed["qc"]["typography"],
+               "retouch": finish, "identity_lock": identity}
     approved = valid_editorial_approval(root)
     if approved:
         return approved
@@ -683,10 +751,11 @@ def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: 
     root = package_path.parent.parent
     history = thumbnail_history(root.parent, exclude=root)
     style = requested_thumbnail_style(pkg["thumbnail"])
-    # Sonia's channel identity is now fixed: host on the right, short hook on
-    # the left, and the truthful story USP protected in the centre. Variety
-    # comes from portrait, expression and art direction—not mirrored hierarchy.
-    layout = "right"
+    # Rotate the host side between videos and test both hierarchies inside the
+    # experiment.  The previous hard-coded `right` made every YATRA thumbnail
+    # the same left-hook template regardless of topic.
+    base_layout = next_layout(history)
+    layouts = (base_layout, "left" if base_layout == "right" else "right", base_layout)
     portrait = pick_portrait(Path(pkg["thumbnail"]["portrait_library"]), pkg.get("recommended_title", ""),
                              [h["portrait"] for h in history])
     results = []
@@ -696,7 +765,8 @@ def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: 
             return approved
         result = make_thumbnail(package_path, tool=tool, artifact_roots=artifact_roots,
                                 variant_index=index, poll_seconds=poll_seconds,
-                                max_wait_seconds=max_wait_seconds, sleep=sleep, layout=layout, portrait=portrait)
+                                max_wait_seconds=max_wait_seconds, sleep=sleep,
+                                layout=layouts[index], portrait=portrait)
         if result.get("source") == "editorial_approval":
             return result
         if result.get("ok"):
@@ -715,10 +785,16 @@ def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: 
     # QC-passed candidate; use fallback only when generation produced none.
     if generated:
         eligible = generated
-    # Mechanical scoring used to select the same high-contrast composition repeatedly. Prefer a direction that did
-    # not win either of the last two videos whenever one passed the same QC and source gates.
+    # Mechanical scoring used to select the same high-contrast composition repeatedly. Prefer a direction and a
+    # layout/typography signature that did not win either of the last two videos whenever one passed the same gates.
     recent_directions = {str(row.get("direction") or "") for row in history[:2] if row.get("direction")}
     fresh = [row for row in eligible if str(row.get("variant") or "") not in recent_directions]
+    if fresh:
+        eligible = fresh
+    recent_signatures = {(str(row.get("layout") or ""), str(row.get("typography") or "outline"))
+                         for row in history[:2]}
+    fresh = [row for row in eligible
+             if (str(row.get("layout") or ""), str(row.get("typography") or "outline")) not in recent_signatures]
     if fresh:
         eligible = fresh
     if not eligible:
@@ -726,7 +802,8 @@ def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: 
         stale = root / "thumbnail" / "final.png"
         if stale.is_file():
             stale.replace(stale.with_name("final.rejected.png"))
-        receipt = {"ok": False, "stage": "experiment", "variants": results, "layout": layout, "style": style,
+        receipt = {"ok": False, "stage": "experiment", "variants": results,
+                   "layout": base_layout, "style": style,
                    "portrait": str(portrait), "error": "none of the three thumbnail variants passed QC"}
     else:
         winner = max(eligible, key=lambda r: r["preupload_score"]["score"])
@@ -735,7 +812,9 @@ def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: 
             return approved
         final = root / "thumbnail" / "final.png"
         shutil.copyfile(winner["path"], final)
-        receipt = {"ok": True, "path": str(final), "winner": winner["variant"], "layout": layout, "style": style,
+        receipt = {"ok": True, "path": str(final), "winner": winner["variant"],
+                   "layout": winner.get("layout") or base_layout, "style": style,
+                   "typography": winner.get("typography") or "outline",
                    "portrait": str(portrait),
                    "winner_score": winner["preupload_score"], "variants": results,
                    "selection": "fresh recent direction, then highest transparent pre-upload score; actual CTR requires YouTube Test & Compare"}

@@ -36,14 +36,19 @@ PLANEXIUM_ACCENTS = (
     (190, 150, 255),  # ultraviolet
     ACCENT,
 )
+TYPOGRAPHIES = ("outline", "panel", "minimal")
 
 
-def adaptive_science_accent(base: Path, recent: list[tuple[int, int, int]] | None = None) -> tuple[int, int, int]:
+def adaptive_science_accent(base: Path, recent: list[tuple[int, int, int]] | None = None,
+                            *, side: str = "left") -> tuple[int, int, int]:
     """Choose the most legible accent; hue variety is deliberately secondary."""
     image = Image.open(base).convert("RGB").resize((160, 90), Image.Resampling.LANCZOS)
-    # PLANEXIUM currently sets copy in the left lane. Its real luminance is a
-    # better predictor of phone-size visibility than colour-wheel distance.
-    lane_luminance = ImageStat.Stat(image.crop((0, 0, 84, 90)).convert("L")).median[0] / 255
+    if side not in ("left", "right"):
+        raise ValueError("side must be left or right")
+    lane = image.crop((0, 0, 84, 90)) if side == "left" else image.crop((76, 0, 160, 90))
+    # Measure the lane the actual concept reserved rather than assuming every
+    # science thumbnail puts the hook on the left.
+    lane_luminance = ImageStat.Stat(lane.convert("L")).median[0] / 255
     x = y = weight_sum = 0.0
     for red, green, blue in image.getdata():
         hue, saturation, value = colorsys.rgb_to_hsv(red / 255, green / 255, blue / 255)
@@ -166,12 +171,15 @@ def _low_detail_y(img: Image.Image, block_h: int, side: str,
 def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] = WHITE,
             accent: tuple[int, int, int] = ACCENT, side: str = "left",
             vertical_anchor: str = "bottom", text_zone: float = TEXT_ZONE,
-            min_font: int = MIN_FONT, max_words: int = 3) -> dict[str, Any]:
+            min_font: int = MIN_FONT, max_words: int = 3,
+            typography: str = "outline") -> dict[str, Any]:
     """Set the hook on `side` ('left' when Sonia is on the right, 'right' when she is on the left)."""
     if side not in ("left", "right"):
         raise ValueError("side must be 'left' or 'right'")
     if vertical_anchor not in ("top", "middle", "bottom", "adaptive"):
         raise ValueError("vertical_anchor must be top, middle, bottom or adaptive")
+    if typography not in TYPOGRAPHIES:
+        raise ValueError(f"typography must be one of {', '.join(TYPOGRAPHIES)}")
     if not 0.30 <= text_zone <= 0.52:
         raise ValueError("text_zone must be between 0.30 and 0.52")
     if not 84 <= min_font <= MIN_FONT:
@@ -198,7 +206,9 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
             if condensed is not None:
                 fonts.append(condensed)
         for font in fonts:
-            stroke = max(6, size // 12)
+            stroke = (max(6, size // 12) if typography == "outline"
+                      else max(3, size // 28) if typography == "panel"
+                      else max(2, size // 38))
             lines = _wrap(words, font, draw, stroke, max_text_width)
             if not lines or len(lines) > 3:
                 continue
@@ -232,11 +242,27 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
         placements.append((line, x, y, width))
         y += line_h + int(size * 0.08)
 
+    if typography == "panel":
+        # A restrained editorial card is intentionally unlike the channel's
+        # familiar giant outlined hook.  It stays inside the same measured
+        # safe lane and therefore cannot cover the story object or host.
+        panel = Image.new("RGBA", SIZE, (0, 0, 0, 0))
+        pd = ImageDraw.Draw(panel)
+        x0 = max(18, min(x for _line, x, _y, _width in placements) - 20)
+        x1 = min(SIZE[0] - 18, max(x + width for _line, x, _y, width in placements) + 20)
+        y1 = min(SIZE[1] - 18, placements[-1][2] + line_h + 18)
+        pd.rounded_rectangle((x0, max(18, y0 - 18), x1, y1), radius=22,
+                             fill=(5, 11, 22, 205), outline=(*accent, 230), width=4)
+        img = Image.alpha_composite(img.convert("RGBA"), panel).convert("RGB")
+
     shadow = Image.new("RGBA", SIZE, (0, 0, 0, 0))
     sd = ImageDraw.Draw(shadow)
     for line, x, y, _ in placements:
-        sd.text((x + 8, y + 10), line, font=font, fill=(0, 0, 0, 170), stroke_width=stroke, stroke_fill=(0, 0, 0, 170))
-    img = Image.alpha_composite(img.convert("RGBA"), shadow.filter(ImageFilter.GaussianBlur(9))).convert("RGB")
+        offset = 8 if typography == "outline" else 4
+        sd.text((x + offset, y + offset), line, font=font, fill=(0, 0, 0, 160),
+                stroke_width=stroke, stroke_fill=(0, 0, 0, 160))
+    blur = 9 if typography == "outline" else 5
+    img = Image.alpha_composite(img.convert("RGBA"), shadow.filter(ImageFilter.GaussianBlur(blur))).convert("RGB")
     draw = ImageDraw.Draw(img)
     left_edge, right_edge = SIZE[0], 0
     for line, x, y, width in placements:
@@ -245,6 +271,9 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
             draw.text((cursor, y), token, font=font, fill=colour_for(token), stroke_width=stroke, stroke_fill=OUTLINE)
             cursor += int(draw.textlength(token + " ", font=font))
         left_edge, right_edge = min(left_edge, x - stroke), max(right_edge, x + width + stroke)
+    if typography == "minimal":
+        underline_y = min(SIZE[1] - 18, placements[-1][2] + line_h + 12)
+        draw.rounded_rectangle((left_edge, underline_y, right_edge, underline_y + 8), radius=4, fill=accent)
 
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(out, "PNG", optimize=True)
@@ -263,6 +292,7 @@ def compose(base: Path, text: str, out: Path, *, primary: tuple[int, int, int] =
           "text_clear_of_usp": inside,
           "text_zone": text_zone,
           "vertical_anchor": vertical_anchor,
+          "typography": typography,
           "adaptive_low_detail_anchor": vertical_anchor == "adaptive",
           "text_y": y0,
           "text_lane_edge_energy": detail_energy,
