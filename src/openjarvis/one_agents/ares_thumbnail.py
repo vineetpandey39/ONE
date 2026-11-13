@@ -284,6 +284,17 @@ def place_approved_portrait(generated: Path, portrait: Path, library: Path, out:
         source_face = source_faces[0]
 
     canvas = thumbnail_compose._cover(ImageOps.exif_transpose(Image.open(generated)).convert("RGB"))
+    # Erase the provider's entire reserved host lane even if it ignored the
+    # background-only prompt.  Rebuild that lane from adjacent destination
+    # pixels before the real photo is placed, so no synthetic face, hand or
+    # body can remain around an inset portrait card.
+    host_width = 460
+    host_left = 0 if layout == "left" else thumbnail_compose.SIZE[0] - host_width
+    sample_box = ((host_width, 0, host_width * 2, thumbnail_compose.SIZE[1]) if layout == "left"
+                  else (thumbnail_compose.SIZE[0] - host_width * 2, 0,
+                        thumbnail_compose.SIZE[0] - host_width, thumbnail_compose.SIZE[1]))
+    neutral_lane = canvas.crop(sample_box).filter(ImageFilter.GaussianBlur(16))
+    canvas.paste(neutral_lane, (host_left, 0))
     # Crop around the detected source face without resizing it non-uniformly.
     portrait_crop = _crop_around(source_image, source_face, wide=2.8, up=0.72, down=3.0, height=960)
     mode = max(0, int(variant_index)) % 3
@@ -617,30 +628,18 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
             video_title=pkg["recommended_title"], destination=pkg.get("destination") or "the destination",
             left_usp=variant["left_usp"], sonia_expression=variant["sonia_expression"], thumbnail_text=variant["text"])
         prompt += style_prompt(style, history, variant_index)
-        # Identity is not a creative variable.  Earlier instructions allowed a
-        # new expression/gesture while also asking for exact anatomy; image
-        # models predictably treated the first instruction as permission to
-        # redraw Sonia.  Preserve her source pose here, then bind the final
-        # facial oval to approved source pixels below.
+        # Identity is not a creative variable.  The provider generates only
+        # the destination/story plate; Sonia's approved source photo is placed
+        # deterministically over the reserved host lane below.
         prompt += ("\n\nVARIANT DIRECTION (mandatory): Composition: "
                    + str(variant.get("composition") or "one unobstructed hero object")
                    + ". Sonia posture: " + str(variant.get("posture") or "close-up")
                    + ". Gesture: " + str(variant.get("gesture") or "point toward the hook")
-                   + ". Do not change her head angle, facial expression, gaze, pose, hands or gesture from the "
-                     "source portrait. Creative variation belongs in the story object, depth, lighting, layout "
-                     "and typography—not in her anatomy."
-                   + "\n\nIDENTITY (do not deviate): this is a real person and the thumbnail goes on "
-                     "her own channel, so she must be recognisable to someone who knows her. "
-                     "Reproduce the face in the reference portrait exactly: same face shape and "
-                     "width, same jawline and chin, same nose, same eye shape and spacing, same "
-                     "eyebrows, same hairline, same age, same body shape. Keep her real skin "
-                     "texture, pores and tone - not a rendered or plastic surface. You may softly remove only "
-                     "temporary acne/blemishes; do not erase permanent marks or change facial geometry. "
-                     "Do NOT slim, lift, sculpt or narrow the face or jaw; do NOT globally smooth or "
-                     "airbrush the skin; do NOT make her younger, thinner or more "
-                     "symmetrical; do NOT give her a different nose, lips or eyes. No beauty filter "
-                     "of any kind. She is not a lookalike, a model or an idealised version - she is "
-                     "this woman. Keep both hands anatomically correct and keep the gesture clear of text.")
+                   + ". Creative variation belongs in the story object, depth, lighting, layout and typography."
+                   + "\n\nBACKGROUND-ONLY IDENTITY CONTRACT: Do not draw, regenerate, reinterpret or include "
+                     "Sonia or any other person. Keep the reserved host lane free of people, faces, hands, text "
+                     "and important story proof. The attached approved photo is a placement reference only; its "
+                     "real pixels will be composited after generation. Generate zero anatomy.")
         sheet = reference_sheet(portrait, Path(thumb["portrait_library"]),
                                 out_dir / "reference-sheet.jpg", always_anchor=True)
         if sheet["panels"] == 2:
@@ -716,18 +715,18 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
         return approved
     base = out_dir / filename
     shutil.copyfile(found, base)
-    # Compact finish first, then replace the synthetic facial oval with actual
-    # approved portrait pixels.  This is the anatomy lock; prompt wording alone
-    # is not accepted as identity evidence.
+    # Compact finish first, then cover the reserved host lane with an approved
+    # real portrait crop.  No synthetic face or body survives into the final.
     try:
         finish = thumbnail_retouch.retouch(base, out_dir / f"variant-{variant_index + 1}-retouched.png")
     except Exception as exc:  # noqa: BLE001 - a retouch problem never costs the thumbnail
         finish = {"path": str(base), "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     try:
-        identity = restore_reference_face(Path(finish["path"]), portrait, Path(thumb["portrait_library"]),
-                                          out_dir / f"variant-{variant_index + 1}-identity-locked.png")
-    except Exception as exc:  # noqa: BLE001 - never ship a face the identity gate could not bind
-        return fallback(f"identity lock failed: {type(exc).__name__}: {str(exc)[:160]}")
+        identity = place_approved_portrait(Path(finish["path"]), portrait, Path(thumb["portrait_library"]),
+                                           out_dir / f"variant-{variant_index + 1}-identity-locked.png",
+                                           layout=layout, variant_index=variant_index)
+    except Exception as exc:  # noqa: BLE001 - never ship synthetic anatomy when the source-photo lock failed
+        return fallback(f"source portrait lock failed: {type(exc).__name__}: {str(exc)[:160]}")
     try:
         # Each variant writes its own file; only the experiment promotes a QC-passed winner to final.png. A failed
         # variant used to overwrite final.png, and the upload gate shipped it (Air France, 2026-10-09).
