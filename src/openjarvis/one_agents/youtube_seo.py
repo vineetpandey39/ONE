@@ -63,6 +63,26 @@ def fallback_hashtags(title: str, channel: ChannelProfile = SONIA) -> list[str]:
     return result[:3]
 
 
+def _devotional_subject(record: dict[str, Any] | None, title: str) -> tuple[str, str]:
+    """Return deity-aware Hindi/English wording for shared devotional fallbacks."""
+    haystack = " ".join([title, str((record or {}).get("destination") or ""),
+                         str((record or {}).get("claim_ledger") or "")])
+    subjects = (
+        (r"lakshmi|laxmi|लक्ष्मी", "लक्ष्मी आरती", "Lakshmi Aarti"),
+        (r"krishna|कृष्ण|kanha|कान्हा", "कृष्ण भक्ति", "Krishna devotional"),
+        (r"hanuman|हनुमान|bajrang", "हनुमान भक्ति", "Hanuman devotional"),
+        (r"durga|दुर्गा|mata rani|माता रानी", "माता की आराधना", "Devi devotional"),
+        (r"ganesh|ganesha|गणेश", "गणेश आराधना", "Ganesh devotional"),
+        (r"ram|rama|राम", "राम भक्ति", "Ram devotional"),
+        (r"saraswati|सरस्वती", "सरस्वती वंदना", "Saraswati devotional"),
+        (r"shiv|shiva|mahadev|शिव|महादेव", "शिव आराधना", "Shiva devotional"),
+    )
+    for pattern, hindi, english in subjects:
+        if re.search(pattern, haystack, re.I):
+            return hindi, english
+    return "भक्ति और आराधना", "devotional"
+
+
 def repair_description_hashtags(package: dict[str, Any], channel: ChannelProfile = SONIA) -> dict[str, Any]:
     """Repair only the hashtag line and its audit; preserve every other saved field."""
     description = str(package.get("description") or "")
@@ -424,9 +444,10 @@ def normalize_metadata_strategy(meta: dict, record: dict, packaging: dict, title
         clauses = [c.strip() for c in re.split(r"[.;]", promise) if len(c.strip()) > 18]
         points.extend(_viewer_facing(c, "") for c in clauses)
         if channel.brand == "shloka_by_shloka":
+            _, english_subject = _devotional_subject(record, title)
             points.extend([f"{primary} for morning prayer and meditation",
                            "Clear Hindi devotional lyrics with a steady bhajan rhythm",
-                           "A peaceful Shiva composition for reflection and worship",
+                           f"A peaceful {english_subject} composition for reflection and worship",
                            "Original devotional text reviewed for pronunciation"])
         else:
             points.extend([f"What {primary} means for your trip",
@@ -560,9 +581,10 @@ def metadata_from_model(record: dict, packaging: dict, llm: LLM | None,
     if channel != SONIA:
         fallback["intro"][1] = "Explore the evidence, the key distinctions and the questions still open in this video."
     if channel.brand == "shloka_by_shloka":
+        hindi_subject, _ = _devotional_subject(record, title)
         fallback["intro"] = [
             packaging.get("core_promise") or title,
-            "इस भजन में स्पष्ट हिंदी गायन, शांत शिव आराधना और ध्यान के लिए पूर्ण devotional experience मिलेगा।",
+            f"इस भजन में स्पष्ट हिंदी गायन, {hindi_subject} और ध्यान के लिए पूर्ण devotional experience मिलेगा।",
         ]
     if not llm:
         return fallback, "fallback"
@@ -835,7 +857,8 @@ def build_package(record: dict[str, Any], *, master: Path, plan_path: Path, port
         # The audit (and a viewer deciding whether to watch) needs the payoff before the fold; on 2026-10-13 the
         # model's intro had none, and the Singapore upload was blocked for it.
         if channel.brand == "shloka_by_shloka":
-            opening = (f"{primary_query}: इस भजन में आपको स्पष्ट हिंदी गायन, शांत शिव आराधना और "
+            hindi_subject, _ = _devotional_subject(record, title)
+            opening = (f"{primary_query}: इस भजन में आपको स्पष्ट हिंदी गायन, {hindi_subject} और "
                        f"ध्यान के लिए devotional music मिलेगा। {intro[0]}")
         else:
             opening = (f"{primary_query.capitalize()}: in this video you'll learn what changed and what to check "
