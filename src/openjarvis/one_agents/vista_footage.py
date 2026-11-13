@@ -23,12 +23,20 @@ def title(video):
 
 def matches(video, requirement):
     text = title(video)
-    return geo.contains(text, requirement["place"]) and geo.contains(text, requirement["subject"])
+    if not (geo.contains(text, requirement["place"]) and geo.contains(text, requirement["subject"])):
+        return False
+    if geo.norm(requirement["subject"]) == "airport":
+        place = re.escape(geo.norm(requirement["place"]))
+        # Airline names (e.g. Fly Dubai at Faisalabad airport) are not location.
+        return bool(re.search(rf"\b{place}(?: international| indira gandhi(?: international)?)? airport\b|"
+                              rf"\bairport(?: terminal)?(?: interior)? (?:in|at|of) {place}\b", geo.norm(text)))
+    return True
 
 
 def rendition(video):
     candidates = [r for r in video.get("video_files", []) if r.get("file_type") == "video/mp4"
-                  and r.get("width", 0) >= 1080 and r.get("height", 0) >= 1080]
+                  and min(r.get("width", 0), r.get("height", 0)) >= 720
+                  and max(r.get("width", 0), r.get("height", 0)) >= 1920]
     if not candidates:
         raise ValueError("No adequate source resolution")
     return min(candidates, key=lambda r: r["width"] * r["height"])
