@@ -6,12 +6,17 @@
     "VINEET": {
       "voice": "hm_omega",
       "pitch": 1.0,
-      "speed": 1.05
+      "speed": 1.05,
+      "eleven_voice_id": "TX3LPaxmHKxFdv7VOQHJ",
+      "eleven_speed": 1.05
     },
     "ONE": {
       "voice": "hm_psi",
       "pitch": 1.22,
-      "speed": 1.08
+      "speed": 1.08,
+      "eleven_voice_id": "cgSgspJ2msm6clMCkdW9",
+      "eleven_speed": 1.08,
+      "eleven_pitch": 1.07
     }
   },
   "lines": [

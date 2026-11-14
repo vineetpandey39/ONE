@@ -47,8 +47,9 @@ def synth_elevenlabs(text: str, voice_id: str, speed: float) -> np.ndarray:
     if not key or not voice_id:
         raise SystemExit("elevenlabs needs ELEVENLABS_API_KEY and a voice id per character")
     body = json.dumps({
-        "text": text, "model_id": os.environ.get("ELEVEN_MODEL", "eleven_multilingual_v2"),
-        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75, "style": 0.0,
+        "text": text, "model_id": os.environ.get("ELEVEN_MODEL", "eleven_turbo_v2_5"),
+        **({"language_code": lang} if (lang := os.environ.get("ELEVEN_LANG", "hi")) else {}),
+        "voice_settings": {"stability": 0.45, "similarity_boost": 0.75, "style": 0.2,
                            "use_speaker_boost": True, "speed": speed},
     }).encode()
     req = urllib.request.Request(
