@@ -2,7 +2,7 @@
   "id": "ep02_prompt",
   "title": "Prompt kya hota hai? (No. Simpler.)",
   "board_title": "Prompt kya hai?",
-  "post_caption": "Prompt kya hota hai? 5 saal wala version 👇\n\nAI galat nahi hota. Hum 'kuch le aao' bolte hain.\n\nMera prompt template chahiye? Comment karo PROMPT, DM me bhejta hoon.\nFollow @aibyvineet, roz ek AI concept.\n\n#AI #ChatGPT #PromptEngineering #AIbyVineet #AIHindi",
+  "post_caption": "Prompt kya hota hai? ✍️ AI se sahi answer kaise nikalwaye (Hindi)\n\nAI galat nahi hota. Hum hi \"kuch le aao\" bolte hain. 😅\n\nMummy ne bola \"kuch le aao\", Chhotu chips le aaya. ❌\nPhir bola \"aadha kilo doodh, Sharma ji ki dukaan se, 10 minute me\", ekdum sahi saaman aaya. ✅\n\nYahi prompt hai: jitna clear bologe, utna sahi kaam.\nFormula: KYA chahiye + KAHAN se + KITNA + KAB tak.\n\n👉 Mera ready prompt template chahiye? Comment karo \"PROMPT\", DM me bhej dunga.\n\n💾 Save karo, agli baar ChatGPT use karne se pehle kaam aayega.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#promptengineering #chatgpt #chatgpthindi #aihindi #aitools",
   "characters": {
     "VINEET": {
       "voice": "hm_omega",
@@ -194,5 +194,36 @@
         "type": "follow"
       }
     }
-  ]
+  ],
+  "seo": {
+    "pinned_comment": "📌 \"PROMPT\" comment karo 👇 mera ready-to-use prompt template DM me bhejta hoon.",
+    "alt_text": "Animated Hindi explainer: VINEET asks the AI mascot ONE what a prompt is. ONE shows on a whiteboard that a vague instruction like 'kuch le aao' gets the wrong result (chips), while a clear one like 'half kilo milk from Sharma ji's shop in 10 minutes' gets the right result. Prompt engineering for beginners in Hindi.",
+    "cover_text": [
+      "PROMPT kya hai?",
+      "AI se sahi answer kaise lo"
+    ],
+    "keywords": [
+      "prompt kya hai",
+      "prompt engineering in Hindi",
+      "ChatGPT prompt kaise likhe",
+      "ChatGPT tips Hindi",
+      "AI se sahi answer",
+      "prompt template"
+    ],
+    "youtube": {
+      "title": "Prompt kya hai? ✍️ ChatGPT se sahi answer kaise lo | Prompt Engineering Hindi #shorts",
+      "description": "Prompt kya hota hai, Chhotu wali kahani se sabse simple Hindi me. 'Kuch le aao' bologe to chips milenge; clear bologe to sahi kaam.\nFormula: KYA + KAHAN + KITNA + KAB.\n\nReady prompt template chahiye? Comment karo PROMPT.\nRoz ek AI concept: subscribe karo.\n\n#PromptEngineering #ChatGPT #AIHindi #ChatGPTHindi #Shorts",
+      "tags": [
+        "prompt kya hai",
+        "prompt engineering hindi",
+        "chatgpt prompt kaise likhe",
+        "chatgpt tips hindi",
+        "chatgpt hindi",
+        "ai hindi",
+        "prompt template",
+        "aibyvineet"
+      ]
+    },
+    "file_name": "prompt-kya-hai-chatgpt-hindi.mp4"
+  }
 }

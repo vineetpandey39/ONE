@@ -55,5 +55,22 @@ Output JSON schema (same as scripts/ep01_ai_agent.json):
 }
 ```
 
+Post copy (same JSON, top level `post_caption` + `seo`):
+- `post_caption` (Hinglish, 450–700 chars): line 1 = main search keyword as a
+  question + emoji + "(Hindi)"/"Hindi me" (Instagram search reads captions);
+  then the 1-line contrast, the analogy in 2–3 short lines, one practical
+  takeaway, the comment-keyword CTA ("Comment karo \"<KEYWORD>\", DM me bhej
+  dunga"), a save/share line, "Follow @aibyvineet", and exactly 3–5 niche
+  hashtags (lowercase, topic-specific, no #fyp/#viral spam).
+- `seo.keywords`: 5–6 phrases people actually type ("<topic> kya hai",
+  "<topic> in Hindi", "<topic> for beginners", a vs/comparison phrase).
+- `seo.alt_text`: 1–3 English sentences describing the reel, with the keyword.
+- `seo.cover_text`: ["<TOPIC> kya hai?", "<short promise>"].
+- `seo.pinned_comment`: "📌 \"<KEYWORD>\" comment karo 👇 <lead magnet> DM me bhejta hoon."
+- `seo.youtube`: {"title" ≤ 100 chars ending "#shorts", "description" with the
+  keyword in line 1 and the CTA, "tags": 8–10 search phrases}.
+- `seo.file_name`: keyword slug, e.g. "ai-agent-kya-hai-hindi-explained.mp4".
+Never promise earnings or results the sources do not support.
+
 TOPIC: {TOPIC}
 SOURCES: {SOURCES}
