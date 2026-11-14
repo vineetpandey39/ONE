@@ -24,7 +24,12 @@ const server = http.createServer((req, res) => {
 (async () => {
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const port = server.address().port;
-  const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  // REEL_GPU=1 on a machine with a graphics card (the PC): hardware WebGL, ~1-2 min per reel.
+  // Default is software rendering (SwiftShader) so it also runs on GPU-less cloud boxes.
+  const gpu = process.env.REEL_GPU === '1';
+  const browser = await chromium.launch(gpu
+    ? { headless: true, args: ['--ignore-gpu-blocklist', '--enable-gpu', '--use-angle=default', '--enable-gpu-rasterization'] }
+    : { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const page = await browser.newPage({ viewport: { width: 720, height: 1280 } });
   page.on('console', m => console.log('[page]', m.text()));
   page.on('pageerror', e => { console.error('[page error]', e.message); process.exit(1); });

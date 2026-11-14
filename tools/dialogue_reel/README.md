@@ -56,5 +56,5 @@ Board ops: `write` (id, text, x, y, size, color, at), `strike` (target, at),
 
 - Characters are code-built low-poly models (stay identical every episode); an optional painted window backdrop loads from `assets/backdrop.jpg`.
 - Kokoro voices -> ElevenLabs (VINEET's cloned voice) by replacing `synth()` in build_audio.py.
-- Render runs on CPU (SwiftShader, ~1 s/frame with bloom + depth of field); a GPU machine is much faster.
+- Render: `REEL_GPU=1` uses the graphics card (PC, expected ~1-2 min per reel); without it, software rendering (~1 s/frame, ~20+ min per reel on a 4-core cloud box).
 - Publishing as an Instagram Reel (media_type=REELS) still needs `publish_reel` in the floors `aibyvineet_publish` module.
