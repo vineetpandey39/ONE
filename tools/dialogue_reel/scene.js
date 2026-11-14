@@ -445,7 +445,7 @@ function placeCamera(t) {
 }
 
 // ---------- character behaviour (stateful, frames rendered in order) ----------
-let boyYaw = 0.0, boyPitch = 0, oneYaw = 0.5, stickAim = new THREE.Vector3(), nodSm = 0, mB = 0, mO = 0;
+let boyYaw = 0.0, boyPitch = 0, oneYaw = 0.5, stickAim = new THREE.Vector3(), nodSm = 0, mB = 0, mO = 0, oneEnv = 0;
 // Natural blinking: irregular gaps (2-5 s), smooth close/open, sometimes a double blink.
 function blinkTrack(seed, total) {
   let s = seed; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
@@ -468,6 +468,7 @@ function animate(t, f) {
   const speaker = l ? l.who : null;
   // mouth/voice envelopes smoothed a little so no single-frame pops
   mB += ((TL.amp.VINEET?.[f] || 0) - mB) * 0.6; mO += ((TL.amp.ONE?.[f] || 0) - mO) * 0.6;
+  oneEnv += ((TL.amp.ONE?.[f] || 0) - oneEnv) * 0.25;   // slower envelope for ONE's body/glow (mouth keeps mO)
   const aB = mB, aO = mO;
   const shB = TL.shape?.VINEET?.[f] ?? 0.5, shO = TL.shape?.ONE?.[f] ?? 0.5;
   const writing = ops.find(o => t >= o.t0 - 0.1 && t <= o.t1 + 0.2);
@@ -506,10 +507,11 @@ function animate(t, f) {
 
   // ONE: bounce while talking, glow with voice, face VINEET
   const fl = lines.find(x => x.shot === 'follow');
-  const jump = fl && t > fl.start ? Math.abs(Math.sin((t - fl.start) * 7)) * 0.05 * Math.max(0, 1 - (t - fl.start) / 3) : 0;
-  const bounce = 0.012 * Math.sin(t * 2.2) + aO * 0.05 + jump;
+  // smooth hops (sin^2: no hard bounce at the landing, so no one-frame snap)
+  const jump = fl && t > fl.start ? Math.pow(Math.sin((t - fl.start) * 3.6), 2) * 0.05 * Math.max(0, 1 - (t - fl.start) / 3) : 0;
+  const bounce = 0.012 * Math.sin(t * 2.2) + oneEnv * 0.03 + jump;
   oneBody.position.y = bounce;
-  oneBody.scale.set(1 + aO * 0.06, 1 - aO * 0.05, 1 + aO * 0.06);
+  oneBody.scale.set(1 + oneEnv * 0.04, 1 - oneEnv * 0.035, 1 + oneEnv * 0.04);
   const toBoy = one.worldToLocal(boyHeadW());
   let wantOne = Math.atan2(toBoy.x, toBoy.z) * 0.55;
   if (speaker === 'ONE' && !writing) wantOne = 0.35;
@@ -519,11 +521,11 @@ function animate(t, f) {
   const ob = blink('one', t);
   oEyeL.scale.y = oEyeR.scale.y = ob * (happy ? 0.38 : 1);
   oEyeL.rotation.z = happy ? 0.35 : 0; oEyeR.rotation.z = happy ? -0.35 : 0;
-  bulbMat.emissiveIntensity = 1.0 + aO * 3;
-  oneGlow.intensity = aO * 1.2;
+  bulbMat.emissiveIntensity = 1.0 + oneEnv * 2;
+  oneGlow.intensity = oneEnv * 1.0;
   bulb.position.y = 0.55 + 0.01 * Math.sin(t * 6);
   oneMouth.scale.set(0.8 + shO * 0.7 + (happy ? 0.4 : 0), 1 + aO * 3.4, 1);
-  armOne.rotation.z = -0.5 - (speaker === 'ONE' ? 0.5 * aO + 0.15 * Math.sin(t * 5) : 0);
+  armOne.rotation.z = -0.5 - (speaker === 'ONE' ? 0.5 * oneEnv + 0.15 * Math.sin(t * 5) : 0);
 
   // pointer stick aims at the pen while writing, else rests diagonally up-left
   const aim = writing ? boardToWorld(writing.penX, writing.y - 10)
