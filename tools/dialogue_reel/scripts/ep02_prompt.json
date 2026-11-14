@@ -1,0 +1,91 @@
+{
+  "id": "ep02_prompt",
+  "title": "Prompt kya hota hai? (No. Simpler.)",
+  "board_title": "Prompt kya hai?",
+  "post_caption": "Prompt kya hota hai? 5 saal wala version 👇\n\nAI galat nahi hota. Hum 'kuch le aao' bolte hain.\n\nMera prompt template chahiye? Comment karo PROMPT.\n\n#AI #ChatGPT #PromptEngineering #AIbyVineet #AIHindi",
+  "characters": {
+    "VINEET": {"voice": "hm_omega", "pitch": 1.0, "speed": 1.05},
+    "ONE": {"voice": "hm_psi", "pitch": 1.22, "speed": 1.08}
+  },
+  "lines": [
+    {
+      "who": "VINEET", "shot": "hook",
+      "caption": "ONE. Prompt kya hota hai? 5 saal wala version.",
+      "tts": "वन. प्रॉम्प्ट क्या होता है? पाँच साल वाला वर्ज़न."
+    },
+    {
+      "who": "ONE", "shot": "explain",
+      "caption": "Prompt ek natural language instruction hai jo model ke output ko condition karta hai.",
+      "tts": "प्रॉम्प्ट एक नैचुरल लैंग्वेज इंस्ट्रक्शन है, जो मॉडल के आउटपुट को कंडीशन करता है.",
+      "board": [
+        {"op": "write", "id": "a1", "text": "natural language instruction", "x": 60, "y": 190, "size": 40, "color": "#2b3a8c", "at": 0.2},
+        {"op": "write", "id": "a2", "text": "output condition", "x": 640, "y": 190, "size": 40, "color": "#2b3a8c", "at": 0.65}
+      ]
+    },
+    {
+      "who": "VINEET", "shot": "simpler",
+      "caption": "Nahi. Aur simple.",
+      "tts": "नहीं. और सिंपल.",
+      "board": [
+        {"op": "strike", "target": "a1", "at": 0.3},
+        {"op": "strike", "target": "a2", "at": 0.5}
+      ]
+    },
+    {
+      "who": "ONE", "shot": "explain",
+      "caption": "Theek hai. Prompt matlab AI ko diya gaya kaam ka message.",
+      "tts": "ठीक है. प्रॉम्प्ट मतलब, ए आई को दिया गया काम का मैसेज.",
+      "board": [
+        {"op": "write", "id": "b1", "text": "AI ko kaam ka message", "x": 60, "y": 275, "size": 44, "color": "#1d6b3a", "at": 0.35}
+      ]
+    },
+    {
+      "who": "VINEET", "shot": "simpler",
+      "caption": "Aur simple. Chhotu wali story se.",
+      "tts": "और सिंपल. छोटू वाली स्टोरी से.",
+      "board": [
+        {"op": "strike", "target": "b1", "at": 0.35}
+      ]
+    },
+    {
+      "who": "ONE", "shot": "story",
+      "caption": "Mummy ne kaha, kuch le aao. Chhotu chips le aaya.",
+      "tts": "मम्मी ने कहा, कुछ ले आओ. छोटू चिप्स ले आया.",
+      "board": [
+        {"op": "write", "id": "c1", "text": "\"Kuch le aao\" → Chips ✗", "x": 60, "y": 370, "size": 46, "color": "#b3261e", "at": 0.25}
+      ]
+    },
+    {
+      "who": "ONE", "shot": "story",
+      "caption": "Phir kaha, aadha kilo doodh, Sharma ji ki dukaan se, 10 minute me. Chhotu ekdum sahi le aaya.",
+      "tts": "फिर कहा, आधा किलो दूध, शर्मा जी की दुकान से, दस मिनट में. छोटू एकदम सही ले आया.",
+      "board": [
+        {"op": "write", "id": "c2", "text": "\"1/2 kg doodh, Sharma ji, 10 min\" → ✓", "x": 60, "y": 450, "size": 42, "color": "#1d6b3a", "at": 0.3}
+      ]
+    },
+    {
+      "who": "ONE", "shot": "reveal",
+      "caption": "Mummy ki baat hi prompt hai. Jitna clear bologe, utna sahi kaam.",
+      "tts": "मम्मी की बात ही प्रॉम्प्ट है. जितना क्लियर बोलोगे, उतना सही काम.",
+      "board": [
+        {"op": "write", "id": "d1", "text": "Clear prompt = Sahi kaam", "x": 170, "y": 565, "size": 60, "color": "#b3261e", "at": 0.2},
+        {"op": "circle", "target": "d1", "at": 0.65}
+      ]
+    },
+    {
+      "who": "VINEET", "shot": "realize",
+      "caption": "Matlab AI galat nahi tha... main hi 'kuch le aao' bol raha tha?",
+      "tts": "मतलब ए आई गलत नहीं था... मैं ही, कुछ ले आओ, बोल रहा था?"
+    },
+    {
+      "who": "ONE", "shot": "payoff",
+      "caption": "Bilkul. Ab se Mummy ki tarah bolna.",
+      "tts": "बिल्कुल. अब से मम्मी की तरह बोलना."
+    },
+    {
+      "who": "VINEET", "shot": "cta",
+      "caption": "Mera prompt template chahiye? Comment karo PROMPT.",
+      "tts": "मेरा प्रॉम्प्ट टेम्पलेट चाहिए? कमेंट करो, प्रॉम्प्ट."
+    }
+  ]
+}

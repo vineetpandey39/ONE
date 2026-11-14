@@ -1,7 +1,12 @@
 // Dialogue reel renderer: low-poly classroom + auto-director camera.
 // Placeholder characters (VINEET + ONE mascot) built from primitives; the
 // final look swaps in real models, while timeline/director/board stay as-is.
-import * as THREE from './node_modules/three/build/three.module.js';
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 const W = 720, H = 1280;
 const params = new URLSearchParams(location.search);
@@ -32,6 +37,13 @@ const cx = comp.getContext('2d');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#1c2438');
 const camera = new THREE.PerspectiveCamera(55, W / H, 0.05, 60);
+const composer = new EffectComposer(renderer);
+composer.setPixelRatio(1); composer.setSize(W, H);
+composer.addPass(new RenderPass(scene, camera));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(W, H), 0.4, 0.5, 0.93));
+const bokeh = new BokehPass(scene, camera, { focus: 3, aperture: 0.002, maxblur: 0.009 });
+composer.addPass(bokeh);
+composer.addPass(new OutputPass());
 
 const flat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.85, metalness: 0, ...extra });
 function mesh(geo, mat, x = 0, y = 0, z = 0, parent = scene) {
@@ -83,6 +95,17 @@ const skyC = document.createElement('canvas'); skyC.width = 512; skyC.height = 5
 }
 const skyTex = new THREE.CanvasTexture(skyC); skyTex.colorSpace = THREE.SRGBColorSpace;
 const sky = new THREE.Mesh(new THREE.PlaneGeometry(26, 14), new THREE.MeshBasicMaterial({ map: skyTex }));
+// Optional painted backdrop (e.g. a Leonardo/ChatGPT night-city image): assets/backdrop.jpg
+{
+  const url = params.get('backdrop') || 'assets/backdrop.jpg';
+  const ok = await fetch(url, { method: 'HEAD' }).then(r => r.ok).catch(() => false);
+  if (ok) {
+    const tex = await new THREE.TextureLoader().loadAsync(url);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    sky.material.map = tex; sky.material.needsUpdate = true;
+    sky.userData.painted = true;
+  }
+}
 sky.position.set(0, 4, -12); scene.add(sky);
 function windowTex(seed) {
   const c = document.createElement('canvas'); c.width = 64; c.height = 128;
@@ -94,7 +117,7 @@ function windowTex(seed) {
   }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
-for (let i = 0; i < 12; i++) {
+for (let i = 0; i < (sky.userData.painted ? 0 : 12); i++) {
   const h = 2 + ((i * 37) % 9) * 0.6, w = 1.2 + ((i * 13) % 5) * 0.3;
   const b = new THREE.Mesh(box(w, h, 1), new THREE.MeshBasicMaterial({ map: windowTex(i + 3) }));
   b.position.set(-8 + i * 1.5, h / 2 - 0.5, -9 - (i % 3)); scene.add(b);
@@ -152,60 +175,90 @@ mesh(box(0.6, 0.7, 0.07), flat('#2c6b6b'), 1.42, 0.85, -1.15).rotation.y = -0.6;
 for (const [dx, dz] of [[-0.25, -0.22], [0.25, -0.22], [-0.25, 0.22], [0.25, 0.22]])
   mesh(box(0.05, 0.47, 0.05), flat('#1f4a4a'), 1.2 + dx, 0.24, -0.95 + dz);
 
-// ---------- VINEET (placeholder low-poly boy) ----------
+// ---------- VINEET (low-poly boy: hoodie, headphones round the neck, quiff) ----------
 const boy = new THREE.Group();
 boy.position.set(1.2, 0, -0.95);
 boy.rotation.y = -0.95; // faces the board/ONE (towards -x)
 scene.add(boy);
-const hoodie = flat('#2f7fbf');
-const torso = mesh(new THREE.CylinderGeometry(0.25, 0.31, 0.62, 7), hoodie, 0, 0.86, 0, boy);
-mesh(new THREE.TorusGeometry(0.17, 0.06, 5, 8), hoodie, 0, 1.14, -0.06, boy).rotation.x = Math.PI / 2.4;
-mesh(box(0.012, 0.16, 0.012), flat('#f3f1ea'), -0.06, 1.0, 0.27, boy);
-mesh(box(0.012, 0.16, 0.012), flat('#f3f1ea'), 0.06, 1.0, 0.27, boy);
-const armL = mesh(box(0.13, 0.13, 0.48), hoodie, -0.22, 0.88, 0.22, boy);
-const armR = mesh(box(0.13, 0.13, 0.48), hoodie, 0.22, 0.88, 0.22, boy);
-mesh(box(0.42, 0.16, 0.45), flat('#2e3550'), 0, 0.6, 0.12, boy); // lap
+const hoodie = flat('#2f7fbf'), hoodieDark = flat('#24679c'), skin = flat('#c68a5e'), jeans = flat('#2e3550');
+const torso = mesh(new THREE.CylinderGeometry(0.24, 0.31, 0.62, 8), hoodie, 0, 0.86, 0, boy);
+mesh(new THREE.TorusGeometry(0.19, 0.075, 5, 10, Math.PI), hoodieDark, 0, 1.1, -0.1, boy).rotation.set(-1.0, 0, 0); // hood
+mesh(box(0.012, 0.16, 0.012), flat('#f3f1ea'), -0.06, 1.0, 0.255, boy);
+mesh(box(0.012, 0.16, 0.012), flat('#f3f1ea'), 0.06, 1.0, 0.255, boy);
+mesh(box(0.3, 0.12, 0.02), hoodieDark, 0, 0.72, 0.28, boy); // pocket
+// headphones resting on the neck
+const hpMat = flat('#1d1f27'), hpAccent = flat('#ff9a1f');
+const hpBand = mesh(new THREE.TorusGeometry(0.15, 0.022, 5, 12, Math.PI), hpMat, 0, 1.12, 0.0, boy);
+hpBand.rotation.set(-1.25, 0, 0);
+for (const sx of [-1, 1]) {
+  const cup = mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.05, 8), hpMat, sx * 0.165, 1.1, 0.07, boy);
+  cup.rotation.z = Math.PI / 2;
+  const cap = mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.012, 8), hpAccent, sx * 0.196, 1.1, 0.07, boy);
+  cap.rotation.z = Math.PI / 2;
+}
+const armL = mesh(box(0.13, 0.13, 0.46), hoodie, -0.22, 0.88, 0.2, boy);
+const armR = mesh(box(0.13, 0.13, 0.46), hoodie, 0.22, 0.88, 0.2, boy);
+mesh(box(0.1, 0.07, 0.11), skin, 0, -0.01, 0.27, armL);
+mesh(box(0.1, 0.07, 0.11), skin, 0, -0.01, 0.27, armR);
+mesh(box(0.42, 0.16, 0.45), jeans, 0, 0.6, 0.12, boy); // lap
+for (const sx of [-1, 1]) {
+  mesh(box(0.15, 0.48, 0.15), jeans, sx * 0.11, 0.3, 0.32, boy);
+  mesh(box(0.16, 0.08, 0.24), flat('#f3f1ea'), sx * 0.11, 0.04, 0.36, boy);
+}
 const headPivot = new THREE.Group(); headPivot.position.set(0, 1.22, 0); boy.add(headPivot);
-const skin = flat('#c68a5e');
-const head = mesh(new THREE.IcosahedronGeometry(0.25, 1), skin, 0, 0.22, 0, headPivot);
-head.scale.set(1, 1.08, 1);
-mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.12, 6), skin, 0, 0.0, 0, headPivot);
+mesh(new THREE.CylinderGeometry(0.075, 0.085, 0.14, 7), skin, 0, 0.0, 0, headPivot);
+const head = mesh(new THREE.SphereGeometry(0.255, 9, 7), skin, 0, 0.23, 0, headPivot);
+head.scale.set(1, 1.1, 0.98);
 const hairMat = flat('#1a1310');
-const hair = mesh(new THREE.SphereGeometry(0.275, 8, 5, 0, Math.PI * 2, 0, Math.PI * 0.42), hairMat, 0, 0.255, -0.015, headPivot);
-hair.scale.set(1.0, 1.1, 1.02); hair.rotation.x = -0.32;
-mesh(box(0.34, 0.06, 0.1), hairMat, 0.03, 0.41, 0.17, headPivot).rotation.z = -0.15;
-mesh(box(0.08, 0.16, 0.12), hairMat, -0.24, 0.27, 0.0, headPivot);
-mesh(box(0.08, 0.16, 0.12), hairMat, 0.24, 0.27, 0.0, headPivot);
+const hair = mesh(new THREE.SphereGeometry(0.268, 9, 5, 0, Math.PI * 2, 0, Math.PI * 0.45), hairMat, 0, 0.255, -0.02, headPivot);
+hair.scale.set(1.0, 1.12, 1.03); hair.rotation.x = -0.3;
+[[-0.09, 0.45, 0.12, 0.25], [0.02, 0.475, 0.14, -0.05], [0.11, 0.455, 0.11, -0.3]].forEach(([x, y, z, rz]) => {
+  const q = mesh(box(0.14, 0.09, 0.14), hairMat, x, y, z, headPivot); q.rotation.set(-0.45, 0.1, rz);
+});
+for (const sx of [-1, 1]) {
+  mesh(box(0.05, 0.13, 0.1), hairMat, sx * 0.235, 0.29, 0.02, headPivot);
+  mesh(box(0.03, 0.07, 0.06), skin, sx * 0.262, 0.22, 0, headPivot); // ears
+}
 const ink = new THREE.MeshBasicMaterial({ color: '#15131a' });
-const eyeL = mesh(box(0.04, 0.06, 0.02), ink, -0.085, 0.25, 0.235, headPivot);
-const eyeR = mesh(box(0.04, 0.06, 0.02), ink, 0.085, 0.25, 0.235, headPivot);
-const browL = mesh(box(0.08, 0.016, 0.02), ink, -0.088, 0.325, 0.232, headPivot);
-const browR = mesh(box(0.08, 0.016, 0.02), ink, 0.088, 0.325, 0.232, headPivot);
-mesh(new THREE.ConeGeometry(0.025, 0.06, 4), flat('#b0734c'), 0, 0.19, 0.255, headPivot).rotation.x = Math.PI / 2;
-const mouth = mesh(box(0.08, 0.018, 0.02), new THREE.MeshBasicMaterial({ color: '#4a1c1c' }), 0, 0.105, 0.232, headPivot);
-mesh(box(0.02, 0.05, 0.05), skin, -0.255, 0.22, 0, headPivot);
-mesh(box(0.02, 0.05, 0.05), skin, 0.255, 0.22, 0, headPivot);
+const shine = new THREE.MeshBasicMaterial({ color: '#ffffff' });
+const eyeL = mesh(box(0.045, 0.068, 0.02), ink, -0.085, 0.245, 0.238, headPivot);
+const eyeR = mesh(box(0.045, 0.068, 0.02), ink, 0.085, 0.245, 0.238, headPivot);
+mesh(box(0.014, 0.014, 0.01), shine, 0.01, 0.017, 0.011, eyeL);
+mesh(box(0.014, 0.014, 0.01), shine, 0.01, 0.017, 0.011, eyeR);
+const browL = mesh(box(0.09, 0.022, 0.02), ink, -0.088, 0.325, 0.232, headPivot);
+const browR = mesh(box(0.09, 0.022, 0.02), ink, 0.088, 0.325, 0.232, headPivot);
+browL.rotation.z = 0.08; browR.rotation.z = -0.08;
+mesh(new THREE.ConeGeometry(0.026, 0.065, 4), flat('#b0734c'), 0, 0.19, 0.262, headPivot).rotation.x = Math.PI / 2;
+const mouth = mesh(box(0.08, 0.018, 0.02), new THREE.MeshBasicMaterial({ color: '#4a1c1c' }), 0, 0.105, 0.236, headPivot);
 
-// ---------- ONE (placeholder mascot: teal low-poly orb + antenna bulb) ----------
+// ---------- ONE (original mascot: teal low-poly orb, dark face visor, cyan LED eyes, antenna bulb) ----------
 const one = new THREE.Group();
 one.position.set(-0.95, STACK_TOP, -0.45);
 scene.add(one);
 const oneBody = new THREE.Group(); one.add(oneBody);
-const tealMat = flat('#2bb3a3', { emissive: '#0c3b36', emissiveIntensity: 0.6 });
+const tealMat = flat('#2bb3a3', { emissive: '#0c3b36', emissiveIntensity: 0.5 });
 const orb = mesh(new THREE.IcosahedronGeometry(0.2, 1), tealMat, 0, 0.21, 0, oneBody);
 orb.scale.set(1.08, 0.95, 1);
+const visor = mesh(new THREE.SphereGeometry(0.205, 12, 6, Math.PI / 2 - 0.8, 1.6, 1.0, 0.95),
+  new THREE.MeshStandardMaterial({ color: '#0e1a2e', roughness: 0.25, metalness: 0.2, flatShading: true }), 0, 0.21, 0.012, oneBody);
+visor.scale.set(1.08, 0.95, 1);
+visor.castShadow = false;
 mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.14, 5), flat('#1b6f66'), 0, 0.46, 0, oneBody);
 const bulbMat = new THREE.MeshStandardMaterial({ color: '#ffb547', emissive: '#ff9a1f', emissiveIntensity: 1.2, flatShading: true });
 const bulb = mesh(new THREE.IcosahedronGeometry(0.04, 0), bulbMat, 0, 0.55, 0, oneBody);
 const footMat = flat('#1f8f83');
 mesh(new THREE.IcosahedronGeometry(0.06, 0), footMat, -0.08, 0.03, 0.05, one).scale.set(1.2, 0.6, 1.3);
 mesh(new THREE.IcosahedronGeometry(0.06, 0), footMat, 0.08, 0.03, 0.05, one).scale.set(1.2, 0.6, 1.3);
-const oneEyeMat = new THREE.MeshBasicMaterial({ color: '#10213a' });
-const oEyeL = mesh(box(0.035, 0.085, 0.02), oneEyeMat, -0.06, 0.24, 0.205, oneBody);
-const oEyeR = mesh(box(0.035, 0.085, 0.02), oneEyeMat, 0.06, 0.24, 0.205, oneBody);
+const led = new THREE.MeshBasicMaterial({ color: '#8ffcff' });
+const oEyeL = mesh(box(0.038, 0.07, 0.02), led, -0.062, 0.245, 0.222, oneBody);
+const oEyeR = mesh(box(0.038, 0.07, 0.02), led, 0.062, 0.245, 0.222, oneBody);
+const oneMouth = mesh(box(0.05, 0.012, 0.02), led, 0, 0.178, 0.219, oneBody);
+const armOne = mesh(new THREE.CapsuleGeometry(0.025, 0.08, 3, 6), tealMat, -0.2, 0.16, 0.03, oneBody);
+armOne.rotation.z = -0.5;
 const oneGlow = new THREE.PointLight('#5ff2df', 0.0, 1.2); oneGlow.position.set(0, 0.25, 0.3); oneBody.add(oneGlow);
-// pointer stick, pivoting at ONE's side
-const stickPivot = new THREE.Group(); stickPivot.position.set(0.17, 0.2, 0.02); one.add(stickPivot);
+// pointer stick, held in ONE's right hand
+const stickPivot = new THREE.Group(); stickPivot.position.set(0.19, 0.18, 0.03); one.add(stickPivot);
+mesh(new THREE.CapsuleGeometry(0.028, 0.05, 3, 6), tealMat, 0, 0.0, 0, stickPivot);
 const stick = mesh(new THREE.CylinderGeometry(0.008, 0.012, 1.0, 5), flat('#f1e3b8'), 0, 0.5, 0, stickPivot);
 stick.castShadow = false;
 
@@ -276,9 +329,9 @@ const oneW = () => one.localToWorld(P(0, 0.25, 0));
 const SHOTS = {
   WIDE: () => ({ pos: P(0.2, 2.05, 4.2), tgt: P(0.0, 1.55, -1.6), fov: 56 }),
   BOY_MED: () => { const h = boyHeadW(); return { pos: h.clone().add(P(-1.75, 0.15, 1.0)), tgt: h.clone().add(P(0, -0.22, 0)), fov: 42 }; },
-  BOY_CU: () => { const h = boyHeadW(); return { pos: h.clone().add(P(-1.2, 0.05, 0.62)), tgt: h.clone().add(P(0, -0.08, 0)), fov: 38 }; },
-  BOY_PUNCH: () => { const h = boyHeadW(); return { pos: h.clone().add(P(-1.1, 0.03, 0.5)), tgt: h.clone().add(P(0, -0.05, 0)), fov: 36 }; },
-  BOY_CAM: () => { const h = boyHeadW(); return { pos: h.clone().add(P(-0.55, 0.05, 1.25)), tgt: h.clone().add(P(0, -0.12, 0)), fov: 40 }; },
+  BOY_CU: () => { const h = boyHeadW(); return { pos: h.clone().add(P(-1.55, 0.08, 0.85)), tgt: h.clone().add(P(0, -0.13, 0)), fov: 38 }; },
+  BOY_PUNCH: () => { const h = boyHeadW(); return { pos: h.clone().add(P(-1.3, 0.04, 0.62)), tgt: h.clone().add(P(0, -0.08, 0)), fov: 36 }; },
+  BOY_CAM: () => { const h = boyHeadW(); return { pos: h.clone().add(P(-0.75, 0.08, 1.6)), tgt: h.clone().add(P(0, -0.18, 0)), fov: 40 }; },
   ONE_CU: () => { const o = oneW(); return { pos: o.clone().add(P(0.5, 0.12, 1.05)), tgt: o.clone().add(P(0, 0.02, 0)), fov: 38 }; },
   ONE_MED: () => { const o = oneW(); return { pos: o.clone().add(P(0.9, 0.35, 1.7)), tgt: o.clone().add(P(0.15, 0.25, -0.4)), fov: 44 }; },
   OTS: () => ({ pos: P(1.75, 1.85, 0.35), tgt: P(-0.75, 1.55, -1.7), fov: 50 }),
@@ -341,6 +394,7 @@ function shotPose(kf, t) {
 }
 const lerpPose = (a, b, x) => ({ pos: a.pos.clone().lerp(b.pos, x), tgt: a.tgt.clone().lerp(b.tgt, x), fov: a.fov + (b.fov - a.fov) * x });
 
+let camFocus = 3;
 function placeCamera(t) {
   let i = 0;
   while (i + 1 < KF.length && KF[i + 1].t <= t) i++;
@@ -356,6 +410,7 @@ function placeCamera(t) {
   camera.lookAt(pose.tgt.clone().add(off.multiplyScalar(0.5)));
   camera.fov = pose.fov * (1 - shake * 0.03);
   camera.updateProjectionMatrix();
+  camFocus = camera.position.distanceTo(pose.tgt);
 }
 
 // ---------- character behaviour (stateful, frames rendered in order) ----------
@@ -402,6 +457,8 @@ function animate(t, f) {
   bulbMat.emissiveIntensity = 1.0 + aO * 3;
   oneGlow.intensity = aO * 2.5;
   bulb.position.y = 0.55 + 0.01 * Math.sin(t * 6);
+  oneMouth.scale.set(1 + aO * 0.9, 1 + aO * 3.2, 1);
+  armOne.rotation.z = -0.5 - (speaker === 'ONE' ? 0.5 * aO + 0.15 * Math.sin(t * 5) : 0);
 
   // pointer stick aims at the pen while writing, else rests diagonally up-left
   const aim = writing ? boardToWorld(writing.penX, writing.y - 10)
@@ -479,7 +536,9 @@ window.renderFrame = (f, fmt = 'image/jpeg') => {
   drawBoard(t);
   scene.updateMatrixWorld(true);
   placeCamera(t);
-  renderer.render(scene, camera);
+  bokeh.uniforms.focus.value = camFocus;
+  bokeh.uniforms.aperture.value = 0.0022 * Math.min(1.6, 3.2 / camFocus);
+  composer.render();
   cx.drawImage(renderer.domElement, 0, 0);
   drawOverlay(t);
   return comp.toDataURL(fmt, 0.9);

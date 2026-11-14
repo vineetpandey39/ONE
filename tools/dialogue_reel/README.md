@@ -16,10 +16,23 @@ scripts/<ep>.json  ->  build_audio.py  ->  out/<ep>/audio.wav + timeline.json
 ```bash
 npm install
 pip install kokoro-onnx soundfile          # needs kokoro.int8.onnx + voices.bin in KOKORO_DIR
-python3 build_audio.py scripts/ep01_ai_agent.json out/ep01 $KOKORO_DIR
-node render.js out/ep01                    # full reel, ~8 min on CPU
-node render.js out/ep01 --stills 0,300,900 # quick look at chosen frames
+
+# one command (validates the script, builds audio, renders, writes caption.txt)
+python3 make_reel.py scripts/ep02_prompt.json --kokoro-dir $KOKORO_DIR
+
+# on the PC: ElevenLabs voices + Envato music/SFX
+ELEVENLABS_API_KEY=... ELEVEN_VOICE_VINEET=... ELEVEN_VOICE_ONE=... \
+  python3 make_reel.py scripts/ep02_prompt.json --tts elevenlabs \
+  --music assets/music/track.mp3 --sfx-dir assets/sfx
+
+# step by step / quick look
+python3 build_audio.py scripts/ep01_ai_agent.json out/ep01 --kokoro-dir $KOKORO_DIR
+node render.js out/ep01 --stills 0,300,900
 ```
+
+New episodes: `prompts/dialogue_writer.md` is the writer prompt for ChatGPT /
+Claude / the local model; its JSON output goes in `scripts/`.
+Asset prompts for Leonardo / ChatGPT / Envato / ElevenLabs: `prompts/asset_prompts.md`.
 
 ## Script format
 
@@ -41,7 +54,7 @@ Board ops: `write` (id, text, x, y, size, color, at), `strike` (target, at),
 
 ## Placeholders to swap later
 
-- Characters and set are primitive low-poly placeholders -> real models (GLB) of the final VINEET and ONE.
+- Characters are code-built low-poly models (stay identical every episode); an optional painted window backdrop loads from `assets/backdrop.jpg`.
 - Kokoro voices -> ElevenLabs (VINEET's cloned voice) by replacing `synth()` in build_audio.py.
-- Render runs on CPU (SwiftShader); a GPU machine renders several times faster.
+- Render runs on CPU (SwiftShader, ~1 s/frame with bloom + depth of field); a GPU machine is much faster.
 - Publishing as an Instagram Reel (media_type=REELS) still needs `publish_reel` in the floors `aibyvineet_publish` module.

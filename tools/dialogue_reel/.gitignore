@@ -1,2 +1,6 @@
 node_modules/
 out/
+assets/**/*.mp3
+assets/**/*.wav
+assets/*.jpg
+assets/*.png

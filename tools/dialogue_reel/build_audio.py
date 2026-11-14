@@ -1,15 +1,24 @@
 """Script JSON -> voice lines, SFX, music bed, and a frame-accurate timeline.
 
-Usage: python3 build_audio.py scripts/ep01_ai_agent.json out_dir [kokoro_dir]
+Usage:
+  python3 build_audio.py scripts/ep01_ai_agent.json out/ep01 --kokoro-dir DIR
+  python3 build_audio.py scripts/ep01_ai_agent.json out/ep01 --tts elevenlabs \
+      --music assets/music/lofi.mp3 --sfx-dir assets/sfx
 
-Prototype voices come from Kokoro (free, local). Swapping in ElevenLabs later
-only changes ``synth``; everything downstream reads timeline.json.
+Voices: ``kokoro`` (free, local, default) or ``elevenlabs`` (ELEVENLABS_API_KEY
+plus a voice id per character: ``eleven_voice_id`` in the script, or the
+ELEVEN_VOICE_<WHO> env var, e.g. ELEVEN_VOICE_VINEET for the cloned voice).
+Music/SFX: any file ffmpeg reads (Envato downloads as-is). ``--sfx-dir`` may hold
+whoosh.*, pop.* -- each one found replaces the synthetic version.
+Everything downstream reads timeline.json, so the renderer never changes.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
+import urllib.request
 import subprocess
 import sys
 import tempfile
@@ -26,10 +35,41 @@ LEAD_IN = 0.35
 TAIL = 1.4
 
 
-def synth(kokoro, text: str, voice: str, speed: float) -> np.ndarray:
+def synth_kokoro(kokoro, text: str, voice: str, speed: float) -> np.ndarray:
     samples, sr = kokoro.create(text, voice=voice, speed=speed, lang="hi")
     assert sr == SR, sr
     return trim(np.asarray(samples, dtype=np.float32))
+
+
+def synth_elevenlabs(text: str, voice_id: str, speed: float) -> np.ndarray:
+    """ElevenLabs multilingual v2 as raw 24 kHz PCM (no decode step needed)."""
+    key = os.environ.get("ELEVENLABS_API_KEY", "")
+    if not key or not voice_id:
+        raise SystemExit("elevenlabs needs ELEVENLABS_API_KEY and a voice id per character")
+    body = json.dumps({
+        "text": text, "model_id": os.environ.get("ELEVEN_MODEL", "eleven_multilingual_v2"),
+        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75, "style": 0.0,
+                           "use_speaker_boost": True, "speed": speed},
+    }).encode()
+    req = urllib.request.Request(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=pcm_{SR}",
+        data=body, headers={"xi-api-key": key, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        pcm = np.frombuffer(r.read(), dtype="<i2").astype(np.float32) / 32768.0
+    return trim(pcm)
+
+
+def load_audio(path: Path) -> np.ndarray:
+    """Any file ffmpeg reads (mp3/wav/m4a from Envato) -> mono float32 at SR."""
+    out = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-ac", "1", "-ar", str(SR),
+                          "-f", "f32le", "-"], check=True, capture_output=True).stdout
+    return np.frombuffer(out, dtype=np.float32).copy()
+
+
+def find(dir_: Path | None, stem: str) -> Path | None:
+    if not dir_ or not dir_.is_dir():
+        return None
+    return next((p for p in sorted(dir_.iterdir()) if p.stem.lower() == stem), None)
 
 
 def trim(x: np.ndarray, thr: float = 0.01) -> np.ndarray:
@@ -101,18 +141,34 @@ def music_bed(total: float) -> np.ndarray:
 
 
 def main() -> None:
-    script_path, out_dir = Path(sys.argv[1]), Path(sys.argv[2])
-    kdir = Path(sys.argv[3] if len(sys.argv) > 3 else os.environ.get("KOKORO_DIR", "."))
+    ap = argparse.ArgumentParser()
+    ap.add_argument("script"); ap.add_argument("out_dir")
+    ap.add_argument("kokoro_dir_pos", nargs="?", help=argparse.SUPPRESS)
+    ap.add_argument("--tts", default=os.environ.get("REEL_TTS", "kokoro"), choices=["kokoro", "elevenlabs"])
+    ap.add_argument("--kokoro-dir", default=os.environ.get("KOKORO_DIR", "."))
+    ap.add_argument("--music", help="music bed file (e.g. an Envato track); default: built-in lo-fi pad")
+    ap.add_argument("--music-gain", type=float, default=0.18)
+    ap.add_argument("--sfx-dir", help="folder with whoosh.* / pop.* to replace the synthetic SFX")
+    a = ap.parse_args()
+    script_path, out_dir = Path(a.script), Path(a.out_dir)
+    kdir = Path(a.kokoro_dir_pos or a.kokoro_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     script = json.loads(script_path.read_text(encoding="utf-8"))
 
-    from kokoro_onnx import Kokoro
-    kokoro = Kokoro(str(kdir / "kokoro.int8.onnx"), str(kdir / "voices.bin"))
+    if a.tts == "kokoro":
+        from kokoro_onnx import Kokoro
+        kokoro = Kokoro(str(kdir / "kokoro.int8.onnx"), str(kdir / "voices.bin"))
+
+    def synth(who: str, ch: dict, text: str) -> np.ndarray:
+        if a.tts == "elevenlabs":
+            vid = ch.get("eleven_voice_id") or os.environ.get(f"ELEVEN_VOICE_{who.upper()}", "")
+            return pitch(synth_elevenlabs(text, vid, ch.get("eleven_speed", 1.0)), ch.get("eleven_pitch", 1.0))
+        return pitch(synth_kokoro(kokoro, text, ch["voice"], ch.get("speed", 1.0)), ch.get("pitch", 1.0))
 
     clips, t = [], LEAD_IN
     for i, line in enumerate(script["lines"]):
         ch = script["characters"][line["who"]]
-        audio = pitch(synth(kokoro, line["tts"], ch["voice"], ch.get("speed", 1.0)), ch.get("pitch", 1.0))
+        audio = synth(line["who"], ch, line["tts"])
         if i:
             t += SNAP_GAP if line.get("shot") == "simpler" else GAP
         clips.append((t, audio))
@@ -128,7 +184,9 @@ def main() -> None:
         voice[s:s + len(audio)] += audio[: n - s]
 
     sfx = np.zeros(n, dtype=np.float32)
-    w, p = whoosh(), pop()
+    sfx_dir = Path(a.sfx_dir) if a.sfx_dir else None
+    w = load_audio(f) * 0.8 if (f := find(sfx_dir, "whoosh")) else whoosh()
+    p = load_audio(f) * 0.6 if (f := find(sfx_dir, "pop")) else pop()
     for line in script["lines"]:
         if line.get("shot") in ("simpler", "payoff", "hook"):
             s = max(0, int((line["start"] - 0.25) * SR))
@@ -138,7 +196,13 @@ def main() -> None:
                 s = int((line["start"] + op["at"] * (line["end"] - line["start"])) * SR)
                 sfx[s:s + len(p)] += p[: n - s]
 
-    bed = music_bed(total)
+    if a.music:
+        track = load_audio(Path(a.music))
+        reps = int(np.ceil(n / len(track)))
+        bed = np.tile(track, reps)[:n]
+        bed = bed / (np.abs(bed).max() + 1e-9) * a.music_gain
+    else:
+        bed = music_bed(total)
     # Duck the music under speech.
     speech_env = np.convolve(np.abs(voice), np.ones(int(0.25 * SR)) / int(0.25 * SR), mode="same")
     duck = 1.0 - 0.55 * np.clip(speech_env / (speech_env.max() + 1e-9) * 6, 0, 1)
