@@ -85,16 +85,41 @@ const barMat = flat('#14161c');
 for (const x of [-2.9, -1.0, 1.0, 2.9]) mesh(box(0.09, 3.4, 0.12), barMat, x, 2.25, -3.95);
 for (const y of [0.6, 2.1, 3.9]) mesh(box(5.9, 0.09, 0.12), barMat, 0, y, -3.95);
 
-// sky + city backdrop
-const skyC = document.createElement('canvas'); skyC.width = 512; skyC.height = 512;
+// sky + city backdrop: painted once onto a canvas and pre-blurred (out-of-focus
+// city with soft bokeh lights). No small sharp window grid exists in 3D, so
+// nothing can shimmer when the camera moves.
+const skyC = document.createElement('canvas'); skyC.width = 2048; skyC.height = 1024;
 {
-  const g = skyC.getContext('2d');
-  const gr = g.createLinearGradient(0, 0, 0, 512);
-  gr.addColorStop(0, '#1f3768'); gr.addColorStop(0.6, '#5a7fb8'); gr.addColorStop(1, '#a9bfdc');
-  g.fillStyle = gr; g.fillRect(0, 0, 512, 512);
+  const raw = document.createElement('canvas'); raw.width = 2048; raw.height = 1024;
+  const g = raw.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 0, 1024);
+  gr.addColorStop(0, '#16284f'); gr.addColorStop(0.45, '#3f5f98'); gr.addColorStop(0.62, '#7d97c4'); gr.addColorStop(1, '#2a3550');
+  g.fillStyle = gr; g.fillRect(0, 0, 2048, 1024);
+  let sd = 7; const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+  for (const [layer, col, base] of [[0, '#2c3a5e', 520], [1, '#1d2744', 600]]) {
+    let x = -40;
+    while (x < 2100) {
+      const w = 110 + rnd() * 160, h = 180 + rnd() * (layer ? 300 : 220);
+      g.fillStyle = col; g.fillRect(x, base + 260 - h, w, 1024);
+      for (let wy = base + 260 - h + 18; wy < 1000; wy += 26) for (let wx = x + 12; wx < x + w - 14; wx += 24)
+        if (rnd() > 0.62) { g.fillStyle = rnd() > 0.25 ? 'rgba(255,210,122,0.85)' : 'rgba(170,205,255,0.7)'; g.fillRect(wx, wy, 10, 12); }
+      x += w + 8 + rnd() * 30;
+    }
+  }
+  const out = skyC.getContext('2d');
+  out.filter = 'blur(7px)'; out.drawImage(raw, 0, 0); out.filter = 'none';
+  // soft bokeh discs
+  for (let i = 0; i < 70; i++) {
+    const x = rnd() * 2048, y = 380 + rnd() * 600, r = 14 + rnd() * 34;
+    const warm = rnd() > 0.3, rg = out.createRadialGradient(x, y, 0, x, y, r);
+    rg.addColorStop(0, warm ? 'rgba(255,205,120,0.55)' : 'rgba(150,200,255,0.45)');
+    rg.addColorStop(0.7, warm ? 'rgba(255,190,100,0.25)' : 'rgba(150,200,255,0.18)');
+    rg.addColorStop(1, 'rgba(0,0,0,0)');
+    out.fillStyle = rg; out.beginPath(); out.arc(x, y, r, 0, Math.PI * 2); out.fill();
+  }
 }
 const skyTex = new THREE.CanvasTexture(skyC); skyTex.colorSpace = THREE.SRGBColorSpace;
-const sky = new THREE.Mesh(new THREE.PlaneGeometry(26, 14), new THREE.MeshBasicMaterial({ map: skyTex }));
+const sky = new THREE.Mesh(new THREE.PlaneGeometry(28, 14), new THREE.MeshBasicMaterial({ map: skyTex }));
 // Optional painted backdrop (e.g. a Leonardo/ChatGPT night-city image): assets/backdrop.jpg
 {
   const url = params.get('backdrop') || 'assets/backdrop.jpg';
@@ -106,22 +131,7 @@ const sky = new THREE.Mesh(new THREE.PlaneGeometry(26, 14), new THREE.MeshBasicM
     sky.userData.painted = true;
   }
 }
-sky.position.set(0, 4, -12); scene.add(sky);
-function windowTex(seed) {
-  const c = document.createElement('canvas'); c.width = 64; c.height = 128;
-  const g = c.getContext('2d'); g.fillStyle = '#2a3550'; g.fillRect(0, 0, 64, 128);
-  let s = seed;
-  const rnd = () => (s = (s * 9301 + 49297) % 233280) / 233280;
-  for (let y = 6; y < 124; y += 10) for (let x = 5; x < 60; x += 11) {
-    g.fillStyle = rnd() > 0.55 ? '#ffd27a' : '#1d2640'; g.fillRect(x, y, 6, 6);
-  }
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
-}
-for (let i = 0; i < (sky.userData.painted ? 0 : 12); i++) {
-  const h = 2 + ((i * 37) % 9) * 0.6, w = 1.2 + ((i * 13) % 5) * 0.3;
-  const b = new THREE.Mesh(box(w, h, 1), new THREE.MeshBasicMaterial({ map: windowTex(i + 3) }));
-  b.position.set(-8 + i * 1.5, h / 2 - 0.5, -9 - (i % 3)); scene.add(b);
-}
+sky.position.set(0, 3, -11); scene.add(sky);
 
 // bookshelf right
 const shelfMat = flat('#6b4630');
@@ -230,8 +240,11 @@ const browR = mesh(box(0.09, 0.022, 0.02), ink, 0.088, 0.325, 0.232, headPivot);
 browL.rotation.z = 0.08; browR.rotation.z = -0.08;
 mesh(new THREE.ConeGeometry(0.026, 0.065, 4), flat('#b0734c'), 0, 0.19, 0.262, headPivot).rotation.x = Math.PI / 2;
 const mouth = mesh(box(0.08, 0.018, 0.02), new THREE.MeshBasicMaterial({ color: '#4a1c1c' }), 0, 0.105, 0.236, headPivot);
-const teeth = mesh(box(0.9, 0.22, 0.4), new THREE.MeshBasicMaterial({ color: '#f4efe6' }), 0, 0.36, 0.35, mouth);
-const tongue = mesh(box(0.6, 0.25, 0.4), new THREE.MeshBasicMaterial({ color: '#b5524f' }), 0, -0.3, 0.3, mouth);
+// Children of the mouth live in the mouth's own units (metres, then scaled with
+// it), so they are sized to sit INSIDE the 0.08 x 0.018 m mouth box.
+const teeth = mesh(box(0.068, 0.005, 0.004), new THREE.MeshBasicMaterial({ color: '#f4efe6' }), 0, 0.006, 0.009, mouth);
+const tongue = mesh(box(0.046, 0.006, 0.004), new THREE.MeshBasicMaterial({ color: '#b5524f' }), 0, -0.005, 0.009, mouth);
+teeth.castShadow = tongue.castShadow = false;
 const eyeBase = { L: eyeL.position.clone(), R: eyeR.position.clone() };
 
 // ---------- ONE (original mascot: teal low-poly orb, dark face visor, cyan LED eyes, antenna bulb) ----------
@@ -327,7 +340,7 @@ const activeOp = t => ops.find(o => t >= o.t0 - 0.25 && t <= o.t1 + 0.6);
 
 // ---------- auto-director ----------
 const P = (x, y, z) => new THREE.Vector3(x, y, z);
-const boyHeadW = () => headPivot.localToWorld(P(0, 0.22, 0));
+const boyHeadW = () => boy.localToWorld(P(0, 1.44, 0));   // stable anchor: head nods must not shake the camera
 const oneW = () => one.localToWorld(P(0, 0.25, 0));
 const SHOTS = {
   WIDE: () => ({ pos: P(0.2, 2.05, 4.2), tgt: P(0.0, 1.55, -1.6), fov: 56 }),
@@ -432,7 +445,7 @@ function placeCamera(t) {
 }
 
 // ---------- character behaviour (stateful, frames rendered in order) ----------
-let boyYaw = 0.0, boyPitch = 0, oneYaw = 0.5, stickAim = new THREE.Vector3();
+let boyYaw = 0.0, boyPitch = 0, oneYaw = 0.5, stickAim = new THREE.Vector3(), nodSm = 0, mB = 0, mO = 0;
 // Natural blinking: irregular gaps (2-5 s), smooth close/open, sometimes a double blink.
 function blinkTrack(seed, total) {
   let s = seed; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
@@ -453,7 +466,9 @@ const tmpQ = new THREE.Quaternion();
 function animate(t, f) {
   const l = lineAt(t);
   const speaker = l ? l.who : null;
-  const aB = TL.amp.VINEET?.[f] || 0, aO = TL.amp.ONE?.[f] || 0;
+  // mouth/voice envelopes smoothed a little so no single-frame pops
+  mB += ((TL.amp.VINEET?.[f] || 0) - mB) * 0.6; mO += ((TL.amp.ONE?.[f] || 0) - mO) * 0.6;
+  const aB = mB, aO = mO;
   const shB = TL.shape?.VINEET?.[f] ?? 0.5, shO = TL.shape?.ONE?.[f] ?? 0.5;
   const writing = ops.find(o => t >= o.t0 - 0.1 && t <= o.t1 + 0.2);
   const recent = lastLineBefore(t);
@@ -467,8 +482,9 @@ function animate(t, f) {
   const wantYaw = Math.max(-1.1, Math.min(1.1, Math.atan2(local.x, local.z)));
   const wantPitch = Math.max(-0.35, Math.min(0.35, -Math.atan2(local.y, Math.hypot(local.x, local.z))));
   boyYaw += (wantYaw - boyYaw) * 0.18; boyPitch += (wantPitch - boyPitch) * 0.18;
-  const prevB = TL.amp.VINEET?.[Math.max(0, f - 2)] || 0;
-  const nod = speaker === 'VINEET' ? Math.max(0, aB - prevB) * 0.25 : 0;   // nod on stressed syllables
+  const prevB = TL.amp.VINEET?.[Math.max(0, f - 3)] || 0;
+  nodSm += ((speaker === 'VINEET' ? Math.max(0, aB - prevB) * 0.12 : 0) - nodSm) * 0.25;   // soft nod on stressed syllables
+  const nod = nodSm;
   headPivot.rotation.set(boyPitch + nod, boyYaw, 0.03 * Math.sin(t * 0.9) + (speaker === 'VINEET' ? 0.03 * Math.sin(t * 2.3) : 0));
   // lip sync: open with loudness, width with vowel shape (ee wide / oo round)
   mouth.scale.set(0.75 + shB * 0.55 - aB * 0.15, 1 + aB * 3.0, 1);
@@ -666,8 +682,15 @@ window.stepFrame = (f) => {
   const t = f / FPS;
   scene.updateMatrixWorld(true); animate(t, f); drawBoard(t); scene.updateMatrixWorld(true); placeCamera(t);
   const h = boyHeadW();
-  return { t, cam: camera.position.toArray().map(v => +v.toFixed(2)), fov: +camera.fov.toFixed(1), head: h.toArray().map(v => +v.toFixed(2)), yaw: +boyYaw.toFixed(2) };
+  const tip = stick.localToWorld(P(0, 0.5, 0)); const base = stickPivot.getWorldPosition(new THREE.Vector3());
+  return { tip: tip.toArray().map(v => +v.toFixed(2)), base: base.toArray().map(v => +v.toFixed(2)), aim: stickAim.toArray().map(v => +v.toFixed(2)), t, cam: camera.position.toArray().map(v => +v.toFixed(2)), fov: +camera.fov.toFixed(1), head: h.toArray().map(v => +v.toFixed(2)), yaw: +boyYaw.toFixed(2) };
 };
 window.KFDBG = () => KF.map(k => [k.t.toFixed(2), k.blend, k.name]);
+window.pick = (nx, ny) => {
+  const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(nx, ny), camera);
+  const hit = rc.intersectObjects(scene.children, true)[0];
+  if (!hit) return null;
+  const m = hit.object; return { d: +hit.distance.toFixed(2), color: m.material?.color?.getHexString(), geo: m.geometry?.type, pos: m.getWorldPosition(new THREE.Vector3()).toArray().map(v => +v.toFixed(2)), parent: m.parent?.type };
+};
 window.TOTAL_FRAMES = TL.frames;
 window.ready = true;

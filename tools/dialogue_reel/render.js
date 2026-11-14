@@ -11,6 +11,7 @@ const outDir = path.resolve(process.argv[2]);
 const arg = k => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : null; };
 const stills = arg('--stills')?.split(',').map(Number) || null;
 const handle = arg('--handle') || '@aibyvineet';
+const range = arg('--range')?.split(':').map(Number) || null; // test a segment: --range 0:120
 
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.woff2': 'font/woff2' };
 const server = http.createServer((req, res) => {
@@ -53,7 +54,9 @@ const server = http.createServer((req, res) => {
   const ff = spawn('ffmpeg', ['-v', 'error', '-y', '-f', 'image2pipe', '-framerate', '30', '-c:v', 'mjpeg', '-i', '-',
     '-c:v', 'libx264', '-preset', 'medium', '-crf', '19', '-pix_fmt', 'yuv420p', silent], { stdio: ['pipe', 'inherit', 'inherit'] });
   const t0 = Date.now();
-  for (let f = 0; f < total; f++) {
+  const [r0, r1] = range || [0, total];
+  for (let f = 0; f < r0; f++) await page.evaluate(f => window.stepFrame(f), f);
+  for (let f = r0; f < Math.min(r1, total); f++) {
     const data = await page.evaluate(f => window.renderFrame(f), f);
     const buf = Buffer.from(data.split(',')[1], 'base64');
     if (!ff.stdin.write(buf)) await new Promise(r => ff.stdin.once('drain', r));
@@ -63,6 +66,7 @@ const server = http.createServer((req, res) => {
   await new Promise(r => ff.on('close', r));
   await browser.close(); server.close();
 
+  if (range) { console.log('segment done', silent); await browser.close(); server.close(); return; }
   const final = path.join(outDir, 'reel.mp4');
   await new Promise((res, rej) => spawn('ffmpeg', ['-v', 'error', '-y', '-i', silent, '-i', path.join(outDir, 'audio.wav'),
     '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', final], { stdio: 'inherit' })

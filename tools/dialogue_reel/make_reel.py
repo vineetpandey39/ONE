@@ -134,6 +134,7 @@ def main() -> None:
     ap.add_argument("--out", help="output folder (default out/<id>)")
     ap.add_argument("--handle", default="@aibyvineet")
     ap.add_argument("--package-only", action="store_true", help="skip audio+render; only write caption/seo files")
+    ap.add_argument("--skip-audio", action="store_true", help="reuse out/<id>/audio.wav + timeline.json (no TTS spend)")
     args, audio_args = ap.parse_known_args()
 
     script_path = Path(args.script)
@@ -144,8 +145,15 @@ def main() -> None:
     out = Path(args.out or HERE / "out" / script["id"])
 
     if not args.package_only:
-        subprocess.run([sys.executable, str(HERE / "build_audio.py"), str(script_path), str(out), *audio_args], check=True)
+        if not args.skip_audio:
+            subprocess.run([sys.executable, str(HERE / "build_audio.py"), str(script_path), str(out), *audio_args], check=True)
         subprocess.run(["node", str(HERE / "render.js"), str(out), "--handle", args.handle], check=True)
+        # Flicker QC is part of the build: a reel that fails is never packaged for publishing.
+        import qc
+        report = qc.check(str(out / "reel.mp4"))
+        (out / "qc.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
+        if not report["ok"]:
+            sys.exit(f"QC failed: {len(report['bad_frames'])} flicker frames, see {out / 'qc.json'}")
     print(json.dumps(package(script, out)))
 
 

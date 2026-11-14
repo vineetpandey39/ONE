@@ -30,6 +30,8 @@ python3 build_audio.py scripts/ep01_ai_agent.json out/ep01 --kokoro-dir $KOKORO_
 node render.js out/ep01 --stills 0,300,900
 ```
 
+Every build runs `qc.py` (flicker check: one-frame pops/flashes) after rendering and stops before packaging if it fails; `--skip-audio` re-renders without spending TTS characters.
+
 New episodes: `prompts/dialogue_writer.md` is the writer prompt for ChatGPT /
 Claude / the local model; its JSON output goes in `scripts/`.
 Asset prompts for Leonardo / ChatGPT / Envato / ElevenLabs: `prompts/asset_prompts.md`.
