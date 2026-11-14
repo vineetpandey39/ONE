@@ -40,7 +40,7 @@ const camera = new THREE.PerspectiveCamera(55, W / H, 0.05, 60);
 const composer = new EffectComposer(renderer);
 composer.setPixelRatio(1); composer.setSize(W, H);
 composer.addPass(new RenderPass(scene, camera));
-composer.addPass(new UnrealBloomPass(new THREE.Vector2(W, H), 0.4, 0.5, 0.93));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(W, H), 0.28, 0.35, 0.95));
 const bokeh = new BokehPass(scene, camera, { focus: 3, aperture: 0.002, maxblur: 0.009 });
 composer.addPass(bokeh);
 composer.addPass(new OutputPass());
@@ -140,7 +140,7 @@ const boardTex = new THREE.CanvasTexture(boardC); boardTex.colorSpace = THREE.SR
 boardTex.anisotropy = 4;
 mesh(box(BOARD.w + 0.12, BOARD.h + 0.12, 0.06), flat('#9aa1ab'), BOARD.x, BOARD.y, BOARD.z - 0.04);
 const boardFace = new THREE.Mesh(new THREE.PlaneGeometry(BOARD.w, BOARD.h),
-  new THREE.MeshStandardMaterial({ map: boardTex, roughness: 0.6 }));
+  new THREE.MeshStandardMaterial({ map: boardTex, roughness: 0.95 }));
 boardFace.position.set(BOARD.x, BOARD.y, BOARD.z);
 scene.add(boardFace);
 mesh(box(BOARD.w * 0.8, 0.05, 0.12), flat('#9aa1ab'), BOARD.x, BOARD.y - BOARD.h / 2 - 0.05, BOARD.z + 0.05);
@@ -243,7 +243,7 @@ const tealMat = flat('#2bb3a3', { emissive: '#0c3b36', emissiveIntensity: 0.5 })
 const orb = mesh(new THREE.IcosahedronGeometry(0.2, 1), tealMat, 0, 0.21, 0, oneBody);
 orb.scale.set(1.08, 0.95, 1);
 const visor = mesh(new THREE.SphereGeometry(0.205, 12, 6, Math.PI / 2 - 0.8, 1.6, 1.0, 0.95),
-  new THREE.MeshStandardMaterial({ color: '#0e1a2e', roughness: 0.25, metalness: 0.2, flatShading: true }), 0, 0.21, 0.012, oneBody);
+  new THREE.MeshStandardMaterial({ color: '#0e1a2e', roughness: 0.7, metalness: 0.0, flatShading: false }), 0, 0.21, 0.012, oneBody);
 visor.scale.set(1.08, 0.95, 1);
 visor.castShadow = false;
 mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.14, 5), flat('#1b6f66'), 0, 0.46, 0, oneBody);
@@ -258,7 +258,7 @@ const oEyeR = mesh(box(0.038, 0.07, 0.02), led, 0.062, 0.245, 0.222, oneBody);
 const oneMouth = mesh(box(0.05, 0.012, 0.02), led, 0, 0.178, 0.219, oneBody);
 const armOne = mesh(new THREE.CapsuleGeometry(0.025, 0.08, 3, 6), tealMat, -0.2, 0.16, 0.03, oneBody);
 armOne.rotation.z = -0.5;
-const oneGlow = new THREE.PointLight('#5ff2df', 0.0, 1.2); oneGlow.position.set(0, 0.25, 0.3); oneBody.add(oneGlow);
+const oneGlow = new THREE.PointLight('#5ff2df', 0.0, 1.2); oneGlow.position.set(0, 0.25, 0.6); oneBody.add(oneGlow);
 // pointer stick, held in ONE's right hand
 const stickPivot = new THREE.Group(); stickPivot.position.set(0.19, 0.18, 0.03); one.add(stickPivot);
 mesh(new THREE.CapsuleGeometry(0.028, 0.05, 3, 6), tealMat, 0, 0.0, 0, stickPivot);
@@ -350,7 +350,7 @@ const SHOTS = {
 
 // Keyframes: {t, shot, blend (s, 0 = hard cut), drift (dolly-in per s), punch}
 const KF = [];
-const add = (t, shot, blend = 0.45, drift = 0.04, punch = 0) => KF.push({ t, shot, blend, drift, punch });
+const add = (t, shot, blend = 0.45, drift = 0.04, punch = 0) => KF.push({ t, shot, blend, drift, punch, name: Object.keys(SHOTS).find(k => SHOTS[k] === shot) || 'BOARD_TRACK' });
 add(0, SHOTS.WIDE, 0, 0.02);
 for (const l of lines) {
   const d = l.end - l.start, lops = ops.filter(o => o.line === l);
@@ -389,6 +389,10 @@ for (const l of lines) {
   }
 }
 KF.sort((a, b) => a.t - b.t);
+// Every shot holds at least MIN_SHOT seconds: a keyframe that comes too soon is
+// pushed later (never dropped), so no 1-2 frame flashes of another angle.
+const MIN_SHOT = 0.6;
+for (let i = 1; i < KF.length; i++) if (KF[i].t - KF[i - 1].t < MIN_SHOT) KF[i].t = KF[i - 1].t + MIN_SHOT;
 
 function shotPose(kf, t) {
   const s = kf.shot();
@@ -406,7 +410,15 @@ function placeCamera(t) {
   while (i + 1 < KF.length && KF[i + 1].t <= t) i++;
   const cur = KF[i];
   let pose = shotPose(cur, t);
-  if (i > 0 && cur.blend > 0 && t - cur.t < cur.blend) pose = lerpPose(shotPose(KF[i - 1], t), pose, ease((t - cur.t) / cur.blend));
+  if (i > 0 && cur.blend > 0 && t - cur.t < cur.blend) {
+    const from = shotPose(KF[i - 1], cur.t);
+    // Shots far apart (other side of the room): clean cut instead of a whip
+    // that sweeps through the set and flashes random objects.
+    const to = shotPose(cur, cur.t);
+    const turn = from.tgt.clone().sub(from.pos).normalize().angleTo(to.tgt.clone().sub(to.pos).normalize());
+    if (from.pos.distanceTo(to.pos) < 1.4 && turn < 0.8)
+      pose = lerpPose(shotPose(KF[i - 1], t), pose, ease((t - cur.t) / cur.blend));
+  }
   // handheld + punch shake
   const hh = 0.006;
   const n = (f, p) => Math.sin(t * f + p);
@@ -492,7 +504,7 @@ function animate(t, f) {
   oEyeL.scale.y = oEyeR.scale.y = ob * (happy ? 0.38 : 1);
   oEyeL.rotation.z = happy ? 0.35 : 0; oEyeR.rotation.z = happy ? -0.35 : 0;
   bulbMat.emissiveIntensity = 1.0 + aO * 3;
-  oneGlow.intensity = aO * 2.5;
+  oneGlow.intensity = aO * 1.2;
   bulb.position.y = 0.55 + 0.01 * Math.sin(t * 6);
   oneMouth.scale.set(0.8 + shO * 0.7 + (happy ? 0.4 : 0), 1 + aO * 3.4, 1);
   armOne.rotation.z = -0.5 - (speaker === 'ONE' ? 0.5 * aO + 0.15 * Math.sin(t * 5) : 0);
@@ -656,5 +668,6 @@ window.stepFrame = (f) => {
   const h = boyHeadW();
   return { t, cam: camera.position.toArray().map(v => +v.toFixed(2)), fov: +camera.fov.toFixed(1), head: h.toArray().map(v => +v.toFixed(2)), yaw: +boyYaw.toFixed(2) };
 };
+window.KFDBG = () => KF.map(k => [k.t.toFixed(2), k.blend, k.name]);
 window.TOTAL_FRAMES = TL.frames;
 window.ready = true;
