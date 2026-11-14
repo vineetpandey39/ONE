@@ -36,6 +36,11 @@ def validate(script: dict) -> list[str]:
         for k in ("caption", "tts"):
             if not str(ln.get(k, "")).strip():
                 errs.append(f"line {i}: empty {k}")
+        tts = str(ln.get("tts", ""))
+        letters = [c for c in tts if c.isalpha()]
+        deva = sum("\u0900" <= c <= "\u097f" for c in letters)
+        if letters and deva / len(letters) < 0.8:
+            errs.append(f"line {i}: tts must be Devanagari (voice pronunciation depends on it): {tts[:40]!r}")
         n = len(str(ln.get("caption", "")).split())
         words += n
         if n > 20:
