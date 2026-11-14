@@ -1,0 +1,204 @@
+{
+  "id": "ep01_ai_agent",
+  "title": "AI Agent kya hota hai? (No. Simpler.)",
+  "board_title": "AI Agent kya hai?",
+  "characters": {
+    "VINEET": {
+      "voice": "hm_omega",
+      "pitch": 1.0,
+      "speed": 1.05
+    },
+    "ONE": {
+      "voice": "hm_psi",
+      "pitch": 1.22,
+      "speed": 1.08
+    }
+  },
+  "lines": [
+    {
+      "who": "VINEET",
+      "shot": "hook",
+      "caption": "ONE. AI agent samjhao. Aise jaise main 5 saal ka hoon.",
+      "tts": "वन. ए आई एजेंट समझाओ. ऐसे, जैसे मैं पाँच साल का हूँ."
+    },
+    {
+      "who": "ONE",
+      "shot": "explain",
+      "caption": "AI agent ek autonomous system hai jo tools aur APIs use karke goals achieve karta hai.",
+      "tts": "ए आई एजेंट एक ऑटोनॉमस सिस्टम है, जो टूल्स और ए पी आईज़ यूज़ करके, गोल्स अचीव करता है.",
+      "board": [
+        {
+          "op": "write",
+          "id": "a1",
+          "text": "autonomous system",
+          "x": 60,
+          "y": 190,
+          "size": 42,
+          "color": "#2b3a8c",
+          "at": 0.25
+        },
+        {
+          "op": "write",
+          "id": "a2",
+          "text": "tools + APIs → goals",
+          "x": 545,
+          "y": 190,
+          "size": 42,
+          "color": "#2b3a8c",
+          "at": 0.6
+        }
+      ]
+    },
+    {
+      "who": "VINEET",
+      "shot": "simpler",
+      "caption": "Nahi. Aur simple.",
+      "tts": "नहीं. और सिंपल.",
+      "board": [
+        {
+          "op": "strike",
+          "target": "a1",
+          "at": 0.3
+        },
+        {
+          "op": "strike",
+          "target": "a2",
+          "at": 0.5
+        }
+      ]
+    },
+    {
+      "who": "ONE",
+      "shot": "explain",
+      "caption": "Theek hai. ChatGPT sirf batata hai. Agent khud kaam karke deta hai.",
+      "tts": "ठीक है. चैट जी पी टी सिर्फ़ बताता है. एजेंट, खुद काम करके देता है.",
+      "board": [
+        {
+          "op": "write",
+          "id": "b1",
+          "text": "ChatGPT → batata hai",
+          "x": 60,
+          "y": 275,
+          "size": 42,
+          "color": "#1d6b3a",
+          "at": 0.2
+        },
+        {
+          "op": "write",
+          "id": "b2",
+          "text": "Agent → KARTA hai",
+          "x": 545,
+          "y": 275,
+          "size": 42,
+          "color": "#1d6b3a",
+          "at": 0.6
+        }
+      ]
+    },
+    {
+      "who": "VINEET",
+      "shot": "simpler",
+      "caption": "Aur simple. Mummy ko samjhana hai.",
+      "tts": "और सिंपल. मम्मी को समझाना है.",
+      "board": [
+        {
+          "op": "strike",
+          "target": "b1",
+          "at": 0.25
+        },
+        {
+          "op": "strike",
+          "target": "b2",
+          "at": 0.45
+        }
+      ]
+    },
+    {
+      "who": "ONE",
+      "shot": "story",
+      "caption": "Mummy ne Chhotu se kaha, doodh le aao. Pehli dukaan band thi.",
+      "tts": "मम्मी ने छोटू से कहा, दूध ले आओ. पहली दुकान बंद थी.",
+      "board": [
+        {
+          "op": "write",
+          "id": "c1",
+          "text": "Mummy → Chhotu",
+          "x": 60,
+          "y": 370,
+          "size": 48,
+          "color": "#222",
+          "at": 0.15
+        },
+        {
+          "op": "write",
+          "id": "c2",
+          "text": "Dukaan 1 ✗",
+          "x": 545,
+          "y": 370,
+          "size": 48,
+          "color": "#b3261e",
+          "at": 0.7
+        }
+      ]
+    },
+    {
+      "who": "ONE",
+      "shot": "story",
+      "caption": "Chhotu ruka nahi. Doosri dukaan gaya, doodh le aaya.",
+      "tts": "छोटू रुका नहीं. दूसरी दुकान गया, दूध ले आया.",
+      "board": [
+        {
+          "op": "write",
+          "id": "c3",
+          "text": "→ Dukaan 2 ✓",
+          "x": 545,
+          "y": 445,
+          "size": 48,
+          "color": "#1d6b3a",
+          "at": 0.45
+        }
+      ]
+    },
+    {
+      "who": "ONE",
+      "shot": "reveal",
+      "caption": "Wahi Chhotu AI agent hai. Kaam do, raasta wo khud dhoondh lega.",
+      "tts": "वही छोटू, ए आई एजेंट है. काम दो, रास्ता वो खुद ढूँढ लेगा.",
+      "board": [
+        {
+          "op": "write",
+          "id": "d1",
+          "text": "Chhotu = AI Agent",
+          "x": 230,
+          "y": 565,
+          "size": 64,
+          "color": "#b3261e",
+          "at": 0.2
+        },
+        {
+          "op": "circle",
+          "target": "d1",
+          "at": 0.6
+        }
+      ]
+    },
+    {
+      "who": "VINEET",
+      "shot": "realize",
+      "caption": "Matlab mere paas 5 Chhotu hon... toh 5 income?",
+      "tts": "मतलब मेरे पास पाँच छोटू हों... तो पाँच इनकम?"
+    },
+    {
+      "who": "ONE",
+      "shot": "payoff",
+      "caption": "Wahi toh tumhara system hai.",
+      "tts": "वही तो तुम्हारा सिस्टम है."
+    },
+    {
+      "who": "VINEET",
+      "shot": "cta",
+      "caption": "Kaise banaya? Next reel. Follow kar lo.",
+      "tts": "कैसे बनाया? नेक्स्ट रील. फ़ॉलो कर लो."
+    }
+  ]
+}
