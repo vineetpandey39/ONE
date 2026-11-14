@@ -24,7 +24,8 @@ Structure (always):
 7. `reveal`: ONE maps the analogy back to {TOPIC} in one line; board gets a circled equation.
 8. `realize`: VINEET has the "ohhh" moment, applying it to money/work/creator life.
 9. `payoff`: ONE's one-line punch.
-10. `cta`: VINEET to camera: next-reel hook OR "Comment karo <KEYWORD>".
+10. `cta`: VINEET to camera: "<lead magnet> chahiye? Comment karo <KEYWORD>. DM me bhejta hoon." with `"cta_card": {"type": "comment", "keyword": "<KEYWORD>"}`.
+11. `follow`: ONE: "Aur follow kar lo. Kal <teaser>!" with `"cta_card": {"type": "follow"}`.
 
 Rules:
 - Max 18 words per line. Total spoken ~95–120 words.
@@ -45,7 +46,7 @@ Output JSON schema (same as scripts/ep01_ai_agent.json):
   "characters": {"VINEET": {"voice": "hm_omega", "pitch": 1.0, "speed": 1.05},
                  "ONE": {"voice": "hm_psi", "pitch": 1.22, "speed": 1.08}},
   "lines": [
-    {"who": "VINEET|ONE", "shot": "hook|explain|simpler|story|reveal|realize|payoff|cta",
+    {"who": "VINEET|ONE", "shot": "hook|explain|simpler|story|reveal|realize|payoff|cta|follow",
      "caption": "...", "tts": "...",
      "board": [{"op": "write", "id": "a1", "text": "...", "x": 60, "y": 190, "size": 42, "color": "#2b3a8c", "at": 0.2},
                {"op": "strike", "target": "a1", "at": 0.3},

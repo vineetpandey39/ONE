@@ -197,8 +197,22 @@
     {
       "who": "VINEET",
       "shot": "cta",
-      "caption": "Kaise banaya? Next reel. Follow kar lo.",
-      "tts": "कैसे बनाया? नेक्स्ट रील. फ़ॉलो कर लो."
+      "caption": "Ye poora 5 Chhotu wala system chahiye? Comment karo GUIDE. Main khud bhejta hoon.",
+      "tts": "ये पूरा पाँच छोटू वाला सिस्टम चाहिए? कमेंट करो, गाइड. मैं खुद भेजता हूँ.",
+      "cta_card": {
+        "type": "comment",
+        "keyword": "GUIDE"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "follow",
+      "caption": "Aur follow kar lo. Kal naya Chhotu aayega!",
+      "tts": "और फ़ॉलो कर लो. कल नया छोटू आएगा!",
+      "cta_card": {
+        "type": "follow"
+      }
     }
-  ]
+  ],
+  "post_caption": "AI Agent kya hota hai? 5 saal wala version 👇\n\nChatGPT batata hai. Agent KARTA hai.\n\nMera poora '5 Chhotu' income system chahiye? Comment karo GUIDE, DM me bhejta hoon.\nFollow @aibyvineet, roz ek AI concept.\n\n#AIAgent #AI #ChatGPT #AIbyVineet #AIHindi"
 }

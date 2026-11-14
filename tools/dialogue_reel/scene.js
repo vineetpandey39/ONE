@@ -230,6 +230,9 @@ const browR = mesh(box(0.09, 0.022, 0.02), ink, 0.088, 0.325, 0.232, headPivot);
 browL.rotation.z = 0.08; browR.rotation.z = -0.08;
 mesh(new THREE.ConeGeometry(0.026, 0.065, 4), flat('#b0734c'), 0, 0.19, 0.262, headPivot).rotation.x = Math.PI / 2;
 const mouth = mesh(box(0.08, 0.018, 0.02), new THREE.MeshBasicMaterial({ color: '#4a1c1c' }), 0, 0.105, 0.236, headPivot);
+const teeth = mesh(box(0.9, 0.22, 0.4), new THREE.MeshBasicMaterial({ color: '#f4efe6' }), 0, 0.36, 0.35, mouth);
+const tongue = mesh(box(0.6, 0.25, 0.4), new THREE.MeshBasicMaterial({ color: '#b5524f' }), 0, -0.3, 0.3, mouth);
+const eyeBase = { L: eyeL.position.clone(), R: eyeR.position.clone() };
 
 // ---------- ONE (original mascot: teal low-poly orb, dark face visor, cyan LED eyes, antenna bulb) ----------
 const one = new THREE.Group();
@@ -375,8 +378,11 @@ for (const l of lines) {
       add(l.start - 0.05, SHOTS.ONE_CU, 0.3, 0.14, 0.5);
       break;
     case 'cta':
-      add(l.start - 0.1, SHOTS.WIDE, 0.6, 0.0);
-      add(l.start + d * 0.35, SHOTS.BOY_CAM, 0.9, 0.05);
+      add(l.start - 0.05, SHOTS.BOY_CAM, 0.45, 0.06, 0.4);
+      break;
+    case 'follow':
+      add(l.start - 0.05, SHOTS.ONE_CU, 0.35, 0.1, 0.5);
+      add(l.start + d * 0.6, SHOTS.WIDE, 1.0, 0.02);
       break;
     default:
       add(l.start, l.who === 'ONE' ? SHOTS.ONE_CU : SHOTS.BOY_CU);
@@ -415,13 +421,28 @@ function placeCamera(t) {
 
 // ---------- character behaviour (stateful, frames rendered in order) ----------
 let boyYaw = 0.0, boyPitch = 0, oneYaw = 0.5, stickAim = new THREE.Vector3();
-const blink = (t, period, phase) => { const x = (t + phase) % period; return x < 0.12 ? 0.15 : 1; };
+// Natural blinking: irregular gaps (2-5 s), smooth close/open, sometimes a double blink.
+function blinkTrack(seed, total) {
+  let s = seed; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  const times = []; let t = 0.8 + rnd();
+  while (t < total) { times.push(t); if (rnd() < 0.2) times.push(t + 0.28); t += 2 + rnd() * 3; }
+  return times;
+}
+const BLINKS = { boy: blinkTrack(11, TL.duration), one: blinkTrack(29, TL.duration) };
+function blink(which, t) {
+  let v = 1;
+  for (const b of BLINKS[which]) { const d = t - b; if (d >= 0 && d < 0.16) v = Math.min(v, 0.1 + 0.9 * Math.abs(Math.cos(Math.PI * d / 0.16))); }
+  return v;
+}
+// Extra blink right after every hard camera cut feels natural on screen.
+const isQuestion = l => /\?\s*$/.test(l.caption);
 const tmpQ = new THREE.Quaternion();
 
 function animate(t, f) {
   const l = lineAt(t);
   const speaker = l ? l.who : null;
   const aB = TL.amp.VINEET?.[f] || 0, aO = TL.amp.ONE?.[f] || 0;
+  const shB = TL.shape?.VINEET?.[f] ?? 0.5, shO = TL.shape?.ONE?.[f] ?? 0.5;
   const writing = ops.find(o => t >= o.t0 - 0.1 && t <= o.t1 + 0.2);
   const recent = lastLineBefore(t);
 
@@ -434,17 +455,31 @@ function animate(t, f) {
   const wantYaw = Math.max(-1.1, Math.min(1.1, Math.atan2(local.x, local.z)));
   const wantPitch = Math.max(-0.35, Math.min(0.35, -Math.atan2(local.y, Math.hypot(local.x, local.z))));
   boyYaw += (wantYaw - boyYaw) * 0.18; boyPitch += (wantPitch - boyPitch) * 0.18;
-  headPivot.rotation.set(boyPitch + (speaker === 'VINEET' ? 0.04 * Math.sin(t * 7) * aB : 0), boyYaw, 0.03 * Math.sin(t * 0.9));
-  mouth.scale.set(1 - aB * 0.2, 1 + aB * 2.4, 1);
-  const bb = blink(t, 3.3, 0.4);
+  const prevB = TL.amp.VINEET?.[Math.max(0, f - 2)] || 0;
+  const nod = speaker === 'VINEET' ? Math.max(0, aB - prevB) * 0.25 : 0;   // nod on stressed syllables
+  headPivot.rotation.set(boyPitch + nod, boyYaw, 0.03 * Math.sin(t * 0.9) + (speaker === 'VINEET' ? 0.03 * Math.sin(t * 2.3) : 0));
+  // lip sync: open with loudness, width with vowel shape (ee wide / oo round)
+  mouth.scale.set(0.75 + shB * 0.55 - aB * 0.15, 1 + aB * 3.0, 1);
+  teeth.visible = aB > 0.3 && shB > 0.35;
+  tongue.visible = aB > 0.55;
+  // eyes follow where he looks
+  const look = Math.max(-1, Math.min(1, (wantYaw - boyYaw) * 3));
+  eyeL.position.x = eyeBase.L.x + look * 0.012; eyeR.position.x = eyeBase.R.x + look * 0.012;
+  const bb = blink('boy', t);
   eyeL.scale.y = eyeR.scale.y = bb;
   const surprise = recent.shot === 'realize' && speaker === 'VINEET' ? 0.03 : 0;
-  browL.position.y = browR.position.y = 0.325 + surprise + (speaker === 'VINEET' ? aB * 0.012 : 0);
+  const lp = l ? (t - l.start) / (l.end - l.start) : 1;
+  const ask = l && l.who === 'VINEET' && isQuestion(l) && lp > 0.5 ? 0.025 : 0;   // brows up on a question
+  const annoyed = recent.shot === 'simpler' && t < recent.end + 0.4;               // "Nahi. Aur simple."
+  browL.position.y = browR.position.y = 0.325 + surprise + ask + (annoyed ? -0.012 : 0) + (speaker === 'VINEET' ? aB * 0.01 : 0);
+  browL.rotation.z = annoyed ? -0.3 : 0.08; browR.rotation.z = annoyed ? 0.3 : -0.08;
   torso.rotation.z = 0.015 * Math.sin(t * 1.1);
   armR.rotation.x = speaker === 'VINEET' ? -0.25 * aB : 0;
 
   // ONE: bounce while talking, glow with voice, face VINEET
-  const bounce = 0.012 * Math.sin(t * 2.2) + aO * 0.05;
+  const fl = lines.find(x => x.shot === 'follow');
+  const jump = fl && t > fl.start ? Math.abs(Math.sin((t - fl.start) * 7)) * 0.05 * Math.max(0, 1 - (t - fl.start) / 3) : 0;
+  const bounce = 0.012 * Math.sin(t * 2.2) + aO * 0.05 + jump;
   oneBody.position.y = bounce;
   oneBody.scale.set(1 + aO * 0.06, 1 - aO * 0.05, 1 + aO * 0.06);
   const toBoy = one.worldToLocal(boyHeadW());
@@ -452,12 +487,14 @@ function animate(t, f) {
   if (speaker === 'ONE' && !writing) wantOne = 0.35;
   oneYaw += (wantOne - oneYaw) * 0.15;
   oneBody.rotation.y = oneYaw;
-  const ob = blink(t, 2.7, 1.1);
-  oEyeL.scale.y = oEyeR.scale.y = ob;
+  const happy = ['payoff', 'follow'].includes(recent.shot) || (recent.shot === 'reveal' && t > recent.start + 1);
+  const ob = blink('one', t);
+  oEyeL.scale.y = oEyeR.scale.y = ob * (happy ? 0.38 : 1);
+  oEyeL.rotation.z = happy ? 0.35 : 0; oEyeR.rotation.z = happy ? -0.35 : 0;
   bulbMat.emissiveIntensity = 1.0 + aO * 3;
   oneGlow.intensity = aO * 2.5;
   bulb.position.y = 0.55 + 0.01 * Math.sin(t * 6);
-  oneMouth.scale.set(1 + aO * 0.9, 1 + aO * 3.2, 1);
+  oneMouth.scale.set(0.8 + shO * 0.7 + (happy ? 0.4 : 0), 1 + aO * 3.4, 1);
   armOne.rotation.z = -0.5 - (speaker === 'ONE' ? 0.5 * aO + 0.15 * Math.sin(t * 5) : 0);
 
   // pointer stick aims at the pen while writing, else rests diagonally up-left
@@ -501,6 +538,75 @@ function wrap(g, text, maxW) {
   for (const w of words) { const tr = row ? row + ' ' + w : w; if (g.measureText(tr).width > maxW && row) { rows.push(row); row = w; } else row = tr; }
   if (row) rows.push(row); return rows;
 }
+// ---------- CTA cards ----------
+const CTA = lines.filter(l => l.cta_card).map(l => ({ ...l.cta_card, t0: l.start, t1: l.end }));
+function drawCtaCards(g, t) {
+  const follow = CTA.find(c => c.type === 'follow');
+  for (const c of CTA) {
+    if (t < c.t0 - 0.1) continue;
+    const inP = ease(clamp01((t - c.t0 + 0.1) / 0.35));
+    let y = H * 0.8 + (1 - inP) * 260;
+    if (c.type === 'comment' && follow && t > follow.t0) y -= ease(clamp01((t - follow.t0) / 0.35)) * 150;
+    g.save(); g.globalAlpha = inP;
+    if (c.type === 'comment') drawComment(g, c, t, y); else drawFollow(g, c, t, y);
+    g.restore();
+  }
+}
+function drawComment(g, c, t, y) {
+  const w = W * 0.86, h = 128, x = (W - w) / 2;
+  g.fillStyle = 'rgba(255,255,255,0.96)'; roundRect(g, x, y - h / 2, w, h, 26); g.fill();
+  // avatar (ONE's teal face)
+  g.fillStyle = '#2bb3a3'; g.beginPath(); g.arc(x + 58, y, 32, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#0e1a2e'; roundRect(g, x + 36, y - 14, 44, 24, 10); g.fill();
+  g.fillStyle = '#8ffcff'; g.fillRect(x + 46, y - 9, 7, 14); g.fillRect(x + 63, y - 9, 7, 14);
+  g.textAlign = 'left'; g.textBaseline = 'middle';
+  g.fillStyle = '#3b4252'; g.font = '700 27px Poppins'; g.fillText('Comment karo', x + 108, y - 26);
+  // keyword typed into the input, then a pulsing chip
+  const typed = clamp01((t - c.t0 - 0.5) / 0.9);
+  const kw = c.keyword.slice(0, Math.ceil(c.keyword.length * typed));
+  g.fillStyle = '#eef1f6'; roundRect(g, x + 104, y - 2, w - 130, 50, 25); g.fill();
+  const pulse = 1 + 0.06 * Math.max(0, Math.sin((t - c.t0) * 6)) * (typed >= 1 ? 1 : 0);
+  g.save(); g.translate(x + 124, y + 23); g.scale(pulse, pulse);
+  g.fillStyle = '#ff7a1a'; g.font = '800 30px Poppins';
+  g.fillText(kw + ((Math.floor(t * 3) % 2 && typed < 1) ? '|' : ''), 0, 1);
+  g.restore();
+  if (typed >= 1) {
+    g.fillStyle = '#1d6b3a'; g.font = '700 22px Poppins'; g.textAlign = 'right';
+    g.fillText('DM me system milega', x + w - 40, y + 23);
+  }
+}
+function drawFollow(g, c, t, y) {
+  const w = W * 0.86, h = 120, x = (W - w) / 2;
+  g.fillStyle = 'rgba(255,255,255,0.96)'; roundRect(g, x, y - h / 2, w, h, 26); g.fill();
+  g.fillStyle = '#1b1b1b'; g.font = '800 30px Poppins'; g.textAlign = 'left'; g.textBaseline = 'middle';
+  g.fillText(HANDLE, x + 34, y - 16);
+  g.fillStyle = '#5b6475'; g.font = '700 21px Poppins'; g.fillText('Roz ek AI concept, simple', x + 34, y + 22);
+  const tap = c.t0 + (c.t1 - c.t0) * 0.45;
+  const done = t >= tap;
+  const press = Math.exp(-Math.pow((t - tap) * 9, 2));
+  const bw = 170, bh = 62, bx = x + w - bw - 26;
+  g.save(); g.translate(bx + bw / 2, y); g.scale(1 - press * 0.12, 1 - press * 0.12);
+  g.fillStyle = done ? '#e4e8ef' : '#ff7a1a'; roundRect(g, -bw / 2, -bh / 2, bw, bh, 31); g.fill();
+  g.fillStyle = done ? '#1b1b1b' : '#ffffff'; g.font = '800 26px Poppins'; g.textAlign = 'center';
+  g.fillText(done ? 'Following ✓' : '+ Follow', 0, 1);
+  g.restore();
+  // tap ripple + sparkles
+  if (t > tap - 0.25 && t < tap + 0.6) {
+    const k = clamp01((t - tap + 0.25) / 0.85);
+    g.strokeStyle = `rgba(255,122,26,${1 - k})`; g.lineWidth = 5;
+    g.beginPath(); g.arc(bx + bw / 2, y, 20 + k * 90, 0, Math.PI * 2); g.stroke();
+  }
+  if (done && t < tap + 1.2) {
+    const k = (t - tap) / 1.2;
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2, r = 40 + k * 140;
+      g.fillStyle = ['#ff7a1a', '#2bb3a3', '#f2c14e'][i % 3]; g.globalAlpha = 1 - k;
+      g.beginPath(); g.arc(bx + bw / 2 + Math.cos(a) * r, y + Math.sin(a) * r * 0.7, 7 * (1 - k) + 2, 0, Math.PI * 2); g.fill();
+    }
+    g.globalAlpha = 1;
+  }
+}
+
 function drawOverlay(t) {
   const g = cx;
   // vignette
@@ -523,9 +629,10 @@ function drawOverlay(t) {
     rows.forEach((r, i) => g.fillText(r, 0, -((rows.length - 1) * lh) / 2 + i * lh + 2));
     g.restore();
   }
+  drawCtaCards(g, t);
   // handle watermark
   g.font = '700 26px Poppins'; g.textAlign = 'center'; g.fillStyle = 'rgba(255,255,255,0.5)';
-  g.fillText(HANDLE, W / 2, H * 0.71);
+  if (!CTA.length || t < CTA[0].t0 - 0.1) g.fillText(HANDLE, W / 2, H * 0.71);
 }
 
 // ---------- frame entry ----------

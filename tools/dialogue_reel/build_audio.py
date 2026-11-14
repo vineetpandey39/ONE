@@ -32,7 +32,7 @@ FPS = 30
 GAP = 0.22          # breath between lines
 SNAP_GAP = 0.08     # "Nahi. Aur simple." comes in hot
 LEAD_IN = 0.35
-TAIL = 1.4
+TAIL = 2.2
 
 
 def synth_kokoro(kokoro, text: str, voice: str, speed: float) -> np.ndarray:
@@ -215,17 +215,30 @@ def main() -> None:
     # Per-frame mouth amplitude per speaker, normalised 0..1.
     frames = int(np.ceil(total * FPS))
     hop = SR // FPS
+    # Per-frame mouth data per speaker: "open" (loudness, fast attack / soft
+    # release, closes in pauses) and "shape" (spectral centroid: 0 = round "oo",
+    # 1 = wide "ee"), so the mouth changes form, not only size.
     amp = {who: [0.0] * frames for who in script["characters"]}
+    shape = {who: [0.5] * frames for who in script["characters"]}
     peak = max(float(np.abs(a).max()) for _, a in clips) or 1.0
+    freqs = np.fft.rfftfreq(hop, 1 / SR)
     for (start, audio), line in zip(clips, script["lines"]):
         f0 = int(start * FPS)
+        prev = 0.0
         for k in range(int(len(audio) / hop)):
-            rms = float(np.sqrt(np.mean(audio[k * hop:(k + 1) * hop] ** 2)))
+            seg = audio[k * hop:(k + 1) * hop]
+            rms = float(np.sqrt(np.mean(seg ** 2)))
+            level = min(1.0, rms / peak * 4.0)
+            level = 0.0 if level < 0.08 else level
+            prev = level if level > prev else prev * 0.55 + level * 0.45
+            mag = np.abs(np.fft.rfft(seg * np.hanning(len(seg))))
+            cen = float((freqs * mag).sum() / (mag.sum() + 1e-9))
             if f0 + k < frames:
-                amp[line["who"]][f0 + k] = round(min(1.0, rms / peak * 4.0), 3)
+                amp[line["who"]][f0 + k] = round(prev, 3)
+                shape[line["who"]][f0 + k] = round(float(np.clip((cen - 600) / 2400, 0, 1)), 3)
 
     timeline = {"fps": FPS, "duration": round(total, 3), "frames": frames,
-                "board_title": script.get("board_title", ""), "lines": script["lines"], "amp": amp}
+                "board_title": script.get("board_title", ""), "lines": script["lines"], "amp": amp, "shape": shape}
     (out_dir / "timeline.json").write_text(json.dumps(timeline, ensure_ascii=False), encoding="utf-8")
     print(f"total {total:.2f}s, {frames} frames", flush=True)
 

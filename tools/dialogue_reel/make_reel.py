@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SHOTS = {"hook", "explain", "simpler", "story", "reveal", "realize", "payoff", "cta"}
+SHOTS = {"hook", "explain", "simpler", "story", "reveal", "realize", "payoff", "cta", "follow"}
 
 
 def validate(script: dict) -> list[str]:
