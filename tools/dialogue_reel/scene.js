@@ -557,7 +557,7 @@ function placeCamera(t) {
   const hh = 0.006;
   const n = (f, p) => Math.sin(t * f + p);
   const shake = KF.filter(k => k.punch && t >= k.t && t - k.t < 0.45).reduce((s, k) => s + k.punch * Math.exp(-(t - k.t) * 9), 0);
-  const off = P(hh * (n(1.3, 0) + 0.5 * n(3.1, 2)) + shake * 0.02 * n(55, 1), hh * (n(1.7, 1) + 0.5 * n(2.3, 4)) + shake * 0.02 * n(61, 3), 0);
+  const off = P(hh * (n(1.3, 0) + 0.5 * n(3.1, 2)) + shake * 0.02 * n(24, 1), hh * (n(1.7, 1) + 0.5 * n(2.3, 4)) + shake * 0.02 * n(27, 3), 0);
   camera.position.copy(pose.pos).add(off);
   camera.lookAt(pose.tgt.clone().add(off.multiplyScalar(0.5)));
   camera.fov = pose.fov * (1 - shake * 0.03);
