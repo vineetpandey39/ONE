@@ -1,0 +1,229 @@
+{
+  "id": "ep05_chatgpt_privacy",
+  "title": "ChatGPT aur Privacy: Sach ya Jhooth? (chai ki shart)",
+  "location": "tapri",
+  "board_style": "chalk",
+  "board_title": "Privacy: Sach ya Jhooth?",
+  "characters": {
+    "VINEET": {
+      "voice": "hm_omega",
+      "pitch": 1.0,
+      "speed": 1.05,
+      "eleven_voice_id": "TX3LPaxmHKxFdv7VOQHJ",
+      "eleven_speed": 1.05
+    },
+    "ONE": {
+      "voice": "hm_psi",
+      "pitch": 1.22,
+      "speed": 1.08,
+      "eleven_voice_id": "cgSgspJ2msm6clMCkdW9",
+      "eleven_speed": 1.08,
+      "eleven_pitch": 1.07
+    }
+  },
+  "lines": [
+    {
+      "who": "VINEET",
+      "shot": "hook",
+      "caption": "ONE, aaj ki chai ki shart. ChatGPT aur privacy. 3 baatein, sach ya jhooth?",
+      "tts": "वन, आज की चाय की शर्त. चैट जी पी टी और प्राइवेसी. तीन बातें, सच या झूठ?"
+    },
+    {
+      "who": "ONE",
+      "shot": "payoff",
+      "caption": "Shart manzoor. Aaj samosa bhi lagega!",
+      "tts": "शर्त मंज़ूर. आज समोसा भी लगेगा!"
+    },
+    {
+      "who": "VINEET",
+      "shot": "claim",
+      "caption": "Pehli. ChatGPT me password ya OTP daalna safe hai.",
+      "tts": "पहली. चैट जी पी टी में पासवर्ड या ओ टी पी डालना सेफ़ है.",
+      "board": [
+        {
+          "op": "write",
+          "id": "c1",
+          "text": "1. Password/OTP daalna safe",
+          "x": 50,
+          "y": 200,
+          "size": 42,
+          "color": "#f4f1e8",
+          "at": 0.25
+        }
+      ]
+    },
+    {
+      "who": "ONE",
+      "shot": "verdict",
+      "caption": "Jhooth! Password, OTP, bank details, kisi bhi chatbot me kabhi mat daalo.",
+      "tts": "झूठ! पासवर्ड, ओ टी पी, बैंक डिटेल्स, किसी भी चैटबॉट में कभी मत डालो.",
+      "board": [
+        {
+          "op": "stamp",
+          "text": "JHOOTH",
+          "x": 830,
+          "y": 185,
+          "size": 56,
+          "color": "#ff5c5c",
+          "rot": -0.12,
+          "at": 0.08
+        }
+      ]
+    },
+    {
+      "who": "VINEET",
+      "shot": "claim",
+      "caption": "Doosri. Office ka secret data paste karna chalta hai.",
+      "tts": "दूसरी. ऑफ़िस का सीक्रेट डेटा पेस्ट करना चलता है.",
+      "board": [
+        {
+          "op": "write",
+          "id": "c2",
+          "text": "2. Office data paste? OK",
+          "x": 50,
+          "y": 330,
+          "size": 42,
+          "color": "#f4f1e8",
+          "at": 0.25
+        }
+      ]
+    },
+    {
+      "who": "ONE",
+      "shot": "verdict",
+      "caption": "Jhooth! Pehle company ki AI policy dekho. Naam aur numbers hata ke pucho.",
+      "tts": "झूठ! पहले कंपनी की ए आई पॉलिसी देखो. नाम और नंबर्स हटा के पूछो.",
+      "board": [
+        {
+          "op": "stamp",
+          "text": "JHOOTH",
+          "x": 830,
+          "y": 315,
+          "size": 56,
+          "color": "#ff5c5c",
+          "rot": 0.1,
+          "at": 0.08
+        }
+      ]
+    },
+    {
+      "who": "VINEET",
+      "shot": "claim",
+      "caption": "Teesri. Apni chats ko training se band kar sakte hain.",
+      "tts": "तीसरी. अपनी चैट्स को ट्रेनिंग से बंद कर सकते हैं.",
+      "board": [
+        {
+          "op": "write",
+          "id": "c3",
+          "text": "3. Training band ho sakti?",
+          "x": 50,
+          "y": 460,
+          "size": 42,
+          "color": "#f4f1e8",
+          "at": 0.25
+        }
+      ]
+    },
+    {
+      "who": "ONE",
+      "shot": "verdict",
+      "caption": "Sach! Settings me Data Controls hai, aur Temporary Chat bhi.",
+      "tts": "सच! सेटिंग्स में डेटा कंट्रोल्स है, और टेम्पररी चैट भी.",
+      "board": [
+        {
+          "op": "stamp",
+          "text": "SACH",
+          "x": 830,
+          "y": 445,
+          "size": 60,
+          "color": "#9be29b",
+          "rot": -0.1,
+          "at": 0.08
+        }
+      ]
+    },
+    {
+      "who": "VINEET",
+      "shot": "realize",
+      "caption": "Matlab AI use karo, par apni secret cheezein apne paas?",
+      "tts": "मतलब ए आई यूज़ करो, पर अपनी सीक्रेट चीज़ें अपने पास?",
+      "board": [
+        {
+          "op": "write",
+          "id": "d1",
+          "text": "AI use karo, secrets nahi!",
+          "x": 190,
+          "y": 585,
+          "size": 54,
+          "color": "#ffd86b",
+          "at": 0.35
+        }
+      ]
+    },
+    {
+      "who": "ONE",
+      "shot": "reveal",
+      "caption": "Bilkul. Aur shart tum haare. Samosa tumhari taraf se!",
+      "tts": "बिल्कुल. और शर्त तुम हारे. समोसा तुम्हारी तरफ़ से!",
+      "board": [
+        {
+          "op": "circle",
+          "target": "d1",
+          "at": 0.15
+        }
+      ]
+    },
+    {
+      "who": "VINEET",
+      "shot": "cta",
+      "caption": "Meri AI privacy settings checklist chahiye? Comment karo PRIVACY.",
+      "tts": "मेरी ए आई प्राइवेसी सेटिंग्स चेकलिस्ट चाहिए? कमेंट करो, प्राइवेसी.",
+      "cta_card": {
+        "type": "comment",
+        "keyword": "PRIVACY"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "follow",
+      "caption": "Aur follow kar lo. Kal agli chai, agla myth!",
+      "tts": "और फ़ॉलो कर लो. कल अगली चाय, अगला मिथ!",
+      "cta_card": {
+        "type": "follow"
+      }
+    }
+  ],
+  "post_caption": "ChatGPT me ye galti mat karna ⚠️ Privacy: Sach ya Jhooth? (Hindi)\n\nChai ki shart, aur 3 privacy myths:\n1️⃣ \"Password/OTP daalna safe hai\" ❌ Jhooth. Password, OTP, bank details kisi chatbot me kabhi mat daalo.\n2️⃣ \"Office ka secret data paste karna chalta hai\" ❌ Jhooth. Pehle company ki AI policy dekho, naam aur numbers hata ke pucho.\n3️⃣ \"Chats ko training se band kar sakte hain\" ✅ Sach. Settings → Data Controls, aur Temporary Chat.\n\nAI use karo, secrets nahi. 🔒\n\n👉 Meri AI privacy settings checklist chahiye? Comment karo \"PRIVACY\", DM me bhej dunga.\n\n💾 Save karo, aur office wale dost ko bhejo.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#chatgpt #aiprivacy #chatgpttips #aihindi #cybersafety",
+  "seo": {
+    "pinned_comment": "📌 \"PRIVACY\" comment karo 👇 ChatGPT privacy settings ki step-by-step checklist DM me bhejta hoon.",
+    "alt_text": "Animated Hindi explainer at a night chai stall: VINEET bets the AI mascot ONE a samosa over three ChatGPT privacy claims. ONE stamps them on the chalkboard: sharing passwords or OTPs is false/unsafe, pasting secret office data is false/unsafe, turning off training via Data Controls or Temporary Chat is true.",
+    "cover_text": [
+      "ChatGPT PRIVACY",
+      "Sach ya Jhooth?"
+    ],
+    "keywords": [
+      "ChatGPT privacy",
+      "ChatGPT safe hai kya",
+      "ChatGPT me kya nahi daalna",
+      "ChatGPT data controls",
+      "AI privacy Hindi",
+      "ChatGPT tips Hindi"
+    ],
+    "youtube": {
+      "title": "ChatGPT me ye galti mat karna ⚠️ Privacy: Sach ya Jhooth? (Hindi) #shorts",
+      "description": "ChatGPT privacy ke 3 myths, chai ki shart ke saath. Password/OTP daalna safe? Office data paste karna? Chats ko training se band kar sakte ho?\n\nPrivacy settings checklist chahiye? Comment karo PRIVACY.\nRoz ek AI concept: subscribe karo.\n\n#ChatGPT #AIPrivacy #ChatGPTTips #AIHindi #Shorts",
+      "tags": [
+        "chatgpt privacy",
+        "chatgpt safe hai kya",
+        "chatgpt tips hindi",
+        "chatgpt data controls",
+        "temporary chat chatgpt",
+        "ai privacy hindi",
+        "cyber safety hindi",
+        "ai hindi",
+        "aibyvineet"
+      ]
+    },
+    "file_name": "chatgpt-privacy-sach-ya-jhooth-hindi.mp4"
+  }
+}
