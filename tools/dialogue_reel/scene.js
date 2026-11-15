@@ -796,8 +796,19 @@ window.renderFrame = (f, fmt = 'image/jpeg') => {
   placeCamera(t);
   bokeh.uniforms.focus.value = camFocus;
   bokeh.uniforms.aperture.value = 0.0022 * Math.min(1.6, 3.2 / camFocus);
-  composer.render();
-  cx.drawImage(renderer.domElement, 0, 0);
+  // Software WebGL occasionally hands back an empty (black) buffer for one frame.
+  // Check a sparse grid of pixels and re-render (same scene state) if it is blank.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    composer.render();
+    cx.drawImage(renderer.domElement, 0, 0);
+    const px = cx.getImageData(0, 0, W, H).data;
+    let lit = 0;
+    for (let y = 40; y < H; y += 80) for (let x = 20; x < W; x += 60) {
+      const i = (y * W + x) * 4; if (px[i] + px[i + 1] + px[i + 2] > 30) lit++;
+    }
+    if (lit > 20) break;
+    console.log(`blank WebGL frame ${f}, re-rendering (attempt ${attempt + 1})`);
+  }
   drawOverlay(t);
   return comp.toDataURL(fmt, 0.9);
 };
