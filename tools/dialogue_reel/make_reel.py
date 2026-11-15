@@ -16,7 +16,8 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SHOTS = {"hook", "explain", "simpler", "story", "reveal", "realize", "payoff", "cta", "follow"}
+SHOTS = {"hook", "explain", "simpler", "story", "reveal", "realize", "payoff", "cta", "follow", "claim", "verdict"}
+LOCATIONS = {"classroom", "tapri"}
 
 
 def validate(script: dict) -> list[str]:
@@ -26,6 +27,8 @@ def validate(script: dict) -> list[str]:
             errs.append(f"missing '{k}'")
     if errs:
         return errs
+    if script.get("location", "classroom") not in LOCATIONS:
+        errs.append(f"unknown location {script.get('location')!r}; one of {sorted(LOCATIONS)}")
     ids: set[str] = set()
     words = 0
     for i, ln in enumerate(script["lines"], 1):
@@ -50,6 +53,9 @@ def validate(script: dict) -> list[str]:
                 ids.add(op.get("id"))
                 if len(op.get("text", "")) > 40:
                     errs.append(f"line {i}: board text too long: {op['text']!r}")
+            elif op.get("op") == "stamp":
+                if not op.get("text") or "x" not in op or "y" not in op:
+                    errs.append(f"line {i}: stamp needs text, x, y")
             elif op.get("op") in ("strike", "circle"):
                 if op.get("target") not in ids:
                     errs.append(f"line {i}: {op['op']} targets unknown id {op.get('target')!r}")

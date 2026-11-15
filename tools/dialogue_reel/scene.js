@@ -73,117 +73,206 @@ const lamp = new THREE.PointLight('#ffb36b', 3, 4);
 lamp.position.set(1.9, 1.6, -0.4);
 scene.add(lamp);
 
-// ---------- room ----------
-mesh(box(10, 0.1, 9), flat('#7a4e33'), 0, -0.05, -1);
-// back wall with a big window (frame bars), city outside
-const wallMat = flat('#34405e');
-mesh(box(1.6, 4.2, 0.15), wallMat, -3.7, 2.1, -4);
-mesh(box(1.6, 4.2, 0.15), wallMat, 3.7, 2.1, -4);
-mesh(box(10, 0.6, 0.15), wallMat, 0, 0.3, -4);
-mesh(box(10, 0.5, 0.15), wallMat, 0, 4.15, -4);
-const barMat = flat('#14161c');
-for (const x of [-2.9, -1.0, 1.0, 2.9]) mesh(box(0.09, 3.4, 0.12), barMat, x, 2.25, -3.95);
-for (const y of [0.6, 2.1, 3.9]) mesh(box(5.9, 0.09, 0.12), barMat, 0, y, -3.95);
-
-// sky + city backdrop: painted once onto a canvas and pre-blurred (out-of-focus
-// city with soft bokeh lights). No small sharp window grid exists in 3D, so
-// nothing can shimmer when the camera moves.
-const skyC = document.createElement('canvas'); skyC.width = 2048; skyC.height = 1024;
-{
-  const raw = document.createElement('canvas'); raw.width = 2048; raw.height = 1024;
-  const g = raw.getContext('2d');
-  const gr = g.createLinearGradient(0, 0, 0, 1024);
-  gr.addColorStop(0, '#16284f'); gr.addColorStop(0.45, '#3f5f98'); gr.addColorStop(0.62, '#7d97c4'); gr.addColorStop(1, '#2a3550');
-  g.fillStyle = gr; g.fillRect(0, 0, 2048, 1024);
-  let sd = 7; const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
-  for (const [layer, col, base] of [[0, '#2c3a5e', 520], [1, '#1d2744', 600]]) {
-    let x = -40;
-    while (x < 2100) {
-      const w = 110 + rnd() * 160, h = 180 + rnd() * (layer ? 300 : 220);
-      g.fillStyle = col; g.fillRect(x, base + 260 - h, w, 1024);
-      for (let wy = base + 260 - h + 18; wy < 1000; wy += 26) for (let wx = x + 12; wx < x + w - 14; wx += 24)
-        if (rnd() > 0.62) { g.fillStyle = rnd() > 0.25 ? 'rgba(255,210,122,0.85)' : 'rgba(170,205,255,0.7)'; g.fillRect(wx, wy, 10, 12); }
-      x += w + 8 + rnd() * 30;
-    }
-  }
-  const out = skyC.getContext('2d');
-  out.filter = 'blur(7px)'; out.drawImage(raw, 0, 0); out.filter = 'none';
-  // soft bokeh discs
-  for (let i = 0; i < 70; i++) {
-    const x = rnd() * 2048, y = 380 + rnd() * 600, r = 14 + rnd() * 34;
-    const warm = rnd() > 0.3, rg = out.createRadialGradient(x, y, 0, x, y, r);
-    rg.addColorStop(0, warm ? 'rgba(255,205,120,0.55)' : 'rgba(150,200,255,0.45)');
-    rg.addColorStop(0.7, warm ? 'rgba(255,190,100,0.25)' : 'rgba(150,200,255,0.18)');
-    rg.addColorStop(1, 'rgba(0,0,0,0)');
-    out.fillStyle = rg; out.beginPath(); out.arc(x, y, r, 0, Math.PI * 2); out.fill();
-  }
-}
-const skyTex = new THREE.CanvasTexture(skyC); skyTex.colorSpace = THREE.SRGBColorSpace;
-const sky = new THREE.Mesh(new THREE.PlaneGeometry(28, 14), new THREE.MeshBasicMaterial({ map: skyTex }));
-// Optional painted backdrop (e.g. a Leonardo/ChatGPT night-city image): assets/backdrop.jpg
-{
-  const url = params.get('backdrop') || 'assets/backdrop.jpg';
-  const ok = await fetch(url, { method: 'HEAD' }).then(r => r.ok).catch(() => false);
-  if (ok) {
-    const tex = await new THREE.TextureLoader().loadAsync(url);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    sky.material.map = tex; sky.material.needsUpdate = true;
-    sky.userData.painted = true;
-  }
-}
-sky.position.set(0, 3, -11); scene.add(sky);
-
-// bookshelf right
-const shelfMat = flat('#6b4630');
-mesh(box(1.1, 2.6, 0.45), shelfMat, 3.3, 1.3, -3.4);
-const bookCols = ['#e0703a', '#f2c14e', '#3d8b6d', '#c94c4c', '#4f6fb3', '#e8e2d0'];
-for (let r = 0; r < 4; r++) for (let i = 0; i < 6; i++) {
-  const h = 0.32 + ((i + r) % 3) * 0.04;
-  mesh(box(0.11, h, 0.3), flat(bookCols[(i + r * 2) % 6]), 2.85 + i * 0.15, 0.35 + r * 0.6 + h / 2, -3.3);
-}
-
-// ---------- whiteboard ----------
+// ---------- location ----------
+// The set changes per episode ("location" in the script); the layout contract
+// stays the same so characters, shots and the board logic never change:
+// board on the back wall, a counter/desk where VINEET's arms rest (top ~0.84 m),
+// ONE's perch at x -0.95 / z -0.45, VINEET's seat at x 1.2 / z -0.95.
+const LOC = TL.location || 'classroom';
+const CHALK = (TL.board_style || (LOC === 'tapri' ? 'chalk' : 'white')) === 'chalk';
 const BOARD = { x: -0.35, y: 2.15, z: -3.25, w: 2.7, h: 2.7 / 1.6 };
 const boardC = document.createElement('canvas'); boardC.width = 1024; boardC.height = 640;
 const bctx = boardC.getContext('2d');
 const boardTex = new THREE.CanvasTexture(boardC); boardTex.colorSpace = THREE.SRGBColorSpace;
 boardTex.anisotropy = 4;
-mesh(box(BOARD.w + 0.12, BOARD.h + 0.12, 0.06), flat('#9aa1ab'), BOARD.x, BOARD.y, BOARD.z - 0.04);
 const boardFace = new THREE.Mesh(new THREE.PlaneGeometry(BOARD.w, BOARD.h),
   new THREE.MeshStandardMaterial({ map: boardTex, roughness: 0.95 }));
 boardFace.position.set(BOARD.x, BOARD.y, BOARD.z);
 scene.add(boardFace);
-mesh(box(BOARD.w * 0.8, 0.05, 0.12), flat('#9aa1ab'), BOARD.x, BOARD.y - BOARD.h / 2 - 0.05, BOARD.z + 0.05);
-['#2b3a8c', '#c0392b', '#1d6b3a'].forEach((c, i) =>
-  mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.16, 6), flat(c), BOARD.x - 0.25 + i * 0.22, BOARD.y - BOARD.h / 2 - 0.01, BOARD.z + 0.07)
-    .rotation.z = Math.PI / 2);
-mesh(box(0.06, 2.2, 0.06), flat('#7c838c'), BOARD.x - 1.0, 0.6, BOARD.z);
-mesh(box(0.06, 2.2, 0.06), flat('#7c838c'), BOARD.x + 1.0, 0.6, BOARD.z);
 const boardToWorld = (px, py) => new THREE.Vector3(
   BOARD.x - BOARD.w / 2 + (px / 1024) * BOARD.w, BOARD.y + BOARD.h / 2 - (py / 640) * BOARD.h, BOARD.z + 0.01);
+let STACK_TOP = 1.32;
 
-// ---------- desk ----------
-const deskMat = flat('#b07a4f');
-mesh(box(3.0, 0.08, 1.1), deskMat, 0.15, 0.8, -0.55);
-mesh(box(2.9, 0.75, 0.06), flat('#8f5f3c'), 0.15, 0.4, -1.05);
-mesh(new THREE.CylinderGeometry(0.07, 0.065, 0.14, 8), flat('#f3f1ea'), 0.55, 0.91, -0.25); // mug
-mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.16, 7), flat('#25505a'), -0.25, 0.92, -0.75); // pen pot
-['#f2c14e', '#e0703a', '#3d8b6d'].forEach((c, i) => {
-  const p = mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.22, 5), flat(c), -0.27 + i * 0.02, 1.0, -0.75); p.rotation.z = 0.1 - i * 0.1;
-});
-mesh(box(0.34, 0.05, 0.25), flat('#e8e2d0'), 0.1, 0.865, -0.3);
-mesh(box(0.3, 0.04, 0.22), flat('#e46a8a'), 0.1, 0.905, -0.3);
-// book stack for ONE
-const stack = [['#2f8a5a', 0.1], ['#7a4fb3', 0.09], ['#f2c14e', 0.1], ['#c94c4c', 0.09], ['#25505a', 0.1]];
-let sy = 0.84;
-stack.forEach(([c, h], i) => { mesh(box(0.5 - i * 0.015, h, 0.36), flat(c), -0.95 + (i % 2) * 0.02, sy + h / 2, -0.45); sy += h; });
-const STACK_TOP = sy;
+// Backdrops are painted on a canvas and pre-blurred: no small sharp repeating
+// detail exists in 3D, so nothing shimmers when the camera moves.
+function paintBackdrop(kind) {
+  const c = document.createElement('canvas'); c.width = 2048; c.height = 1024;
+  const raw = document.createElement('canvas'); raw.width = 2048; raw.height = 1024;
+  const g = raw.getContext('2d');
+  let sd = kind === 'street' ? 13 : 7; const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+  const gr = g.createLinearGradient(0, 0, 0, 1024);
+  if (kind === 'street') {
+    gr.addColorStop(0, '#0d1226'); gr.addColorStop(0.5, '#1f2547'); gr.addColorStop(0.7, '#3a2f4a'); gr.addColorStop(1, '#141218');
+    g.fillStyle = gr; g.fillRect(0, 0, 2048, 1024);
+    // shop fronts with warm/neon light, a street-light glow, road at the bottom
+    let x = -30;
+    while (x < 2100) {
+      const w = 160 + rnd() * 200, h = 260 + rnd() * 220, top = 760 - h;
+      g.fillStyle = ['#2a2238', '#33263a', '#262a3d'][Math.floor(rnd() * 3)]; g.fillRect(x, top, w, 1024);
+      g.fillStyle = ['rgba(255,190,90,0.9)', 'rgba(255,120,80,0.85)', 'rgba(120,220,200,0.8)', 'rgba(255,230,160,0.9)'][Math.floor(rnd() * 4)];
+      g.fillRect(x + 14, 600, w - 28, 120);                  // lit shop shutter opening
+      g.fillStyle = ['#e8742c', '#2bb3a3', '#c94c4c', '#f2c14e'][Math.floor(rnd() * 4)];
+      g.fillRect(x + 10, 560, w - 20, 30);                   // shop sign band
+      x += w + 6 + rnd() * 20;
+    }
+    g.fillStyle = '#18161c'; g.fillRect(0, 770, 2048, 254);  // road
+  } else {
+    gr.addColorStop(0, '#16284f'); gr.addColorStop(0.45, '#3f5f98'); gr.addColorStop(0.62, '#7d97c4'); gr.addColorStop(1, '#2a3550');
+    g.fillStyle = gr; g.fillRect(0, 0, 2048, 1024);
+    for (const [layer, col, base] of [[0, '#2c3a5e', 520], [1, '#1d2744', 600]]) {
+      let x = -40;
+      while (x < 2100) {
+        const w = 110 + rnd() * 160, h = 180 + rnd() * (layer ? 300 : 220);
+        g.fillStyle = col; g.fillRect(x, base + 260 - h, w, 1024);
+        for (let wy = base + 260 - h + 18; wy < 1000; wy += 26) for (let wx = x + 12; wx < x + w - 14; wx += 24)
+          if (rnd() > 0.62) { g.fillStyle = rnd() > 0.25 ? 'rgba(255,210,122,0.85)' : 'rgba(170,205,255,0.7)'; g.fillRect(wx, wy, 10, 12); }
+        x += w + 8 + rnd() * 30;
+      }
+    }
+  }
+  const out = c.getContext('2d');
+  out.filter = kind === 'street' ? 'blur(9px)' : 'blur(7px)'; out.drawImage(raw, 0, 0); out.filter = 'none';
+  const n = kind === 'street' ? 90 : 70;
+  for (let i = 0; i < n; i++) {
+    const x = rnd() * 2048, y = (kind === 'street' ? 480 : 380) + rnd() * (kind === 'street' ? 420 : 600), r = 14 + rnd() * 38;
+    const pick = rnd();
+    const col = kind === 'street'
+      ? (pick < 0.45 ? [255, 200, 120] : pick < 0.65 ? [255, 90, 80] : pick < 0.85 ? [255, 245, 220] : [120, 220, 200])
+      : (pick > 0.3 ? [255, 205, 120] : [150, 200, 255]);
+    const rg = out.createRadialGradient(x, y, 0, x, y, r);
+    rg.addColorStop(0, `rgba(${col},0.55)`); rg.addColorStop(0.7, `rgba(${col},0.22)`); rg.addColorStop(1, 'rgba(0,0,0,0)');
+    out.fillStyle = rg; out.beginPath(); out.arc(x, y, r, 0, Math.PI * 2); out.fill();
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+async function addBackdrop(kind) {
+  const sky = new THREE.Mesh(new THREE.PlaneGeometry(28, 14), new THREE.MeshBasicMaterial({ map: paintBackdrop(kind) }));
+  // Optional painted backdrop (e.g. a Leonardo/ChatGPT image): assets/backdrop_<location>.jpg or ?backdrop=
+  const url = params.get('backdrop') || `assets/backdrop_${LOC}.jpg`;
+  const ok = await fetch(url, { method: 'HEAD' }).then(r => r.ok).catch(() => false);
+  if (ok) {
+    const tex = await new THREE.TextureLoader().loadAsync(url);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    sky.material.map = tex; sky.material.needsUpdate = true;
+  }
+  sky.position.set(0, 3, -11); scene.add(sky);
+}
 
-// chair
-mesh(box(0.6, 0.07, 0.55), flat('#2c6b6b'), 1.2, 0.5, -0.95);
-mesh(box(0.6, 0.7, 0.07), flat('#2c6b6b'), 1.42, 0.85, -1.15).rotation.y = -0.6;
-for (const [dx, dz] of [[-0.25, -0.22], [0.25, -0.22], [-0.25, 0.22], [0.25, 0.22]])
-  mesh(box(0.05, 0.47, 0.05), flat('#1f4a4a'), 1.2 + dx, 0.24, -0.95 + dz);
+function buildClassroom() {
+  mesh(box(10, 0.1, 9), flat('#7a4e33'), 0, -0.05, -1);
+  const wallMat = flat('#34405e');
+  mesh(box(1.6, 4.2, 0.15), wallMat, -3.7, 2.1, -4);
+  mesh(box(1.6, 4.2, 0.15), wallMat, 3.7, 2.1, -4);
+  mesh(box(10, 0.6, 0.15), wallMat, 0, 0.3, -4);
+  mesh(box(10, 0.5, 0.15), wallMat, 0, 4.15, -4);
+  const barMat = flat('#14161c');
+  for (const x of [-2.9, -1.0, 1.0, 2.9]) mesh(box(0.09, 3.4, 0.12), barMat, x, 2.25, -3.95);
+  for (const y of [0.6, 2.1, 3.9]) mesh(box(5.9, 0.09, 0.12), barMat, 0, y, -3.95);
+  // bookshelf right
+  const shelfMat = flat('#6b4630');
+  mesh(box(1.1, 2.6, 0.45), shelfMat, 3.3, 1.3, -3.4);
+  const bookCols = ['#e0703a', '#f2c14e', '#3d8b6d', '#c94c4c', '#4f6fb3', '#e8e2d0'];
+  for (let r = 0; r < 4; r++) for (let i = 0; i < 6; i++) {
+    const h = 0.32 + ((i + r) % 3) * 0.04;
+    mesh(box(0.11, h, 0.3), flat(bookCols[(i + r * 2) % 6]), 2.85 + i * 0.15, 0.35 + r * 0.6 + h / 2, -3.3);
+  }
+  // whiteboard frame, tray, markers, legs
+  mesh(box(BOARD.w + 0.12, BOARD.h + 0.12, 0.06), flat('#9aa1ab'), BOARD.x, BOARD.y, BOARD.z - 0.04);
+  mesh(box(BOARD.w * 0.8, 0.05, 0.12), flat('#9aa1ab'), BOARD.x, BOARD.y - BOARD.h / 2 - 0.05, BOARD.z + 0.05);
+  ['#2b3a8c', '#c0392b', '#1d6b3a'].forEach((c, i) =>
+    mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.16, 6), flat(c), BOARD.x - 0.25 + i * 0.22, BOARD.y - BOARD.h / 2 - 0.01, BOARD.z + 0.07)
+      .rotation.z = Math.PI / 2);
+  mesh(box(0.06, 2.2, 0.06), flat('#7c838c'), BOARD.x - 1.0, 0.6, BOARD.z);
+  mesh(box(0.06, 2.2, 0.06), flat('#7c838c'), BOARD.x + 1.0, 0.6, BOARD.z);
+  // desk + props
+  mesh(box(3.0, 0.08, 1.1), flat('#b07a4f'), 0.15, 0.8, -0.55);
+  mesh(box(2.9, 0.75, 0.06), flat('#8f5f3c'), 0.15, 0.4, -1.05);
+  mesh(new THREE.CylinderGeometry(0.07, 0.065, 0.14, 8), flat('#f3f1ea'), 0.55, 0.91, -0.25); // mug
+  mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.16, 7), flat('#25505a'), -0.25, 0.92, -0.75); // pen pot
+  ['#f2c14e', '#e0703a', '#3d8b6d'].forEach((c, i) => {
+    const p = mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.22, 5), flat(c), -0.27 + i * 0.02, 1.0, -0.75); p.rotation.z = 0.1 - i * 0.1;
+  });
+  mesh(box(0.34, 0.05, 0.25), flat('#e8e2d0'), 0.1, 0.865, -0.3);
+  mesh(box(0.3, 0.04, 0.22), flat('#e46a8a'), 0.1, 0.905, -0.3);
+  // book stack for ONE
+  const stack = [['#2f8a5a', 0.1], ['#7a4fb3', 0.09], ['#f2c14e', 0.1], ['#c94c4c', 0.09], ['#25505a', 0.1]];
+  let sy = 0.84;
+  stack.forEach(([c, h], i) => { mesh(box(0.5 - i * 0.015, h, 0.36), flat(c), -0.95 + (i % 2) * 0.02, sy + h / 2, -0.45); sy += h; });
+  STACK_TOP = sy;
+  // chair
+  mesh(box(0.6, 0.07, 0.55), flat('#2c6b6b'), 1.2, 0.5, -0.95);
+  mesh(box(0.6, 0.7, 0.07), flat('#2c6b6b'), 1.42, 0.85, -1.15).rotation.y = -0.6;
+  for (const [dx, dz] of [[-0.25, -0.22], [0.25, -0.22], [-0.25, 0.22], [0.25, 0.22]])
+    mesh(box(0.05, 0.47, 0.05), flat('#1f4a4a'), 1.2 + dx, 0.24, -0.95 + dz);
+}
+
+// Night chai tapri: tin roof, chalkboard menu, kettle + kulhads on the counter,
+// string lights, street glowing behind.
+function buildTapri() {
+  scene.background = new THREE.Color('#0d1020');
+  mesh(box(12, 0.1, 10), flat('#2c2b30'), 0, -0.05, -1);                 // road
+  mesh(box(5.2, 0.12, 3.6), flat('#6d6862'), -0.2, 0.06, -2.0);          // footpath slab under the stall
+  // stall back wall (painted tin panels, wide so nothing shimmers)
+  ['#8a3b2e', '#7a3328', '#8a3b2e', '#7a3328'].forEach((c, i) => mesh(box(1.0, 3.1, 0.1), flat(c), -1.85 + i * 1.0, 1.65, -3.42));
+  mesh(box(0.12, 3.3, 0.12), flat('#4a3326'), -2.4, 1.65, -3.35);         // posts
+  mesh(box(0.12, 3.3, 0.12), flat('#4a3326'), 1.7, 1.65, -3.35);
+  mesh(box(0.1, 3.0, 0.1), flat('#4a3326'), -2.4, 1.5, -0.15);
+  // tin roof sloping towards the street + fabric valance
+  const roof = mesh(box(4.6, 0.06, 3.8), flat('#9aa3a8', { roughness: 0.6 }), -0.35, 3.25, -1.6);
+  roof.rotation.x = 0.1;
+  mesh(box(4.6, 0.26, 0.04), flat('#e8742c'), -0.35, 3.0, 0.27);
+  // chalkboard frame (wood) and chalk ledge
+  mesh(box(BOARD.w + 0.16, BOARD.h + 0.16, 0.06), flat('#6b4630'), BOARD.x, BOARD.y, BOARD.z - 0.04);
+  mesh(box(BOARD.w * 0.9, 0.05, 0.1), flat('#6b4630'), BOARD.x, BOARD.y - BOARD.h / 2 - 0.06, BOARD.z + 0.05);
+  ['#f4f1e8', '#ffd86b', '#ff8fa3'].forEach((c, i) =>
+    mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.09, 6), flat(c), BOARD.x - 0.2 + i * 0.16, BOARD.y - BOARD.h / 2 - 0.025, BOARD.z + 0.06)
+      .rotation.z = Math.PI / 2);
+  // shelf with glass jars behind the counter (left of the board, low)
+  mesh(box(0.9, 0.05, 0.3), flat('#6b4630'), -2.0, 1.25, -3.2);
+  ['#f2c14e', '#c94c4c', '#e8e2d0'].forEach((c, i) => {
+    mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.24, 10), flat('#cfe3e6', { roughness: 0.35 }), -2.3 + i * 0.3, 1.4, -3.2);
+    mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.12, 10), flat(c), -2.3 + i * 0.3, 1.36, -3.2);
+    mesh(new THREE.CylinderGeometry(0.095, 0.095, 0.04, 10), flat('#c94c4c'), -2.3 + i * 0.3, 1.54, -3.2);
+  });
+  // counter (same footprint as the classroom desk)
+  mesh(box(3.0, 0.08, 1.1), flat('#8b5a3c'), 0.15, 0.8, -0.55);
+  mesh(box(2.9, 0.76, 0.06), flat('#c0622f'), 0.15, 0.4, -0.02);          // painted front panel facing the street
+  mesh(box(2.9, 0.04, 0.07), flat('#f2c14e'), 0.15, 0.62, 0.0);           // stripe
+  // kettle on a small stove
+  mesh(box(0.34, 0.1, 0.3), flat('#2c2b30'), 0.0, 0.89, -0.85);
+  mesh(new THREE.ConeGeometry(0.05, 0.05, 8), new THREE.MeshBasicMaterial({ color: '#4fb3ff' }), 0.0, 0.965, -0.85);
+  const steel = flat('#c9ced3', { roughness: 0.45, flatShading: false });
+  mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.22, 14), steel, 0.0, 1.06, -0.85);
+  mesh(new THREE.SphereGeometry(0.12, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2), steel, 0.0, 1.17, -0.85);
+  const spout = mesh(new THREE.CylinderGeometry(0.015, 0.03, 0.16, 8), steel, 0.15, 1.1, -0.85); spout.rotation.z = -0.9;
+  mesh(new THREE.TorusGeometry(0.1, 0.012, 6, 12, Math.PI), flat('#2c2b30'), 0.0, 1.26, -0.85);
+  // kulhads on a tray + one in front of VINEET
+  mesh(box(0.42, 0.02, 0.26), flat('#a8a39b'), -0.45, 0.85, -0.3);
+  const clay = flat('#b5562f');
+  for (let i = 0; i < 6; i++) mesh(new THREE.CylinderGeometry(0.04, 0.03, 0.08, 9), clay, -0.6 + (i % 3) * 0.12, 0.9, -0.36 + Math.floor(i / 3) * 0.12);
+  mesh(new THREE.CylinderGeometry(0.045, 0.034, 0.09, 9), clay, 0.62, 0.885, -0.38);
+  mesh(new THREE.CylinderGeometry(0.038, 0.038, 0.005, 9), flat('#c58b5a'), 0.62, 0.928, -0.38);   // chai inside
+  // ONE's perch: stacked biscuit tins (same height as the book stack)
+  const tins = [['#c94c4c', 0.16], ['#f2c14e', 0.16], ['#2f6fb3', 0.16]];
+  let sy = 0.84;
+  tins.forEach(([c, h], i) => { mesh(new THREE.CylinderGeometry(0.21 - i * 0.012, 0.21 - i * 0.012, h, 14), flat(c, { flatShading: false, roughness: 0.5 }), -0.95, sy + h / 2, -0.45); sy += h; });
+  STACK_TOP = sy;
+  // stool for VINEET
+  mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.06, 10), flat('#3d7a5a'), 1.2, 0.5, -0.95);
+  for (const a of [0, 2.1, 4.2]) mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.48, 5), flat('#2a2a2a'), 1.2 + Math.cos(a) * 0.17, 0.24, -0.95 + Math.sin(a) * 0.17);
+  // gas cylinder + crate at the side
+  mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.6, 12), flat('#c9302c', { flatShading: false }), -2.0, 0.42, -2.6);
+  mesh(box(0.55, 0.38, 0.4), flat('#a77b4f'), 2.1, 0.31, -2.5);
+  // warm bulb under the roof + string lights along the roof edge (few, big, static)
+  mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.4, 4), flat('#111'), 1.45, 3.05, -2.1);
+  mesh(new THREE.SphereGeometry(0.06, 12, 8), new THREE.MeshBasicMaterial({ color: '#ffd9a0' }), 1.45, 2.83, -2.1);
+  const bulbLight = new THREE.PointLight('#ffb766', 6, 5); bulbLight.position.set(0.6, 2.5, -1.2); scene.add(bulbLight);
+  ['#ffcf6b', '#ff7a7a', '#7ff2e0', '#ffcf6b', '#b7a0ff', '#ffcf6b', '#ff7a7a'].forEach((c, i) =>
+    mesh(new THREE.SphereGeometry(0.05, 10, 6), new THREE.MeshBasicMaterial({ color: c }), -2.3 + i * 0.65, 2.78 + 0.05 * Math.sin(i * 1.7), 0.22));
+}
+
+if (LOC === 'tapri') buildTapri(); else buildClassroom();
+await addBackdrop(LOC === 'tapri' ? 'street' : 'city');
 
 // ---------- VINEET (low-poly boy: hoodie, headphones round the neck, quiff) ----------
 const boy = new THREE.Group();
@@ -289,21 +378,29 @@ const clamp01 = x => Math.max(0, Math.min(1, x));
 const ops = [];
 for (const l of lines) for (const op of l.board || []) {
   const t0 = l.start + op.at * (l.end - l.start);
-  const dur = op.op === 'write' ? Math.min(1.3, Math.max(0.5, op.text.length * 0.045)) : op.op === 'strike' ? 0.3 : 0.55;
+  const dur = op.op === 'write' ? Math.min(1.3, Math.max(0.5, op.text.length * 0.045)) : op.op === 'strike' ? 0.3 : op.op === 'stamp' ? 0.28 : 0.55;
   ops.push({ ...op, t0, t1: t0 + dur, line: l });
 }
 const byId = Object.fromEntries(ops.filter(o => o.op === 'write').map(o => [o.id, o]));
 function writeFont(o) { return `700 ${o.size}px Kalam`; }
 for (const o of Object.values(byId)) { bctx.font = writeFont(o); o.width = bctx.measureText(o.text).width; o.penX = o.x; }
-for (const o of ops) if (o.op !== 'write' && byId[o.target]) { o.y = byId[o.target].y; o.size = byId[o.target].size; o.x = byId[o.target].x; o.penX = o.x; }
+for (const o of ops) if (o.op === 'stamp') { o.penX = o.x; o.size = o.size || 64; }
+for (const o of ops) if (o.op !== 'write' && o.op !== 'stamp' && byId[o.target]) { o.y = byId[o.target].y; o.size = byId[o.target].size; o.x = byId[o.target].x; o.penX = o.x; }
 
 function drawBoard(t) {
   const g = bctx;
-  g.fillStyle = '#f6f5f0'; g.fillRect(0, 0, 1024, 640);
+  g.fillStyle = CHALK ? '#243b30' : '#f6f5f0'; g.fillRect(0, 0, 1024, 640);
+  if (CHALK) {   // old chalk dust: big soft smudges only (no fine grain that could shimmer)
+    for (const [x, y, r] of [[220, 420, 260], [760, 260, 300], [520, 560, 220]]) {
+      const sm = g.createRadialGradient(x, y, 0, x, y, r);
+      sm.addColorStop(0, 'rgba(255,255,255,0.06)'); sm.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = sm; g.fillRect(0, 0, 1024, 640);
+    }
+  }
   const vg = g.createRadialGradient(512, 320, 200, 512, 320, 700);
-  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.07)');
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, CHALK ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.07)');
   g.fillStyle = vg; g.fillRect(0, 0, 1024, 640);
-  g.fillStyle = '#1b1b1b'; g.font = '700 58px Kalam'; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+  g.fillStyle = CHALK ? '#f4f1e8' : '#1b1b1b'; g.font = '700 58px Kalam'; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
   g.fillText(TL.board_title, 512, 95);
   g.fillRect(260, 118, 504, 6);
   g.textAlign = 'left';
@@ -319,18 +416,29 @@ function drawBoard(t) {
       o.penX = o.x + g.measureText(o.text.slice(0, n)).width;
     } else if (o.op === 'strike') {
       const tg = byId[o.target]; if (!tg) continue;
-      g.strokeStyle = '#d0312d'; g.lineWidth = 7; g.lineCap = 'round';
+      g.strokeStyle = CHALK ? '#ff8fa3' : '#d0312d'; g.lineWidth = 7; g.lineCap = 'round';
       g.beginPath(); g.moveTo(tg.x - 8, tg.y - tg.size * 0.3);
       g.lineTo(tg.x - 8 + (tg.width + 16) * p, tg.y - tg.size * 0.3 + 4 * p); g.stroke();
       o.penX = tg.x + tg.width * p; o.y = tg.y;
     } else if (o.op === 'circle') {
       const tg = byId[o.target]; if (!tg) continue;
-      g.strokeStyle = '#d0312d'; g.lineWidth = 6;
+      g.strokeStyle = CHALK ? '#ffd86b' : '#d0312d'; g.lineWidth = 6;
       g.beginPath();
       g.ellipse(tg.x + tg.width / 2, tg.y - tg.size * 0.32, tg.width / 2 + 34, tg.size * 0.85, -0.03,
         -Math.PI * 0.6, -Math.PI * 0.6 + Math.PI * 2.1 * p);
       g.stroke();
       o.penX = tg.x + tg.width / 2; o.y = tg.y;
+    } else if (o.op === 'stamp') {
+      // rubber-stamp verdict: drops in from 1.5x and settles (smooth over ~8 frames)
+      const k = ease(p), sc = 1 + 0.5 * (1 - k);
+      g.save(); g.globalAlpha = 0.25 + 0.75 * k;
+      g.translate(o.x, o.y); g.rotate(o.rot ?? -0.14); g.scale(sc, sc);
+      g.font = `800 ${o.size}px Poppins`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      const w = g.measureText(o.text).width + 44, h = o.size * 1.25;
+      g.strokeStyle = o.color; g.lineWidth = 7; g.strokeRect(-w / 2, -h / 2, w, h);
+      g.lineWidth = 3; g.strokeRect(-w / 2 + 9, -h / 2 + 9, w - 18, h - 18);
+      g.fillStyle = o.color; g.fillText(o.text, 0, 4);
+      g.restore(); g.textAlign = 'left'; g.textBaseline = 'alphabetic';
     }
   }
   boardTex.needsUpdate = true;
@@ -381,6 +489,19 @@ for (const l of lines) {
       for (const o of lops.filter(o => o.op === 'write')) add(o.t0 - 0.3, SHOTS.BOARD_TRACK(o), 0.55, 0.06);
       const circle = lops.find(o => o.op === 'circle');
       if (circle) add(circle.t0 - 0.1, SHOTS.BOARD_FULL, 0.7, 0.05);
+      break;
+    }
+    case 'claim':      // VINEET states a claim; camera follows it onto the board
+      add(l.start - 0.05, SHOTS.BOY_CU, 0.4, 0.05);
+      for (const o of lops.filter(o => o.op === 'write')) add(o.t0 - 0.25, SHOTS.BOARD_TRACK(o), 0.5, 0.05);
+      break;
+    case 'verdict': {  // ONE judges: punch on ONE, hard cut to the stamp, back to ONE to explain
+      add(l.start - 0.05, SHOTS.ONE_CU, 0.3, 0.1, 0.5);
+      const st = lops.find(o => o.op === 'stamp');
+      if (st) {
+        add(st.t0 - 0.12, SHOTS.BOARD_TRACK(st), 0, 0.12, 0.8);
+        if (st.t1 + 1.0 < l.end - 0.8) add(st.t1 + 1.0, SHOTS.ONE_MED, 0.45, 0.05);
+      }
       break;
     }
     case 'realize':

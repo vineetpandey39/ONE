@@ -14,7 +14,9 @@ Characters:
   always lands on a desi everyday analogy. Recurring world: Mummy, Chhotu (the
   kid who runs errands), Sharma ji ki dukaan, chai, cricket, auto-rickshaw.
 
-Structure (always):
+Pick a location (`"location"`: classroom | tapri) and one structure.
+
+Structure A, "Nahi. Aur simple." (classroom, whiteboard):
 1. `hook`: VINEET asks ONE to explain {TOPIC} "like I'm 5".
 2. `explain`: ONE gives the textbook definition (2 jargon phrases go on the board).
 3. `simpler`: VINEET: "Nahi. Aur simple." (jargon gets struck through).
@@ -26,6 +28,14 @@ Structure (always):
 9. `payoff`: ONE's one-line punch.
 10. `cta`: VINEET to camera: "<lead magnet> chahiye? Comment karo <KEYWORD>. DM me bhejta hoon." with `"cta_card": {"type": "comment", "keyword": "<KEYWORD>"}`.
 11. `follow`: ONE: "Aur follow kar lo. Kal <teaser>!" with `"cta_card": {"type": "follow"}`.
+
+Structure B, "Sach ya Jhooth?" chai ki shart (tapri, `board_style: chalk`):
+1. `hook`: VINEET bets ONE a chai over 3 claims. 2. `payoff`: ONE accepts with a joke.
+3-8. three pairs of `claim` (VINEET, board `write` "1. <claim>") and `verdict`
+(ONE: "Jhooth!/Sach!/Aadha sach." + one-line reason, board `stamp` at the right of
+that row, x ~800, red #ff5c5c for JHOOTH, yellow #ffd86b for AADHA SACH, green #9be29b for SACH).
+9. `realize`: VINEET's takeaway, written on the last row. 10. `reveal`: ONE closes the bet (circle).
+11. `cta` + 12. `follow` as above. Chalk colours: white #f4f1e8, yellow #ffd86b, pink #ff8fa3, green #9be29b.
 
 Rules:
 - Max 18 words per line. Total spoken ~95–120 words.

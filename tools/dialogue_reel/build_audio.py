@@ -189,11 +189,11 @@ def main() -> None:
     w = load_audio(f) * 0.8 if (f := find(sfx_dir, "whoosh")) else whoosh()
     p = load_audio(f) * 0.6 if (f := find(sfx_dir, "pop")) else pop()
     for line in script["lines"]:
-        if line.get("shot") in ("simpler", "payoff", "hook"):
+        if line.get("shot") in ("simpler", "payoff", "hook", "verdict"):
             s = max(0, int((line["start"] - 0.25) * SR))
             sfx[s:s + len(w)] += w[: n - s]
         for op in line.get("board", []):
-            if op["op"] in ("circle",):
+            if op["op"] in ("circle", "stamp"):
                 s = int((line["start"] + op["at"] * (line["end"] - line["start"])) * SR)
                 sfx[s:s + len(p)] += p[: n - s]
 
@@ -239,7 +239,8 @@ def main() -> None:
                 shape[line["who"]][f0 + k] = round(float(np.clip((cen - 600) / 2400, 0, 1)), 3)
 
     timeline = {"fps": FPS, "duration": round(total, 3), "frames": frames,
-                "board_title": script.get("board_title", ""), "lines": script["lines"], "amp": amp, "shape": shape}
+                "board_title": script.get("board_title", ""), "lines": script["lines"], "amp": amp, "shape": shape,
+                "location": script.get("location", "classroom"), "board_style": script.get("board_style", "")}
     (out_dir / "timeline.json").write_text(json.dumps(timeline, ensure_ascii=False), encoding="utf-8")
     print(f"total {total:.2f}s, {frames} frames", flush=True)
 

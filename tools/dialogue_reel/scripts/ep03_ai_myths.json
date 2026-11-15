@@ -1,0 +1,112 @@
+{
+  "id": "ep03_ai_myths",
+  "title": "AI ke 3 myths: Sach ya Jhooth? (chai ki shart)",
+  "location": "tapri",
+  "board_style": "chalk",
+  "board_title": "Sach ya Jhooth?",
+  "characters": {
+    "VINEET": {"voice": "hm_omega", "pitch": 1.0, "speed": 1.05, "eleven_voice_id": "TX3LPaxmHKxFdv7VOQHJ", "eleven_speed": 1.05},
+    "ONE": {"voice": "hm_psi", "pitch": 1.22, "speed": 1.08, "eleven_voice_id": "cgSgspJ2msm6clMCkdW9", "eleven_speed": 1.08, "eleven_pitch": 1.07}
+  },
+  "lines": [
+    {
+      "who": "VINEET", "shot": "hook",
+      "caption": "ONE, chai ki shart. 3 AI baatein bolta hoon. Sach ya jhooth, bata.",
+      "tts": "वन, चाय की शर्त. तीन ए आई बातें बोलता हूँ. सच या झूठ, बता."
+    },
+    {
+      "who": "ONE", "shot": "payoff",
+      "caption": "Shart manzoor. Haara toh chai meri taraf se!",
+      "tts": "शर्त मंज़ूर. हारा तो चाय मेरी तरफ़ से!"
+    },
+    {
+      "who": "VINEET", "shot": "claim",
+      "caption": "Pehli. ChatGPT ko sab pata hota hai.",
+      "tts": "पहली. चैट जी पी टी को सब पता होता है.",
+      "board": [
+        {"op": "write", "id": "c1", "text": "1. ChatGPT sab jaanta hai", "x": 50, "y": 200, "size": 44, "color": "#f4f1e8", "at": 0.25}
+      ]
+    },
+    {
+      "who": "ONE", "shot": "verdict",
+      "caption": "Jhooth! Kabhi kabhi woh confidently galat bolta hai. Facts hamesha check karo.",
+      "tts": "झूठ! कभी कभी वो कॉन्फ़िडेंटली गलत बोलता है. फ़ैक्ट्स हमेशा चेक करो.",
+      "board": [
+        {"op": "stamp", "text": "JHOOTH", "x": 830, "y": 185, "size": 56, "color": "#ff5c5c", "at": 0.08}
+      ]
+    },
+    {
+      "who": "VINEET", "shot": "claim",
+      "caption": "Doosri. AI sirf coders ke kaam ka hai.",
+      "tts": "दूसरी. ए आई सिर्फ़ कोडर्स के काम का है.",
+      "board": [
+        {"op": "write", "id": "c2", "text": "2. AI sirf coders ke liye", "x": 50, "y": 330, "size": 44, "color": "#f4f1e8", "at": 0.25}
+      ]
+    },
+    {
+      "who": "ONE", "shot": "verdict",
+      "caption": "Jhooth! Email, Excel, reel ki script, sab karta hai. Bas Hindi me bolo.",
+      "tts": "झूठ! ईमेल, एक्सेल, रील की स्क्रिप्ट, सब करता है. बस हिंदी में बोलो.",
+      "board": [
+        {"op": "stamp", "text": "JHOOTH", "x": 830, "y": 315, "size": 56, "color": "#ff5c5c", "rot": 0.1, "at": 0.08}
+      ]
+    },
+    {
+      "who": "VINEET", "shot": "claim",
+      "caption": "Teesri. AI meri job le lega.",
+      "tts": "तीसरी. ए आई मेरी जॉब ले लेगा.",
+      "board": [
+        {"op": "write", "id": "c3", "text": "3. AI meri job le lega", "x": 50, "y": 460, "size": 44, "color": "#f4f1e8", "at": 0.25}
+      ]
+    },
+    {
+      "who": "ONE", "shot": "verdict",
+      "caption": "Aadha sach. AI se zyada, AI chalane wala insaan aage nikal jaayega.",
+      "tts": "आधा सच. ए आई से ज़्यादा, ए आई चलाने वाला इंसान, आगे निकल जाएगा.",
+      "board": [
+        {"op": "stamp", "text": "AADHA SACH", "x": 790, "y": 445, "size": 46, "color": "#ffd86b", "rot": -0.1, "at": 0.08}
+      ]
+    },
+    {
+      "who": "VINEET", "shot": "realize",
+      "caption": "Matlab AI se darna nahi... AI seekhna hai?",
+      "tts": "मतलब ए आई से डरना नहीं... ए आई सीखना है?",
+      "board": [
+        {"op": "write", "id": "d1", "text": "AI se daro nahi, seekho!", "x": 210, "y": 585, "size": 54, "color": "#9be29b", "at": 0.35}
+      ]
+    },
+    {
+      "who": "ONE", "shot": "reveal",
+      "caption": "Bilkul. Aur shart tum haare. Chai tumhari taraf se!",
+      "tts": "बिल्कुल. और शर्त तुम हारे. चाय तुम्हारी तरफ़ से!",
+      "board": [
+        {"op": "circle", "target": "d1", "at": 0.15}
+      ]
+    },
+    {
+      "who": "VINEET", "shot": "cta",
+      "caption": "Kaunsa AI tool pehle seekhein? Comment karo TOOLS. List DM me bhejta hoon.",
+      "tts": "कौन सा ए आई टूल पहले सीखें? कमेंट करो, टूल्स. लिस्ट डी एम में भेजता हूँ.",
+      "cta_card": {"type": "comment", "keyword": "TOOLS"}
+    },
+    {
+      "who": "ONE", "shot": "follow",
+      "caption": "Aur follow kar lo. Kal agli chai, agla myth!",
+      "tts": "और फ़ॉलो कर लो. कल अगली चाय, अगला मिथ!",
+      "cta_card": {"type": "follow"}
+    }
+  ],
+  "post_caption": "AI ke 3 sabse bade myths ☕ Sach ya Jhooth? (Hindi)\n\nChai ki shart lagi, aur 3 myths toot gaye:\n1️⃣ \"ChatGPT ko sab pata hai\" ❌ Jhooth. Woh kabhi kabhi confidently galat bolta hai, facts check karo.\n2️⃣ \"AI sirf coders ke liye hai\" ❌ Jhooth. Email, Excel, reel scripts, sab Hindi me.\n3️⃣ \"AI meri job le lega\" ⚠️ Aadha sach. AI chalane wala insaan aage nikal jaayega.\n\nAI se daro nahi, seekho. 💪\n\n👉 Kaunsa AI tool pehle seekhein? Comment karo \"TOOLS\", list DM me bhej dunga.\n\n💾 Save karo, aur us dost ko bhejo jo AI se darta hai.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#aimyths #chatgpt #aihindi #aitools #artificialintelligence",
+  "seo": {
+    "pinned_comment": "📌 \"TOOLS\" comment karo 👇 beginners ke liye meri AI tools list DM me bhejta hoon.",
+    "alt_text": "Animated Hindi explainer at a night chai stall: VINEET challenges the AI mascot ONE to a chai bet over three AI myths. ONE stamps each claim on the chalkboard: 'ChatGPT knows everything' is false, 'AI is only for coders' is false, 'AI will take my job' is half true. AI myths explained in Hindi.",
+    "cover_text": ["AI MYTHS: Sach ya Jhooth?", "Chai ki shart"],
+    "keywords": ["AI myths", "AI myths Hindi", "kya AI job le lega", "ChatGPT galat jawab", "AI for beginners Hindi", "AI tools Hindi"],
+    "youtube": {
+      "title": "AI ke 3 myths ☕ Sach ya Jhooth? | Kya AI job le lega? (Hindi) #shorts",
+      "description": "AI myths, chai ki shart ke saath, sabse simple Hindi me. ChatGPT ko sab pata hai? AI sirf coders ke liye? AI meri job le lega?\n\nKaunsa AI tool pehle seekhein? Comment karo TOOLS.\nRoz ek AI concept: subscribe karo.\n\n#AIMyths #ChatGPT #AIHindi #AITools #Shorts",
+      "tags": ["ai myths", "ai myths hindi", "kya ai job le lega", "chatgpt galat jawab", "chatgpt hallucination hindi", "ai for beginners hindi", "ai tools hindi", "ai hindi", "aibyvineet"]
+    },
+    "file_name": "ai-myths-sach-ya-jhooth-hindi.mp4"
+  }
+}

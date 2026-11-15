@@ -70,7 +70,8 @@ const server = http.createServer((req, res) => {
   const final = path.join(outDir, 'reel.mp4');
   await new Promise((res, rej) => spawn('ffmpeg', ['-v', 'error', '-y', '-i', silent, '-i', path.join(outDir, 'audio.wav'),
     '-c:v', 'copy', '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11', '-c:a', 'aac', '-profile:a', 'aac_low', '-ar', '48000', '-ac', '2', '-b:a', '192k',
-    '-shortest', '-movflags', '+faststart', final]  // 48 kHz stereo AAC: what phones and Instagram expect, { stdio: 'inherit' })
+    // 48 kHz stereo AAC, -14 LUFS: what phones and Instagram expect
+    '-shortest', '-movflags', '+faststart', final], { stdio: 'inherit' })
     .on('close', c => (c ? rej(new Error('mux failed')) : res())));
   console.log('done', final, `${((Date.now() - t0) / 1000).toFixed(0)}s`);
 })();

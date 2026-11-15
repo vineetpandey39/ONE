@@ -49,10 +49,19 @@ Each line has `who` (VINEET / ONE), `caption` (Roman Hinglish, shown on screen),
 | `reveal` | board tracking, pull back for the circle |
 | `realize` | over-the-shoulder, slow dolly into VINEET |
 | `payoff` | quick push on ONE |
-| `cta` | wide, then VINEET turns to camera |
+| `cta` | VINEET to camera + comment card |
+| `follow` | ONE close-up, pull back to wide + follow card |
+| `claim` | VINEET states a claim, camera follows it onto the board |
+| `verdict` | punch on ONE, hard cut to the stamp landing, back to ONE |
 
 Board ops: `write` (id, text, x, y, size, color, at), `strike` (target, at),
-`circle` (target, at). `at` is 0..1 through the line.
+`circle` (target, at), `stamp` (text, x, y, size, color, rot, at). `at` is 0..1 through the line.
+
+Locations (`"location"` in the script; characters, shots and board logic stay the same):
+- `classroom`: study room, whiteboard, night city window (episodes 1-2)
+- `tapri`: night chai stall, chalkboard menu (`board_style: chalk`), street bokeh (episode 3)
+
+Optional painted backdrop per location: `assets/backdrop_<location>.jpg`.
 
 ## Placeholders to swap later
 
