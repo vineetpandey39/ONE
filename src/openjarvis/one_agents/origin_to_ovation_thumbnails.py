@@ -57,10 +57,32 @@ def earlier_thumbnails(missions_root: Path, current: str) -> list[dict[str, Any]
         meta_path = mission / "production" / "master-v1" / "editorial-metadata.json"
         meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
         # An episode without a thumbnail prompt used the pipeline default (Sachin, the first episode).
-        headline = (meta.get("thumbnail_headline") or _headline_from_prompt(meta.get("thumbnail_prompt", ""))
-                    or DEFAULT_HEADLINE)
+        headline = _headline_from_metadata(meta) or DEFAULT_HEADLINE
         found.append({"mission": mission.name, "image": image, "headline": headline})
     return found
+
+
+def _headline_from_metadata(meta: dict[str, Any]) -> str:
+    """Read both legacy and current thumbnail metadata schemas.
+
+    Newer episodes store the rendered headline under ``thumbnail_concepts``.
+    Ignoring that field let an exact earlier headline pass the duplicate gate.
+    Prefer the selected concept when recorded, otherwise use the first concept.
+    """
+    direct = str(meta.get("thumbnail_headline") or "").strip()
+    if direct:
+        return direct
+    concepts = meta.get("thumbnail_concepts") or []
+    if isinstance(concepts, list):
+        choice = str(meta.get("thumbnail_choice") or "").strip()
+        selected = next((c for c in concepts if isinstance(c, dict) and choice
+                         and str(c.get("name") or "") == choice), None)
+        candidate = selected or next((c for c in concepts if isinstance(c, dict)), None)
+        if candidate:
+            headline = str(candidate.get("headline") or "").strip()
+            if headline:
+                return headline
+    return _headline_from_prompt(meta.get("thumbnail_prompt", ""))
 
 
 def _headline_from_prompt(prompt: str) -> str:
