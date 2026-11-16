@@ -769,7 +769,8 @@ function blinkTrack(seed, total) {
 const BLINKS = { boy: blinkTrack(11, TL.duration), one: blinkTrack(29, TL.duration) };
 function blink(which, t) {
   let v = 1;
-  for (const b of BLINKS[which]) { const d = t - b; if (d >= 0 && d < 0.16) v = Math.min(v, 0.1 + 0.9 * Math.abs(Math.cos(Math.PI * d / 0.16))); }
+  // ~7 frames per blink so the eye never snaps shut for a single frame
+  for (const b of BLINKS[which]) { const d = t - b; if (d >= 0 && d < 0.24) v = Math.min(v, 0.1 + 0.9 * (0.5 + 0.5 * Math.cos(2 * Math.PI * d / 0.24))); }
   return v;
 }
 // Extra blink right after every hard camera cut feels natural on screen.
@@ -802,8 +803,10 @@ function animate(t, f) {
   headPivot.rotation.set(boyPitch + nod, boyYaw, 0.03 * Math.sin(t * 0.9) + (speaker === 'VINEET' ? 0.03 * Math.sin(t * 2.3) : 0));
   // lip sync: open with loudness, width with vowel shape (ee wide / oo round)
   mouth.scale.set(0.75 + shB * 0.55 - aB * 0.15, 1 + aB * 3.0, 1);
-  teeth.visible = aB > 0.3 && shB > 0.35;
-  tongue.visible = aB > 0.55;
+  // teeth/tongue grow in gradually (no on/off pop in close-ups)
+  const tk = clamp01((aB - 0.25) / 0.25) * clamp01((shB - 0.3) / 0.2), gk = clamp01((aB - 0.45) / 0.25);
+  teeth.visible = tk > 0.01; teeth.scale.set(1, tk, 1);
+  tongue.visible = gk > 0.01; tongue.scale.set(1, gk, 1);
   // eyes follow where he looks
   const look = Math.max(-1, Math.min(1, (wantYaw - boyYaw) * 3));
   eyeL.position.x = eyeBase.L.x + look * 0.012; eyeR.position.x = eyeBase.R.x + look * 0.012;
