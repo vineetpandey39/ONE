@@ -810,7 +810,6 @@ def stock_context_matches(request, metadata):
         str(source.get("description") or "")
         for source in (metadata, subject_evidence if isinstance(subject_evidence, dict) else {})
     ).casefold()
-    text = " ".join((title_tags_text, description_text))
     verdict = (subject_evidence.get("preview_verdict") or {}
                if isinstance(subject_evidence, dict) else {})
     signed_preview_match = bool(
@@ -822,6 +821,23 @@ def stock_context_matches(request, metadata):
         and all(verdict.get(key) is False
                 for key in ("unusable", "uncertain", "contradiction"))
     )
+    depicted_description = description_text
+    if signed_preview_match:
+        # Catalogue descriptions append suggested edit/use cases after the
+        # actual visual description. Words in those clauses ("ideal for
+        # fantasy projects", "perfect for scenes such as explosions") do not
+        # describe pixels that LAO's two signed preview frames already judged.
+        # Remove only explicit suitability clauses; an explosion stated in the
+        # descriptive sentences remains a contradiction.
+        depicted_description = re.sub(
+            r"\b(?:ideal|perfect|suitable)\s+for\b[^.!?]*(?:[.!?]|$)",
+            " ", depicted_description,
+        )
+        depicted_description = re.sub(
+            r"\b(?:it\s+)?(?:can|could)\s+(?:also\s+)?be\s+used\b[^.!?]*(?:[.!?]|$)",
+            " ", depicted_description,
+        )
+    text = " ".join((title_tags_text, depicted_description))
     blocked = ["fantasy", "surreal", "alien", *request.get("blocked_keywords", [])]
     # Catalogue prose uses "alien landscape" for lifeless Mars terrain.
     # This does not permit alien life/civilizations or relax authored negatives.
