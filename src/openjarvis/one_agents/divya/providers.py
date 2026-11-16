@@ -3,6 +3,7 @@ from pathlib import Path
 import importlib.util
 import shutil
 import time
+from collections import Counter
 from .core import Blocked, read, write, digest, fingerprint, require_review
 from .presets import VOCAL_STYLES
 
@@ -19,7 +20,23 @@ def vault_key(config):
         raise Blocked('Existing ElevenLabs vault reference did not resolve')
     return str(value)
 
+def validate_strict_lyric_plan(mission):
+    """Refuse provider calls whose vocal plan can omit or invent occurrences."""
+    if not mission.get('strict_lyric_plan'):
+        return
+    expected=list(mission.get('lyrics') or [])
+    planned=[line for section in mission.get('sections',[]) for line in (section.get('lines') or [])]
+    if not expected or Counter(planned)!=Counter(expected):
+        missing=list((Counter(expected)-Counter(planned)).elements())
+        extra=list((Counter(planned)-Counter(expected)).elements())
+        raise Blocked('Strict lyric plan mismatch; missing='+repr(missing[:6])+' extra='+repr(extra[:6]))
+    allowed=set(mission.get('allowed_repeat_lines') or [])
+    unexpected=[line for line,count in Counter(expected).items() if count>1 and line not in allowed]
+    if unexpected:
+        raise Blocked('Strict lyric plan repeats unapproved lines: '+repr(unexpected[:6]))
+
 def music_payload(mission):
+    validate_strict_lyric_plan(mission)
     style = VOCAL_STYLES[mission['vocal_style']]['direction']
     direction=mission.get('music_direction')
     if (mission.get('brand')=='shloka_by_shloka'
@@ -40,8 +57,12 @@ def music_payload(mission):
             if not 3000<=duration<=120000:raise ValueError('Music v2 chunk duration must be 3–120 seconds')
             text='['+section['name']+']\n'+('\n'.join(section['lines']) if section['lines'] else '{instrumental; no vocals}')
             chunks.append({'text':text,'duration_ms':duration,
-                'positive_styles':['original Hindu devotional music',style,'clear Hindi diction']+musical_styles+section['styles'],
-                'negative_styles':['spoken narration','artist imitation','distorted vocals']})
+                'positive_styles':['original Hindu devotional music',style,'clear Hindi diction',
+                    'sing every written line exactly once in the exact written order',
+                    'complete every word before any instrumental answer; if time remains continue instrumentally']+musical_styles+section['styles'],
+                'negative_styles':['spoken narration','artist imitation','distorted vocals','missing lyrics',
+                    'word substitution','paraphrased lyrics','invented lyrics','unwritten lyric repetition',
+                    'endless chorus repetition','long instrumental intro','excessive alaap']})
         if len(chunks)>30 or not 3000<=sum(c['duration_ms'] for c in chunks)<=600000:
             raise Blocked('Music plan exceeds supported chunk count or total duration')
         return {'model_id':model,'composition_plan':{'chunks':chunks}}

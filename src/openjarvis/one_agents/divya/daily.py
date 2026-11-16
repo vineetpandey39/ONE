@@ -116,8 +116,24 @@ TULSI_VIVAH_LYRICS = [
     "भक्ति बनी है आज दुल्हनिया, प्रेम बना वरदाई।",
     "हरी-हरी तुलसी, जय श्रीहरि।",
     "सबके जीवन में शुभता हो, यही प्रार्थना गाई।",
-    "तुलसी मैया का आँगन आज, मंगल दीप सजाए।",
-    "शालिग्राम संग शुभ मिलन पर, हरि का नाम सुनाए।",
+    "आँगन-आँगन मंगल गूँजे, मन का मैल मिटाए।",
+    "कंठ-कंठ से नाम हरि का, मीठी तान सुनाए।",
+    "हरी-हरी तुलसी, जय श्रीहरि।",
+    "कर्म बने जब सच्ची पूजा, हर दिन पर्व बन जाए।",
+    "धरती, जल और जीव सभी में, हरि का रूप निहारे।",
+    "तुलसी दल की कोमल छाया, थके हृदय को सँवारे।",
+    "हरी-हरी तुलसी, जय श्रीहरि।",
+    "संतोषी मन की समृद्धि, जग का मोह उतारे।",
+    "विपदा में भी धीरज रखना, श्रद्धा हमें सिखाए।",
+    "भटके पथ पर हरि का सुमिरन, सच्ची राह दिखाए।",
+    "हरी-हरी तुलसी, जय श्रीहरि।",
+    "टूटी आशा फिर से जागे, प्रेम गले लग जाए।",
+    "एक सुर में जब भजन उठे तो, दूरी सभी मिटाए।",
+    "छोटा-बड़ा न कोई रहे, हर जन शीश झुकाए।",
+    "हरी-हरी तुलसी, जय श्रीहरि।",
+    "तुलसी-हरि के मंगल मिलन से, जग परिवार बन जाए।",
+    "मंगल मिलन की यह पावन धुन, हर हृदय में समाए।",
+    "तुलसी-शालिग्राम की महिमा, हरि से प्रीत बढ़ाए।",
     "हरी-हरी तुलसी, जय श्रीहरि।",
     "प्रेम और विश्वास की ज्योति, युग-युग तक जगमगाए।",
 ]
@@ -154,20 +170,25 @@ TULSI_VIVAH_SCENES = [
 def create_tulsi_vivah_mission(root: Path, *, day: date) -> dict:
     """Prepare an original, no-spend Tulsi Vivah production commission."""
     title = "तुलसी मैया संग शालिग्राम | Tulsi Vivah Bhajan 2026 | Shloka By Shloka"
-    refrain = TULSI_VIVAH_LYRICS[2:4]
-    verses = [TULSI_VIVAH_LYRICS[index:index + 4] for index in range(0, 24, 4)]
-    section_rows = [
-        ("Immediate festive hook", TULSI_VIVAH_LYRICS[:4], "Female lead begins on beat one; soft shehnai answers only after the full line"),
-        ("Verse 1 Vrindavan", verses[1], "Bright female solo with bansuri and restrained dholak"),
-        ("Congregational refrain", refrain * 2, "Warm mixed chorus response; every Hindi syllable remains clear"),
-        ("Verse 2 inner devotion", verses[2], "Lead remains forward; manjira marks the Keharwa pulse"),
-        ("Verse 3 grace", verses[3], "Gentle melodic lift with harmonium and flute between lines"),
-        ("Festival refrain", refrain * 2, "Fuller chorus and shehnai, without covering the words"),
-        ("Verse 4 wedding celebration", verses[4], "Dholak, manjira and restrained temple bells build festive energy"),
-        ("Prayer bridge", TULSI_VIVAH_LYRICS[8:16], "Strip back to tanpura and voice, then return to steady rhythm"),
-        ("Grand final chorus", TULSI_VIVAH_LYRICS[16:24], "Joyful ensemble, exact written lyrics, no invented repetitions"),
-        ("Closing blessing", TULSI_VIVAH_LYRICS[20:24] + refrain, "Complete final word before the short bell and reverb tail"),
+    verses = [TULSI_VIVAH_LYRICS[index:index + 4] for index in range(0, 40, 4)]
+    section_names = [
+        "Immediate festive hook", "Vrindavan verse", "Inner devotion verse", "Grace verse",
+        "Wedding celebration verse", "Community verse", "Sacred nature verse", "Faith verse",
+        "Unity verse", "Closing blessing",
     ]
+    section_styles = [
+        "Female lead begins on beat one; soft shehnai answers only after the full line",
+        "Bright female solo with bansuri and restrained dholak",
+        "Lead remains forward; manjira marks the Keharwa pulse",
+        "Gentle melodic lift with harmonium and flute between lines",
+        "Dholak, manjira and restrained temple bells build festive energy",
+        "Warm response chorus only on the explicitly written refrain",
+        "Acoustic texture softens while the steady beat and vocal clarity remain",
+        "Confident melodic rise without extra words or alaap",
+        "Joyful ensemble supports the lead without covering consonants",
+        "Complete the final written line, then use only a short instrumental resolution",
+    ]
+    section_rows = list(zip(section_names, verses, section_styles))
     sections = [
         {"name": name, "duration": 48, "lines": lines,
          "styles": [style, "92 BPM Keharwa 8-beat festive bhajan", "precise Hindi diction"]}
@@ -195,6 +216,8 @@ def create_tulsi_vivah_mission(root: Path, *, day: date) -> dict:
         "vocal_style": "female_devotional", "composition_type": "original_bhajan",
         "music_model": "music_v2_5", "title": title, "display_title": "तुलसी विवाह",
         "lyrics": TULSI_VIVAH_LYRICS,
+        "strict_lyric_plan": True,
+        "allowed_repeat_lines": ["हरी-हरी तुलसी, जय श्रीहरि।"],
         "text_origin": "Original Hindi devotional lyrics inspired by the Tulsi Vivah observance; not a scripture quotation",
         "scripture_sources": [], "text_review": "PENDING", "pronunciation_review": "PENDING",
         "requested_duration_seconds": 480, "sections": sections, "scenes": scenes,
