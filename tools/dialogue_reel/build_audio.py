@@ -110,6 +110,75 @@ def whoosh(dur: float = 0.38) -> np.ndarray:
     return 0.5 * out * env / (np.abs(out).max() + 1e-9)
 
 
+def phone_filter(x: np.ndarray) -> np.ndarray:
+    """Make an off-screen voice sound like it comes through a phone call."""
+    with tempfile.TemporaryDirectory() as d:
+        src, dst = Path(d, "a.wav"), Path(d, "b.wav")
+        sf.write(src, x, SR)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-af",
+                        "highpass=f=320,lowpass=f=3300,acompressor=threshold=0.1:ratio=4,volume=1.4",
+                        str(dst)], check=True)
+        y, _ = sf.read(dst, dtype="float32")
+    return y
+
+
+# ---------- voice QC: listen back with speech-to-text ----------
+DISFLUENT = {"uh", "um", "umm", "hmm", "अं", "उम्म", "हम्म"}
+
+
+def transcribe(x: np.ndarray) -> str:
+    with tempfile.TemporaryDirectory() as d:
+        wav = Path(d, "line.wav")
+        sf.write(wav, x, SR)
+        out = subprocess.run(["curl", "-sS", "-m", "120", "-H", f"xi-api-key: {os.environ.get('ELEVENLABS_API_KEY', '')}",
+                              "-F", "model_id=scribe_v1", "-F", "language_code=hin", "-F", f"file=@{wav}",
+                              "https://api.elevenlabs.io/v1/speech-to-text"], capture_output=True, text=True).stdout
+    try:
+        return json.loads(out).get("text", "")
+    except json.JSONDecodeError:
+        return ""
+
+
+_DEVA = dict(zip("कखगघचछजझटठडढणतथदधनपफबभमयरलवशषसहंँ",
+                 "kkggccjjttddntttddnpfbbmyrlvsssshnn"))
+_NUMBER_WORDS = {"एक", "दो", "तीन", "चार", "पाँच", "पांच", "छह", "सात", "आठ", "नौ", "दस", "ग्यारह", "बारह",
+                 "बीस", "तीस", "पचास", "सौ", "हज़ार", "हजार", "लाख", "पंद्रह", "उन्नीस"}
+
+
+def skeleton(word: str) -> str:
+    """Script-independent sound skeleton: 'फ़ोन' and 'phone' both become 'fn'."""
+    import re
+    w = word.lower()
+    if re.search(r"[\u0900-\u097F]", w):
+        out = "".join(_DEVA.get(ch, "") for ch in w.replace("\u093c", ""))
+    else:
+        for a2, b2 in (("ph", "f"), ("sh", "s"), ("ch", "c"), ("th", "t"), ("kh", "k"), ("gh", "g"),
+                       ("bh", "b"), ("dh", "d"), ("w", "v"), ("z", "j"), ("q", "k"), ("x", "ks")):
+            w = w.replace(a2, b2)
+        out = re.sub(r"[aeiouh0-9]", "", w)
+    out = out.replace("h", "")
+    return re.sub(r"(.)\1+", r"\1", out)
+
+
+def voice_score(tts: str, heard: str, keyword: str | None) -> tuple[float, list[str]]:
+    """Share of the script's words that were heard (compared by sound, not spelling)."""
+    import difflib
+    import re
+    words = lambda t: re.findall(r"[\w\u0900-\u097F]+", t.lower())
+    said = [w for w in words(tts) if w not in _NUMBER_WORDS and len(skeleton(w)) >= 2]
+    got_sk = [skeleton(w) for w in words(heard)]
+    got_sk += [a2 + b2 for a2, b2 in zip(got_sk, got_sk[1:])]          # 'notebook lm' vs 'नोटबुकएलएम'
+    hit = sum(1 for w in said if difflib.get_close_matches(skeleton(w), got_sk, n=1, cutoff=0.6)) / max(1, len(said))
+    issues = []
+    if hit < 0.6:
+        issues.append(f"only {hit:.0%} of words heard")
+    if any(w in DISFLUENT for w in words(heard)):
+        issues.append("hesitation (uh/um) in the voice")
+    if keyword and not re.search(rf"(?<![\w]){re.escape(keyword)}(?![\w])", heard, re.IGNORECASE):
+        issues.append(f"CTA keyword {keyword!r} not heard")
+    return hit - 0.3 * any("hesitation" in i for i in issues) - (1.0 if any("keyword" in i for i in issues) else 0), issues
+
+
 def pop(dur: float = 0.09) -> np.ndarray:
     t = np.arange(int(dur * SR)) / SR
     f = 900 - 500 * t / dur
@@ -150,6 +219,7 @@ def main() -> None:
     ap.add_argument("--music", help="music bed file (e.g. an Envato track); default: built-in lo-fi pad")
     ap.add_argument("--music-gain", type=float, default=0.18)
     ap.add_argument("--sfx-dir", help="folder with whoosh.* / pop.* to replace the synthetic SFX")
+    ap.add_argument("--no-voice-qc", action="store_true", help="skip the speech-to-text check of each line")
     a = ap.parse_args()
     script_path, out_dir = Path(a.script), Path(a.out_dir)
     kdir = Path(a.kokoro_dir_pos or a.kokoro_dir)
@@ -163,13 +233,52 @@ def main() -> None:
     def synth(who: str, ch: dict, text: str) -> np.ndarray:
         if a.tts == "elevenlabs":
             vid = ch.get("eleven_voice_id") or os.environ.get(f"ELEVEN_VOICE_{who.upper()}", "")
-            return pitch(synth_elevenlabs(text, vid, ch.get("eleven_speed", 1.0)), ch.get("eleven_pitch", 1.0))
-        return pitch(synth_kokoro(kokoro, text, ch["voice"], ch.get("speed", 1.0)), ch.get("pitch", 1.0))
+            x = pitch(synth_elevenlabs(text, vid, ch.get("eleven_speed", 1.0)), ch.get("eleven_pitch", 1.0))
+        else:
+            x = pitch(synth_kokoro(kokoro, text, ch["voice"], ch.get("speed", 1.0)), ch.get("pitch", 1.0))
+        return phone_filter(x) if ch.get("phone") else x
+
+    qc_on = a.tts == "elevenlabs" and not a.no_voice_qc
+    qc_report = []
+
+    cache_dir = out_dir / "tts_cache"
+    cache_dir.mkdir(exist_ok=True)
+
+    def synth_cached(who: str, ch: dict, text: str, take: int) -> np.ndarray:
+        import hashlib
+        key = hashlib.sha1(json.dumps([a.tts, who, ch, text, take], sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
+        f = cache_dir / f"{key}.wav"
+        if f.exists():
+            return sf.read(f, dtype="float32")[0]
+        x = synth(who, ch, text)
+        sf.write(f, x, SR)
+        return x
+
+    def synth_checked(line: dict, ch: dict) -> np.ndarray:
+        """Synthesise, listen back, and retry (TTS is not deterministic) until it is clean."""
+        keyword = (line.get("cta_card") or {}).get("keyword")
+        best = None
+        for attempt in range(3 if qc_on else 1):
+            x = synth_cached(line["who"], ch, line["tts"], attempt)
+            if not qc_on:
+                return x
+            heard = transcribe(x)
+            score, issues = voice_score(line["tts"], heard, keyword)
+            if best is None or score > best[0]:
+                best = (score, x, issues, heard)
+            if not issues:
+                break
+            print(f"   voice QC retry ({', '.join(issues)}): heard {heard!r}", flush=True)
+        qc_report.append({"line": line["caption"], "heard": best[3], "issues": best[2]})
+        if keyword and any("keyword" in i for i in best[2]):
+            raise SystemExit(f"voice QC: CTA keyword {keyword!r} still not heard in: {best[3]!r}. "
+                             "Write the keyword in Latin letters inside tts, e.g. 'कमेंट करो, SAFE.'")
+        return best[1]
 
     clips, t = [], LEAD_IN
     for i, line in enumerate(script["lines"]):
         ch = script["characters"][line["who"]]
-        audio = synth(line["who"], ch, line["tts"])
+        audio = synth_checked(line, ch)
         if i:
             t += SNAP_GAP if line.get("shot") == "simpler" else GAP
         clips.append((t, audio))
@@ -177,6 +286,11 @@ def main() -> None:
         t = line["end"]
         print(f"[{line['start']:6.2f}-{line['end']:6.2f}] {line['who']}: {line['caption']}", flush=True)
 
+    if qc_report:
+        (out_dir / "voice_qc.json").write_text(json.dumps(qc_report, ensure_ascii=False, indent=1), encoding="utf-8")
+        left = [r for r in qc_report if r["issues"]]
+        print(f"voice QC: {len(qc_report) - len(left)}/{len(qc_report)} lines clean"
+              + "".join(f"\n   ! {r['line']}: {', '.join(r['issues'])}" for r in left), flush=True)
     total = t + TAIL
     n = int(total * SR)
     voice = np.zeros(n, dtype=np.float32)

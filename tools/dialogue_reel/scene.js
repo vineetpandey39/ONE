@@ -79,7 +79,7 @@ scene.add(lamp);
 // board on the back wall, a counter/desk where VINEET's arms rest (top ~0.84 m),
 // ONE's perch at x -0.95 / z -0.45, VINEET's seat at x 1.2 / z -0.95.
 const LOC = TL.location || 'classroom';
-const BSTYLE = TL.board_style || ({ tapri: 'chalk', studio: 'sign', terrace: 'none' }[LOC] || 'white');
+const BSTYLE = TL.board_style || ({ tapri: 'chalk', studio: 'sign', terrace: 'none', bedroom: 'none' }[LOC] || 'white');
 const CHALK = BSTYLE === 'chalk';
 const BOARD = { x: -0.35, y: 2.15, z: -3.25, w: 2.7, h: 2.7 / 1.6 };
 const boardC = document.createElement('canvas'); boardC.width = 1024; boardC.height = 640;
@@ -370,7 +370,59 @@ function buildTerrace() {
   const sun = new THREE.PointLight('#ff9a4d', 8, 12); sun.position.set(-3, 3, -5); scene.add(sun);
 }
 
-({ tapri: buildTapri, studio: buildStudio, terrace: buildTerrace }[LOC] || buildClassroom)();
+// VINEET's room at night: study table with laptop and lamp, posters, a shelf,
+// window with the city outside, ONE on a pile of cushions and books.
+function buildBedroom() {
+  scene.background = new THREE.Color('#141a2e');
+  mesh(box(10, 0.1, 9), flat('#6b4a35'), 0, -0.05, -1);
+  mesh(box(3.4, 0.02, 2.4), flat('#3a4a7a'), 0.3, 0.01, -1.4);                      // rug
+  const wall = flat('#2f3a5c');
+  mesh(box(3.2, 4.2, 0.15), wall, -3.0, 2.1, -4);
+  mesh(box(2.2, 4.2, 0.15), wall, 2.9, 2.1, -4);
+  mesh(box(3.6, 1.0, 0.15), wall, 0.0, 0.5, -4);
+  mesh(box(3.6, 1.2, 0.15), wall, 0.0, 3.6, -4);
+  const frameMat = flat('#e8e2d0');
+  for (const x of [-1.8, 0.0, 1.8]) mesh(box(0.08, 2.0, 0.12), frameMat, x, 2.0, -3.95);
+  for (const y of [1.0, 3.0]) mesh(box(3.7, 0.08, 0.12), frameMat, 0, y, -3.95);
+  // posters + shelf
+  [['#e8742c', -3.2, 2.5, 0.8, 1.1], ['#2bb3a3', -2.3, 2.9, 0.6, 0.8], ['#f2c14e', 2.6, 2.6, 0.7, 0.9]].forEach(([c, x, y, w, h]) => {
+    mesh(box(w, h, 0.02), flat(c), x, y, -3.91);
+    mesh(box(w * 0.7, h * 0.12, 0.02), flat('#1b1b1b'), x, y - h * 0.25, -3.9);
+  });
+  mesh(box(1.4, 0.05, 0.3), flat('#6b4630'), 2.6, 1.6, -3.8);
+  ['#c94c4c', '#4f6fb3', '#f2c14e', '#3d8b6d', '#e8e2d0'].forEach((c, i) => mesh(box(0.1, 0.3 + (i % 2) * 0.05, 0.22), flat(c), 2.1 + i * 0.13, 1.78, -3.8));
+  // bed at the right edge
+  mesh(box(1.6, 0.45, 2.2), flat('#3b3f6b'), 3.1, 0.23, -2.2);
+  mesh(box(1.6, 0.18, 2.1), flat('#d9d4e8'), 3.1, 0.54, -2.2);
+  mesh(box(0.9, 0.16, 0.45), flat('#f0eadf'), 3.1, 0.7, -3.0);
+  // study table (desk footprint) + laptop + lamp + phone
+  mesh(box(3.0, 0.08, 1.1), flat('#c49a6c'), 0.15, 0.8, -0.55);
+  mesh(box(2.9, 0.75, 0.06), flat('#a07a50'), 0.15, 0.4, -1.05);
+  mesh(box(0.5, 0.02, 0.34), flat('#9aa1ab'), -0.15, 0.85, -0.55);
+  const lid = mesh(box(0.5, 0.32, 0.02), flat('#9aa1ab'), -0.15, 1.0, -0.73); lid.rotation.x = -0.25;
+  mesh(box(0.44, 0.27, 0.005), new THREE.MeshBasicMaterial({ color: '#4fb3ff' }), -0.15, 1.0, -0.715).rotation.x = -0.25;
+  mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.03, 10), flat('#2a2a2a'), 0.75, 0.855, -0.85);
+  mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.36, 6), flat('#2a2a2a'), 0.75, 1.04, -0.85);
+  mesh(new THREE.ConeGeometry(0.13, 0.16, 12, 1, true), flat('#f2c14e', { side: THREE.DoubleSide }), 0.75, 1.25, -0.85);
+  const desk = new THREE.PointLight('#ffc27a', 5, 3.5); desk.position.set(0.7, 1.15, -0.75); scene.add(desk);
+  mesh(box(0.09, 0.012, 0.18), flat('#1b1b1b'), 0.55, 0.845, -0.3);
+  // ONE's perch: books + two cushions, up to the same height
+  mesh(box(0.46, 0.12, 0.34), flat('#4f6fb3'), -0.95, 0.9, -0.45);
+  mesh(box(0.42, 0.1, 0.32), flat('#c94c4c'), -0.95, 1.01, -0.45);
+  const cu1 = mesh(new THREE.SphereGeometry(0.25, 12, 6), flat('#f2c14e', { flatShading: false }), -0.95, 1.13, -0.45); cu1.scale.set(1, 0.32, 0.8);
+  const cu2 = mesh(new THREE.SphereGeometry(0.22, 12, 6), flat('#e46a8a', { flatShading: false }), -0.95, 1.24, -0.45); cu2.scale.set(1, 0.3, 0.8);
+  STACK_TOP = 1.3;
+  // chair
+  mesh(box(0.6, 0.07, 0.55), flat('#33415e'), 1.2, 0.5, -0.95);
+  mesh(box(0.6, 0.7, 0.07), flat('#33415e'), 1.42, 0.85, -1.15).rotation.y = -0.6;
+  for (const [dx, dz] of [[-0.25, -0.22], [0.25, -0.22], [-0.25, 0.22], [0.25, 0.22]])
+    mesh(box(0.05, 0.47, 0.05), flat('#222a3d'), 1.2 + dx, 0.24, -0.95 + dz);
+  // fairy lights along the window top (few, big, static)
+  ['#ffcf6b', '#fff1c8', '#ffcf6b', '#fff1c8', '#ffcf6b'].forEach((c, i) =>
+    mesh(new THREE.SphereGeometry(0.045, 10, 6), new THREE.MeshBasicMaterial({ color: c }), -1.6 + i * 0.8, 3.12 - 0.06 * Math.sin(i * 1.2), -3.85));
+}
+
+({ tapri: buildTapri, studio: buildStudio, terrace: buildTerrace, bedroom: buildBedroom }[LOC] || buildClassroom)();
 await addBackdrop({ tapri: 'street', studio: 'studio', terrace: 'sunset' }[LOC] || 'city');
 
 // ---------- VINEET (low-poly boy: hoodie, headphones round the neck, quiff) ----------
@@ -632,6 +684,18 @@ for (const l of lines) {
     case 'react':      // short reaction between chat steps
       add(l.start - 0.05, l.who === 'ONE' ? SHOTS.ONE_CU : SHOTS.BOY_PUNCH, 0.3, 0.08, 0.3);
       break;
+    case 'call':       // VINEET on a phone call (call screen overlay)
+      add(l.start - 0.05, SHOTS.BOY_MED, 0.45, 0.04);
+      break;
+    case 'flag':       // ONE walks through the red flags
+      add(l.start - 0.05, SHOTS.ONE_MED, 0.4, 0.04);
+      break;
+    case 'tier':       // ONE ranks; tier list overlay below the faces
+      add(l.start - 0.05, l.who === 'ONE' ? SHOTS.ONE_MED : SHOTS.BOY_MED, 0.4, 0.04);
+      break;
+    case 'argue':      // VINEET objects
+      add(l.start - 0.05, SHOTS.BOY_PUNCH, 0.25, 0.07, 0.35);
+      break;
     case 'realize':
       add(l.start - 0.05, SHOTS.OTS, 0.5, 0.03);
       add(l.start + d * 0.45, SHOTS.BOY_CU, 1.4, 0.07);
@@ -804,7 +868,7 @@ function chunks(line) {
   }
   const total = merged.reduce((s, c) => s + c.length, 0);
   let acc = line.start;
-  return merged.map(c => { const d = (c.length / total) * (line.end - line.start); const r = { text: c, t0: acc, t1: acc + d }; acc += d; return r; });
+  return merged.map(c => { const d = (c.length / total) * (line.end - line.start); const r = { text: c, t0: acc, t1: acc + d, who: line.who }; acc += d; return r; });
 }
 const CAPS = lines.flatMap(chunks);
 
@@ -1025,13 +1089,127 @@ function drawChat(g, t) {
   return phoneShow > 0.3;
 }
 
+// ---------- call screen, red-flag checklist, tier list ----------
+const callLines = lines.filter(l => l.overlay?.type === 'call');
+let callAmp = 0;
+function drawCall(g, t, f) {
+  if (!callLines.length) return false;
+  const t0 = callLines[0].start - 0.25, t1 = callLines[callLines.length - 1].end + 0.5;
+  if (t < t0 || t > t1) return false;
+  const vis = Math.min(ease(clamp01((t - t0) / 0.35)), ease(clamp01((t1 - t) / 0.35)));
+  const cur = [...callLines].reverse().find(l => t >= l.start - 0.05) || callLines[0];
+  const stage = cur.overlay.stage || 'talk', name = callLines[0].overlay.name || 'Unknown';
+  const talkStart = callLines.find(l => (l.overlay.stage || 'talk') === 'talk')?.start ?? t;
+  callAmp += ((TL.amp.CALLER?.[f] || 0) - callAmp) * 0.35;
+  const pw = W * 0.8, ph = H * 0.44, px = (W - pw) / 2, py = H * 0.37 + (1 - vis) * H * 0.5;
+  g.save();
+  g.fillStyle = '#111318'; roundRect(g, px - 10, py - 10, pw + 20, ph + 20, 44); g.fill();
+  const bg = g.createLinearGradient(0, py, 0, py + ph); bg.addColorStop(0, '#1d2b4f'); bg.addColorStop(1, '#0d1222');
+  g.fillStyle = bg; roundRect(g, px, py, pw, ph, 36); g.fill();
+  const cx0 = W / 2, cy0 = py + ph * 0.3;
+  if (stage === 'ring') for (let k = 0; k < 3; k++) {          // calm ripple rings
+    const ph2 = ((t * 0.8 + k / 3) % 1);
+    g.strokeStyle = `rgba(120,200,255,${0.5 * (1 - ph2)})`; g.lineWidth = 4;
+    g.beginPath(); g.arc(cx0, cy0, 62 + ph2 * 70, 0, Math.PI * 2); g.stroke();
+  }
+  g.fillStyle = '#e8742c'; g.beginPath(); g.arc(cx0, cy0, 60, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#ffffff'; g.font = '800 54px Poppins'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(name[0].toUpperCase(), cx0, cy0 + 2);
+  g.font = '800 36px Poppins'; g.fillText(name, cx0, cy0 + 105);
+  g.fillStyle = 'rgba(255,255,255,0.7)'; g.font = '600 24px Poppins';
+  const secs = Math.max(0, Math.floor(t - talkStart));
+  g.fillText(stage === 'ring' ? 'Incoming call…' : stage === 'end' ? 'Call ended' : `00:${String(secs).padStart(2, '0')}`, cx0, cy0 + 148);
+  if (stage === 'talk') {                                       // voice waveform
+    for (let k = 0; k < 21; k++) {
+      const hgt = 8 + callAmp * 70 * (0.45 + 0.55 * Math.abs(Math.sin(k * 1.7 + t * 3)));
+      g.fillStyle = '#7fd6ff'; roundRect(g, cx0 - 210 + k * 20, cy0 + 205 - hgt / 2, 10, hgt, 5); g.fill();
+    }
+  }
+  const by = py + ph - 70;
+  if (stage === 'ring') {
+    g.fillStyle = '#e74c3c'; g.beginPath(); g.arc(cx0 - 110, by, 38, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#2ecc71'; g.beginPath(); g.arc(cx0 + 110, by, 38 + 3 * Math.sin(t * 6), 0, Math.PI * 2); g.fill();
+  } else if (stage === 'talk') { g.fillStyle = '#e74c3c'; g.beginPath(); g.arc(cx0, by, 38, 0, Math.PI * 2); g.fill(); }
+  g.restore();
+  return vis > 0.3;
+}
+
+const flagLines = lines.filter(l => l.overlay?.type === 'flags');
+const FLAGS = [];
+for (const l of flagLines) {
+  const items = l.overlay.items || [], d = l.end - l.start;
+  items.forEach((txt, k) => FLAGS.push({ txt, t0: l.start + ((k + 0.3) / items.length) * d * 0.9 }));
+}
+function drawFlags(g, t) {
+  if (!FLAGS.length) return false;
+  const endAt = (CTA[0]?.t0 ?? TL.duration) - 0.1, t0 = FLAGS[0].t0 - 0.4;
+  if (t < t0 || t > endAt + 0.4) return false;
+  const vis = Math.min(ease(clamp01((t - t0) / 0.35)), ease(clamp01((endAt + 0.4 - t) / 0.35)));
+  const cw = W * 0.88, x0 = (W - cw) / 2, rowH = 74, title = flagLines[0].overlay.title || 'RED FLAGS';
+  const ch = 84 + FLAGS.length * (rowH + 12), y0 = H * 0.44 + (1 - vis) * 200;
+  g.save(); g.globalAlpha = vis;
+  g.fillStyle = 'rgba(20,12,16,0.9)'; roundRect(g, x0, y0, cw, ch, 26); g.fill();
+  g.fillStyle = '#ff5c5c'; g.font = '800 30px Poppins'; g.textAlign = 'left'; g.textBaseline = 'middle';
+  g.fillText(title, x0 + 26, y0 + 42);
+  FLAGS.forEach((it, k) => {
+    const a = ease(clamp01((t - it.t0) / 0.3)); if (a <= 0) return;
+    const y = y0 + 84 + k * (rowH + 12) + (1 - a) * 16;
+    g.globalAlpha = vis * a;
+    g.fillStyle = 'rgba(255,92,92,0.16)'; roundRect(g, x0 + 18, y, cw - 36, rowH, 18); g.fill();
+    g.fillStyle = '#ff5c5c'; g.fillRect(x0 + 40, y + 16, 5, rowH - 30);            // flag pole + cloth
+    g.beginPath(); g.moveTo(x0 + 45, y + 16); g.lineTo(x0 + 78, y + 26); g.lineTo(x0 + 45, y + 37); g.fill();
+    g.fillStyle = '#ffffff'; g.font = '700 26px Poppins';
+    g.fillText(it.txt, x0 + 96, y + rowH / 2 + 1);
+  });
+  g.restore();
+  return vis > 0.3;
+}
+
+const tierLines = lines.filter(l => l.overlay?.type === 'tier');
+const TIER_ITEMS = [];
+for (const l of tierLines) {
+  const adds = l.overlay.add || [], d = l.end - l.start;
+  adds.forEach((it, k) => TIER_ITEMS.push({ ...it, t0: l.start + ((k + 0.35) / adds.length) * d * 0.85 }));
+}
+const TIERS = [['S', '#ff5c7a'], ['A', '#ff9f43'], ['B', '#ffd23f'], ['C', '#7bd88f']];
+function drawTier(g, t) {
+  if (!TIER_ITEMS.length) return false;
+  const t0 = tierLines[0].start - 0.2, endAt = (CTA[0]?.t0 ?? TL.duration) - 0.1;
+  if (t < t0 || t > endAt + 0.4) return false;
+  const vis = Math.min(ease(clamp01((t - t0) / 0.35)), ease(clamp01((endAt + 0.4 - t) / 0.35)));
+  const cw = W * 0.92, x0 = (W - cw) / 2, rh = 92, y0 = H * 0.44 + (1 - vis) * 200;
+  g.save(); g.globalAlpha = vis;
+  g.fillStyle = 'rgba(15,16,30,0.9)'; roundRect(g, x0, y0, cw, 4 * (rh + 10) + 64, 24); g.fill();
+  g.fillStyle = '#ffffff'; g.font = '800 28px Poppins'; g.textAlign = 'left'; g.textBaseline = 'middle';
+  g.fillText(tierLines[0].overlay.title || 'TIER LIST', x0 + 22, y0 + 32);
+  TIERS.forEach(([name, col], r) => {
+    const y = y0 + 60 + r * (rh + 10);
+    g.fillStyle = col; roundRect(g, x0 + 14, y, 82, rh, 14); g.fill();
+    g.fillStyle = '#14141f'; g.font = '800 46px Poppins'; g.textAlign = 'center'; g.fillText(name, x0 + 55, y + rh / 2 + 2);
+    g.fillStyle = 'rgba(255,255,255,0.06)'; roundRect(g, x0 + 104, y, cw - 118, rh, 14); g.fill();
+    let cx1 = x0 + 116;
+    for (const it of TIER_ITEMS.filter(i => i.tier === name)) {
+      const a = ease(clamp01((t - it.t0) / 0.35)); if (a <= 0) continue;
+      g.font = '700 22px Poppins';
+      const w = Math.min(cw - 140, g.measureText(it.name).width + 34);
+      const yy = y + 14 + (1 - a) * -120;                     // drops in from above
+      g.globalAlpha = vis * a;
+      g.fillStyle = '#ffffff'; roundRect(g, cx1, yy, w, rh - 28, 14); g.fill();
+      g.fillStyle = '#14141f'; g.textAlign = 'left'; g.fillText(it.name, cx1 + 17, yy + (rh - 28) / 2 + 1);
+      g.globalAlpha = vis; cx1 += w + 10;
+    }
+  });
+  g.restore();
+  return vis > 0.3;
+}
+
 function drawOverlay(t) {
   const g = cx;
   // vignette
   const vg = g.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.75);
   vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.38)');
   g.fillStyle = vg; g.fillRect(0, 0, W, H);
-  const busy = drawChat(g, t) | drawQuiz(g, t);
+  const busy = drawChat(g, t) | drawQuiz(g, t) | drawCall(g, t, Math.round(t * FPS)) | drawFlags(g, t) | drawTier(g, t);
   // caption
   const c = CAPS.find(c => t >= c.t0 - 0.03 && t < c.t1 + 0.15) ;
   if (c) {
@@ -1043,7 +1221,7 @@ function drawOverlay(t) {
     const lh = 52, bw = Math.max(...rows.map(r => g.measureText(r).width)) + 56, bh = rows.length * lh + 30;
     const x = W / 2, y = H * 0.17;
     g.translate(x, y); g.scale(s, s);
-    g.fillStyle = 'rgba(32,40,56,0.86)'; roundRect(g, -bw / 2, -bh / 2, bw, bh, 22); g.fill();
+    g.fillStyle = (c.who === 'VINEET' || c.who === 'ONE') ? 'rgba(32,40,56,0.86)' : 'rgba(120,28,36,0.9)'; roundRect(g, -bw / 2, -bh / 2, bw, bh, 22); g.fill();
     g.fillStyle = '#ffffff'; g.textAlign = 'center'; g.textBaseline = 'middle';
     rows.forEach((r, i) => g.fillText(r, 0, -((rows.length - 1) * lh) / 2 + i * lh + 2));
     g.restore();

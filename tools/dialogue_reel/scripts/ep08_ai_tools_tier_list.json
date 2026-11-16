@@ -1,0 +1,184 @@
+{
+  "id": "ep08_ai_tools_tier_list",
+  "title": "Students ke liye free AI tools: tier list",
+  "location": "tapri",
+  "board_style": "chalk",
+  "board_title": "AI Tools Tier List",
+  "characters": {
+    "VINEET": {
+      "voice": "hm_omega",
+      "pitch": 1.0,
+      "speed": 1.05,
+      "eleven_voice_id": "TX3LPaxmHKxFdv7VOQHJ",
+      "eleven_speed": 1.05
+    },
+    "ONE": {
+      "voice": "hm_psi",
+      "pitch": 1.22,
+      "speed": 1.08,
+      "eleven_voice_id": "cgSgspJ2msm6clMCkdW9",
+      "eleven_speed": 1.08,
+      "eleven_pitch": 1.07
+    }
+  },
+  "lines": [
+    {
+      "who": "VINEET",
+      "shot": "hook",
+      "caption": "ONE, students ke liye free AI tools ki tier list bana. Aur sach bolna!",
+      "tts": "वन, स्टूडेंट्स के लिए फ़्री ए आई टूल्स की टियर लिस्ट बना. और सच बोलना!"
+    },
+    {
+      "who": "ONE",
+      "shot": "tier",
+      "caption": "S tier me: NotebookLM. Apne notes daalo, wo unhi se padhata hai aur quiz bhi banata hai.",
+      "tts": "एस टियर में: नोटबुक एल एम. अपने नोट्स डालो, वो उन्हीं से पढ़ाता है और क्विज़ भी बनाता है.",
+      "overlay": {
+        "type": "tier",
+        "add": [
+          {
+            "name": "NotebookLM",
+            "tier": "S"
+          }
+        ],
+        "title": "Students ke liye FREE AI tools"
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "argue",
+      "caption": "ChatGPT S tier me nahi? Sab toh wahi use karte hain!",
+      "tts": "चैट जी पी टी, एस टियर में नहीं? सब तो वही यूज़ करते हैं!"
+    },
+    {
+      "who": "ONE",
+      "shot": "tier",
+      "caption": "ChatGPT A tier. Samjhane me best, par facts kabhi kabhi galat.",
+      "tts": "चैट जी पी टी, ए टियर. समझाने में बेस्ट, पर फ़ैक्ट्स कभी कभी गलत.",
+      "overlay": {
+        "type": "tier",
+        "add": [
+          {
+            "name": "ChatGPT",
+            "tier": "A"
+          }
+        ]
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "tier",
+      "caption": "Perplexity bhi A tier. Jawab ke saath sources deta hai, assignment ke kaam ka.",
+      "tts": "परप्लेक्सिटी भी ए टियर. जवाब के साथ सोर्सेज़ देता है, असाइनमेंट के काम का.",
+      "overlay": {
+        "type": "tier",
+        "add": [
+          {
+            "name": "Perplexity",
+            "tier": "A"
+          }
+        ]
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "tier",
+      "caption": "Canva AI, B tier. Presentation aur poster jaldi, par padhai ke liye kam.",
+      "tts": "कैनवा ए आई, बी टियर. प्रेज़ेंटेशन और पोस्टर जल्दी, पर पढ़ाई के लिए कम.",
+      "overlay": {
+        "type": "tier",
+        "add": [
+          {
+            "name": "Canva AI",
+            "tier": "B"
+          }
+        ]
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "argue",
+      "caption": "Aur C tier me kaun?",
+      "tts": "और सी टियर में कौन?"
+    },
+    {
+      "who": "ONE",
+      "shot": "tier",
+      "caption": "C tier: homework copy karwane wale apps. Teacher pakad leta hai, aur tum seekhte bhi nahi.",
+      "tts": "सी टियर: होमवर्क कॉपी करवाने वाले ऐप्स. टीचर पकड़ लेता है, और तुम सीखते भी नहीं.",
+      "overlay": {
+        "type": "tier",
+        "add": [
+          {
+            "name": "Homework copy apps",
+            "tier": "C"
+          }
+        ]
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "realize",
+      "caption": "Matlab tool se zyada, use karne ka tareeka matter karta hai.",
+      "tts": "मतलब टूल से ज़्यादा, यूज़ करने का तरीका मैटर करता है."
+    },
+    {
+      "who": "ONE",
+      "shot": "payoff",
+      "caption": "Bilkul. AI se padho, AI se copy mat karo.",
+      "tts": "बिल्कुल. ए आई से पढ़ो, ए आई से कॉपी मत करो."
+    },
+    {
+      "who": "VINEET",
+      "shot": "cta",
+      "caption": "Aapki tier list kya hai? Comment karo LIST, poori list DM me bhejta hoon.",
+      "tts": "आपकी टियर लिस्ट क्या है? कमेंट करो, LIST. पूरी लिस्ट डी एम में भेजता हूँ.",
+      "cta_card": {
+        "type": "comment",
+        "keyword": "LIST"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "follow",
+      "caption": "Aur follow kar lo. Agli tier list jaldi!",
+      "tts": "और फ़ॉलो कर लो. अगली टियर लिस्ट जल्दी!",
+      "cta_card": {
+        "type": "follow"
+      }
+    }
+  ],
+  "post_caption": "Students ke liye FREE AI tools 🎓 Tier List (Hindi)\n\nS: NotebookLM (apne notes se padhata hai, quiz banata hai)\nA: ChatGPT (samjhane me best, facts check karo)\nA: Perplexity (sources ke saath jawab)\nB: Canva AI (presentation, poster)\nC: Homework copy apps (seekhoge kuch nahi)\n\nAI se padho, AI se copy mat karo. 📚\n\n👉 Aapki tier list kya hai? Comment me batao aur \"LIST\" likho, poori list DM me bhej dunga.\n\n💾 Save karo, exam ke time kaam aayega. Class group me bhejo.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#aitools #studenttips #notebooklm #aihindi #studyhacks",
+  "seo": {
+    "pinned_comment": "📌 Apni tier list comment karo + \"LIST\" likho 👇 students ke liye free AI tools ki poori list DM me bhejta hoon.",
+    "alt_text": "Animated Hindi tier list at a night chai stall: the AI mascot ONE ranks free AI tools for students while VINEET argues. S tier NotebookLM, A tier ChatGPT and Perplexity, B tier Canva AI, C tier homework copy apps. Message: use AI to study, not to copy.",
+    "cover_text": [
+      "AI TOOLS TIER LIST",
+      "Students ke liye FREE"
+    ],
+    "keywords": [
+      "AI tools for students",
+      "free AI tools Hindi",
+      "AI tools tier list",
+      "NotebookLM Hindi",
+      "best AI for study",
+      "Perplexity vs ChatGPT"
+    ],
+    "youtube": {
+      "title": "Students ke liye FREE AI tools 🎓 Tier List | NotebookLM, ChatGPT, Perplexity (Hindi) #shorts",
+      "description": "Free AI tools for students, tier list in Hindi: NotebookLM, ChatGPT, Perplexity, Canva AI. AI se padho, copy mat karo.\n\nApni tier list comment karo + LIST likho.\nRoz ek AI concept: subscribe karo.\n\n#AITools #StudentTips #NotebookLM #AIHindi #Shorts",
+      "tags": [
+        "ai tools for students",
+        "free ai tools hindi",
+        "ai tools tier list",
+        "notebooklm hindi",
+        "best ai for study",
+        "perplexity vs chatgpt",
+        "study hacks hindi",
+        "ai hindi",
+        "aibyvineet"
+      ]
+    },
+    "file_name": "free-ai-tools-students-tier-list-hindi.mp4"
+  }
+}

@@ -1,8 +1,9 @@
 {
   "id": "ep04_voice_clone_scam",
-  "title": "AI Voice Clone Scam kya hai? (No. Simpler.)",
-  "location": "classroom",
-  "board_title": "Voice Clone Scam?",
+  "title": "AI Voice Clone Scam: Bhaiya ka call (scam call simulator)",
+  "location": "bedroom",
+  "board_style": "none",
+  "board_title": "",
   "characters": {
     "VINEET": {
       "voice": "hm_omega",
@@ -18,180 +19,128 @@
       "eleven_voice_id": "cgSgspJ2msm6clMCkdW9",
       "eleven_speed": 1.08,
       "eleven_pitch": 1.07
+    },
+    "CALLER": {
+      "voice": "hm_omega",
+      "pitch": 0.95,
+      "speed": 1.0,
+      "eleven_voice_id": "iP95p4xoKVk53GoZ742B",
+      "eleven_speed": 1.0,
+      "phone": true
     }
   },
   "lines": [
     {
       "who": "VINEET",
-      "shot": "hook",
-      "caption": "ONE, ye AI voice clone scam kya hai? 5 saal wala version.",
-      "tts": "वन, ये ए आई वॉइस क्लोन स्कैम क्या है? पाँच साल वाला वर्ज़न."
+      "shot": "call",
+      "caption": "Raat ke 11 baje... Bhaiya ka call?",
+      "tts": "रात के ग्यारह बजे... भैया का कॉल?",
+      "overlay": {
+        "type": "call",
+        "name": "Bhaiya",
+        "stage": "ring"
+      }
     },
     {
-      "who": "ONE",
-      "shot": "explain",
-      "caption": "Voice cloning model kisi ke audio samples se uski synthetic voice copy bana deta hai.",
-      "tts": "वॉइस क्लोनिंग मॉडल, किसी के ऑडियो सैम्पल्स से, उसकी सिंथेटिक वॉइस कॉपी बना देता है.",
-      "board": [
-        {
-          "op": "write",
-          "id": "a1",
-          "text": "voice cloning model",
-          "x": 60,
-          "y": 190,
-          "size": 42,
-          "color": "#2b3a8c",
-          "at": 0.15
-        },
-        {
-          "op": "write",
-          "id": "a2",
-          "text": "synthetic voice copy",
-          "x": 545,
-          "y": 190,
-          "size": 42,
-          "color": "#2b3a8c",
-          "at": 0.6
-        }
-      ]
+      "who": "CALLER",
+      "shot": "call",
+      "caption": "Bhaiya (call): Hello chhote! Mera phone kho gaya, ye naya number hai.",
+      "tts": "हेलो छोटे! मेरा फ़ोन खो गया, ये नया नंबर है.",
+      "overlay": {
+        "type": "call",
+        "name": "Bhaiya",
+        "stage": "talk"
+      }
     },
     {
-      "who": "VINEET",
-      "shot": "simpler",
-      "caption": "Nahi. Aur simple.",
-      "tts": "नहीं. और सिंपल.",
-      "board": [
-        {
-          "op": "strike",
-          "target": "a1",
-          "at": 0.3
-        },
-        {
-          "op": "strike",
-          "target": "a2",
-          "at": 0.5
-        }
-      ]
-    },
-    {
-      "who": "ONE",
-      "shot": "explain",
-      "caption": "Theek hai. AI kisi ki bhi awaaz ki photocopy bana leta hai.",
-      "tts": "ठीक है. ए आई किसी की भी आवाज़ की फ़ोटोकॉपी बना लेता है.",
-      "board": [
-        {
-          "op": "write",
-          "id": "b1",
-          "text": "Awaaz ki PHOTOCOPY",
-          "x": 60,
-          "y": 275,
-          "size": 44,
-          "color": "#1d6b3a",
-          "at": 0.4
-        }
-      ]
+      "who": "CALLER",
+      "shot": "call",
+      "caption": "Bhaiya (call): Emergency hai. Abhi 20 hazaar bhej de. Ghar pe kisi ko mat batana.",
+      "tts": "इमरजेंसी है. अभी बीस हज़ार भेज दे. घर पे किसी को मत बताना.",
+      "overlay": {
+        "type": "call",
+        "name": "Bhaiya",
+        "stage": "talk"
+      }
     },
     {
       "who": "VINEET",
-      "shot": "simpler",
-      "caption": "Aur simple. Mummy ko bachana hai.",
-      "tts": "और सिंपल. मम्मी को बचाना है.",
-      "board": [
-        {
-          "op": "strike",
-          "target": "b1",
-          "at": 0.35
-        }
-      ]
+      "shot": "call",
+      "caption": "Bhaiya, aap theek ho? Ruko, main...",
+      "tts": "भैया, आप ठीक हो? रुको, मैं...",
+      "overlay": {
+        "type": "call",
+        "name": "Bhaiya",
+        "stage": "talk"
+      }
     },
     {
       "who": "ONE",
-      "shot": "story",
-      "caption": "Mummy ko call aaya, bilkul Chhotu ki awaaz. Mummy, accident ho gaya, jaldi paise bhejo!",
-      "tts": "मम्मी को कॉल आया, बिल्कुल छोटू की आवाज़. मम्मी, एक्सीडेंट हो गया, जल्दी पैसे भेजो!",
-      "board": [
-        {
-          "op": "write",
-          "id": "c1",
-          "text": "Chhotu ki awaaz: \"paise bhejo!\"",
-          "x": 60,
-          "y": 370,
-          "size": 44,
-          "color": "#b3261e",
-          "at": 0.3
-        }
-      ]
+      "shot": "react",
+      "caption": "Ruko! Phone rakho. Ye Bhaiya nahi, AI voice clone ho sakta hai.",
+      "tts": "रुको! फ़ोन रखो. ये भैया नहीं, ए आई वॉइस क्लोन हो सकता है.",
+      "overlay": {
+        "type": "call",
+        "name": "Bhaiya",
+        "stage": "end"
+      }
     },
     {
       "who": "ONE",
-      "shot": "story",
-      "caption": "Par asli Chhotu toh ghar pe so raha tha.",
-      "tts": "पर असली छोटू तो घर पे सो रहा था.",
-      "board": [
-        {
-          "op": "write",
-          "id": "c2",
-          "text": "Asli Chhotu: ghar pe so raha",
-          "x": 60,
-          "y": 450,
-          "size": 44,
-          "color": "#222",
-          "at": 0.25
-        }
-      ]
+      "shot": "flag",
+      "caption": "Red flags dekho. Naya number. Aur turant paise ki jaldi.",
+      "tts": "रेड फ़्लैग्स देखो. नया नंबर. और तुरंत पैसे की जल्दी.",
+      "overlay": {
+        "type": "flags",
+        "items": [
+          "Naya number, 'phone kho gaya'",
+          "Turant paise, abhi ke abhi"
+        ],
+        "title": "AI VOICE SCAM: RED FLAGS"
+      }
     },
     {
       "who": "ONE",
-      "shot": "reveal",
-      "caption": "Isliye ghar me ek code word rakho. Code word nahi bola? Phone kaato, khud call karo.",
-      "tts": "इसलिए घर में एक कोड वर्ड रखो. कोड वर्ड नहीं बोला? फ़ोन काटो, खुद कॉल करो.",
-      "board": [
-        {
-          "op": "write",
-          "id": "d1",
-          "text": "Code word + khud call back",
-          "x": 130,
-          "y": 565,
-          "size": 56,
-          "color": "#b3261e",
-          "at": 0.25
-        },
-        {
-          "op": "circle",
-          "target": "d1",
-          "at": 0.75
-        }
-      ]
+      "shot": "flag",
+      "caption": "Aur 'kisi ko mat batana'. Scammer hamesha baat chhupwata hai.",
+      "tts": "और, किसी को मत बताना. स्कैमर हमेशा बात छुपवाता है.",
+      "overlay": {
+        "type": "flags",
+        "items": [
+          "'Ghar pe kisi ko mat batana'"
+        ]
+      }
     },
     {
       "who": "VINEET",
-      "shot": "realize",
-      "caption": "Matlab koi jaldi paise maange, toh pehle ruk ke check karna hai?",
-      "tts": "मतलब कोई जल्दी पैसे माँगे, तो पहले रुक के चेक करना है?"
+      "shot": "argue",
+      "caption": "Par awaaz toh bilkul Bhaiya ki thi!",
+      "tts": "पर आवाज़ तो बिल्कुल भैया की थी!"
     },
     {
       "who": "ONE",
-      "shot": "verdict",
-      "caption": "Bilkul. Aur fraud ho jaaye, toh turant 1930 pe call karo.",
-      "tts": "बिल्कुल. और फ़्रॉड हो जाए, तो तुरंत, उन्नीस सौ तीस, पे कॉल करो.",
-      "board": [
-        {
-          "op": "stamp",
-          "text": "CALL 1930",
-          "x": 800,
-          "y": 285,
-          "size": 54,
-          "color": "#b3261e",
-          "rot": -0.1,
-          "at": 0.55
-        }
-      ]
+      "shot": "payoff",
+      "caption": "AI ko bas kuch second ki recording chahiye. Reels aur videos se bhi mil jaati hai.",
+      "tts": "ए आई को बस कुछ सेकंड की रिकॉर्डिंग चाहिए. रील्स और वीडियोज़ से भी मिल जाती है."
+    },
+    {
+      "who": "ONE",
+      "shot": "flag",
+      "caption": "Rule simple hai. Phone kaato, purane number pe khud call karo. Aur family code word rakho.",
+      "tts": "रूल सिंपल है. फ़ोन काटो, पुराने नंबर पे खुद कॉल करो. और फ़ैमिली कोड वर्ड रखो.",
+      "overlay": {
+        "type": "flags",
+        "items": [
+          "Phone kaato, purane number pe call back",
+          "Family ka secret code word"
+        ]
+      }
     },
     {
       "who": "VINEET",
       "shot": "cta",
-      "caption": "Family ke liye safety checklist chahiye? Comment karo SAFE. DM me bhejta hoon.",
-      "tts": "फ़ैमिली के लिए सेफ़्टी चेकलिस्ट चाहिए? कमेंट करो, सेफ़. डी एम में भेजता हूँ.",
+      "caption": "Family ke liye scam safety checklist chahiye? Comment karo SAFE.",
+      "tts": "फ़ैमिली के लिए स्कैम सेफ़्टी चेकलिस्ट चाहिए? कमेंट करो, SAFE.",
       "cta_card": {
         "type": "comment",
         "keyword": "SAFE"
@@ -207,37 +156,37 @@
       }
     }
   ],
-  "post_caption": "AI Voice Clone Scam kya hai? 🚨 Hindi me samjho, family ko bachao\n\nAI sirf 10-20 second ki awaaz se kisi ki bhi nakli awaaz bana sakta hai. Phir aata hai call: \"Mummy, accident ho gaya, jaldi paise bhejo!\" 😨\n\nBachne ke 3 rules:\n1️⃣ Family me ek CODE WORD rakho\n2️⃣ Jaldi paise maange? Phone kaato, khud us number pe call back karo\n3️⃣ Fraud ho jaaye toh turant 1930 pe call karo (National Cyber Crime Helpline)\n\n👉 Family safety checklist chahiye? Comment karo \"SAFE\", DM me bhej dunga.\n\n📲 Ye reel family group me zaroor bhejo.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#voicecloning #cybersafety #deepfake #aihindi #scamalert",
+  "post_caption": "AI Voice Clone Scam 🚨 Ye call aaye toh paise mat bhejna (Hindi)\n\nRaat ke 11 baje \"Bhaiya\" ka call: \"Phone kho gaya, naya number hai. 20 hazaar bhej de, ghar pe kisi ko mat batana.\" Awaaz bilkul Bhaiya jaisi. Par ho sakta hai ye AI voice clone ho. 😨\n\n🚩 Red flags:\n1️⃣ Naya number + \"phone kho gaya\"\n2️⃣ Turant paise ki jaldi\n3️⃣ \"Kisi ko mat batana\"\n\n✅ Rule: phone kaato, purane number pe khud call back karo. Family me ek secret code word rakho.\n\n👉 Family scam safety checklist chahiye? Comment karo \"SAFE\", DM me bhej dunga.\n\n📲 Ye reel family group me zaroor bhejo.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#voicecloning #scamalert #cybersafety #deepfake #aihindi",
   "seo": {
     "pinned_comment": "📌 \"SAFE\" comment karo 👇 family ke liye AI scam safety checklist DM me bhejta hoon.",
-    "alt_text": "Animated Hindi explainer: VINEET asks the AI mascot ONE what an AI voice clone scam is. ONE explains with a story: Mummy gets a call in Chhotu's cloned voice asking for money while the real Chhotu is asleep at home. Safety tips on the whiteboard: keep a family code word, call back yourself, report fraud on 1930.",
+    "alt_text": "Animated Hindi scam-call simulation: at night VINEET gets a call from 'Bhaiya' on a new number asking for 20,000 rupees urgently and to tell no one. The AI mascot ONE stops him and lists the red flags on screen: new number, urgent money, secrecy. Safety rule: hang up, call back on the old number, keep a family code word.",
     "cover_text": [
-      "VOICE CLONE SCAM",
-      "Family ko aise bachao"
+      "BHAIYA ka call? 🚨",
+      "AI voice clone scam"
     ],
     "keywords": [
       "voice clone scam",
       "AI voice scam Hindi",
       "deepfake call scam",
-      "AI fraud call kaise bache",
-      "cyber fraud helpline 1930",
+      "AI fraud call kaise pehchane",
+      "scam call red flags",
       "AI scam alert"
     ],
     "youtube": {
-      "title": "AI Voice Clone Scam 🚨 Family ko aise bachao | Deepfake call scam (Hindi) #shorts",
-      "description": "AI voice clone scam kya hai, sabse simple Hindi me. 10 second ki awaaz se nakli call. Bachne ke rules: family code word, khud call back, aur fraud ho toh 1930 pe call.\n\nFamily safety checklist chahiye? Comment karo SAFE.\nRoz ek AI concept: subscribe karo.\n\n#VoiceCloneScam #CyberSafety #Deepfake #AIHindi #Shorts",
+      "title": "AI Voice Clone Scam 🚨 'Bhaiya' ka call aaye toh paise mat bhejna (Hindi) #shorts",
+      "description": "AI voice clone scam call simulation, Hindi me. Red flags: naya number, turant paise, 'kisi ko mat batana'. Rule: phone kaato, purane number pe call back, family code word.\n\nFamily scam safety checklist chahiye? Comment karo SAFE.\nRoz ek AI concept: subscribe karo.\n\n#VoiceCloneScam #ScamAlert #CyberSafety #AIHindi #Shorts",
       "tags": [
         "voice clone scam",
         "ai voice scam hindi",
         "deepfake call",
+        "scam call red flags",
         "ai fraud call",
-        "cyber fraud 1930",
         "cyber safety hindi",
-        "ai scam alert",
+        "scam alert hindi",
         "ai hindi",
         "aibyvineet"
       ]
     },
-    "file_name": "ai-voice-clone-scam-hindi.mp4"
+    "file_name": "ai-voice-clone-scam-call-hindi.mp4"
   }
 }

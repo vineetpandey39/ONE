@@ -16,8 +16,8 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SHOTS = {"hook", "explain", "simpler", "story", "reveal", "realize", "payoff", "cta", "follow", "claim", "verdict", "question", "answer", "result", "chat", "react"}
-LOCATIONS = {"classroom", "tapri", "studio", "terrace"}
+SHOTS = {"hook", "explain", "simpler", "story", "reveal", "realize", "payoff", "cta", "follow", "claim", "verdict", "question", "answer", "result", "chat", "react", "call", "flag", "tier", "argue"}
+LOCATIONS = {"classroom", "tapri", "studio", "terrace", "bedroom"}
 
 
 def validate(script: dict) -> list[str]:
@@ -40,6 +40,15 @@ def validate(script: dict) -> list[str]:
         elif ov and ov.get("type") == "chat":
             if not all(m.get("from") in ("me", "ai") and m.get("text") for m in ov.get("msgs", [])):
                 errs.append(f"line {i}: chat msgs need from (me/ai) and text")
+        elif ov and ov.get("type") == "call":
+            if ov.get("stage", "talk") not in ("ring", "talk", "end"):
+                errs.append(f"line {i}: call stage must be ring/talk/end")
+        elif ov and ov.get("type") == "flags":
+            if not ov.get("items"):
+                errs.append(f"line {i}: flags overlay needs items")
+        elif ov and ov.get("type") == "tier":
+            if not all(it.get("name") and it.get("tier") in ("S", "A", "B", "C") for it in ov.get("add", [])):
+                errs.append(f"line {i}: tier add items need name and tier S/A/B/C")
         elif ov:
             errs.append(f"line {i}: unknown overlay type {ov.get('type')!r}")
     ids: set[str] = set()
@@ -77,8 +86,8 @@ def validate(script: dict) -> list[str]:
             if not 0 <= float(op.get("at", -1)) <= 1:
                 errs.append(f"line {i}: board 'at' must be 0..1")
     errs += validate_seo(script)
-    if not 60 <= words <= 140:
-        errs.append(f"{words} spoken words; aim for 90-120 (35-45 s)")
+    if not 60 <= words <= 150:
+        errs.append(f"{words} spoken words; aim for 90-140 (35-58 s)")
     return errs
 
 

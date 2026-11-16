@@ -49,7 +49,26 @@ type, then stream). VINEET `hook` (complains about a bad AI answer), `chat` (the
 reply), ONE `react` x2 (what details are missing), VINEET `chat` (detailed prompt + useful reply), `realize`,
 `payoff`, `cta`, `follow`. Keep AI replies under ~45 words; facts must be real.
 
+Structure E, Scam Call Simulator (`location: bedroom`): add an off-screen `"CALLER"` character
+(`"phone": true`, its own voice). Lines with `"overlay": {"type": "call", "name": "<caller>", "stage":
+"ring"|"talk"|"end"}`: VINEET `call` (ring), CALLER `call` x2 (the scam pitch; caption starts with
+"<Name> (call):"), VINEET `call`, ONE `react` (stage end: stops him), ONE `flag` lines with
+`"overlay": {"type": "flags", "title": "...", "items": [...]}` (red flags appear one by one), VINEET
+`argue`, ONE `payoff` (the key fact), ONE `flag` (the safety rule), `cta`, `follow`.
+
+Structure F, Tier List (any location; tapri works): ONE `tier` lines with `"overlay": {"type": "tier",
+"title": "...", "add": [{"name": "<tool>", "tier": "S|A|B|C"}]}` (one card per line), VINEET `argue`
+in between ("X S tier me nahi?!"). Say tiers as "S tier / A tier / B tier / C tier" (a bare "S" or "B"
+is misheard as "yes"/"bhi"). End with `realize`, `payoff`, `cta` ("apni tier list comment karo"), `follow`.
+
 Rotate structures and locations day to day; never the same structure twice in a row.
+
+Analogies: vary them (cricket, Bollywood, office, college, shaadi, traffic, exams, food delivery).
+Mummy/Chhotu may appear at most once a week; never in two episodes in a row.
+
+Voice: write tts in Devanagari, but write the CTA keyword (and any word that must be heard exactly)
+in Latin capitals inside it, e.g. "कमेंट करो, SAFE." build_audio's voice QC listens to every line and
+stops the build if the keyword is not heard.
 
 Rules:
 - Max 18 words per line. Total spoken ~95–120 words.
