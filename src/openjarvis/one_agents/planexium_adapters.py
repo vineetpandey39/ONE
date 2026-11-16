@@ -402,19 +402,17 @@ class ChatGPTAdapter:
             receipt = output.parent / "provider-v3.json"
         repair_path = self.context.artifact("thumbnail-reference-repair.json")
         repair = json.loads(repair_path.read_text(encoding="utf-8")) if repair_path.exists() else {}
-        repair_jobs = set(repair.get("provider_job_ids") or [])
-        if repair.get("provider_job_id"):
-            repair_jobs.add(repair["provider_job_id"])
-        current_failure_proved = (v2.get("terminal_status") == "Failed"
-                                  and v2.get("job_id") in repair_jobs)
-        mission_reference_mode = (repair.get("scope") == "mission_thumbnail_variants"
-                                  and len(repair_jobs) >= 2)
-        if (repair.get("finding") == "reference_required_no_image_generated"
-                and (current_failure_proved or mission_reference_mode)):
-            # The retained provider screenshot/receipt proves text-only image
-            # generation refused and requested the authentic observation.
-            # Attach the mission's already verified official NASA/Webb image;
-            # this is a changed dependency and uses a new durable receipt.
+        refusal_error = v2_error.lower()
+        verified_generation_refusal = (v2.get("terminal_status") == "Failed"
+            and bool(v2.get("job_id"))
+            and any(phrase in refusal_error for phrase in (
+                "reported that image generation failed",
+                "could not generate the image",
+                "couldn't generate the image",
+                "unable to generate the image",
+            )))
+
+        def verified_official_reference() -> tuple[Path, str]:
             manifest_path = self.context.artifact("media-manifest.json")
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             official = next((asset for scene in manifest.get("scenes", {}).values()
@@ -426,6 +424,43 @@ class ChatGPTAdapter:
             actual = hashlib.sha256(reference.read_bytes()).hexdigest()
             if actual != official.get("sha256"):
                 raise ValueError("Official thumbnail reference changed after evidence sealing")
+            return reference, actual
+
+        if verified_generation_refusal and not repair:
+            # A sealed text-only refusal is enough evidence to apply the same
+            # bounded recovery used by YATRA/Imagine India.  Persist the
+            # decision once so later variants start with the verified official
+            # reference instead of each burning four identical failed turns.
+            _, reference_sha256 = verified_official_reference()
+            repair = {
+                "scope": "mission_thumbnail_variants",
+                "finding": "reference_required_no_image_generated",
+                "provider_job_id": v2["job_id"],
+                "provider_job_ids": [v2["job_id"]],
+                "reference_sha256": reference_sha256,
+                "policy": "verified-provider-refusal-reference-v1",
+                "reason": "verified_text_only_generation_refusal",
+            }
+            repair_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = repair_path.with_suffix(repair_path.suffix + ".tmp")
+            temporary.write_text(json.dumps(repair, indent=2, sort_keys=True), encoding="utf-8")
+            os.replace(temporary, repair_path)
+        repair_jobs = set(repair.get("provider_job_ids") or [])
+        if repair.get("provider_job_id"):
+            repair_jobs.add(repair["provider_job_id"])
+        current_failure_proved = (v2.get("terminal_status") == "Failed"
+                                  and v2.get("job_id") in repair_jobs)
+        mission_reference_mode = (repair.get("scope") == "mission_thumbnail_variants"
+            and (len(repair_jobs) >= 2
+                 or (repair.get("policy") == "verified-provider-refusal-reference-v1"
+                     and bool(repair_jobs))))
+        if (repair.get("finding") == "reference_required_no_image_generated"
+                and (current_failure_proved or mission_reference_mode)):
+            # The retained provider screenshot/receipt proves text-only image
+            # generation refused and requested the authentic observation.
+            # Attach the mission's already verified official NASA/Webb image;
+            # this is a changed dependency and uses a new durable receipt.
+            reference, actual = verified_official_reference()
             if actual != repair.get("reference_sha256"):
                 raise ValueError("Thumbnail repair receipt names a different official reference")
             image_args["reference_image_path"] = str(reference)
