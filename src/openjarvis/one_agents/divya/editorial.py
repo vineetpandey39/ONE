@@ -2,6 +2,17 @@
 from .core import read,write,digest,artifact,Blocked,validate_cues,require_review
 import re
 
+MOTION_TREATMENTS=('petals','rays','mist','stars','flame','rays','petals','mist')
+
+def scene_motion_defaults(scenes):
+    """Give long-form scenes varied deterministic effects when prompts omit them."""
+    result=[]
+    for index,scene in enumerate(scenes):
+        item=dict(scene)
+        item.setdefault('motion_treatment',MOTION_TREATMENTS[index%len(MOTION_TREATMENTS)])
+        result.append(item)
+    return result
+
 def lyric_fragments(lines):
     """Keep authored punctuation/Devanagari intact when captioning clauses."""
     return list(dict.fromkeys(lines+[part.strip() for line in lines for part in re.split(r'(?<=[,।॥])\s+',line) if part.strip()]))
@@ -44,6 +55,7 @@ def prepare(root, draft=False):
     require_no_hold(root)
     from .render import _probe,cards_module
     m=read(root/'mission.json');config=read(root/'config.json')
+    m['scenes']=scene_motion_defaults(m['scenes'])
     audio=root/'audio/master.wav'
     duration=float(_probe(audio)['format']['duration'])
     cs=read(root/'lyrics-cues.json')
