@@ -189,7 +189,14 @@ def main() -> None:
     w = load_audio(f) * 0.8 if (f := find(sfx_dir, "whoosh")) else whoosh()
     p = load_audio(f) * 0.6 if (f := find(sfx_dir, "pop")) else pop()
     for line in script["lines"]:
-        if line.get("shot") in ("simpler", "payoff", "hook", "verdict"):
+        ov = line.get("overlay") or {}
+        if ov.get("type") == "quiz" and ov.get("stage") == "reveal":
+            s = int((line["start"] + 0.2) * SR); sfx[s:s + len(p)] += p[: n - s]
+        if ov.get("type") == "chat":
+            msgs, d = ov.get("msgs", []), line["end"] - line["start"]
+            for k, m in enumerate(msgs):
+                s = int((line["start"] + m.get("at", k / len(msgs) * 0.85 + 0.05) * d) * SR); sfx[s:s + len(p)] += 0.6 * p[: n - s]
+        if line.get("shot") in ("simpler", "payoff", "hook", "verdict", "result"):
             s = max(0, int((line["start"] - 0.25) * SR))
             sfx[s:s + len(w)] += w[: n - s]
         for op in line.get("board", []):
@@ -240,7 +247,8 @@ def main() -> None:
 
     timeline = {"fps": FPS, "duration": round(total, 3), "frames": frames,
                 "board_title": script.get("board_title", ""), "lines": script["lines"], "amp": amp, "shape": shape,
-                "location": script.get("location", "classroom"), "board_style": script.get("board_style", "")}
+                "location": script.get("location", "classroom"), "board_style": script.get("board_style", ""),
+                "quiz": script.get("quiz", {})}
     (out_dir / "timeline.json").write_text(json.dumps(timeline, ensure_ascii=False), encoding="utf-8")
     print(f"total {total:.2f}s, {frames} frames", flush=True)
 

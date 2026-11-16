@@ -37,6 +37,20 @@ that row, x ~800, red #ff5c5c for JHOOTH, yellow #ffd86b for AADHA SACH, green #
 9. `realize`: VINEET's takeaway, written on the last row. 10. `reveal`: ONE closes the bet (circle).
 11. `cta` + 12. `follow` as above. Chalk colours: white #f4f1e8, yellow #ffd86b, pink #ff8fa3, green #9be29b.
 
+Structure C, AI Quiz Show (`location: studio`, `board_style: sign`, board_title "AI QUIZ"):
+top-level `"quiz": {"q1": {"q", "options": [4], "answer": 0-3}, ...}`. ONE `question` (hook: welcome +
+prize), VINEET `react`, then per question: ONE `question` + overlay {type quiz, id, stage ask}, VINEET
+`answer` + {stage pick, pick: 0-3} (get one wrong for drama), ONE `result` + {stage reveal} with a one-line
+fact. Then `realize` (score), `payoff`, `cta` ("Comment karo QUIZ aur score"), `follow`.
+
+Structure D, Chat demo "galat vs sahi" (`location: terrace`, `board_style: none`): lines with
+`"overlay": {"type": "chat", "msgs": [{"from": "me"|"ai", "text": ...}]}` show a phone chat (AI replies
+type, then stream). VINEET `hook` (complains about a bad AI answer), `chat` (the 4-word prompt + generic
+reply), ONE `react` x2 (what details are missing), VINEET `chat` (detailed prompt + useful reply), `realize`,
+`payoff`, `cta`, `follow`. Keep AI replies under ~45 words; facts must be real.
+
+Rotate structures and locations day to day; never the same structure twice in a row.
+
 Rules:
 - Max 18 words per line. Total spoken ~95–120 words.
 - Facts and numbers only from {SOURCES}; never invent earnings or statistics.

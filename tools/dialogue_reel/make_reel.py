@@ -16,8 +16,8 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SHOTS = {"hook", "explain", "simpler", "story", "reveal", "realize", "payoff", "cta", "follow", "claim", "verdict"}
-LOCATIONS = {"classroom", "tapri"}
+SHOTS = {"hook", "explain", "simpler", "story", "reveal", "realize", "payoff", "cta", "follow", "claim", "verdict", "question", "answer", "result", "chat", "react"}
+LOCATIONS = {"classroom", "tapri", "studio", "terrace"}
 
 
 def validate(script: dict) -> list[str]:
@@ -29,6 +29,19 @@ def validate(script: dict) -> list[str]:
         return errs
     if script.get("location", "classroom") not in LOCATIONS:
         errs.append(f"unknown location {script.get('location')!r}; one of {sorted(LOCATIONS)}")
+    for i, ln in enumerate(script["lines"], 1):
+        ov = ln.get("overlay")
+        if ov and ov.get("type") == "quiz":
+            q = script.get("quiz", {}).get(ov.get("id"))
+            if not q or len(q.get("options", [])) != 4 or not 0 <= q.get("answer", -1) <= 3:
+                errs.append(f"line {i}: quiz {ov.get('id')!r} needs q, 4 options and answer 0-3 in script.quiz")
+            if ov.get("stage") not in ("ask", "pick", "reveal"):
+                errs.append(f"line {i}: quiz stage must be ask/pick/reveal")
+        elif ov and ov.get("type") == "chat":
+            if not all(m.get("from") in ("me", "ai") and m.get("text") for m in ov.get("msgs", [])):
+                errs.append(f"line {i}: chat msgs need from (me/ai) and text")
+        elif ov:
+            errs.append(f"line {i}: unknown overlay type {ov.get('type')!r}")
     ids: set[str] = set()
     words = 0
     for i, ln in enumerate(script["lines"], 1):

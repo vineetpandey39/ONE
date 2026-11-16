@@ -1,0 +1,236 @@
+{
+  "id": "ep06_ai_quiz",
+  "title": "AI Quiz Show: 3 sawal, kitne sahi?",
+  "location": "studio",
+  "board_style": "sign",
+  "board_title": "AI QUIZ",
+  "characters": {
+    "VINEET": {
+      "voice": "hm_omega",
+      "pitch": 1.0,
+      "speed": 1.05,
+      "eleven_voice_id": "TX3LPaxmHKxFdv7VOQHJ",
+      "eleven_speed": 1.05
+    },
+    "ONE": {
+      "voice": "hm_psi",
+      "pitch": 1.22,
+      "speed": 1.08,
+      "eleven_voice_id": "cgSgspJ2msm6clMCkdW9",
+      "eleven_speed": 1.08,
+      "eleven_pitch": 1.07
+    }
+  },
+  "quiz": {
+    "q1": {
+      "q": "ChatGPT me 'GPT' ka matlab kya hai?",
+      "options": [
+        "General Purpose Tool",
+        "Generative Pre-trained Transformer",
+        "Google Powered Tech",
+        "Great Prompt Thinker"
+      ],
+      "answer": 1
+    },
+    "q2": {
+      "q": "AI se image banane ke liye sabse zaroori kya hai?",
+      "options": [
+        "Achha, detailed prompt",
+        "Coding aani chahiye",
+        "Mehenga gaming laptop",
+        "Photoshop skills"
+      ],
+      "answer": 0
+    },
+    "q3": {
+      "q": "AI ka sabse bada risk kya hai?",
+      "options": [
+        "Robot hamla karenge",
+        "Phone garam hoga",
+        "Galat info, confident tone me",
+        "Bijli ka bill"
+      ],
+      "answer": 2
+    }
+  },
+  "lines": [
+    {
+      "who": "ONE",
+      "shot": "question",
+      "caption": "Swagat hai AI Quiz me! 3 sawal, har sahi jawab pe ek samosa.",
+      "tts": "स्वागत है ए आई क्विज़ में! तीन सवाल, हर सही जवाब पे एक समोसा."
+    },
+    {
+      "who": "VINEET",
+      "shot": "react",
+      "caption": "Samose pakke! Shuru karo.",
+      "tts": "समोसे पक्के! शुरू करो."
+    },
+    {
+      "who": "ONE",
+      "shot": "question",
+      "caption": "Pehla sawal. ChatGPT me GPT ka matlab kya hai?",
+      "tts": "पहला सवाल. चैट जी पी टी में, जी पी टी का मतलब क्या है?",
+      "overlay": {
+        "type": "quiz",
+        "id": "q1",
+        "stage": "ask"
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "answer",
+      "caption": "Ye toh easy hai... C! Google Powered Tech!",
+      "tts": "ये तो ईज़ी है... सी! गूगल पावर्ड टेक!",
+      "overlay": {
+        "type": "quiz",
+        "id": "q1",
+        "stage": "pick",
+        "pick": 2
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "result",
+      "caption": "Galat! Generative Pre-trained Transformer. Pehle se padha hua, naya likhne wala model.",
+      "tts": "गलत! जनरेटिव प्री ट्रेन्ड ट्रांसफ़ॉर्मर. पहले से पढ़ा हुआ, नया लिखने वाला मॉडल.",
+      "overlay": {
+        "type": "quiz",
+        "id": "q1",
+        "stage": "reveal"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "question",
+      "caption": "Doosra sawal. AI se image banane ke liye sabse zaroori kya hai?",
+      "tts": "दूसरा सवाल. ए आई से इमेज बनाने के लिए सबसे ज़रूरी क्या है?",
+      "overlay": {
+        "type": "quiz",
+        "id": "q2",
+        "stage": "ask"
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "answer",
+      "caption": "A. Achha, detailed prompt.",
+      "tts": "ए. अच्छा, डिटेल्ड प्रॉम्प्ट.",
+      "overlay": {
+        "type": "quiz",
+        "id": "q2",
+        "stage": "pick",
+        "pick": 0
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "result",
+      "caption": "Sahi! Na coding, na mehenga laptop. Bas saaf likho kya chahiye.",
+      "tts": "सही! ना कोडिंग, ना महँगा लैपटॉप. बस साफ़ लिखो क्या चाहिए.",
+      "overlay": {
+        "type": "quiz",
+        "id": "q2",
+        "stage": "reveal"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "question",
+      "caption": "Aakhri sawal. AI ka sabse bada risk kya hai?",
+      "tts": "आख़िरी सवाल. ए आई का सबसे बड़ा रिस्क क्या है?",
+      "overlay": {
+        "type": "quiz",
+        "id": "q3",
+        "stage": "ask"
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "answer",
+      "caption": "Robot... nahi nahi! C. Galat info, confident tone me.",
+      "tts": "रोबोट... नहीं नहीं! सी. गलत इन्फ़ो, कॉन्फ़िडेंट टोन में.",
+      "overlay": {
+        "type": "quiz",
+        "id": "q3",
+        "stage": "pick",
+        "pick": 2
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "result",
+      "caption": "Sahi! Isliye AI ka jawab hamesha cross check karo.",
+      "tts": "सही! इसलिए ए आई का जवाब हमेशा क्रॉस चेक करो.",
+      "overlay": {
+        "type": "quiz",
+        "id": "q3",
+        "stage": "reveal"
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "realize",
+      "caption": "3 me se 2! Matlab 2 samose pakke?",
+      "tts": "तीन में से दो! मतलब दो समोसे पक्के?"
+    },
+    {
+      "who": "ONE",
+      "shot": "payoff",
+      "caption": "Pakke. Aur GPT ka matlab bhi pakka yaad!",
+      "tts": "पक्के. और जी पी टी का मतलब भी पक्का याद!"
+    },
+    {
+      "who": "VINEET",
+      "shot": "cta",
+      "caption": "Aapka score kitna? Comment karo QUIZ aur score. Agla quiz DM me.",
+      "tts": "आपका स्कोर कितना? कमेंट करो, क्विज़, और स्कोर. अगला क्विज़ डी एम में.",
+      "cta_card": {
+        "type": "comment",
+        "keyword": "QUIZ"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "follow",
+      "caption": "Aur follow kar lo. Agla quiz jaldi!",
+      "tts": "और फ़ॉलो कर लो. अगला क्विज़ जल्दी!",
+      "cta_card": {
+        "type": "follow"
+      }
+    }
+  ],
+  "post_caption": "AI Quiz 🧠 3 sawal, kitne sahi kar paoge? (Hindi)\n\nVINEET ne 3 me se 2 sahi kiye. Aap?\n1️⃣ ChatGPT me GPT ka matlab?\n2️⃣ AI image ke liye sabse zaroori kya?\n3️⃣ AI ka sabse bada risk?\n\nReel pause karo, pehle khud answer do, phir dekho. 😄\n\n👉 Comment me apna SCORE likho aur \"QUIZ\" likho, agla quiz DM me bhej dunga.\n\n💾 Save karo, aur dosto ko challenge karo.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#aiquiz #chatgpt #aihindi #artificialintelligence #quiztime",
+  "seo": {
+    "pinned_comment": "📌 Apna score comment karo + \"QUIZ\" likho 👇 agla AI quiz DM me bhejta hoon.",
+    "alt_text": "Animated Hindi AI quiz show: the mascot ONE hosts and VINEET plays at a podium in a neon studio. Three multiple-choice questions appear on screen with a timer: what GPT stands for (Generative Pre-trained Transformer), the most important thing for AI images (a good detailed prompt), and the biggest AI risk (confident wrong information). VINEET scores 2 out of 3.",
+    "cover_text": [
+      "AI QUIZ",
+      "3 sawal, kitne sahi?"
+    ],
+    "keywords": [
+      "AI quiz",
+      "AI quiz Hindi",
+      "GPT full form",
+      "ChatGPT ka matlab",
+      "AI GK quiz",
+      "AI for beginners Hindi"
+    ],
+    "youtube": {
+      "title": "AI Quiz 🧠 3 sawal, kitne sahi kar paoge? | GPT ka full form (Hindi) #shorts",
+      "description": "AI quiz in Hindi: GPT ka matlab, AI image ke liye kya zaroori, aur AI ka sabse bada risk. Pause karo, khud answer do!\n\nApna score comment karo + QUIZ likho.\nRoz ek AI concept: subscribe karo.\n\n#AIQuiz #ChatGPT #AIHindi #QuizTime #Shorts",
+      "tags": [
+        "ai quiz",
+        "ai quiz hindi",
+        "gpt full form",
+        "chatgpt full form",
+        "chatgpt ka matlab",
+        "ai gk quiz",
+        "ai hindi",
+        "quiz in hindi",
+        "aibyvineet"
+      ]
+    },
+    "file_name": "ai-quiz-gpt-full-form-hindi.mp4"
+  }
+}

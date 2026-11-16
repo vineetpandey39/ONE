@@ -1,0 +1,146 @@
+{
+  "id": "ep07_goa_trip_prompt",
+  "title": "AI se Goa trip plan: galat vs sahi tarika",
+  "location": "terrace",
+  "board_style": "none",
+  "board_title": "",
+  "characters": {
+    "VINEET": {
+      "voice": "hm_omega",
+      "pitch": 1.0,
+      "speed": 1.05,
+      "eleven_voice_id": "TX3LPaxmHKxFdv7VOQHJ",
+      "eleven_speed": 1.05
+    },
+    "ONE": {
+      "voice": "hm_psi",
+      "pitch": 1.22,
+      "speed": 1.08,
+      "eleven_voice_id": "cgSgspJ2msm6clMCkdW9",
+      "eleven_speed": 1.08,
+      "eleven_pitch": 1.07
+    }
+  },
+  "lines": [
+    {
+      "who": "VINEET",
+      "shot": "hook",
+      "caption": "ONE, AI se Goa trip ka plan banwaya. Dekh, kya bekaar jawab diya!",
+      "tts": "वन, ए आई से गोवा ट्रिप का प्लान बनवाया. देख, क्या बेकार जवाब दिया!"
+    },
+    {
+      "who": "VINEET",
+      "shot": "chat",
+      "caption": "Maine likha, Goa trip plan karo. Aur ye mila.",
+      "tts": "मैंने लिखा, गोवा ट्रिप प्लान करो. और ये मिला.",
+      "overlay": {
+        "type": "chat",
+        "msgs": [
+          {
+            "from": "me",
+            "text": "Goa trip plan karo"
+          },
+          {
+            "from": "ai",
+            "text": "Goa ek sundar jagah hai! Wahan kai beaches hain jaise Baga aur Calangute. November se February best season hai. Aap sightseeing, nightlife aur seafood enjoy kar sakte hain."
+          }
+        ]
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "react",
+      "caption": "Kyunki tumne sirf 4 shabd likhe. AI ko details chahiye.",
+      "tts": "क्योंकि तुमने सिर्फ़ चार शब्द लिखे. ए आई को डिटेल्स चाहिए."
+    },
+    {
+      "who": "ONE",
+      "shot": "react",
+      "caption": "Batao: kitne din, kitne log, budget, aur kya pasand hai.",
+      "tts": "बताओ: कितने दिन, कितने लोग, बजट, और क्या पसंद है."
+    },
+    {
+      "who": "VINEET",
+      "shot": "chat",
+      "caption": "Theek hai. 3 din, 2 dost, 15 hazaar budget, beach aur cafe. Day-wise plan do.",
+      "tts": "ठीक है. तीन दिन, दो दोस्त, पंद्रह हज़ार बजट, बीच और कैफ़े. डे वाइज़ प्लान दो.",
+      "overlay": {
+        "type": "chat",
+        "msgs": [
+          {
+            "from": "me",
+            "text": "3 din, 2 dost, total budget ₹15,000. Beach + cafes pasand. Scooty se ghoomenge. Day-wise plan do."
+          },
+          {
+            "from": "ai",
+            "text": "Day 1: Baga beach, Chapora Fort sunset, dinner in Anjuna.\nDay 2: Fort Aguada, Candolim beach cafes.\nDay 3: Panjim, Fontainhas walk, Miramar sunset.\nBudget (approx): stay ₹6k, scooty+fuel ₹2.5k, khana ₹5k, extra ₹1.5k."
+          }
+        ]
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "realize",
+      "caption": "Arre waah! Same AI, bas mera sawal badla.",
+      "tts": "अरे वाह! सेम ए आई, बस मेरा सवाल बदला."
+    },
+    {
+      "who": "ONE",
+      "shot": "payoff",
+      "caption": "AI utna hi smart hai, jitna tumhara sawal.",
+      "tts": "ए आई उतना ही स्मार्ट है, जितना तुम्हारा सवाल."
+    },
+    {
+      "who": "VINEET",
+      "shot": "cta",
+      "caption": "Mera trip planning prompt chahiye? Comment karo TRIP. DM me bhejta hoon.",
+      "tts": "मेरा ट्रिप प्लानिंग प्रॉम्प्ट चाहिए? कमेंट करो, ट्रिप. डी एम में भेजता हूँ.",
+      "cta_card": {
+        "type": "comment",
+        "keyword": "TRIP"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "follow",
+      "caption": "Aur follow kar lo. Kal ek naya AI jugaad!",
+      "tts": "और फ़ॉलो कर लो. कल एक नया ए आई जुगाड़!",
+      "cta_card": {
+        "type": "follow"
+      }
+    }
+  ],
+  "post_caption": "AI se Goa trip plan 🌴 4 shabd vs sahi prompt (Hindi)\n\n\"Goa trip plan karo\" likha, toh mila generic gyaan. 😑\nPhir likha: 3 din, 2 dost, ₹15,000 budget, beach + cafes, scooty, day-wise plan. Toh mila ekdum kaam ka itinerary. ✅\n\nFormula: DIN + LOG + BUDGET + PASAND + FORMAT\nAI utna hi smart hai, jitna tumhara sawal.\n\n👉 Mera trip planning prompt chahiye? Comment karo \"TRIP\", DM me bhej dunga.\n\n💾 Save karo, agli trip pe kaam aayega. Trip wale group me bhejo.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#goatrip #chatgpt #aitravel #aihindi #travelhacks",
+  "seo": {
+    "pinned_comment": "📌 \"TRIP\" comment karo 👇 mera copy-paste trip planning prompt DM me bhejta hoon.",
+    "alt_text": "Animated Hindi reel on a rooftop at sunset: VINEET shows the AI mascot ONE a phone chat. A four-word prompt 'Goa trip plan karo' gets a generic answer; a detailed prompt with days, people, budget, interests and format gets a day-wise Goa itinerary with a budget split. Shows how to write better prompts for trip planning.",
+    "cover_text": [
+      "AI se GOA TRIP plan",
+      "4 shabd vs sahi prompt"
+    ],
+    "keywords": [
+      "AI se trip plan",
+      "ChatGPT trip planning",
+      "Goa trip plan",
+      "Goa itinerary 3 days",
+      "ChatGPT prompt Hindi",
+      "AI travel planner"
+    ],
+    "youtube": {
+      "title": "AI se Goa trip plan 🌴 4 shabd vs sahi prompt | ChatGPT trip planning (Hindi) #shorts",
+      "description": "ChatGPT se trip plan kaise banwaye: 'Goa trip plan karo' vs detailed prompt. Formula: din + log + budget + pasand + format.\n\nTrip planning prompt chahiye? Comment karo TRIP.\nRoz ek AI concept: subscribe karo.\n\n#GoaTrip #ChatGPT #AITravel #AIHindi #Shorts",
+      "tags": [
+        "ai trip planner",
+        "chatgpt trip planning",
+        "goa trip plan",
+        "goa itinerary 3 days",
+        "goa budget trip",
+        "chatgpt prompt hindi",
+        "ai travel hindi",
+        "ai hindi",
+        "aibyvineet"
+      ]
+    },
+    "file_name": "ai-goa-trip-plan-prompt-hindi.mp4"
+  }
+}

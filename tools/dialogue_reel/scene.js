@@ -79,7 +79,8 @@ scene.add(lamp);
 // board on the back wall, a counter/desk where VINEET's arms rest (top ~0.84 m),
 // ONE's perch at x -0.95 / z -0.45, VINEET's seat at x 1.2 / z -0.95.
 const LOC = TL.location || 'classroom';
-const CHALK = (TL.board_style || (LOC === 'tapri' ? 'chalk' : 'white')) === 'chalk';
+const BSTYLE = TL.board_style || ({ tapri: 'chalk', studio: 'sign', terrace: 'none' }[LOC] || 'white');
+const CHALK = BSTYLE === 'chalk';
 const BOARD = { x: -0.35, y: 2.15, z: -3.25, w: 2.7, h: 2.7 / 1.6 };
 const boardC = document.createElement('canvas'); boardC.width = 1024; boardC.height = 640;
 const bctx = boardC.getContext('2d');
@@ -89,6 +90,7 @@ const boardFace = new THREE.Mesh(new THREE.PlaneGeometry(BOARD.w, BOARD.h),
   new THREE.MeshStandardMaterial({ map: boardTex, roughness: 0.95 }));
 boardFace.position.set(BOARD.x, BOARD.y, BOARD.z);
 scene.add(boardFace);
+boardFace.visible = BSTYLE !== 'none';
 const boardToWorld = (px, py) => new THREE.Vector3(
   BOARD.x - BOARD.w / 2 + (px / 1024) * BOARD.w, BOARD.y + BOARD.h / 2 - (py / 640) * BOARD.h, BOARD.z + 0.01);
 let STACK_TOP = 1.32;
@@ -101,7 +103,34 @@ function paintBackdrop(kind) {
   const g = raw.getContext('2d');
   let sd = kind === 'street' ? 13 : 7; const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
   const gr = g.createLinearGradient(0, 0, 0, 1024);
-  if (kind === 'street') {
+  if (kind === 'studio') {
+    gr.addColorStop(0, '#05061a'); gr.addColorStop(0.6, '#140f33'); gr.addColorStop(1, '#0a0a18');
+    g.fillStyle = gr; g.fillRect(0, 0, 2048, 1024);
+    for (let i = 0; i < 9; i++) {                       // light beams
+      const x = 120 + i * 230, b = g.createLinearGradient(x, 0, x, 900);
+      b.addColorStop(0, i % 2 ? 'rgba(255,63,164,0.35)' : 'rgba(54,224,255,0.35)'); b.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = b; g.beginPath(); g.moveTo(x - 20, 0); g.lineTo(x + 20, 0); g.lineTo(x + 160, 900); g.lineTo(x - 160, 900); g.fill();
+    }
+    g.fillStyle = '#07071a';                             // audience heads
+    for (let x = -20; x < 2080; x += 46) { g.beginPath(); g.arc(x + rnd() * 10, 860 + rnd() * 30, 30, 0, Math.PI * 2); g.fill(); }
+    g.fillRect(0, 880, 2048, 144);
+  } else if (kind === 'sunset') {
+    gr.addColorStop(0, '#3b3f8f'); gr.addColorStop(0.35, '#c75b8a'); gr.addColorStop(0.6, '#ff9a5c'); gr.addColorStop(0.78, '#ffd28a'); gr.addColorStop(1, '#c98a6a');
+    g.fillStyle = gr; g.fillRect(0, 0, 2048, 1024);
+    g.fillStyle = 'rgba(255,240,200,0.9)'; g.beginPath(); g.arc(1500, 640, 90, 0, Math.PI * 2); g.fill();   // sun
+    let x = -30;
+    while (x < 2100) {                                   // rooftops with tanks
+      const w = 140 + rnd() * 220, h = 140 + rnd() * 200;
+      g.fillStyle = ['#7a5a6e', '#6a4d63', '#835f6f'][Math.floor(rnd() * 3)]; g.fillRect(x, 780 - h, w, 400);
+      if (rnd() > 0.4) { g.fillStyle = '#3a2c3a'; g.fillRect(x + w * 0.3, 780 - h - 50, 46, 50); }
+      x += w + rnd() * 16;
+    }
+    for (let i = 0; i < 6; i++) {                        // kites
+      const kx = 200 + rnd() * 1650, ky = 120 + rnd() * 300, ks = 18 + rnd() * 14;
+      g.fillStyle = ['#ff3b5c', '#ffd23b', '#3bc6ff', '#7b4dff'][i % 4];
+      g.beginPath(); g.moveTo(kx, ky - ks); g.lineTo(kx + ks * 0.8, ky); g.lineTo(kx, ky + ks); g.lineTo(kx - ks * 0.8, ky); g.fill();
+    }
+  } else if (kind === 'street') {
     gr.addColorStop(0, '#0d1226'); gr.addColorStop(0.5, '#1f2547'); gr.addColorStop(0.7, '#3a2f4a'); gr.addColorStop(1, '#141218');
     g.fillStyle = gr; g.fillRect(0, 0, 2048, 1024);
     // shop fronts with warm/neon light, a street-light glow, road at the bottom
@@ -131,12 +160,12 @@ function paintBackdrop(kind) {
     }
   }
   const out = c.getContext('2d');
-  out.filter = kind === 'street' ? 'blur(9px)' : 'blur(7px)'; out.drawImage(raw, 0, 0); out.filter = 'none';
-  const n = kind === 'street' ? 90 : 70;
+  out.filter = { street: 'blur(9px)', studio: 'blur(6px)', sunset: 'blur(4px)' }[kind] || 'blur(7px)'; out.drawImage(raw, 0, 0); out.filter = 'none';
+  const n = { street: 90, studio: 60, sunset: 25 }[kind] ?? 70;
   for (let i = 0; i < n; i++) {
     const x = rnd() * 2048, y = (kind === 'street' ? 480 : 380) + rnd() * (kind === 'street' ? 420 : 600), r = 14 + rnd() * 38;
     const pick = rnd();
-    const col = kind === 'street'
+    const col = kind === 'studio' ? (pick < 0.5 ? [255, 80, 180] : [70, 220, 255]) : kind === 'sunset' ? [255, 230, 170] : kind === 'street'
       ? (pick < 0.45 ? [255, 200, 120] : pick < 0.65 ? [255, 90, 80] : pick < 0.85 ? [255, 245, 220] : [120, 220, 200])
       : (pick > 0.3 ? [255, 205, 120] : [150, 200, 255]);
     const rg = out.createRadialGradient(x, y, 0, x, y, r);
@@ -271,8 +300,78 @@ function buildTapri() {
     mesh(new THREE.SphereGeometry(0.05, 10, 6), new THREE.MeshBasicMaterial({ color: c }), -2.3 + i * 0.65, 2.78 + 0.05 * Math.sin(i * 1.7), 0.22));
 }
 
-if (LOC === 'tapri') buildTapri(); else buildClassroom();
-await addBackdrop(LOC === 'tapri' ? 'street' : 'city');
+
+// Quiz show studio: dark stage, neon "AI QUIZ" sign where the board is, podium
+// with a buzzer for VINEET, a golden host stand for ONE.
+function buildStudio() {
+  scene.background = new THREE.Color('#0a0b1c');
+  mesh(box(12, 0.1, 10), flat('#1d1836', { roughness: 0.6 }), 0, -0.05, -1);
+  mesh(new THREE.CylinderGeometry(2.6, 2.6, 0.06, 40), flat('#2a2150', { flatShading: false, roughness: 0.6 }), 0.1, 0.03, -1.0); // stage disc
+  mesh(box(9, 4.6, 0.12), flat('#151a3a'), 0, 2.3, -3.55);
+  for (const [y, c] of [[0.35, '#ff3fa4'], [4.1, '#36e0ff']]) mesh(box(8.6, 0.07, 0.04), new THREE.MeshBasicMaterial({ color: c }), 0, y, -3.47);
+  for (const x of [-3.2, 2.6]) mesh(box(0.07, 3.6, 0.04), new THREE.MeshBasicMaterial({ color: x < 0 ? '#ff3fa4' : '#36e0ff' }), x, 2.2, -3.47);
+  mesh(box(BOARD.w + 0.2, BOARD.h + 0.2, 0.06), new THREE.MeshBasicMaterial({ color: '#7b4dff' }), BOARD.x, BOARD.y, BOARD.z - 0.04);
+  // contestant podium (same footprint as the desk)
+  mesh(box(3.0, 0.08, 1.1), flat('#1f1b3a'), 0.15, 0.8, -0.55);
+  mesh(box(2.9, 0.76, 0.06), flat('#ff3fa4', { emissive: '#5a0f3a', emissiveIntensity: 0.6 }), 0.15, 0.4, -0.02);
+  mesh(box(2.9, 0.05, 0.07), new THREE.MeshBasicMaterial({ color: '#36e0ff' }), 0.15, 0.7, 0.0);
+  mesh(new THREE.CylinderGeometry(0.11, 0.12, 0.05, 16), flat('#2a2a2a', { flatShading: false }), 0.7, 0.865, -0.42);
+  mesh(new THREE.SphereGeometry(0.09, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), flat('#e5262f', { flatShading: false, emissive: '#5a0000', emissiveIntensity: 0.6, roughness: 0.4 }), 0.7, 0.89, -0.42);
+  // ONE's host stand
+  mesh(new THREE.CylinderGeometry(0.24, 0.3, STACK_TOP - 0.84 + 0.84, 16), flat('#d4a24c', { flatShading: false, roughness: 0.45 }), -0.95, (STACK_TOP) / 2, -0.45);
+  mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.03, 16), new THREE.MeshBasicMaterial({ color: '#36e0ff' }), -0.95, STACK_TOP - 0.015, -0.45);
+  // stool
+  mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.06, 12), flat('#36e0ff', { flatShading: false }), 1.2, 0.5, -0.95);
+  for (const a of [0, 2.1, 4.2]) mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.48, 5), flat('#cfcfcf'), 1.2 + Math.cos(a) * 0.17, 0.24, -0.95 + Math.sin(a) * 0.17);
+  const pink = new THREE.PointLight('#ff4fb0', 5, 6); pink.position.set(-2.2, 2.6, -0.6); scene.add(pink);
+  const cyan = new THREE.PointLight('#40d8ff', 5, 6); cyan.position.set(2.4, 2.6, -0.4); scene.add(cyan);
+}
+
+// Rooftop at sunset: parapet, black water tank, clothesline, plants, plastic
+// table and chair, ONE on an upturned bucket on bricks.
+function buildTerrace() {
+  scene.background = new THREE.Color('#f29c6b');
+  mesh(box(12, 0.1, 10), flat('#a39b8e'), 0, -0.05, -1);
+  mesh(box(9, 1.0, 0.22), flat('#d8c7ad'), 0, 0.5, -3.6);
+  mesh(box(9, 0.08, 0.3), flat('#bfae94'), 0, 1.04, -3.6);
+  mesh(box(0.22, 1.0, 5), flat('#d8c7ad'), -4.4, 0.5, -1.2);
+  // water tank
+  mesh(new THREE.CylinderGeometry(0.55, 0.6, 1.15, 16), flat('#1d1d20', { flatShading: false, roughness: 0.5 }), 2.7, 1.3, -2.9);
+  mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.1, 16), flat('#2a2a2e', { flatShading: false }), 2.7, 1.92, -2.9);
+  mesh(box(1.3, 0.72, 1.3), flat('#9d958a'), 2.7, 0.36, -2.9);
+  // clothesline with a few clothes
+  mesh(box(0.05, 2.1, 0.05), flat('#6b6b6b'), -3.3, 1.05, -2.6);
+  mesh(box(0.05, 2.1, 0.05), flat('#6b6b6b'), -1.3, 1.05, -3.2);
+  const rope = mesh(new THREE.CylinderGeometry(0.008, 0.008, 2.1, 4), flat('#eeeeee'), -2.3, 2.0, -2.9);
+  rope.rotation.z = Math.PI / 2; rope.rotation.y = 0.29;
+  [['#e8742c', -2.9], ['#2f7fbf', -2.4], ['#f2c14e', -1.85]].forEach(([c, x]) => mesh(box(0.34, 0.5, 0.03), flat(c), x, 1.72, -2.9 + (x + 2.3) * -0.3));
+  // plants
+  for (const [x, z, s] of [[-2.6, -1.6, 1], [-3.0, -0.6, 0.8]]) {
+    mesh(new THREE.CylinderGeometry(0.22 * s, 0.16 * s, 0.32 * s, 10), flat('#b5562f'), x, 0.16 * s, z);
+    mesh(new THREE.IcosahedronGeometry(0.32 * s, 0), flat('#3d8b4d'), x, 0.5 * s, z);
+  }
+  // plastic table (counter footprint) and chair
+  mesh(box(3.0, 0.06, 1.1), flat('#ecebe6'), 0.15, 0.81, -0.55);
+  for (const [dx, dz] of [[-1.35, -0.45], [1.35, -0.45], [-1.35, 0.45], [1.35, 0.45]])
+    mesh(box(0.06, 0.78, 0.06), flat('#d9d7d0'), 0.15 + dx, 0.39, -0.55 + dz);
+  mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.12, 10), flat('#f3f1ea'), 0.6, 0.9, -0.35);           // chai glass
+  mesh(box(0.16, 0.012, 0.3), flat('#1b1b1b'), 0.35, 0.845, -0.3);                                     // phone on the table
+  mesh(box(0.6, 0.06, 0.55), flat('#c9302c'), 1.2, 0.5, -0.95);
+  mesh(box(0.6, 0.6, 0.06), flat('#c9302c'), 1.42, 0.82, -1.15).rotation.y = -0.6;
+  for (const [dx, dz] of [[-0.25, -0.22], [0.25, -0.22], [-0.25, 0.22], [0.25, 0.22]])
+    mesh(box(0.05, 0.47, 0.05), flat('#a52521'), 1.2 + dx, 0.24, -0.95 + dz);
+  // ONE's perch: bricks + upturned blue bucket up to the same height
+  mesh(box(0.46, 0.14, 0.24), flat('#a8513a'), -0.95, 0.91, -0.45);
+  mesh(box(0.46, 0.14, 0.24), flat('#b45e44'), -0.95, 1.05, -0.45);
+  mesh(new THREE.CylinderGeometry(0.17, 0.21, STACK_TOP - 1.12, 14), flat('#2f6fb3', { flatShading: false, roughness: 0.5 }), -0.95, 1.12 + (STACK_TOP - 1.12) / 2, -0.45);
+  // string lights + warm sun rim
+  ['#ffcf6b', '#fff1c8', '#ffcf6b', '#fff1c8', '#ffcf6b', '#fff1c8'].forEach((c, i) =>
+    mesh(new THREE.SphereGeometry(0.05, 10, 6), new THREE.MeshBasicMaterial({ color: c }), -2.6 + i * 0.95, 2.55 + 0.08 * Math.sin(i * 1.3), -1.9));
+  const sun = new THREE.PointLight('#ff9a4d', 8, 12); sun.position.set(-3, 3, -5); scene.add(sun);
+}
+
+({ tapri: buildTapri, studio: buildStudio, terrace: buildTerrace }[LOC] || buildClassroom)();
+await addBackdrop({ tapri: 'street', studio: 'studio', terrace: 'sunset' }[LOC] || 'city');
 
 // ---------- VINEET (low-poly boy: hoodie, headphones round the neck, quiff) ----------
 const boy = new THREE.Group();
@@ -389,6 +488,19 @@ for (const o of ops) if (o.op !== 'write' && o.op !== 'stamp' && byId[o.target])
 
 function drawBoard(t) {
   const g = bctx;
+  if (BSTYLE === 'none') return null;
+  if (BSTYLE === 'sign') {        // quiz-show screen: neon title + live score
+    g.fillStyle = '#0b0f24'; g.fillRect(0, 0, 1024, 640);
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.save(); g.shadowColor = '#ff3fa4'; g.shadowBlur = 28; g.fillStyle = '#ffd6ef'; g.font = '800 150px Poppins';
+    g.fillText(TL.board_title || 'AI QUIZ', 512, 270); g.restore();
+    const sc = quizScore(t);
+    g.save(); g.shadowColor = '#36e0ff'; g.shadowBlur = 18; g.fillStyle = '#c9f6ff'; g.font = '700 58px Poppins';
+    g.fillText(sc.total ? `SCORE  ${sc.right} / ${sc.total}` : 'Get ready!', 512, 470); g.restore();
+    g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+    boardTex.needsUpdate = true;
+    return null;
+  }
   g.fillStyle = CHALK ? '#243b30' : '#f6f5f0'; g.fillRect(0, 0, 1024, 640);
   if (CHALK) {   // old chalk dust: big soft smudges only (no fine grain that could shimmer)
     for (const [x, y, r] of [[220, 420, 260], [760, 260, 300], [520, 560, 220]]) {
@@ -504,6 +616,22 @@ for (const l of lines) {
       }
       break;
     }
+    case 'question':   // quiz host asks: medium on ONE, push in while options appear
+      add(l.start - 0.05, SHOTS.ONE_MED, 0.4, 0.04);
+      add(l.start + d * 0.55, SHOTS.ONE_CU, 0.8, 0.05);
+      break;
+    case 'answer':     // contestant locks an option
+      add(l.start - 0.05, SHOTS.BOY_CU, 0.35, 0.07);
+      break;
+    case 'result':     // right / wrong reveal
+      add(l.start - 0.05, SHOTS.ONE_CU, 0.25, 0.1, 0.5);
+      break;
+    case 'chat':       // phone overlay on screen; camera stays wide-ish behind it
+      add(l.start - 0.05, SHOTS.BOY_MED, 0.45, 0.03);
+      break;
+    case 'react':      // short reaction between chat steps
+      add(l.start - 0.05, l.who === 'ONE' ? SHOTS.ONE_CU : SHOTS.BOY_PUNCH, 0.3, 0.08, 0.3);
+      break;
     case 'realize':
       add(l.start - 0.05, SHOTS.OTS, 0.5, 0.03);
       add(l.start + d * 0.45, SHOTS.BOY_CU, 1.4, 0.07);
@@ -758,12 +886,152 @@ function drawFollow(g, c, t, y) {
   }
 }
 
+// ---------- format overlays (quiz card, phone chat) ----------
+// Every animation here is monotonic or a slow sine, so nothing pops for a frame.
+const QUIZ = TL.quiz || {};
+const quizLines = lines.filter(l => l.overlay?.type === 'quiz');
+const quizIds = [...new Set(quizLines.map(l => l.overlay.id))];
+function quizState(t) {
+  // the question whose lines cover t (with a short tail for the slide-out)
+  for (const id of quizIds) {
+    const ls = quizLines.filter(l => l.overlay.id === id);
+    const t0 = ls[0].start - 0.2, t1 = ls[ls.length - 1].end + 0.6;
+    if (t >= t0 && t <= t1) {
+      const pickL = ls.find(l => l.overlay.stage === 'pick'), revL = ls.find(l => l.overlay.stage === 'reveal');
+      return { id, q: QUIZ[id], t0, t1, ask: ls[0], pickL, revL };
+    }
+  }
+  return null;
+}
+function quizScore(t) {
+  let right = 0, total = 0;
+  for (const id of quizIds) {
+    const ls = quizLines.filter(l => l.overlay.id === id);
+    const rev = ls.find(l => l.overlay.stage === 'reveal'), pk = ls.find(l => l.overlay.stage === 'pick');
+    if (rev && t >= rev.start + 0.25) { total++; if (pk && pk.overlay.pick === QUIZ[id].answer) right++; }
+  }
+  return { right, total };
+}
+function drawQuiz(g, t) {
+  const st = quizState(t);
+  if (!st || !st.q) return false;
+  const inP = ease(clamp01((t - st.t0) / 0.35)), outP = ease(clamp01((st.t1 - t) / 0.35));
+  const vis = Math.min(inP, outP);
+  const cw = W * 0.9, ch = 380, x0 = (W - cw) / 2, y0 = H * 0.5 + (1 - vis) * 120;
+  g.save(); g.globalAlpha = vis;
+  g.fillStyle = 'rgba(14,16,40,0.92)'; roundRect(g, x0, y0, cw, ch, 28); g.fill();
+  g.strokeStyle = 'rgba(123,77,255,0.9)'; g.lineWidth = 3; roundRect(g, x0, y0, cw, ch, 28); g.stroke();
+  // question
+  g.fillStyle = '#ffffff'; g.font = '700 31px Poppins'; g.textAlign = 'left'; g.textBaseline = 'top';
+  wrap(g, st.q.q, cw - 150).forEach((r, i) => g.fillText(r, x0 + 28, y0 + 26 + i * 40));
+  // timer ring during the pick line
+  if (st.pickL) {
+    const tp = clamp01((t - st.ask.start) / Math.max(0.5, st.pickL.end - st.ask.start));
+    const cx0 = x0 + cw - 62, cy0 = y0 + 58;
+    g.lineWidth = 9; g.strokeStyle = 'rgba(255,255,255,0.15)'; g.beginPath(); g.arc(cx0, cy0, 34, 0, Math.PI * 2); g.stroke();
+    g.strokeStyle = tp < 0.75 ? '#36e0ff' : '#ff6b6b';
+    g.beginPath(); g.arc(cx0, cy0, 34, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - tp)); g.stroke();
+    g.fillStyle = '#ffffff'; g.font = '800 26px Poppins'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(String(Math.ceil(5 * (1 - tp))), cx0, cy0 + 1);
+  }
+  // options 2x2, appearing one by one during the question
+  const ow = (cw - 28 * 3) / 2, oh = 82;
+  const revOn = st.revL && t >= st.revL.start + 0.2, pickOn = st.pickL && t >= st.pickL.start + (st.pickL.end - st.pickL.start) * 0.55;
+  const pick = st.pickL?.overlay.pick;
+  st.q.options.forEach((opt, i) => {
+    const appear = ease(clamp01((t - (st.ask.start + 0.4 + i * 0.35)) / 0.3));
+    if (appear <= 0) return;
+    const ox = x0 + 28 + (i % 2) * (ow + 28), oy = y0 + 150 + Math.floor(i / 2) * (oh + 20) + (1 - appear) * 20;
+    let fill = 'rgba(255,255,255,0.08)', edge = 'rgba(255,255,255,0.25)';
+    if (pickOn && i === pick) { fill = 'rgba(255,200,60,0.30)'; edge = '#ffc83c'; }
+    if (revOn && i === st.q.answer) { fill = 'rgba(46,204,113,0.45)'; edge = '#2ecc71'; }
+    else if (revOn && i === pick) { fill = 'rgba(231,76,60,0.45)'; edge = '#e74c3c'; }
+    g.globalAlpha = vis * appear;
+    g.fillStyle = fill; roundRect(g, ox, oy, ow, oh, 20); g.fill();
+    g.strokeStyle = edge; g.lineWidth = 3; roundRect(g, ox, oy, ow, oh, 20); g.stroke();
+    g.fillStyle = edge; g.beginPath(); g.arc(ox + 34, oy + oh / 2, 20, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#0e1028'; g.font = '800 22px Poppins'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('ABCD'[i], ox + 34, oy + oh / 2 + 1);
+    g.fillStyle = '#ffffff'; g.font = '700 23px Poppins'; g.textAlign = 'left';
+    const rows = wrap(g, opt, ow - 80);
+    rows.slice(0, 2).forEach((r, k) => g.fillText(r, ox + 64, oy + oh / 2 + (k - (Math.min(rows.length, 2) - 1) / 2) * 27));
+  });
+  // score chip
+  const sc = quizScore(t);
+  g.globalAlpha = vis; g.fillStyle = '#7b4dff'; roundRect(g, x0 + 20, y0 - 26, 180, 46, 23); g.fill();
+  g.fillStyle = '#ffffff'; g.font = '800 22px Poppins'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(`SCORE ${sc.right}/${quizIds.length}`, x0 + 110, y0 - 3);
+  g.restore();
+  return vis > 0.05;
+}
+
+const chatLines = lines.filter(l => l.overlay?.type === 'chat');
+const CHAT = [];
+for (const l of chatLines) {
+  const msgs = l.overlay.msgs || [], d = l.end - l.start;
+  msgs.forEach((m, k) => CHAT.push({ ...m, t0: l.start + (m.at ?? (k / msgs.length) * 0.85 + 0.05) * d }));
+}
+let phoneShow = 0, chatScroll = 0;
+function drawChat(g, t) {
+  if (!chatLines.length) return false;
+  // visible while a chat line runs, and until the last AI reply has finished streaming
+  const streamEnd = CHAT.reduce((e, m) => Math.max(e, m.t0 + (m.from === 'ai' ? 0.7 + m.text.split(' ').length / 9 : 0.3)), 0);
+  const active = chatLines.some(l => t >= l.start - 0.15 && t <= l.end + 0.25) || (t >= CHAT[0]?.t0 && t <= streamEnd + 0.9);
+  phoneShow += ((active ? 1 : 0) - phoneShow) * 0.2;
+  if (phoneShow < 0.02) return false;
+  const pw = W * 0.8, ph = H * 0.44, px = (W - pw) / 2, py = H * 0.37 + (1 - ease(phoneShow)) * H * 0.6;   // below the face line
+  g.save();
+  g.fillStyle = '#111318'; roundRect(g, px - 10, py - 10, pw + 20, ph + 20, 44); g.fill();
+  g.fillStyle = '#f2f4f7'; roundRect(g, px, py, pw, ph, 36); g.fill();
+  g.fillStyle = '#ffffff'; roundRect(g, px, py, pw, 84, 36); g.fill(); g.fillRect(px, py + 40, pw, 44);
+  g.fillStyle = '#2bb3a3'; g.beginPath(); g.arc(px + 50, py + 44, 22, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#0e1a2e'; roundRect(g, px + 35, py + 36, 30, 15, 6); g.fill();
+  g.fillStyle = '#8ffcff'; g.fillRect(px + 42, py + 39, 5, 9); g.fillRect(px + 53, py + 39, 5, 9);
+  g.fillStyle = '#1b1b1b'; g.font = '800 26px Poppins'; g.textAlign = 'left'; g.textBaseline = 'middle';
+  g.fillText('AI Chat', px + 86, py + 36); g.fillStyle = '#2ecc71'; g.font = '700 17px Poppins'; g.fillText('online', px + 88, py + 62);
+  // messages (laid out bottom-up so the newest is always visible)
+  g.save(); g.beginPath(); g.rect(px, py + 86, pw, ph - 96); g.clip();
+  const shown = CHAT.filter(m => t >= m.t0);
+  const bw = pw * 0.8, lineH = 32;
+  const items = shown.map(m => {
+    g.font = (m.from === 'me' ? '700 ' : '600 ') + '24px Poppins';
+    let text = m.text, typing = false;
+    if (m.from === 'ai') {   // typing dots, then words stream in
+      const tt = t - m.t0;
+      if (tt < 0.7) typing = true;
+      else { const words = m.text.split(' '); text = words.slice(0, Math.max(1, Math.floor((tt - 0.7) * 9))).join(' '); }
+    }
+    const rows = typing ? [''] : text.split('\n').flatMap(p => wrap(g, p, bw - 36));
+    return { m, rows, typing, h: rows.length * lineH + 30 };
+  });
+  const total = items.reduce((s, it) => s + it.h + 14, 0);
+  const want = Math.max(0, total - (ph - 110));
+  chatScroll += (want - chatScroll) * 0.25;
+  let y = py + 100 - chatScroll;
+  for (const it of items) {
+    const me = it.m.from === 'me', w = it.typing ? 96 : Math.min(bw, Math.max(...it.rows.map(r => g.measureText(r).width)) + 36);
+    const bx = me ? px + pw - w - 18 : px + 18;
+    const app = ease(clamp01((t - it.m.t0) / 0.25));
+    g.globalAlpha = app;
+    g.fillStyle = me ? '#2bb3a3' : '#ffffff'; roundRect(g, bx, y + (1 - app) * 12, w, it.h, 20); g.fill();
+    if (!me) { g.strokeStyle = 'rgba(0,0,0,0.08)'; g.lineWidth = 2; roundRect(g, bx, y + (1 - app) * 12, w, it.h, 20); g.stroke(); }
+    g.fillStyle = me ? '#ffffff' : '#1b1b1b'; g.font = (me ? '700 ' : '600 ') + '24px Poppins';
+    if (it.typing) {
+      for (let k = 0; k < 3; k++) { g.globalAlpha = app * (0.35 + 0.65 * (0.5 + 0.5 * Math.sin(t * 7 - k * 0.9))); g.beginPath(); g.arc(bx + 28 + k * 20, y + it.h / 2, 6, 0, Math.PI * 2); g.fill(); }
+    } else it.rows.forEach((r, k) => g.fillText(r, bx + 18, y + 15 + lineH / 2 + k * lineH));
+    y += it.h + 14;
+  }
+  g.restore(); g.restore();
+  return phoneShow > 0.3;
+}
+
 function drawOverlay(t) {
   const g = cx;
   // vignette
   const vg = g.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.75);
   vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.38)');
   g.fillStyle = vg; g.fillRect(0, 0, W, H);
+  const busy = drawChat(g, t) | drawQuiz(g, t);
   // caption
   const c = CAPS.find(c => t >= c.t0 - 0.03 && t < c.t1 + 0.15) ;
   if (c) {
@@ -783,7 +1051,7 @@ function drawOverlay(t) {
   drawCtaCards(g, t);
   // handle watermark
   g.font = '700 26px Poppins'; g.textAlign = 'center'; g.fillStyle = 'rgba(255,255,255,0.5)';
-  if (!CTA.length || t < CTA[0].t0 - 0.1) g.fillText(HANDLE, W / 2, H * 0.71);
+  if (!busy && (!CTA.length || t < CTA[0].t0 - 0.1)) g.fillText(HANDLE, W / 2, H * 0.71);
 }
 
 // ---------- frame entry ----------
@@ -814,7 +1082,7 @@ window.renderFrame = (f, fmt = 'image/jpeg') => {
 };
 window.stepFrame = (f) => {
   const t = f / FPS;
-  scene.updateMatrixWorld(true); animate(t, f); drawBoard(t); scene.updateMatrixWorld(true); placeCamera(t);
+  scene.updateMatrixWorld(true); animate(t, f); drawBoard(t); scene.updateMatrixWorld(true); placeCamera(t); drawOverlay(t);
   const h = boyHeadW();
   const tip = stick.localToWorld(P(0, 0.5, 0)); const base = stickPivot.getWorldPosition(new THREE.Vector3());
   return { tip: tip.toArray().map(v => +v.toFixed(2)), base: base.toArray().map(v => +v.toFixed(2)), aim: stickAim.toArray().map(v => +v.toFixed(2)), t, cam: camera.position.toArray().map(v => +v.toFixed(2)), fov: +camera.fov.toFixed(1), head: h.toArray().map(v => +v.toFixed(2)), yaw: +boyYaw.toFixed(2) };

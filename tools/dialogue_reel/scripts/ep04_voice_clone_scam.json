@@ -171,9 +171,21 @@
     },
     {
       "who": "ONE",
-      "shot": "payoff",
+      "shot": "verdict",
       "caption": "Bilkul. Aur fraud ho jaaye, toh turant 1930 pe call karo.",
-      "tts": "बिल्कुल. और फ़्रॉड हो जाए, तो तुरंत, एक नौ तीन शून्य, पे कॉल करो."
+      "tts": "बिल्कुल. और फ़्रॉड हो जाए, तो तुरंत, उन्नीस सौ तीस, पे कॉल करो.",
+      "board": [
+        {
+          "op": "stamp",
+          "text": "CALL 1930",
+          "x": 800,
+          "y": 285,
+          "size": 54,
+          "color": "#b3261e",
+          "rot": -0.1,
+          "at": 0.55
+        }
+      ]
     },
     {
       "who": "VINEET",
