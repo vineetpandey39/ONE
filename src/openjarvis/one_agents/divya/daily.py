@@ -95,13 +95,168 @@ LAKSHMI_AARTI_SOURCES = [
 ]
 
 
+TULSI_VIVAH_LYRICS = [
+    "तुलसी मैया का आँगन आज, मंगल दीप सजाए।",
+    "शालिग्राम संग शुभ मिलन पर, हरि का नाम सुनाए।",
+    "हरी-हरी तुलसी, जय श्रीहरि।",
+    "भक्ति की सुगंध बहे घर-घर, प्रेम की ज्योति जगाए।",
+    "वृंदावन की पावन बेला, बंसी मधुर बजाए।",
+    "फूलों का मंडप मुस्काए, मन भी फूल चढ़ाए।",
+    "हरी-हरी तुलसी, जय श्रीहरि।",
+    "सच्चे भाव की एक अंजलि, जीवन सफल बनाए।",
+    "अहंकार का तम मिट जाए, सेवा राह दिखाए।",
+    "दया, क्षमा और सत्य का दीपक, अंतर में जल जाए।",
+    "हरी-हरी तुलसी, जय श्रीहरि।",
+    "हर दुख में विश्वास रहे, हर सुख विनय सिखाए।",
+    "माता तुलसी की छाया में, मन को शांति मिले।",
+    "श्रीहरि की करुणा बरसे तो, सूने सपने खिलें।",
+    "हरी-हरी तुलसी, जय श्रीहरि।",
+    "नाम तुम्हारा लेते-लेते, मन के बंधन खुलें।",
+    "मंगल ध्वनि से गूँजे द्वारे, शंख और शहनाई।",
+    "भक्ति बनी है आज दुल्हनिया, प्रेम बना वरदाई।",
+    "हरी-हरी तुलसी, जय श्रीहरि।",
+    "सबके जीवन में शुभता हो, यही प्रार्थना गाई।",
+    "तुलसी मैया का आँगन आज, मंगल दीप सजाए।",
+    "शालिग्राम संग शुभ मिलन पर, हरि का नाम सुनाए।",
+    "हरी-हरी तुलसी, जय श्रीहरि।",
+    "प्रेम और विश्वास की ज्योति, युग-युग तक जगमगाए।",
+]
+
+
+TULSI_VIVAH_SCENES = [
+    "Sacred Tulsi plant in an ornate Vrindavan courtyard at dawn, marigold mandap and rows of warm diyas.",
+    "Close devotional view of fresh Tulsi leaves with dew, gold temple bokeh and soft morning rays.",
+    "Respectful Shaligram shrine beside a decorated Tulsi planter, flowers and lamps, no human hands visible.",
+    "Wide festive temple courtyard prepared for Tulsi Vivah, floral canopy, rangoli and luminous lamps.",
+    "Serene Krishna portrait with flute in Vrindavan, compassionate expression, peacock feather and blue-gold light.",
+    "Tulsi mandap beneath flowering vines, shehnai players suggested as distant silhouettes, devotional not theatrical.",
+    "Close brass diya and marigold garland beside the Tulsi altar, shallow depth of field.",
+    "Moonlit Vrindavan garden with Tulsi centered and Krishna temple glowing in the distance.",
+    "Temple women carrying flower baskets toward the mandap, modest festive attire, faces natural and respectful.",
+    "Conch, manjira and flower petals arranged near a clean sacred altar, cinematic gold and emerald palette.",
+    "Wide river ghat at sunrise with Tulsi planter and lamps, soft mist and distant temple bells.",
+    "Canonical Vishnu presence in a luminous temple arch, calm blessing gesture, anatomically correct iconography.",
+    "Tulsi leaves moving gently in a warm breeze, floating petals and subtle god rays.",
+    "Festive courtyard filled with lamps and flower strings, central aisle leading to the Tulsi mandap.",
+    "Close Krishna flute and peacock feather beside Tulsi leaves, rich sapphire and emerald lighting.",
+    "Devotees singing kirtan around the decorated courtyard, joyful but reverent, natural hand anatomy.",
+    "Sacred Shaligram and Tulsi composition under a floral canopy, symmetrical lamps and no deity performing puja.",
+    "Vrindavan temple exterior at blue hour, warm windows, drifting petals and subtle festival lights.",
+    "Close devotional Tulsi portrait with a small red bridal cloth and restrained traditional ornaments.",
+    "Grand overhead view of floral rangoli surrounding the Tulsi mandap, clean geometry and glowing diyas.",
+    "Serene Krishna and Radha seen respectfully in the distant temple garden, Tulsi prominent in foreground.",
+    "Golden dawn breaking behind the Tulsi altar, petals lifting in the light and soft volumetric rays.",
+    "Final celebratory courtyard tableau, Tulsi and Shaligram shrine centered, lamps, flowers and joyful kirtan atmosphere.",
+    "Closing prayer image of one steady diya beside green Tulsi leaves against a calm midnight-blue background.",
+]
+
+
+def create_tulsi_vivah_mission(root: Path, *, day: date) -> dict:
+    """Prepare an original, no-spend Tulsi Vivah production commission."""
+    title = "तुलसी मैया संग शालिग्राम | Tulsi Vivah Bhajan 2026 | Shloka By Shloka"
+    refrain = TULSI_VIVAH_LYRICS[2:4]
+    verses = [TULSI_VIVAH_LYRICS[index:index + 4] for index in range(0, 24, 4)]
+    section_rows = [
+        ("Immediate festive hook", TULSI_VIVAH_LYRICS[:4], "Female lead begins on beat one; soft shehnai answers only after the full line"),
+        ("Verse 1 Vrindavan", verses[1], "Bright female solo with bansuri and restrained dholak"),
+        ("Congregational refrain", refrain * 2, "Warm mixed chorus response; every Hindi syllable remains clear"),
+        ("Verse 2 inner devotion", verses[2], "Lead remains forward; manjira marks the Keharwa pulse"),
+        ("Verse 3 grace", verses[3], "Gentle melodic lift with harmonium and flute between lines"),
+        ("Festival refrain", refrain * 2, "Fuller chorus and shehnai, without covering the words"),
+        ("Verse 4 wedding celebration", verses[4], "Dholak, manjira and restrained temple bells build festive energy"),
+        ("Prayer bridge", TULSI_VIVAH_LYRICS[8:16], "Strip back to tanpura and voice, then return to steady rhythm"),
+        ("Grand final chorus", TULSI_VIVAH_LYRICS[16:24], "Joyful ensemble, exact written lyrics, no invented repetitions"),
+        ("Closing blessing", TULSI_VIVAH_LYRICS[20:24] + refrain, "Complete final word before the short bell and reverb tail"),
+    ]
+    sections = [
+        {"name": name, "duration": 48, "lines": lines,
+         "styles": [style, "92 BPM Keharwa 8-beat festive bhajan", "precise Hindi diction"]}
+        for name, lines, style in section_rows
+    ]
+    bible = (
+        "Original premium cinematic Tulsi Vivah devotional artwork, consistent Vrindavan temple world and respectful "
+        "Hindu iconography. Emerald green, sapphire blue and antique gold palette, warm marigold accents, natural faces "
+        "and anatomically correct hands. Tulsi remains a sacred plant or traditionally decorated altar; Krishna, Vishnu "
+        "or Shaligram never worship themselves and no deity performs their own puja. No text, logo, watermark, collage, "
+        "malformed fingers, duplicate people or cropped sacred objects. 16:9 landscape composed for safe 9:16 crops, "
+        "cinematic depth, varied camera distance and distinct locations. "
+    )
+    scenes = [
+        {"id": f"tulsi-{i:02d}", "image": f"images-quality-v2/quality-{i:02d}.png",
+         "duration": 20, "reference_mode": "none" if i == 1 else "canonical",
+         "prompt": bible + detail}
+        for i, detail in enumerate(TULSI_VIVAH_SCENES, 1)
+    ]
+    mission_id = root.name
+    mission = {
+        "schema": "one.divya-mission/v2", "brand": BRAND, "agent_id": "naad",
+        "head_agent": "helios", "floor_id": "12", "mission_id": mission_id,
+        "production_date": day.isoformat(), "deity": "Tulsi-Vishnu", "preset": "KRISHNA_VRINDAVAN",
+        "vocal_style": "female_devotional", "composition_type": "original_bhajan",
+        "music_model": "music_v2_5", "title": title, "display_title": "तुलसी विवाह",
+        "lyrics": TULSI_VIVAH_LYRICS,
+        "text_origin": "Original Hindi devotional lyrics inspired by the Tulsi Vivah observance; not a scripture quotation",
+        "scripture_sources": [], "text_review": "PENDING", "pronunciation_review": "PENDING",
+        "requested_duration_seconds": 480, "sections": sections, "scenes": scenes,
+        "music_direction": {
+            "bpm": 92, "rhythm": "Keharwa, steady 8-beat festive wedding-bhajan groove",
+            "melodic_language": "Bright Vrindavan folk-devotional contour with an immediately singable refrain",
+            "vocal_delivery": "Clear female devotional lead from beat one, warm response chorus, exact Hindi words",
+            "instruments": ["dholak", "manjira", "harmonium", "bansuri", "shehnai", "tanpura", "restrained temple bells"],
+            "phrasing": "Complete one lyric line before instrumental answers; refrain may recur only at marked sections",
+            "sync": "Resolve lyrical phrases on sam; Shorts begin with a complete vocal hook, never mid-instrumental",
+            "avoid": "No long intro, no missing words, no endless refrain loop, no ad-libs, no EDM drop, no trailer drums",
+        },
+        "shorts_policy": "vocals_first_v1", "shorts": [], "channel_id": CHANNEL,
+        "public_publish_authorized": False, "upload_authorized": False, "schedule_enabled": False,
+    }
+    config = {
+        "lao_folder_id": "446427d7-5722-4d59-a487-8de321325cbc",
+        "artifact_roots": ["E:/ONE-Suite/lao-robot/worker"],
+        "edit_tools": "C:/Users/pc/Documents/LAO/yatra-edit",
+        "uploader_script": "C:/Users/pc/Documents/LAO/yatra-upload/youtube_api_upload.py",
+        "voice_overrides": {}, "credential_asset": None, "channel_id": CHANNEL,
+        "daily_schedule": {"enabled": False},
+    }
+    request = music_payload(mission)
+    write(root / "mission.json", mission)
+    write(root / "config.json", config)
+    write(root / "channel-binding.json", {"brand": BRAND, "channel_id": CHANNEL, "mission_id": mission_id})
+    write(root / "review-package/music-request.json", request)
+    write(root / "review-package/metadata-brief.json", {
+        "keyword": "Tulsi Vivah Bhajan 2026",
+        "description": "Original Hindi Tulsi Vivah bhajan for Tulsi Mata and Shaligram's sacred festival.",
+        "tags": ["tulsi vivah bhajan 2026", "तुलसी विवाह भजन", "tulsi mata bhajan", "shaligram bhajan", "dev uthani ekadashi 2026", "krishna bhajan"],
+    })
+    write(root / "review-package/commission.json", {
+        "duration_seconds": 480, "variants": 1, "paid_attempts_authorized": 0,
+        "credit_quote": None, "automatic_paid_retry": False,
+        "lyrics_review": "PENDING", "pronunciation_review": "PENDING", "publish": False,
+    })
+    write(root / "review-package/review-templates.json", {
+        purpose: {"approved": False, "reviewer": None, "authorization_reference": None,
+                  "binding_sha256": fingerprint(binding)}
+        for purpose, binding in (("lyrics", lyrics_binding(mission)), ("music-spend-and-rights", request))
+    })
+    journal = Journal(root)
+    journal.stage("TOPIC_SELECTION", {"mission_id": mission_id},
+                  lambda: {"files": [str(root / "mission.json")], "deity": "Tulsi-Vishnu", "cost_usd": 0})
+    for name in STAGES[1:]:
+        journal.data["stages"].setdefault(name, {"status": "PENDING", "attempts": 0, "cost_usd": 0})
+    journal.save()
+    return {"status": "REVIEW_READY", "root": str(root), "mission": str(root / "mission.json"),
+            "duration_seconds": 480, "paid_attempts_authorized": 0}
+
+
 def create_daily_mission(root: Path, *, day: date, deity: str = "Lakshmi") -> dict:
     """Create today's review package without provider or publishing side effects."""
     root = Path(root).resolve()
     if (root / "mission.json").exists():
         return {"status": "existing", "root": str(root), "mission": str(root / "mission.json")}
+    if deity.casefold() in {"tulsi", "tulsi-vishnu", "tulsi_vivah", "tulsi vivah"}:
+        return create_tulsi_vivah_mission(root, day=day)
     if deity.casefold() != "lakshmi":
-        raise ValueError("This reviewed daily template currently supports Lakshmi only")
+        raise ValueError("This reviewed daily template currently supports Lakshmi and Tulsi Vivah")
 
     title = "माँ लक्ष्मी आओ, दीप जलाओ | Lakshmi Bhajan | Shloka By Shloka"
     hook = FRIDAY_LAKSHMI_LYRICS[:4]
