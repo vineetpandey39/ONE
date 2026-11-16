@@ -31,7 +31,7 @@ def _short_hook(root,m,number):
     return _clean_hook(m.get('display_title') or m['title'].split('|',1)[0])
 
 def _short_title(hook,keyword,number,deity=''):
-    deity_emoji={'shiva':'🔱','krishna':'🪈','hanuman':'🚩','durga':'🔴','lakshmi':'🪷'}
+    deity_emoji={'shiva':'🔱','krishna':'🪈','hanuman':'🚩','durga':'🔴','lakshmi':'🪷','tulsi-vishnu':'🪷'}
     emoji=deity_emoji.get(str(deity).casefold(),'✨')
     candidates=[f'{hook} {emoji} | {keyword} | Part {number} #Shorts',
                 f'{hook} | {keyword} | Part {number} #Shorts',
@@ -47,6 +47,20 @@ def _visible_hashtags(m):
     second={'shiva':'#Mahadev','krishna':'#RadhaKrishna','hanuman':'#Bajrangbali','durga':'#MataRani','lakshmi':'#MaaLakshmi','tulsi-vishnu':'#TulsiMata'}.get(deity,'#Devotional')
     return [first,second,'#Shorts']
 
+def _long_visible_hashtags(m):
+    """Return exactly three topic-correct discovery hashtags for long-form."""
+    return [*_visible_hashtags(m)[:2], '#ShlokaByShloka']
+
+def _replace_visible_hashtag_line(description, hashtags):
+    """Replace only standalone hashtag lines; preserve the ARES description."""
+    lines=[]
+    for line in str(description or '').splitlines():
+        tokens=line.split()
+        if tokens and all(re.fullmatch(r'#\w+', token) for token in tokens):
+            continue
+        lines.append(line)
+    return '\n'.join(lines).rstrip()+'\n\n'+' '.join(hashtags)
+
 def _ares_long_form(root,m,brief):
     """Adapt the devotional mission to the shared ARES SEO package contract."""
     from openjarvis.one_agents import youtube_seo
@@ -55,15 +69,18 @@ def _ares_long_form(root,m,brief):
     keyword=brief['keyword'].strip()
     deity=str(m.get('deity') or 'Devotional').strip()
     deity_key=deity.casefold()
-    deity_emoji={'shiva':'🔱','krishna':'🪈','hanuman':'🚩','durga':'🔴','lakshmi':'🪷'}.get(deity_key,'✨')
+    deity_emoji={'shiva':'🔱','krishna':'🪈','hanuman':'🚩','durga':'🔴','lakshmi':'🪷','tulsi-vishnu':'🪷'}.get(deity_key,'✨')
     worship_label={'shiva':'शिव आराधना','krishna':'कृष्ण भक्ति','hanuman':'हनुमान भक्ति',
-                   'durga':'माता की आराधना','lakshmi':'लक्ष्मी आरती'}.get(deity_key,'भक्ति और आराधना')
+                   'durga':'माता की आराधना','lakshmi':'लक्ष्मी आरती',
+                   'tulsi-vishnu':'तुलसी-श्रीहरि भक्ति'}.get(deity_key,'भक्ति और आराधना')
     english_hybrid={'shiva':'Peaceful Mahadev Bhajan 2026','krishna':'Peaceful Krishna Bhajan 2026',
                     'hanuman':'Powerful Hanuman Bhajan 2026','durga':'Powerful Mata Bhajan 2026',
-                    'lakshmi':'Full Lakshmi Aarti with Lyrics'}.get(deity_key,f'Peaceful {deity} Devotional 2026')
+                    'lakshmi':'Full Lakshmi Aarti with Lyrics',
+                    'tulsi-vishnu':'Peaceful Tulsi Vivah Bhajan 2026'}.get(deity_key,f'Peaceful {deity} Devotional 2026')
     traditional=m.get('composition_type') in {'traditional_aarti','traditional_mantra','traditional_stuti'}
+    year_suffix='' if re.search(r'\b20\d{2}\b',keyword) else ' 2026'
     title=(f'{display} | संपूर्ण {keyword} | Shloka By Shloka' if traditional else
-           f'{display} {deity_emoji} | मन की शांति के लिए Powerful {keyword} 2026')
+           f'{display} {deity_emoji} | मन की शांति के लिए Powerful {keyword}{year_suffix}')
     sections=m.get('sections') or []
     duration=max(1,int(m.get('requested_duration_seconds') or 480))
     cues=[];scene_blocks=[]
@@ -105,6 +122,9 @@ def _ares_long_form(root,m,brief):
     llm=None if m.get('seo_model')=='deterministic_test' else youtube_seo.ollama_json
     package=youtube_seo.build_package(record,master=master,plan_path=root/'mission.json',
                                       channel=SHLOKA_BY_SHLOKA,llm=llm)
+    package['description']=_replace_visible_hashtag_line(package.get('description'),_long_visible_hashtags(m))[:5000]
+    package['description_audit']=youtube_seo.description_audit(
+        package['description'],package.get('primary_query',''),list(package.get('tags') or []),SHLOKA_BY_SHLOKA)
     package.update(channel_id=m['channel_id'],content_format='long_form',contains_synthetic_media=True)
     if package.get('owner')!='ARES' or 'ECHO' not in package.get('handoff',''):
         raise Blocked('Shared ARES/ECHO SEO ownership was not preserved')
