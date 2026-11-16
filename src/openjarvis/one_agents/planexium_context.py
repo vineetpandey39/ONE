@@ -28,6 +28,10 @@ PIPELINE_LABELS = {
     'Illustrative capsule descent - not actual Soyuz footage',
     'Illustrative bioprinter - not ISS experiment footage',
     'Illustrative inspection - not Expedition 74 footage',
+    'Illustrative young-star environment; accretion disk not directly shown',
+    'Illustrative young-star environment; protostar accretion disk not directly shown',
+    'Illustrative energized gas around a star; stellar wind not directly shown',
+    'Illustrative moving nebular gas; stellar outflow not directly shown',
 }
 
 
