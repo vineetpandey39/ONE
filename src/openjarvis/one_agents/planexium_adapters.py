@@ -16,10 +16,10 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-# v25 lets an authored semantic fallback bind its own visible subject instead
-# of pretending an analogue depicts the exact phenomenon. Accepted acquired
-# checkpoints remain reusable; only unfinished searches get new jobs.
-ENVATO_RECEIPT_REVISION = "v25"
+# v26 adds an honest young-star analogue for sparse protostar/accretion-disk
+# catalogue searches. Accepted acquired checkpoints remain reusable; only
+# unfinished searches get new jobs.
+ENVATO_RECEIPT_REVISION = "v26"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -743,6 +743,18 @@ def concrete_stock_brief(request):
                        contextual_label=("Illustrative young-star environment; "
                                          "accretion disk not directly shown"))
         request["blocked_keywords"] += ["gas giant", "saturn", "black hole"]
+    elif subject == "protostar" and "accretion" in query:
+        # Catalogue results for the exact phrase frequently substitute black
+        # holes. A visibly young star embedded in moving nebular gas is a
+        # truthful editorial analogue when it is explicitly labelled; it does
+        # not claim that the unavailable accretion disk is directly shown.
+        request.update(
+            semantic_fallback_query="young star nebula gas animation",
+            semantic_fallback_subject="star",
+            contextual_label=("Illustrative young-star environment; "
+                              "protostar accretion disk not directly shown"),
+        )
+        request["blocked_keywords"] += ["black hole", "event horizon", "gas giant", "saturn"]
     elif subject == "wind" and "stellar" in query:
         # Stock catalogues rarely title the invisible flow itself as stellar
         # wind. After the exact stage, allow visible energized gas around a
