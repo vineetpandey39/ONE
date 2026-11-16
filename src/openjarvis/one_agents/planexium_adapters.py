@@ -16,10 +16,10 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-# v23 separates the visible-subject catalogue repairs (including protostar
-# disks) from terminal v22 jobs launched with the old ambiguous brief. Accepted
-# acquired checkpoints remain reusable; only unfinished searches get new jobs.
-ENVATO_RECEIPT_REVISION = "v23"
+# v24 adds an explicitly labelled, two-fact semantic fallback after exact
+# protostar-disk results are exhausted. Accepted acquired checkpoints remain
+# reusable; only unfinished searches get new jobs.
+ENVATO_RECEIPT_REVISION = "v24"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -738,7 +738,10 @@ def concrete_stock_brief(request):
         # plus its protoplanetary/accretion disk, so bind both catalogue facts
         # and keep the common planetary/black-hole substitutions out.
         request.update(query="protoplanetary disk young star animation",
-                       subject="star")
+                       subject="star",
+                       semantic_fallback_query="young star nebula gas animation",
+                       contextual_label=("Illustrative young-star environment; "
+                                         "accretion disk not directly shown"))
         request["blocked_keywords"] += ["gas giant", "saturn", "black hole"]
     if "astronaut" in request["query"].casefold():
         request["blocked_keywords"] += ["costume", "comedy", "humor", "urban", "city", "sneakers"]
@@ -755,6 +758,9 @@ def secondary_stock_queries(request):
     stage so a sparse primary search can broaden without weakening relevance.
     """
     primary = " ".join(str(request["query"]).split())
+    semantic_fallback = " ".join(str(request.get("semantic_fallback_query") or "").split())
+    if semantic_fallback:
+        return list(dict.fromkeys((primary, semantic_fallback)))
     try:
         context = stock_context(request)
     except ValueError:
@@ -1055,9 +1061,16 @@ class EnvatoAdapter:
                     offset = candidate - first_candidate
                     stage = min(offset // per_query, len(catalog_queries) - 1)
                     catalog_query = catalog_queries[stage]
+                    catalog_request = request
+                    if catalog_query == request.get("semantic_fallback_query"):
+                        catalog_request = {**request, "query": catalog_query}
                     inputs["envatoQuery"] = catalog_query
                     inputs["envatoQueryUrl"] = quote_plus(catalog_query)
                     inputs["resultIndex"] = str(offset % per_query + 1)
+                    inputs["requiredTitleKeyword"] = (stock_context(catalog_request)
+                                                       if requires_context
+                                                       else catalog_request["subject"])
+                    inputs["alternateTitleKeyword"] = catalog_request["subject"]
                     # v7 binds the receipt namespace to the concrete-subject
                     # policy and PLANEXIUM's isolated persistent Envato
                     # session.  Older failed jobs were launched with a
@@ -1099,7 +1112,7 @@ class EnvatoAdapter:
                         if not self.draft.subject_rejected(receipt):
                             raise
                         if candidate == first_candidate + self.failure_limit - 1:
-                            fallback_row = self.free_stock(request, index, Path(output_root))
+                            fallback_row = self.free_stock(catalog_request, index, Path(output_root))
                             break
                         # The failed candidate ended before any paid/download step.
                         # Keep its receipt; the next distinct result gets its own job.
