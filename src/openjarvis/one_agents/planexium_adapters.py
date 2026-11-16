@@ -784,19 +784,49 @@ def verified_stock_subject(title, subject, outputs):
 def stock_context_matches(request, metadata):
     """Reject contradictory stock metadata, including old accepted receipts."""
     subject_evidence = metadata.get("subject_evidence") or {}
-    text = " ".join(
+    title_tags_text = " ".join(
         str(source.get(key) or "")
         for source in (metadata, subject_evidence if isinstance(subject_evidence, dict) else {})
-        for key in ("title", "tags", "description")
+        for key in ("title", "tags")
     ).casefold()
+    description_text = " ".join(
+        str(source.get("description") or "")
+        for source in (metadata, subject_evidence if isinstance(subject_evidence, dict) else {})
+    ).casefold()
+    text = " ".join((title_tags_text, description_text))
+    verdict = (subject_evidence.get("preview_verdict") or {}
+               if isinstance(subject_evidence, dict) else {})
+    signed_preview_match = bool(
+        isinstance(subject_evidence, dict)
+        and subject_evidence.get("policy") == "selected-metadata-preview-fast-v2"
+        and subject_evidence.get("accepted") is True
+        and len(subject_evidence.get("preview_sha256") or []) >= 2
+        and verdict.get("subject_match") is True
+        and all(verdict.get(key) is False
+                for key in ("unusable", "uncertain", "contradiction"))
+    )
     blocked = ["fantasy", "surreal", "alien", *request.get("blocked_keywords", [])]
     # Catalogue prose uses "alien landscape" for lifeless Mars terrain.
     # This does not permit alien life/civilizations or relax authored negatives.
     generic_text = text
     if str(request.get("subject", "")).casefold() == "mars":
         generic_text = re.sub(r"\balien landscape\b", "landscape", text)
-    if any(str(word).casefold() in (generic_text if word == "alien" and word not in request.get("blocked_keywords", []) else text) for word in blocked):
-        return False
+    for word in blocked:
+        word = str(word).casefold()
+        # Envato descriptions often advertise a genuine astronomy clip as
+        # suitable for "science fiction or fantasy" projects.  Once LAO has
+        # signed two distinct preview frames and a positive subject verdict,
+        # those three generic style words are contradictions only when the
+        # selected title/tags identify the asset that way.  Authored concrete
+        # negatives (wildlife, aircraft, cartoons, etc.) remain strict across
+        # every metadata field.
+        candidate_text = (title_tags_text
+                          if signed_preview_match and word in {"fantasy", "surreal", "alien"}
+                          else (generic_text if word == "alien"
+                                and word not in request.get("blocked_keywords", [])
+                                else text))
+        if word in candidate_text:
+            return False
     query = str(request["query"]).casefold()
     if re.search(r"\b(interior|core|cross[ -]?section)\b", query):
         if re.search(r"\b(cockpit|cabin|dashboard)\b", text):
@@ -1097,6 +1127,7 @@ class EnvatoAdapter:
                         "title": title,
                         "tags": subject_evidence.get("tags"),
                         "description": subject_evidence.get("description"),
+                        "subject_evidence": subject_evidence,
                 }):
                     raise ValueError("Selected asset lacks relevant visual context")
                 titles.append(title)
