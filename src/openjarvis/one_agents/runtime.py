@@ -11629,7 +11629,15 @@ def _run_planexium(job: dict[str, Any]) -> dict[str, Any]:
     stages.set_stage("planexium", stages.EXECUTING, "Producing The Planexium local science review bundle")
     try:
         result = run_job(job)
-        if result.get("production_complete") and not result.get("uploaded"):
+        # PLANEXIUM's pipeline may already have handed the sealed package to
+        # ARES for the mandatory independent SEO audit.  Do not also enqueue
+        # LYRA: that creates two writers for the same package and makes a
+        # metadata-only step wait behind an unrelated Floor 12 production
+        # seat. LYRA remains the fallback for older results that have no ARES
+        # handoff of their own.
+        seo_handoff = (result.get("status") == "awaiting_seo"
+                       or str((result.get("handed_to") or {}).get("agent") or "").upper() == "ARES")
+        if result.get("production_complete") and not result.get("uploaded") and not seo_handoff:
             report = enqueue_job("lyra", json.dumps({"brand": "planexium", "stage": "package", "mission_id": result["mission_id"]}),
                                  mode="execute", dedupe_key=f"planexium:{result['mission_id']}:packaging")
             result["handed_to"] = {"agent": "LYRA", "job_id": report["id"]}
