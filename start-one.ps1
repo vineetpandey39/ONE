@@ -435,6 +435,7 @@ if ($foundWorkerPid -gt 0) {
     # source owned by the agent runtime plus the company trigger registry.
     # Reload still uses the no-active-jobs/no-imminent-trigger gate below.
     $companyTriggerSource = Join-Path $oneRoot "one-company\floors\_work\triggers.py"
+    $workerBootstrap = Join-Path $sourceRoot "scripts\one_agent_worker.py"
     $workerProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$foundWorkerPid" -ErrorAction SilentlyContinue
     $reloadSources = @(
         if (Test-Path -LiteralPath $agentSourceRoot) {
@@ -442,6 +443,7 @@ if ($foundWorkerPid -gt 0) {
                 Select-Object -ExpandProperty FullName
         }
         if (Test-Path -LiteralPath $companyTriggerSource) { $companyTriggerSource }
+        if (Test-Path -LiteralPath $workerBootstrap) { $workerBootstrap }
     )
     $runtimeChanged = $workerProcess -and [bool]($reloadSources | Where-Object {
         (Get-Item $_).LastWriteTime -gt $workerProcess.CreationDate
@@ -462,11 +464,14 @@ if ($foundWorkerPid -gt 0) {
         $jobRunningChecker = Join-Path $sourceRoot "scripts\check_worker_jobs_running.py"
         $jobRunning = $false
         if ((Test-Path $agentQueueDb) -and (Test-Path $jobRunningChecker)) {
-            & $pythonExe $jobRunningChecker $agentQueueDb $companyTriggerDb 600
+            # The second check below closes the enqueue race. A ten-minute
+            # future-trigger horizon can otherwise keep a busy installation
+            # permanently stale even when it has a real idle deployment gap.
+            & $pythonExe $jobRunningChecker $agentQueueDb $companyTriggerDb 0
             $jobRunning = ($LASTEXITCODE -eq 1)
             if (-not $jobRunning) {
                 Start-Sleep -Seconds 5
-                & $pythonExe $jobRunningChecker $agentQueueDb $companyTriggerDb 600
+                & $pythonExe $jobRunningChecker $agentQueueDb $companyTriggerDb 0
                 $jobRunning = ($LASTEXITCODE -eq 1)
             }
         }
