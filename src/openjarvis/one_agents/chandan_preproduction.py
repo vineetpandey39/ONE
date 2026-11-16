@@ -173,6 +173,40 @@ def _effects_slots(master: Path) -> dict[str, dict]:
     return slots
 
 
+def _ensure_default_effects_board(master: Path, sport: str) -> Path:
+    """Create a restrained 75-scene board when commissioning supplied none.
+
+    Exactly 27 scenes (36%) receive genuine coded motion, distributed across
+    statistics, timelines, typography and a sport-specific schematic. The
+    remaining scenes stay clean so effects never become a blanket overlay.
+    """
+    path = master / "effects-direction.json"
+    if path.is_file():
+        return path
+    scenes = []
+    families = ("stat", "timeline", "typography", "sport_graphic")
+    for number in range(1, 76):
+        effects = []
+        intent = "reflection"
+        note = "Keep the scene visually clean; camera motion carries this beat."
+        if number <= 27:
+            kind = families[(number - 1) % len(families)]
+            intent = "competition" if kind == "sport_graphic" else "record"
+            effect = {"kind": kind, "start": 0.16, "end": 0.78}
+            if kind in {"stat", "timeline", "typography"}:
+                effect["text"] = "Verified career milestone"
+            else:
+                effect["sport"] = sport
+            effects = [effect]
+            note = ("Clarify a sourced milestone with restrained kinetic graphics."
+                    if kind != "sport_graphic" else
+                    f"Explain {sport}-specific competitive geometry without covering the athlete.")
+        scenes.append({"scene_id": f"S{number:02d}", "scene_intent": intent,
+                       "narrative_intent": note, "effects": effects})
+    pipeline.write(path, {"schema": "one.chandan.effects-direction/v1", "scenes": scenes})
+    return path
+
+
 def _bind_effects(slot: dict | None, claim_ids: list[str]) -> dict:
     """Bind planned effects to the generated shot's real ledger claims."""
     if not slot:
@@ -272,6 +306,7 @@ def generate(path: Path) -> dict:
         raise ValueError("CHANDAN pack must contain exactly 15 chapters and 75 shots")
     sources = brief.get("sources") or {}
     master = path / "production/master-v1"
+    _ensure_default_effects_board(master, profile["sport"])
     effect_slots = _effects_slots(master)
     images = master / "images"
     images.mkdir(parents=True, exist_ok=True)
@@ -325,15 +360,13 @@ def generate(path: Path) -> dict:
     pipeline.write(master / "editorial-metadata.json", metadata)
     (path / "research/claim-ledger.md").write_text("\n".join(ledger) + "\n", encoding="utf-8")
     pipeline.write(path / "research/source-register.json", register)
-    template = pipeline.ROOT / "missions/pv-sindhu-2026-10-26/production/master-v1/generate_narration.py"
-    if not template.is_file():
-        raise FileNotFoundError("Governed ElevenLabs narration template missing")
-    script = template.read_text(encoding="utf-8").replace("George Narration", f"{brief['voice']['name']} Narration")
-    script = script.replace('VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"', f'VOICE_ID = "{brief["voice"]["voice_id"]}"')
-    script = script.replace('TITLE = "P. V. Sindhu Biography: The Finals That Forged a Champion"', f'TITLE = {json.dumps(pack["title"])}')
-    script = script.replace("narration-george", f"narration-{brief['voice']['name'].lower()}").replace("pv-sindhu-george", f"{manifest['subject_id']}-{brief['voice']['name'].lower()}")
-    script = script.replace('"voice": "George"', f'"voice": "{brief["voice"]["name"]}"')
-    script = script.replace('"voice": "George", "duration_seconds"', f'"voice": "{brief["voice"]["name"]}", "duration_seconds"')
+    script = (
+        "from pathlib import Path\n"
+        "from openjarvis.one_agents.chandan_narration import generate\n"
+        f"generate(Path(__file__).resolve().parent, voice_id={brief['voice']['voice_id']!r}, "
+        f"voice_name={brief['voice']['name']!r}, title={pack['title']!r}, "
+        f"mission_id={manifest['mission_id']!r})\n"
+    )
     (master / "generate_narration.py").write_text(script, encoding="utf-8")
     manifest.update(production_phase="reference_then_produce", reference_review_required=True)
     pipeline.write(path / "mission.json", manifest)
