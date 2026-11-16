@@ -16,7 +16,10 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-ENVATO_RECEIPT_REVISION = "v22"
+# v23 separates the visible-subject catalogue repairs (including protostar
+# disks) from terminal v22 jobs launched with the old ambiguous brief. Accepted
+# acquired checkpoints remain reusable; only unfinished searches get new jobs.
+ENVATO_RECEIPT_REVISION = "v23"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -729,6 +732,14 @@ def concrete_stock_brief(request):
         request.update(query="dense globular stars deep space animation",
                        subject="star")
         request["blocked_keywords"] += ["bomb", "weapon", "title", "typography"]
+    elif subject == "disk" and "protostar" in query:
+        # Bare "gas disk" is dominated by ringed gas-giant planets.  The
+        # commissioned science shot is the independently visible young star
+        # plus its protoplanetary/accretion disk, so bind both catalogue facts
+        # and keep the common planetary/black-hole substitutions out.
+        request.update(query="protoplanetary disk young star animation",
+                       subject="star")
+        request["blocked_keywords"] += ["gas giant", "saturn", "black hole"]
     if "astronaut" in request["query"].casefold():
         request["blocked_keywords"] += ["costume", "comedy", "humor", "urban", "city", "sneakers"]
     return request

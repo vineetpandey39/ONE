@@ -9454,7 +9454,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
             # rejected-topic fallbacks. Sanjeevani and preproduction QC still
             # verify factual claims; MCP failure cannot silently become a
             # news-only commission or trigger paid narration.
-            from openjarvis.one_agents.vidiq_research import collect_story, validate_keyword, research_label
+            from openjarvis.one_agents.vidiq_research import validate_keyword, research_label
             if is_vista_short:
                 from openjarvis.one_agents.vista_research import commission
                 # Read-only research may resume under the original schedule
@@ -9474,8 +9474,19 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                     progress=lambda detail: stages.set_stage(head_id, stages.RESEARCHING, detail),
                     keyword=str(request_payload.get("research_keyword") or ""))
             else:
-                story = collect_story(job["id"], prior, short=False,
-                                      keyword=str(request_payload.get("research_keyword") or ""))
+                from openjarvis.one_agents.sonia_research import commission_longform
+                story = commission_longform(
+                    job["id"], prior, reusable=reusable,
+                    synthesize=_research_synthesis,
+                    pick_story=lambda: _sonia_story_pick(
+                        reusable, prior, job["id"], check_all_prior=True),
+                    output_dir=_home() / "agent_outputs",
+                    progress=lambda detail: stages.set_stage(head_id, stages.RESEARCHING, detail),
+                    keyword=str(request_payload.get("research_keyword") or ""),
+                    unique=lambda brief, note, candidate: _sonia_unique_evergreen_brief(
+                        brief, note, prompt=candidate["prompt"],
+                        evidence=candidate["synthesis_evidence"], recent=prior),
+                )
             no_news_reason = story.get("reason", "") if story["status"] == "none" else ""
             travel_query = "Indian travellers international trip visa flight hotel"
             if story["status"] in {"picked", "vidiq", "sanjeevani"}:
@@ -9690,7 +9701,10 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
             evidence_file = output_dir / f"{job['id']}-{'vista-slot' if is_vista_short else 'yatra-trend'}-brief.md"
             evidence_file.write_text(
                 f"# {head_name} -> {'VISTA SlotBrief' if is_vista_short else 'YATRA TrendBrief'}\n\nRequest: {task}\n\n"
-                f"Researched by: {research_label(story)}\n\n{grounded_angle}\n", encoding="utf-8")
+                f"Researched by: {research_label(story)}\n\n"
+                + (f"Research attempts: {story['fallback_receipt']}\n\n"
+                   if story.get("fallback_receipt") else "")
+                + f"{grounded_angle}\n", encoding="utf-8")
             evidence_path = str(evidence_file)
             memory_body = grounded_angle
             if story.get("status") == "picked":
