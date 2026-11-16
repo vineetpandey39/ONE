@@ -12,6 +12,16 @@ class Revision(Motion):
     def __init__(self,root,brand_label='D I V Y A'):
         self.brand_label=brand_label
         self.mission=read(root/'mission.json')
+        treatments=('petals','rays','mist','stars','flame','rays','petals','mist')
+        for index,scene in enumerate(self.mission['scenes']):
+            scene.setdefault('motion_treatment',treatments[index%len(treatments)])
+            prompt=scene.get('prompt','').casefold()
+            if any(name in prompt for name in ('krishna portrait','vishnu presence','krishna and radha')):
+                scene.setdefault('portrait_focus_x',.76)
+            elif any(name in prompt for name in ('tulsi plant','tulsi leaves','tulsi altar','tulsi portrait','tulsi mandap')):
+                scene.setdefault('portrait_focus_x',.36)
+            else:
+                scene.setdefault('portrait_focus_x',.5)
         self.atlas={}
         for item in read(root/'edit/v2/caption-atlas.json'):
             tile=cv2.imread(str(root/item['file']),cv2.IMREAD_UNCHANGED)
