@@ -369,6 +369,23 @@ def shot_plan(science, voice, stock, original, *, mapping=None, primary_offsets=
     return sequence
 
 
+def editorial_frame_limit(kind, asset, scene):
+    """Return the bounded beat length for one verified editorial asset."""
+    if kind == 'archive':
+        from openjarvis.one_agents.planexium_editorial import archive_hold_seconds
+        return round(archive_hold_seconds(scene) * 30)
+    proof = asset.get('context_label_proof') or {}
+    bound_label = (
+        bool(asset.get('contextual_label'))
+        and proof.get('policy') == 'authored-illustration-v1'
+        and proof.get('label') == asset.get('contextual_label')
+        and proof.get('asset_sha256') == asset.get('sha256')
+    )
+    # Labelled, hash-bound motion may absorb a short-clip deficit for at most
+    # 32 seconds. Ordinary licensed clips retain the twenty-second ceiling.
+    return 960 if bound_label else 600
+
+
 def validate_unique_timeline(shots):
     """Reject replayed frames and stock cycling before any encoding occurs."""
     from openjarvis.one_agents.space_research import source_identity
@@ -474,11 +491,8 @@ def render(root, tools, *, resolve_settings=None):
                 matched=next((a for a in assets['stock'] if a['sha256']==asset['sha256']),None)
                 if matched:asset['usable_in']=matched.get('usable_in',0)
                 if sha(asset['path'])!=asset['sha256']:raise ValueError('Editorial asset bytes changed')
-                if t['kind'] == 'archive':
-                    from openjarvis.one_agents.planexium_editorial import archive_hold_seconds
-                    frame_limit = round(archive_hold_seconds(science['scenes'][number-1]) * 30)
-                else:
-                    frame_limit = 600
+                frame_limit = editorial_frame_limit(
+                    t['kind'], asset, science['scenes'][number-1])
                 if frames<=0 or frames>frame_limit:
                     raise ValueError('Shot exceeds its bounded editorial beat; supply more distinct visuals')
                 shots.append({'scene':number,'shot':index+1,'frames':frames,'start_frame':cursor,
