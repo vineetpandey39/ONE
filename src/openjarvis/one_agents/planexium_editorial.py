@@ -176,6 +176,24 @@ def build_scene_shots(root, science, voice, assets, original, media, editorial, 
             rows.append({'asset': asset, 'kind': 'authored_scientific_motion' if authored else 'envato', 'seconds': seconds})
             remaining -= seconds
             remember(asset)
+        # A labelled semantic analogue can be a long, genuinely moving clip
+        # while neighbouring exact clips are only five to ten seconds. Use
+        # that approved motion before demanding unrelated archive stills. The
+        # disclosure stays visible, and the 32-second ceiling prevents one
+        # stock loop from carrying an entire chapter.
+        if remaining > 0.5:
+            for row in rows:
+                asset = row.get('asset', {})
+                if (row.get('kind') != 'envato' or not asset.get('contextual_label')
+                        or remaining <= 0.5):
+                    continue
+                scheduled = float(row.get('seconds', 0))
+                usable = float(asset['seconds']) - float(asset.get('usable_in', 0)) - .1
+                extra = min(remaining, max(0.0, 32.0 - scheduled),
+                            max(0.0, usable - scheduled))
+                if extra > 0:
+                    row['seconds'] = scheduled + extra
+                    remaining -= extra
         pictures = [r for r in rows if 'seconds' not in r]
         # A still receives a restrained pan/zoom in the cinematic assembler.
         # Fifteen seconds is the upper editorial beat; the previous nine-second
