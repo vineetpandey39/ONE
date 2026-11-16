@@ -16,10 +16,10 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-# v26 adds an honest young-star analogue for sparse protostar/accretion-disk
-# catalogue searches. Accepted acquired checkpoints remain reusable; only
-# unfinished searches get new jobs.
-ENVATO_RECEIPT_REVISION = "v26"
+# v27 adds honest labelled analogues for sparse protostar/accretion-disk and
+# stellar-outflow catalogue searches. Accepted acquired checkpoints remain
+# reusable; only unfinished searches get new jobs.
+ENVATO_RECEIPT_REVISION = "v27"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -755,6 +755,18 @@ def concrete_stock_brief(request):
                               "protostar accretion disk not directly shown"),
         )
         request["blocked_keywords"] += ["black hole", "event horizon", "gas giant", "saturn"]
+    elif subject == "outflow" and "stellar" in query:
+        # "Stellar outflow" is a scientific interpretation that stock
+        # catalogues seldom state verbatim. Moving nebular gas is a useful
+        # visual analogue only when the edit labels that the outflow itself is
+        # not directly shown; bind the fallback to the visible nebula.
+        request.update(
+            semantic_fallback_query="flowing nebula gas stars animation",
+            semantic_fallback_subject="nebula",
+            contextual_label=("Illustrative moving nebular gas; "
+                              "stellar outflow not directly shown"),
+        )
+        request["blocked_keywords"] += ["spaceship", "aircraft", "weather", "smoke machine"]
     elif subject == "wind" and "stellar" in query:
         # Stock catalogues rarely title the invisible flow itself as stellar
         # wind. After the exact stage, allow visible energized gas around a
