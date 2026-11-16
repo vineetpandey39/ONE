@@ -11,6 +11,7 @@ _DEITY_TERMS={
     'krishna':['krishna bhajan shorts','radha krishna shorts','kanha bhajan','कृष्ण भजन','राधा कृष्ण','हरे कृष्ण','vrindavan bhajan','lord krishna'],
     'hanuman':['hanuman bhajan shorts','hanuman chalisa shorts','bajrangbali bhajan','हनुमान भजन','बजरंगबली','jai hanuman'],
     'durga':['durga bhajan shorts','mata rani shorts','devi bhajan','दुर्गा भजन','माता रानी भजन','jai mata di'],
+    'tulsi-vishnu':['tulsi vivah shorts','tulsi mata bhajan','shaligram bhajan','तुलसी विवाह भजन','तुलसी मैया','शालिग्राम','dev uthani ekadashi','shri hari bhajan'],
     'lakshmi':['lakshmi aarti shorts','om jai lakshmi mata','laxmi ji ki aarti','माँ लक्ष्मी आरती','लक्ष्मी माता की आरती','friday aarti','mahalakshmi aarti'],
 }
 def _clean_hook(value):
@@ -42,8 +43,8 @@ def _short_title(hook,keyword,number,deity=''):
 
 def _visible_hashtags(m):
     deity=str(m.get('deity','Shiva')).casefold()
-    first={'shiva':'#ShivBhajan','krishna':'#KrishnaBhajan','hanuman':'#HanumanBhajan','durga':'#DurgaBhajan','lakshmi':'#LakshmiAarti'}.get(deity,'#Bhakti')
-    second={'shiva':'#Mahadev','krishna':'#RadhaKrishna','hanuman':'#Bajrangbali','durga':'#MataRani','lakshmi':'#MaaLakshmi'}.get(deity,'#Devotional')
+    first={'shiva':'#ShivBhajan','krishna':'#KrishnaBhajan','hanuman':'#HanumanBhajan','durga':'#DurgaBhajan','lakshmi':'#LakshmiAarti','tulsi-vishnu':'#TulsiVivah'}.get(deity,'#Bhakti')
+    second={'shiva':'#Mahadev','krishna':'#RadhaKrishna','hanuman':'#Bajrangbali','durga':'#MataRani','lakshmi':'#MaaLakshmi','tulsi-vishnu':'#TulsiMata'}.get(deity,'#Devotional')
     return [first,second,'#Shorts']
 
 def _ares_long_form(root,m,brief):
