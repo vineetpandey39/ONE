@@ -16,10 +16,10 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-# v24 adds an explicitly labelled, two-fact semantic fallback after exact
-# protostar-disk results are exhausted. Accepted acquired checkpoints remain
-# reusable; only unfinished searches get new jobs.
-ENVATO_RECEIPT_REVISION = "v24"
+# v25 lets an authored semantic fallback bind its own visible subject instead
+# of pretending an analogue depicts the exact phenomenon. Accepted acquired
+# checkpoints remain reusable; only unfinished searches get new jobs.
+ENVATO_RECEIPT_REVISION = "v25"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -743,6 +743,17 @@ def concrete_stock_brief(request):
                        contextual_label=("Illustrative young-star environment; "
                                          "accretion disk not directly shown"))
         request["blocked_keywords"] += ["gas giant", "saturn", "black hole"]
+    elif subject == "wind" and "stellar" in query:
+        # Stock catalogues rarely title the invisible flow itself as stellar
+        # wind. After the exact stage, allow visible energized gas around a
+        # star, labelled as an analogue rather than claiming it is measured
+        # stellar-wind footage.
+        request.update(
+            semantic_fallback_query="glowing star nebula gas motion",
+            semantic_fallback_subject="star",
+            contextual_label=("Illustrative energized gas around a star; "
+                              "stellar wind not directly shown"),
+        )
     if "astronaut" in request["query"].casefold():
         request["blocked_keywords"] += ["costume", "comedy", "humor", "urban", "city", "sneakers"]
     return request
@@ -778,6 +789,17 @@ def secondary_stock_queries(request):
     secondary = " ".join(dict.fromkeys(
         part for part in (context, visible, tail) if part))
     return list(dict.fromkeys(q for q in (primary, secondary) if q))
+
+
+def catalog_request_for_query(request, catalog_query):
+    """Bind an approved fallback query to the subject it can actually prove."""
+    if catalog_query == request.get("semantic_fallback_query"):
+        return {
+            **request,
+            "query": catalog_query,
+            "subject": request.get("semantic_fallback_subject", request["subject"]),
+        }
+    return request
 
 
 def verified_stock_subject(title, subject, outputs):
@@ -1077,9 +1099,8 @@ class EnvatoAdapter:
                     offset = candidate - first_candidate
                     stage = min(offset // per_query, len(catalog_queries) - 1)
                     catalog_query = catalog_queries[stage]
-                    catalog_request = request
-                    if catalog_query == request.get("semantic_fallback_query"):
-                        catalog_request = {**request, "query": catalog_query}
+                    catalog_request = catalog_request_for_query(request, catalog_query)
+                    selected_request = catalog_request
                     inputs["envatoQuery"] = catalog_query
                     inputs["envatoQueryUrl"] = quote_plus(catalog_query)
                     inputs["resultIndex"] = str(offset % per_query + 1)
@@ -1158,7 +1179,7 @@ class EnvatoAdapter:
                     raise ValueError("Envato returned a duplicate source; preserve receipts for targeted repair")
                 hashes.add(sha)
                 title = str(out.get("selected_asset_title") or "").strip()
-                if not title or not verified_stock_subject(title, request["subject"], out):
+                if not title or not verified_stock_subject(title, selected_request["subject"], out):
                     raise ValueError("Provider success lacks a verified selected-asset subject title")
                 if any(str(word).casefold() in title.casefold() for word in inputs["blockedTitleKeywords"]):
                     raise ValueError("Selected asset contains a forbidden visual keyword")

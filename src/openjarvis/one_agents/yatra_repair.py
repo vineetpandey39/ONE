@@ -33,6 +33,24 @@ def apply_targeted_repair(source: Path, repair_file: Path) -> dict[str, Any]:
         chunks.append(match.group(1) + "\n\n" + (replacement.strip() if replacement else original_script[match.end():end].strip()))
     record["full_script"] = "\n\n".join(chunks) + "\n"
 
+    scene_plan_replacement = repair.get("scene_plan_replacement")
+    if scene_plan_replacement:
+        filename = scene_plan_replacement.get("path")
+        expected_sha = scene_plan_replacement.get("sha256")
+        reason = str(scene_plan_replacement.get("reason") or "").strip()
+        if (not isinstance(filename, str) or not filename
+                or Path(filename).name != filename or not isinstance(expected_sha, str)
+                or not re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha) or not reason):
+            raise RuntimeError("Scene-plan replacement requires a local filename, SHA-256 and review reason")
+        replacement_path = repair_file.parent / filename
+        replacement_raw = replacement_path.read_bytes()
+        if hashlib.sha256(replacement_raw).hexdigest().upper() != expected_sha.upper():
+            raise RuntimeError("Scene-plan replacement does not match its reviewed SHA-256")
+        replacement = replacement_raw.decode("utf-8")
+        if not replacement.strip():
+            raise RuntimeError("Scene-plan replacement cannot be empty")
+        record["scene_plan"] = replacement
+
     opening = repair.get("scene_1")
     if opening:
         beats = opening["beats"]
@@ -161,6 +179,8 @@ def apply_targeted_repair(source: Path, repair_file: Path) -> dict[str, Any]:
             if end != old["beats"][-1]["relative_end"]:
                 raise RuntimeError("Plan repair cannot change scene duration")
     audit = []
+    if scene_plan_replacement:
+        audit.append("reviewed hash-bound scene-plan replacement")
     if plan_edits:
         audit.append("reviewed exact plan edits: " + ",".join(sorted({e["field"] for e in plan_edits})))
     if repair.get("cue_overrides"):
