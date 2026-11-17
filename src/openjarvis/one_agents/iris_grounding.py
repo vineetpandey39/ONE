@@ -13,7 +13,7 @@ def _core(value):
     return re.split(r"[,\(]", value, maxsplit=1)[0].strip().casefold()
 
 
-def repair_regular_brief(brief, evidence):
+def repair_regular_brief(brief, evidence, predicted_location=None):
     """Fail-safe repair for a cited current incident omitted by local synthesis.
 
     A repair is possible only when the exact PLACE occurs in eligible evidence
@@ -38,7 +38,43 @@ def repair_regular_brief(brief, evidence):
                 and item.get("category") != "predicted_location"):
             supporting.append((evidence_id, title))
     if not supporting:
-        return brief
+        predicted_label = str((predicted_location or {}).get("name") or "").strip()
+        predicted = _core(predicted_label)
+        subject = (place if place and predicted and (place in predicted or predicted in place)
+                   else predicted)
+        predicted_support = [
+            (str(item.get("evidence_id") or ""), str(item.get("title") or "").strip())
+            for item in evidence.get("eligible") or []
+            if item.get("category") == "predicted_location"
+            and item.get("evidence_id") and item.get("title")
+            and subject and subject in str(item.get("title") or "").casefold()
+        ]
+        if not predicted_support:
+            return brief
+        evidence_id, title = predicted_support[0]
+        ref = f"[{evidence_id}]"
+        grounding_label = place_label if subject == place else predicted_label
+        # The model tried to force a general incident onto an unsupported
+        # place. Fall back to the rotation subject's own exact headline and
+        # explicitly remove every incident marker instead of inventing a link.
+        replacements = {
+            "PRIORITY": f"Ground the reel in verified context for {grounding_label} {ref}",
+            "ANGLE": f"Use only the cited {grounding_label} context; make no current-incident claim {ref}",
+            "BRIEF": (f"Eligible evidence headline: {title} {ref}. Produce the normal restoration "
+                      "story for the rotation-owned location without transferring an unrelated "
+                      "incident, casualty, cause or safety claim to it."),
+            "PLACE": "",
+            "INCIDENT_SUMMARY": "",
+            "SEARCH_TERMS": "",
+        }
+        repaired = brief
+        for name, value in replacements.items():
+            pattern = r"^" + name + r":[^\n]*$"
+            line = f"{name}: {value}"
+            repaired, count = re.subn(pattern, line, repaired, count=1, flags=re.M)
+            if not count:
+                repaired = repaired.rstrip() + "\n" + line
+        return repaired
     refs = " ".join(f"[{evidence_id}]" for evidence_id, _ in supporting[:3])
     titles = "; ".join(title for _, title in supporting[:3])
     replacements = {
@@ -69,7 +105,7 @@ def bind_regular_brief(brief, evidence, predicted_location):
     but only exact eligible-headline support can establish that incident.
     This never chooses or overrides the production location.
     """
-    brief = repair_regular_brief(brief, evidence)
+    brief = repair_regular_brief(brief, evidence, predicted_location)
     items = evidence.get("eligible") or []
     by_id = {str(x.get("evidence_id")): x for x in items if x.get("evidence_id")}
     def marker(name):
