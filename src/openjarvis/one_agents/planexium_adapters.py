@@ -173,6 +173,12 @@ class LaoDraft:
         if saved.get("terminal_status") != "Failed" or any(
                 term in lowered for term in ("download", "sign in", "authentication", "payment")):
             return False
+        # Search-page navigation happens before any candidate selection or
+        # paid action. Retry it once with the existing isolated receipt path.
+        if ("page.goto: timeout" in lowered
+                and "app.envato.com/search?" in lowered
+                and "itemtype=stock-video" in lowered):
+            return True
         startup_probe_timeout = ("get-ciminstance win32_process" in lowered
                                  and "--remote-debugging-port=" in lowered
                                  and "timed out after 15 seconds" in lowered)
