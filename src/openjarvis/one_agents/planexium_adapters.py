@@ -16,11 +16,11 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-# v32 adds honest labelled analogues for sparse scientific stock searches,
-# including meteorite specimens whose exact composition cannot be established
-# visually. Accepted acquired checkpoints remain reusable; only unfinished
-# searches get new jobs.
-ENVATO_RECEIPT_REVISION = "v32"
+# v33 adds the labelled laboratory rock-sample analogue for meteorite briefs.
+# The namespace bump prevents an unfinished failed receipt from being attached
+# to the materially different verified fallback query. Accepted acquired
+# checkpoints remain reusable; only unfinished searches get new jobs.
+ENVATO_RECEIPT_REVISION = "v33"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -840,6 +840,19 @@ def concrete_stock_brief(request):
                 contextual_label=(f"Illustrative {composition} asteroid surface; "
                                   "not a recovered meteorite specimen"),
             )
+    elif (subject == "meteorite" and "specimen" in query
+          and re.search(r"\b(lab|laboratory|science)\b", query)):
+        # A catalogue may truthfully show a scientist examining a rock sample
+        # in a laboratory without being able to prove that the sample came
+        # from a meteorite.  Preserve the independently visible lab + rock
+        # facts and label that scientific limitation instead of accepting the
+        # shot as literal meteorite evidence or weakening to a bare subject.
+        request.update(
+            semantic_fallback_query="scientist examining rock sample laboratory",
+            semantic_fallback_subject="rock",
+            contextual_label=("Illustrative laboratory rock-sample analysis; "
+                              "meteorite origin not visually verified"),
+        )
     elif subject == "asteroid" and "collision" in query and "debris" in query:
         # Stock catalogues describe the visible contact event as an impact,
         # while collision searches are dominated by unrelated drifting fields.
