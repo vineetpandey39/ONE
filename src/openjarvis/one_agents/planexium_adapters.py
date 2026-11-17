@@ -16,11 +16,11 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-# v31 adds honest labelled analogues for sparse scientific stock searches,
+# v32 adds honest labelled analogues for sparse scientific stock searches,
 # including meteorite specimens whose exact composition cannot be established
 # visually. Accepted acquired checkpoints remain reusable; only unfinished
 # searches get new jobs.
-ENVATO_RECEIPT_REVISION = "v31"
+ENVATO_RECEIPT_REVISION = "v32"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -840,6 +840,15 @@ def concrete_stock_brief(request):
                 contextual_label=(f"Illustrative {composition} asteroid surface; "
                                   "not a recovered meteorite specimen"),
             )
+    elif subject == "asteroid" and "collision" in query and "debris" in query:
+        # Stock catalogues describe the visible contact event as an impact,
+        # while collision searches are dominated by unrelated drifting fields.
+        # Preserve the asteroid and debris facts and change only the action's
+        # common catalogue synonym; never weaken to generic space debris.
+        request.update(
+            semantic_fallback_query="asteroid impact debris animation",
+            contextual_label="Illustrative asteroid impact/collision animation",
+        )
     if "astronaut" in request["query"].casefold():
         request["blocked_keywords"] += ["costume", "comedy", "humor", "urban", "city", "sneakers"]
     return request
