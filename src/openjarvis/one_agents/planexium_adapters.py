@@ -16,11 +16,11 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-# v28 adds honest labelled analogues for sparse scientific stock searches,
+# v29 adds honest labelled analogues for sparse scientific stock searches,
 # including meteorite specimens whose exact composition cannot be established
 # visually. Accepted acquired checkpoints remain reusable; only unfinished
 # searches get new jobs.
-ENVATO_RECEIPT_REVISION = "v28"
+ENVATO_RECEIPT_REVISION = "v29"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -822,7 +822,7 @@ def concrete_stock_brief(request):
         # This is deliberately not a bare-subject fallback: LAO must still
         # verify the meteorite subject in signed metadata and preview frames.
         request.update(
-            semantic_fallback_query="meteorite rock specimen laboratory",
+            semantic_fallback_query="meteorite mineral close up",
             contextual_label=("Illustrative meteorite specimen; "
                               "carbonaceous composition not visually verified"),
         )
