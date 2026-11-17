@@ -66,18 +66,30 @@ def commission_longform(job_id, prior, *, reusable, synthesize, pick_story,
                 "_dedupe_checked": unique is not None,
                 "fallback_receipt": str(path)}
 
-    progress("YATRA research: checking relevant vidIQ evidence")
-    try:
-        selected = evaluate(
-            vidiq_research.collect_story(job_id, prior, short=False, keyword=keyword),
-            "vidIQ",
-        )
-        if selected:
-            return selected
-    except Exception as exc:  # provider failure is evidence for failover
-        attempts.append({"provider": "vidIQ", "status": "unavailable",
-                         "reason": f"{type(exc).__name__}: {exc}"[:500]})
+    # A recovery commission may explicitly choose Sanjeevani-first research by
+    # using the ``sanjeevani:`` research-keyword prefix.  This is deliberately
+    # opt-in: ordinary scheduled videos retain the normal vidIQ -> Sanjeevani
+    # order, while an editor can escape a bad vidIQ topic loop without
+    # disabling vidIQ globally or weakening any downstream QC gate.
+    sanjeevani_first = str(keyword or "").strip().lower().startswith("sanjeevani:")
+    vidiq_keyword = "" if sanjeevani_first else keyword
+    if sanjeevani_first:
+        attempts.append({"provider": "vidIQ", "status": "skipped",
+                         "reason": "Explicit Sanjeevani-first recovery commission"})
         save()
+    else:
+        progress("YATRA research: checking relevant vidIQ evidence")
+        try:
+            selected = evaluate(
+                vidiq_research.collect_story(job_id, prior, short=False, keyword=vidiq_keyword),
+                "vidIQ",
+            )
+            if selected:
+                return selected
+        except Exception as exc:  # provider failure is evidence for failover
+            attempts.append({"provider": "vidIQ", "status": "unavailable",
+                             "reason": f"{type(exc).__name__}: {exc}"[:500]})
+            save()
 
     progress("YATRA fallback: Sanjeevani scored travel discovery")
     try:
