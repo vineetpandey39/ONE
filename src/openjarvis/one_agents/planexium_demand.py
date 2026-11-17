@@ -17,6 +17,22 @@ _GENERIC_SCIENCE_WORDS = {
 }
 _MIN_VOLUME_SCORE = 20.0
 _MIN_MONTHLY_SEARCH = 1000
+_STRONG_SUBJECTS = {
+    'asteroid', 'asteroids', 'artemis', 'curiosity', 'jupiter', 'mars', 'moon',
+    'saturn', 'spacex', 'webb', 'jwst', 'voyager', 'exoplanet', 'exoplanets',
+}
+_OFFICIAL_EVERGREEN = (
+    {'topic': 'Why NASA studies asteroids and what they reveal about the solar system',
+     'sources': ['https://science.nasa.gov/solar-system/asteroids/facts/']},
+    {'topic': 'How the James Webb Space Telescope sees the early universe',
+     'sources': ['https://science.nasa.gov/mission/webb/']},
+    {'topic': 'What Mars rover discoveries reveal about the planet',
+     'sources': ['https://science.nasa.gov/mars/']},
+    {'topic': 'Why Jupiter has such extreme storms',
+     'sources': ['https://science.nasa.gov/jupiter/facts/']},
+    {'topic': 'How Artemis changes human exploration of the Moon',
+     'sources': ['https://www.nasa.gov/artemis/']},
+)
 
 
 def _terms(value):
@@ -81,7 +97,7 @@ def demand_support(receipt, candidate, keyword):
         haystack = _terms(' '.join([str(video.get('videoTitle') or ''),
                                     ' '.join(str(tag) for tag in video.get('videoTags') or [])]))
         overlap = sorted(target & haystack)
-        if len(overlap) >= 2:
+        if len(overlap) >= 2 or any(word in _STRONG_SUBJECTS for word in overlap):
             support.append({'video_id': video.get('videoId'), 'title': video.get('videoTitle'),
                             'vph': float(video.get('vph') or 0), 'matched_terms': overlap})
     return sorted(support, key=lambda row: row['vph'], reverse=True)
@@ -98,10 +114,18 @@ def grounded_keyword(selection, receipt):
             'estimated_monthly_search': seed_row['monthly'],
             'note': 'Measured exact phrase; demand is not a guaranteed view count'}}
     terms = _terms(seed)
-    matched = [row for row in rows if _measured(row)
-               and len(terms & _terms(row['keyword'])) >= 2]
+    matched = []
+    for row in rows:
+        overlap = terms & _terms(row['keyword'])
+        if _measured(row) and (len(overlap) >= 2 or any(word in _STRONG_SUBJECTS for word in overlap)):
+            matched.append((row, overlap))
     if matched:
-        chosen = max(matched, key=lambda row: (row['volume'], row['monthly']))
+        # A broad phrase such as "solar system" may have more volume, but it
+        # must not displace the recognizable subject that earned the trend
+        # match (for example "asteroids").
+        chosen, overlap = max(matched, key=lambda item: (
+            any(word in _STRONG_SUBJECTS for word in item[1]),
+            len(item[1]), item[0]['volume'], item[0]['monthly']))
         return {**selection, 'original_search_keyword': seed, 'search_keyword': chosen['keyword'],
                 'keyword_validation': {'validated': True, 'mode': 'topic-bound-related',
                 'estimated_monthly_search': chosen['monthly'], 'volume_score': chosen['volume'],
@@ -123,6 +147,11 @@ def candidates(recent, read=space_research.read_public):
         rows.append({'id':str(len(rows)), 'topic':title, 'sources':[url], 'published_at':item.findtext('pubDate')})
         if len(rows) == 16:
             break
+    for evergreen in _OFFICIAL_EVERGREEN:
+        if evergreen['topic'] in recent:
+            continue
+        rows.append({'id': str(len(rows)), **evergreen, 'published_at': None,
+                     'candidate_type': 'official_evergreen_demand_fallback'})
     if not rows:
         raise ResearchUnavailable('No unused official science candidate; no paid production started')
     return rows
