@@ -211,6 +211,10 @@ def run_job(job):
 
 
 def head_job(job,enqueue):
+    raw=json.loads(job.get('task') or '{}')
+    if raw.get('brand')==BRAND and raw.get('action')=='daily_commission':
+        from .autonomy import commission_daily
+        return commission_daily(job,enqueue)
     payload=bound_payload(job)
     action=payload.get('action','status')
     seat={'shorts_plan':'raag','shorts_qa':'naad','scripture':'raag','audio_audit':'raag','render':'alankaar','proof':'alankaar','short_labels':'alankaar','status':'naad','audit':'naad','verify_pipeline':'naad'}.get(action)
