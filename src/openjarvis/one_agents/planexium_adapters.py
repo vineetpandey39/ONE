@@ -16,11 +16,11 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-# v29 adds honest labelled analogues for sparse scientific stock searches,
+# v30 adds honest labelled analogues for sparse scientific stock searches,
 # including meteorite specimens whose exact composition cannot be established
 # visually. Accepted acquired checkpoints remain reusable; only unfinished
 # searches get new jobs.
-ENVATO_RECEIPT_REVISION = "v29"
+ENVATO_RECEIPT_REVISION = "v30"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -148,6 +148,11 @@ class LaoDraft:
             or ("Rejected asset: destination phrase " in error and " absent from " in error)
             or "Rejected asset: preview does not confidently support selected-item metadata and subject" in error
             or "Asset preview unavailable" in error
+            # A sparse results page can legitimately contain fewer cards than
+            # the bounded per-query cursor requests. No asset was selected or
+            # downloaded, so advance to the next candidate/search stage.
+            or ("Timed out waiting for selectors" in error
+                and ":nth-match(a[href^='/search/stock-video/']" in error)
             # The selected item cannot be verified when its description never
             # appears. This locator is read by assert_destination_subject,
             # before preview admission and every download action.
@@ -814,17 +819,18 @@ def concrete_stock_brief(request):
             contextual_label=("Illustrative energized gas around a star; "
                               "stellar wind not directly shown"),
         )
-    elif subject == "meteorite" and "carbonaceous" in query:
+    elif subject == "meteorite" and re.search(r"\b(carbonaceous|metallic|stony)\b", query):
         # A stock preview can prove that a rock is a meteorite specimen, but
-        # cannot establish its carbonaceous composition from appearance. Try
+        # cannot establish its exact composition from appearance. Try
         # the authored exact phrase first, then retain two independently
         # visible facts (meteorite + rock/specimen) and label the limitation.
         # This is deliberately not a bare-subject fallback: LAO must still
         # verify the meteorite subject in signed metadata and preview frames.
+        composition = re.search(r"\b(carbonaceous|metallic|stony)\b", query).group(1)
         request.update(
             semantic_fallback_query="meteorite mineral close up",
             contextual_label=("Illustrative meteorite specimen; "
-                              "carbonaceous composition not visually verified"),
+                              f"{composition} composition not visually verified"),
         )
     if "astronaut" in request["query"].casefold():
         request["blocked_keywords"] += ["costume", "comedy", "humor", "urban", "city", "sneakers"]
