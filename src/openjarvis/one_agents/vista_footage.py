@@ -42,6 +42,20 @@ def rendition(video):
     return min(candidates, key=lambda r: r["width"] * r["height"])
 
 
+def review_sample_seconds(path):
+    """Return three in-bounds review points for clips of any duration."""
+    raw = subprocess.check_output([
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+    ], text=True).strip()
+    duration = float(raw)
+    if duration <= 0.15:
+        raise ValueError(f"Footage duration is too short for review: {duration}")
+    end = max(0.05, duration - 0.05)
+    return [round(min(end, max(0.05, duration * fraction)), 3)
+            for fraction in (0.15, 0.50, 0.85)]
+
+
 def acquire(spec, run_dir, *, review=True):
     root = Path(run_dir)
     requirements = geo.requirements(spec)
@@ -127,8 +141,10 @@ def review_manifest(spec, root, manifest):
         if row.get("visual_geography_review", {}).get("verdict") == "approved":
             continue  # validate() below still checks all hashes and bindings.
         samples = []
-        for index, seconds in enumerate((1, 5, 9)):
-            path = sample_dir / f"slot-{row['slot']}-{index}.jpg"
+        for index, seconds in enumerate(review_sample_seconds(row["file"])):
+            # PNG avoids FFmpeg's MJPEG full-range YUV restriction, which can
+            # otherwise fail perfectly valid H.264 clips before vision review.
+            path = sample_dir / f"slot-{row['slot']}-{index}.png"
             subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(seconds), "-i", row["file"],
                             "-frames:v", "1", "-vf", "scale=360:-2", str(path)], check=True)
             samples.append({"path": str(path), "sha256": geo.sha(path), "seconds": seconds})

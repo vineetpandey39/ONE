@@ -8423,6 +8423,7 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         from openjarvis.one_agents.iris_grounding import bind_regular_brief
         binding, digest, raw = bind_regular_brief(
             brief, _compact_media_evidence(media_evidence), predicted_location)
+        brief = binding["brief"]
         evidence_dir = _home() / "agent_outputs"
         evidence_dir.mkdir(parents=True, exist_ok=True)
         evidence_path = evidence_dir / f"{job['id']}.grounding-{digest}.json"

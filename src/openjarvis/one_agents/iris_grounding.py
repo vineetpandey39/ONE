@@ -4,20 +4,78 @@ import json
 import re
 
 
+def _marker(brief, name):
+    match = re.search(r"^" + name + r":[^\S\n]*(.*)$", brief, re.M)
+    return match.group(1).strip() if match else ""
+
+
+def _core(value):
+    return re.split(r"[,\(]", value, maxsplit=1)[0].strip().casefold()
+
+
+def repair_regular_brief(brief, evidence):
+    """Fail-safe repair for a cited current incident omitted by local synthesis.
+
+    A repair is possible only when the exact PLACE occurs in eligible evidence
+    headlines. Factual prose is replaced with those headlines verbatim rather
+    than preserving model-added numbers, causes, or consequences.
+    """
+    place_label = _marker(brief, "PLACE")
+    place = _core(place_label)
+    if not place:
+        return brief
+    # Repair only the observed local-model omission: both editorial lines
+    # named a fresh general-news incident but omitted every evidence id.
+    # Existing, invented, mixed, or predicted-location citations still fail
+    # closed in the validator instead of being silently replaced.
+    if re.search(r"\[[^\[\]]+\]", _marker(brief, "PRIORITY") + _marker(brief, "ANGLE")):
+        return brief
+    supporting = []
+    for item in evidence.get("eligible") or []:
+        evidence_id = str(item.get("evidence_id") or "")
+        title = str(item.get("title") or "").strip()
+        if (evidence_id and title and place in title.casefold()
+                and item.get("category") != "predicted_location"):
+            supporting.append((evidence_id, title))
+    if not supporting:
+        return brief
+    refs = " ".join(f"[{evidence_id}]" for evidence_id, _ in supporting[:3])
+    titles = "; ".join(title for _, title in supporting[:3])
+    replacements = {
+        "PRIORITY": f"Cover the verified current report at {place_label} {refs}",
+        "ANGLE": (f"Explain only the headline-backed update at {place_label}; "
+                  f"do not add uncited causes, figures or consequences {refs}"),
+        "BRIEF": (f"Current eligible evidence reports: {titles} {refs}. Keep every "
+                  "production claim within these cited headlines. The rotation-owned "
+                  "visual location remains independent and must not be presented as "
+                  "the incident site unless it is the same place."),
+        "INCIDENT_SUMMARY": f"{titles} {refs}",
+        "SEARCH_TERMS": f"{place_label} news today, {place_label} latest report",
+    }
+    repaired = brief
+    for name, value in replacements.items():
+        pattern = r"^" + name + r":[^\n]*$"
+        line = f"{name}: {value}"
+        repaired, count = re.subn(pattern, line, repaired, count=1, flags=re.M)
+        if not count:
+            repaired = repaired.rstrip() + "\n" + line
+    return repaired
+
+
 def bind_regular_brief(brief, evidence, predicted_location):
     """Bind exact model context; citations establish attribution, not truth.
 
-    A named incident must agree with the predicted manifest place. Other
-    places may appear as context when both editorial lines name that subject.
+    A fresh named incident may differ from the rotation-owned visual location,
+    but only exact eligible-headline support can establish that incident.
     This never chooses or overrides the production location.
     """
+    brief = repair_regular_brief(brief, evidence)
     items = evidence.get("eligible") or []
     by_id = {str(x.get("evidence_id")): x for x in items if x.get("evidence_id")}
     def marker(name):
-        match = re.search(r"^" + name + r":[^\S\n]*(.*)$", brief, re.M)
-        return match.group(1).strip() if match else ""
+        return _marker(brief, name)
     def core(value):
-        return re.split(r"[,\(]", value, maxsplit=1)[0].strip().casefold()
+        return _core(value)
     errors = []
     citations = {}
     for field in ("PRIORITY", "ANGLE"):
@@ -54,11 +112,13 @@ def bind_regular_brief(brief, evidence, predicted_location):
         for name in sorted(mentioned):
             if not re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", headlines):
                 errors.append(field + ": cited headlines do not support " + name)
-        if mentioned and (not predicted or predicted not in mentioned):
+        if not place and mentioned and (not predicted or predicted not in mentioned):
             errors.append(field + ": named claims lack the predicted manifest subject")
     if place:
-        if not predicted or place != predicted:
-            errors.append("PLACE differs from predicted manifest subject or prediction unavailable")
+        referenced = [by_id.get(ref, {}) for refs in citations.values() for ref in refs]
+        if (any(item.get("category") == "predicted_location" for item in referenced)
+                and (not predicted or place != predicted)):
+            errors.append("PLACE differs from predicted manifest subject")
         for field, refs in citations.items():
             if place not in marker(field).casefold():
                 errors.append(field + ": named subject is inconsistent")
@@ -66,7 +126,7 @@ def bind_regular_brief(brief, evidence, predicted_location):
                 errors.append(field + ": cited headline does not support named subject")
         if not marker("INCIDENT_SUMMARY") or not marker("SEARCH_TERMS"):
             errors.append("PLACE requires incident summary and search terms")
-    payload = {"schema": 1, "brief": brief, "evidence": evidence,
+    payload = {"schema": 2, "brief": brief, "evidence": evidence,
                "predicted_location": predicted_location, "citations": citations,
                "errors": errors, "accepted": not errors}
     raw = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
