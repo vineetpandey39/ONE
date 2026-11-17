@@ -16,11 +16,12 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-# v34 adds a visible two-asteroid formulation for sparse binary-orbit briefs.
+# v35 accepts a visibly handled mineral/rock sample as the labelled laboratory
+# analogue without claiming that the sample has meteorite origin.
 # The namespace bump prevents an unfinished failed receipt from being attached
 # to the materially different verified fallback query. Accepted acquired
 # checkpoints remain reusable; only unfinished searches get new jobs.
-ENVATO_RECEIPT_REVISION = "v34"
+ENVATO_RECEIPT_REVISION = "v35"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -870,8 +871,8 @@ def concrete_stock_brief(request):
         # shot as literal meteorite evidence or weakening to a bare subject.
         request.update(
             semantic_fallback_query="scientist examining rock sample laboratory",
-            semantic_fallback_subject="rock",
-            contextual_label=("Illustrative laboratory rock-sample analysis; "
+            semantic_fallback_subject="sample",
+            contextual_label=("Illustrative laboratory mineral/rock sample analysis; "
                               "meteorite origin not visually verified"),
         )
     elif subject == "asteroid" and "collision" in query and "debris" in query:
