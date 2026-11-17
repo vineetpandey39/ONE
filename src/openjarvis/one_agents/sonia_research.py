@@ -13,6 +13,34 @@ def _accepted(brief: str) -> bool:
         re.search(r"(?im)^\s*(?:\*\*)?COMMISSION:\s*NO\b", brief))
 
 
+def _lacks_longform_travel_depth(brief: str) -> bool:
+    """Reject fresh news that cannot honestly sustain a travel video.
+
+    Sanjeevani's news scorer can find a real, fresh aviation story whose
+    evidence contains no destination scenes and no practical travel decision.
+    Such a story is useful news, but accepting it here merely pushes an
+    impossible ten-minute brief into FABULA.  Let the normal Sanjeevani public
+    search fallback find an evidence-backed itinerary/comparison instead.
+    """
+    text = re.sub(r"\s+", " ", str(brief or "")).lower()
+    no_scenes = any(marker in text for marker in (
+        "no specific scenes or attractions",
+        "no verified scenes or attractions",
+        "locations/scenes worth showing: none",
+    ))
+    no_practical = any(marker in text for marker in (
+        "practical flight/hotel/visa questions:** none",
+        "practical flight/hotel/visa questions: none",
+        "none directly caused by this story",
+        "no practical travel questions",
+    ))
+    forbids_trip_depth = any(marker in text for marker in (
+        "do not add a broad visa guide, hotels, attractions, budget, best time, or general trip planning",
+        "do not add general trip planning",
+    ))
+    return no_scenes and (no_practical or forbids_trip_depth)
+
+
 def commission_longform(job_id, prior, *, reusable, synthesize, pick_story,
                         output_dir, progress=lambda detail: None, keyword="",
                         unique=None):
@@ -42,6 +70,13 @@ def commission_longform(job_id, prior, *, reusable, synthesize, pick_story,
         attempt.update(brief=brief, note=note)
         if not _accepted(brief):
             attempt["status"] = "rejected"
+            save()
+            return None
+        if story.get("status") == "picked" and _lacks_longform_travel_depth(brief):
+            attempt.update(
+                status="rejected",
+                note="Fresh story lacks verified scenes and practical depth for a long-form travel video",
+            )
             save()
             return None
         if unique is not None and story["status"] != "picked":
