@@ -298,9 +298,49 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
             return result
         except (ValueError, KeyError, TypeError) as exc:
             errors = str(exc)
-    # A model-format failure must not strand an otherwise reviewed video. Keep
-    # thumbnail/scientific semantic failures fail-closed; only structural output
-    # failures use the same deterministic normalization and audit path.
+    # A model-format failure must not strand an otherwise reviewed video. If
+    # both model attempts overclaim, prefer the sealed, code-authored packaging
+    # opening when it is itself semantically clean. This preserves the strict
+    # rejection for missions without reviewed fallback copy and keeps the
+    # winning thumbnail/title pairing deterministic.
+    trusted_opening = str(package.get("thumbnail_strategy", {}).get(
+        "description_opening") or "").strip()
+    if (semantic_failure and trusted_opening
+            and not re.search(r"\b(proves?|proving|findings show)\b", trusted_opening, re.I)):
+        out = _deterministic_output(package, science)
+        if required_titles:
+            out["title"] = required_titles[0]
+        out["opening"] = (trusted_opening + "\n\nIn this video, see how that measured result "
+                          "fits NASA's broader asteroid research.")
+        result = dict(package)
+        title, query, secondary_queries, tags, opening = _strategy_fields(out, package, science)
+        if preferred:
+            hook = str(concepts[preferred["name"]].get("text") or "")
+            if not title_matches_thumbnail_promise(title, hook):
+                raise ValueError("ARES could not produce passing SEO: trusted title does not match thumbnail")
+            result["thumbnail_path"] = preferred["path"]
+            result["thumbnail_pairing"] = {
+                "thumbnail": preferred["name"], "title": title,
+                "chosen_by": "ARES deterministic semantic fallback",
+            }
+        old = package["description"]
+        if "CHAPTERS\n" not in old:
+            raise ValueError("ARES could not produce passing SEO: Measured chapters missing")
+        tail = "CHAPTERS\n" + old.split("CHAPTERS\n", 1)[1]
+        tail = re.sub(r"(?<!\w)#[A-Za-z0-9_]+", "", tail).strip()
+        result.update(recommended_title=title, primary_query=query,
+                      secondary_queries=secondary_queries,
+                      description=opening + "\n\n" + tail + "\n\n" + " ".join(out["hashtags"]),
+                      tags=tags, hashtags=out["hashtags"], seo_owner="ARES", seo_job_id=job_id,
+                      metadata_source="ares_reviewed_semantic_fallback", seo_schema_version="1.2",
+                      pinned_comment_draft=out["comment"], public_publish_authorized=False,
+                      owner="ARES", handoff="PLANEXIUM -> ARES SEO audit -> human upload review")
+        result["seo_strategy_audit"] = _strategy_audit(result)
+        result["seo_metadata_sha256"] = metadata_hash(result)
+        result["description_audit"] = require_seo(result)
+        return result
+    # Thumbnail pairing and semantic failures without clean reviewed copy stay
+    # fail-closed; only structural model output uses the generic fallback below.
     if thumbnails or semantic_failure:
         raise ValueError("ARES could not produce passing SEO: "+str(errors))
     out = _deterministic_output(package, science)
