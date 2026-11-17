@@ -16,10 +16,11 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-# v27 adds honest labelled analogues for sparse protostar/accretion-disk and
-# stellar-outflow catalogue searches. Accepted acquired checkpoints remain
-# reusable; only unfinished searches get new jobs.
-ENVATO_RECEIPT_REVISION = "v27"
+# v28 adds honest labelled analogues for sparse scientific stock searches,
+# including meteorite specimens whose exact composition cannot be established
+# visually. Accepted acquired checkpoints remain reusable; only unfinished
+# searches get new jobs.
+ENVATO_RECEIPT_REVISION = "v28"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -812,6 +813,18 @@ def concrete_stock_brief(request):
             semantic_fallback_subject="star",
             contextual_label=("Illustrative energized gas around a star; "
                               "stellar wind not directly shown"),
+        )
+    elif subject == "meteorite" and "carbonaceous" in query:
+        # A stock preview can prove that a rock is a meteorite specimen, but
+        # cannot establish its carbonaceous composition from appearance. Try
+        # the authored exact phrase first, then retain two independently
+        # visible facts (meteorite + rock/specimen) and label the limitation.
+        # This is deliberately not a bare-subject fallback: LAO must still
+        # verify the meteorite subject in signed metadata and preview frames.
+        request.update(
+            semantic_fallback_query="meteorite rock specimen laboratory",
+            contextual_label=("Illustrative meteorite specimen; "
+                              "carbonaceous composition not visually verified"),
         )
     if "astronaut" in request["query"].casefold():
         request["blocked_keywords"] += ["costume", "comedy", "humor", "urban", "city", "sneakers"]
