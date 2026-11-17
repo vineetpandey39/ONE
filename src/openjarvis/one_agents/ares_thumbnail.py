@@ -52,7 +52,34 @@ EXPERIMENT_FORMATS = (
      "composition": "one curiosity object at large scale with a clean silhouette and no collage",
      "primary_colour": [255, 255, 255], "accent_colour": [178, 126, 255],
      "typography": "minimal", "vertical_anchor": "middle"},
+    {"name": "Structured glow", "sonia_expression": "preserve the source portrait expression exactly",
+     "posture": "preserve the source portrait posture exactly", "gesture": "open-palm present the central proof",
+     "composition": "one central structured proof with a clear progression; use a route only when the story itself is a route or itinerary",
+     "primary_colour": [255, 255, 255], "accent_colour": [255, 214, 0],
+     "typography": "outline", "vertical_anchor": "adaptive", "format_key": "structured_glow"},
 )
+
+
+def structured_glow_prompt(variant: dict[str, Any]) -> str:
+    """Fourth ChatGPT direction: the owner's approved dark/fade visual family.
+
+    The structure follows the actual story. An itinerary may use a grounded route,
+    while a rule change or comparison must use its truthful steps or contrasts and
+    must never inherit an irrelevant flight arc or map.
+    """
+    if variant.get("format_key") != "structured_glow":
+        return ""
+    return (
+        "\n\nFOURTH VARIANT — STRUCTURED GLOW (mandatory): Use a deep near-black/navy background with "
+        "three restrained depth fades: soft navy behind the hook lane, a warm amber bloom behind the central "
+        "story proof, and a subtle cyan/teal separation light behind Sonia. Keep roughly 70 percent of the "
+        "background dark and uncluttered; no heavy glow stacks or decorative collage. Turn the approved story "
+        "into one instantly readable structured visual. If and only if the title/brief is an itinerary or route, "
+        "show a grounded destination/route progression with a few large nodes and recognizable verified stops. "
+        "Otherwise use the story's truthful comparison, timeline, checklist or before/after progression instead. "
+        "Never invent geography, prices, documents, steps or guarantees. Do not use an airplane or connecting-flight "
+        "arc unless the approved story is specifically about a flight. Preserve the clean deterministic text lane."
+    )
 
 
 def _local_fallback_base(portrait: Path, destination: str, out: Path) -> Path:
@@ -442,11 +469,11 @@ def _find_artifact(roots: Iterable[Path], lao_job: str, filename: str) -> Path |
 
 
 def experiment_variants(thumb: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return exactly three distinct identity-safe creative directions.
+    """Return four distinct identity-safe creative directions.
 
     ARES's SEO model may supply one or several hooks.  The visual experiment is
-    deliberately fixed at three so upload cannot silently regress to a single
-    untested pose.
+    deliberately fixed at four so the owner's structured-glow family is tested
+    alongside the original three rather than replacing them.
     """
     supplied = thumb.get("variants") or []
     anchor = supplied[0] if supplied else {}
@@ -628,6 +655,7 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
             video_title=pkg["recommended_title"], destination=pkg.get("destination") or "the destination",
             left_usp=variant["left_usp"], sonia_expression=variant["sonia_expression"], thumbnail_text=variant["text"])
         prompt += style_prompt(style, history, variant_index)
+        prompt += structured_glow_prompt(variant)
         # Identity is not a creative variable. ChatGPT receives both the
         # selected pose/outfit and the clearest approved face anchor, and must
         # preserve Sonia naturally in the destination scene. Never turn the
@@ -759,7 +787,7 @@ def make_thumbnail(package_path: Path, *, tool: Any, artifact_roots: Iterable[Pa
 def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: Iterable[Path],
                               poll_seconds: float = 30, max_wait_seconds: float = 1800,
                               sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
-    """Generate, score and retain three variants; promote only the winner to final.png."""
+    """Generate, score and retain four variants; promote only the winner to final.png."""
     package_path = Path(package_path)
     pkg = json.loads(package_path.read_text(encoding="utf-8"))
     from openjarvis.one_agents.youtube_channels import SONIA
@@ -781,7 +809,7 @@ def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: 
     # experiment.  The previous hard-coded `right` made every YATRA thumbnail
     # the same left-hook template regardless of topic.
     base_layout = next_layout(history)
-    layouts = (base_layout, "left" if base_layout == "right" else "right", base_layout)
+    layouts = (base_layout, "left" if base_layout == "right" else "right", base_layout, "right")
     portrait = pick_portrait(Path(pkg["thumbnail"]["portrait_library"]), pkg.get("recommended_title", ""),
                              [h["portrait"] for h in history])
     results = []
@@ -830,7 +858,7 @@ def make_thumbnail_experiment(package_path: Path, *, tool: Any, artifact_roots: 
             stale.replace(stale.with_name("final.rejected.png"))
         receipt = {"ok": False, "stage": "experiment", "variants": results,
                    "layout": base_layout, "style": style,
-                   "portrait": str(portrait), "error": "none of the three thumbnail variants passed QC"}
+                   "portrait": str(portrait), "error": "none of the four thumbnail variants passed QC"}
     else:
         winner = max(eligible, key=lambda r: r["preupload_score"]["score"])
         approved = valid_editorial_approval(root)

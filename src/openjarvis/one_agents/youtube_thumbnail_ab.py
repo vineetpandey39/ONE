@@ -29,7 +29,11 @@ def _sha256(path: Path) -> str:
 
 def build_plan(root: Path, receipt: dict[str, Any], *, visibility: str = "private",
                content_format: str = "long_form") -> dict[str, Any]:
-    """Seal exactly three real candidates, with the editorial winner first."""
+    """Seal YouTube's three allowed candidates, with the editorial winner first.
+
+    ARES may retain more creative candidates locally. Studio Test & Compare accepts
+    three, so the winner plus the next two strongest generated candidates are sealed.
+    """
     root = Path(root)
     variants: list[dict[str, Any]] = []
     blockers: list[str] = []
@@ -46,13 +50,13 @@ def build_plan(root: Path, receipt: dict[str, Any], *, visibility: str = "privat
             "qc": row.get("qc") or {},
             "preupload_score": row.get("preupload_score") or {},
         })
-    if len(variants) != 3:
-        blockers.append(f"native A/B/C requires exactly 3 generated QC-passed thumbnails (found {len(variants)})")
-    elif len({row["sha256"] for row in variants}) != 3:
-        blockers.append("native A/B/C candidates are not visually distinct files")
-
     winner = str(receipt.get("winner") or "")
     variants.sort(key=lambda row: (row["name"] != winner, -float((row["preupload_score"] or {}).get("score") or 0)))
+    variants = variants[:3]
+    if len(variants) != 3:
+        blockers.append(f"native A/B/C requires at least 3 generated QC-passed thumbnails (found {len(variants)})")
+    elif len({row["sha256"] for row in variants}) != 3:
+        blockers.append("native A/B/C candidates are not visually distinct files")
     for index, row in enumerate(variants, 1):
         row["position"] = index
         row["editorial_default"] = index == 1
