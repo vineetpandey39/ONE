@@ -8424,6 +8424,14 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         binding, digest, raw = bind_regular_brief(
             brief, _compact_media_evidence(media_evidence), predicted_location)
         brief = binding["brief"]
+        # Grounding may replace an unsupported incident with a conservative,
+        # evidence-bound brief. Downstream fields must come from that repaired
+        # text, never the model draft parsed above.
+        priority = _marker(brief, "PRIORITY")
+        angle = _marker(brief, "ANGLE")
+        incident_place = _marker(brief, "PLACE")
+        incident_summary = _marker(brief, "INCIDENT_SUMMARY")
+        incident_search_terms = _marker(brief, "SEARCH_TERMS")
         evidence_dir = _home() / "agent_outputs"
         evidence_dir.mkdir(parents=True, exist_ok=True)
         evidence_path = evidence_dir / f"{job['id']}.grounding-{digest}.json"
