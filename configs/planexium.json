@@ -47,7 +47,7 @@
     "segmented_output_reserve_bytes": 6442450944,
     "final_copy_reserve_bytes": 3221225472,
     "system_reserve_path": "C:/",
-    "destination_minimum_free_bytes": 21474836480,
+    "destination_minimum_free_bytes": 10737418240,
     "destination_minimum_free_fraction": 0.1,
     "bridge_config": "C:/Users/pc/.config/davinci-resolve-mcp/bridge.json",
     "autostart": {
