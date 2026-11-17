@@ -11435,7 +11435,10 @@ def _yatra_capture_semantic_state(path: Path, *, required_any: Any = (),
         pattern = str(Path(temporary) / "frame-%02d.png")
         extract = subprocess.run(
             ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(path),
-             "-vf", "fps=1/7,scale=1280:-2", "-frames:v", "4", "-y", pattern],
+             # Do not downscale the 1080p OBS evidence. Small policy text on
+             # official sites becomes illegible to OCR at 1280px even though
+             # it remains clearly readable in the accepted recording.
+             "-vf", "fps=1/7", "-frames:v", "4", "-y", pattern],
             capture_output=True, text=True, timeout=180,
         )
         if extract.returncode:
