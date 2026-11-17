@@ -1267,10 +1267,18 @@ class EnvatoAdapter:
                             # repaired-capacity attempt has its own audit trail
                             # and is bounded to one job for this candidate.
                             retry_receipt = receipt.with_name(receipt.stem + "-capacity-retry.json")
-                            out, job = self.draft.run("planexium-envato", asset_steps, inputs,
-                                                      retry_receipt, timeout=10800)
-                            query_positions[query] = candidate
-                            break
+                            try:
+                                out, job = self.draft.run("planexium-envato", asset_steps, inputs,
+                                                          retry_receipt, timeout=10800)
+                            except RuntimeError:
+                                # Capacity is repaired; the new provider job
+                                # may now reach normal preview validation and
+                                # reject this candidate. Classify that receipt
+                                # below so the bounded search can advance.
+                                receipt = retry_receipt
+                            else:
+                                query_positions[query] = candidate
+                                break
                         if getattr(self.draft, "transient_pre_download_failure", lambda _receipt: False)(receipt):
                             retry_receipt = self.context.artifact(
                                 f"receipts/envato-{ENVATO_RECEIPT_REVISION}-{index}-candidate-{candidate}-browser-retry.json")
