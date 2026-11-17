@@ -215,6 +215,7 @@ def create_tulsi_vivah_mission(root: Path, *, day: date) -> dict:
         "production_date": day.isoformat(), "deity": "Tulsi-Vishnu", "preset": "KRISHNA_VRINDAVAN",
         "vocal_style": "female_devotional", "composition_type": "original_bhajan",
         "music_model": "music_v2_5", "title": title, "display_title": "तुलसी विवाह",
+        "estimated_music_credits": 7198,
         "lyrics": TULSI_VIVAH_LYRICS,
         "strict_lyric_plan": True,
         "allowed_repeat_lines": ["हरी-हरी तुलसी, जय श्रीहरि।"],
@@ -239,6 +240,7 @@ def create_tulsi_vivah_mission(root: Path, *, day: date) -> dict:
         "edit_tools": "C:/Users/pc/Documents/LAO/yatra-edit",
         "uploader_script": "C:/Users/pc/Documents/LAO/yatra-upload/youtube_api_upload.py",
         "voice_overrides": {}, "credential_asset": None, "channel_id": CHANNEL,
+        "autonomy_policy_path": "E:/ONE-Suite/one-company/floors/floor_12_youtube_studio/shloka_autonomy.json",
         "daily_schedule": {"enabled": False},
     }
     request = music_payload(mission)
@@ -326,6 +328,7 @@ def create_daily_mission(root: Path, *, day: date, deity: str = "Lakshmi") -> di
         "production_date": day.isoformat(), "deity": "Lakshmi", "preset": "LAKSHMI_GOLDEN",
         "vocal_style": "female_devotional", "composition_type": "original_bhajan",
         "music_model": "music_v2_5", "title": title, "display_title": "माँ लक्ष्मी आओ",
+        "estimated_music_credits": 7198,
         "lyrics": FRIDAY_LAKSHMI_LYRICS,
         "text_origin": "Original Hindi devotional lyrics; not a scripture quotation",
         "scripture_sources": [], "text_review": "PENDING", "pronunciation_review": "PENDING",
@@ -348,6 +351,7 @@ def create_daily_mission(root: Path, *, day: date, deity: str = "Lakshmi") -> di
         "edit_tools": "C:/Users/pc/Documents/LAO/yatra-edit",
         "uploader_script": "C:/Users/pc/Documents/LAO/yatra-upload/youtube_api_upload.py",
         "voice_overrides": {}, "credential_asset": None, "channel_id": CHANNEL,
+        "autonomy_policy_path": "E:/ONE-Suite/one-company/floors/floor_12_youtube_studio/shloka_autonomy.json",
         "daily_schedule": {"enabled": False},
     }
     request = music_payload(mission)

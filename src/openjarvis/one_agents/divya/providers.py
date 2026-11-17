@@ -102,8 +102,17 @@ def compose(root, config, mission):
         raise Blocked('Music audio already exists without an API receipt. Reconcile imported song provenance; never spend again to replace it.')
     key = vault_key(config)
     target.parent.mkdir(parents=True,exist_ok=True)
+    autonomy_policy = None
+    credit_reservation = None
+    if config.get('autonomy_policy_path'):
+        from .autonomy import load_policy, reserve_music_credits
+        autonomy_policy = load_policy(Path(config['autonomy_policy_path']))
+        credits = int(mission.get('estimated_music_credits') or
+                      autonomy_policy.get('estimated_music_credits_per_job') or 0)
+        credit_reservation = reserve_music_credits(autonomy_policy, mission['mission_id'], credits)
     receipt = {'status':'SUBMITTING','request_sha256':fingerprint(payload),'estimated_usd':estimate,
-               'maximum_usd':maximum,'actual_usd':None,'started_at':time.time(),'provider':'ElevenLabs Music'}
+               'maximum_usd':maximum,'actual_usd':None,'started_at':time.time(),'provider':'ElevenLabs Music',
+               'credit_reservation':credit_reservation}
     write(receipt_path,receipt)
     import httpx
     from openjarvis.speech.elevenlabs_tts import _API_ROOT
@@ -136,12 +145,21 @@ def compose(root, config, mission):
         pending.replace(target)
         receipt.update(status='COMPLETE',audio_sha256=digest(target),duration=float(media['format']['duration']),actual_usd=None)
         write(receipt_path,receipt)
+        if autonomy_policy:
+            from .autonomy import mark_music_outcome
+            mark_music_outcome(autonomy_policy, mission['mission_id'], 'COMPLETE')
         return {'files':[str(target),str(receipt_path)],'estimated_usd':estimate,'actual_usd':None}
     except Blocked:
+        if autonomy_policy:
+            from .autonomy import mark_music_outcome
+            mark_music_outcome(autonomy_policy, mission['mission_id'], 'BLOCKED')
         raise
     except Exception as exc:
         receipt.update(status='OUTCOME_UNKNOWN',error_type=type(exc).__name__)
         write(receipt_path,receipt)
+        if autonomy_policy:
+            from .autonomy import mark_music_outcome
+            mark_music_outcome(autonomy_policy, mission['mission_id'], 'OUTCOME_UNKNOWN')
         raise Blocked('Music outcome unknown; do not resubmit until reconciled') from None
 
 def image_steps(prompt, filename, marker, reference=None, reuse_session=False, context_url=None):

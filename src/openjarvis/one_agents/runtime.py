@@ -8031,6 +8031,9 @@ def _run_helios(job: dict[str, Any]) -> dict[str, Any]:
     task = str(job.get("task") or "")
     mode = str(job.get("mode") or "plan").strip().lower()
     payload = _json_task(job)
+    if "[shloka-daily]" in task.casefold():
+        from openjarvis.one_agents.divya.autonomy import commission_daily
+        return commission_daily(job, enqueue_job)
     if payload.get("brand") == "shloka_by_shloka":
         from openjarvis.one_agents.divya.floor12 import head_job
         return head_job(job, enqueue=enqueue_job)
