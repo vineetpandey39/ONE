@@ -307,11 +307,28 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
         "description_opening") or "").strip()
     if (semantic_failure and trusted_opening
             and not re.search(r"\b(proves?|proving|findings show)\b", trusted_opening, re.I)):
-        out = _deterministic_output(package, science)
+        deterministic = _deterministic_output(package, science)
+        # Retain structurally useful model fields (queries/tags) while
+        # replacing only the unsafe semantic opening with reviewed copy.
+        out = dict(out) if isinstance(out, dict) else dict(deterministic)
         if required_titles:
             out["title"] = required_titles[0]
-        out["opening"] = (trusted_opening + "\n\nIn this video, see how that measured result "
+        out["opening"] = ("In this video, " + trusted_opening[0].lower()
+                          + trusted_opening[1:] + "\n\nSee how that measured result "
                           "fits NASA's broader asteroid research.")
+        hashtags = out.get("hashtags")
+        if isinstance(hashtags, str):
+            hashtags = re.findall(r"#[A-Za-z][A-Za-z0-9_]+", hashtags)
+        if isinstance(hashtags, list):
+            hashtags = ["#" + re.sub(r"\s+", "", str(h).strip().lstrip("#"))
+                        for h in hashtags]
+        if (not isinstance(hashtags, list) or len(set(hashtags)) != 3
+                or any(not re.fullmatch(r"#[A-Za-z0-9_]{2,30}", h)
+                       or not re.search(r"[A-Za-z]", h) for h in hashtags)):
+            hashtags = deterministic["hashtags"]
+        comment = normalize_comment(out.get("comment"))
+        if not 30 <= len(comment) <= 220 or not comment.endswith("?"):
+            comment = deterministic["comment"]
         result = dict(package)
         title, query, secondary_queries, tags, opening = _strategy_fields(out, package, science)
         if preferred:
@@ -330,10 +347,10 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
         tail = re.sub(r"(?<!\w)#[A-Za-z0-9_]+", "", tail).strip()
         result.update(recommended_title=title, primary_query=query,
                       secondary_queries=secondary_queries,
-                      description=opening + "\n\n" + tail + "\n\n" + " ".join(out["hashtags"]),
-                      tags=tags, hashtags=out["hashtags"], seo_owner="ARES", seo_job_id=job_id,
+                      description=opening + "\n\n" + tail + "\n\n" + " ".join(hashtags),
+                      tags=tags, hashtags=hashtags, seo_owner="ARES", seo_job_id=job_id,
                       metadata_source="ares_reviewed_semantic_fallback", seo_schema_version="1.2",
-                      pinned_comment_draft=out["comment"], public_publish_authorized=False,
+                      pinned_comment_draft=comment, public_publish_authorized=False,
                       owner="ARES", handoff="PLANEXIUM -> ARES SEO audit -> human upload review")
         result["seo_strategy_audit"] = _strategy_audit(result)
         result["seo_metadata_sha256"] = metadata_hash(result)
