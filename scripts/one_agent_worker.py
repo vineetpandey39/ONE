@@ -25,7 +25,7 @@ def committed_revision(repo=REPO_ROOT):
 
 
 def install_revision_gate(runtime, *, started_revision, revision_reader=committed_revision,
-                          restart=None, check_seconds=5.0):
+                          restart=None, successor=None, retire=None, check_seconds=5.0):
     """Never let a long-lived worker claim a job with stale committed code.
 
     A commit made while jobs are running stops new claims, lets the jobs this
@@ -36,7 +36,7 @@ def install_revision_gate(runtime, *, started_revision, revision_reader=committe
     original_finish = runtime._finish_active_job
     original_abandon = runtime._abandon_active_job
     owned = set()
-    state = {"checked": 0.0, "revision": started_revision}
+    state = {"checked": 0.0, "revision": started_revision, "successor_started": False}
 
     def current_revision():
         now = time.monotonic()
@@ -51,13 +51,52 @@ def install_revision_gate(runtime, *, started_revision, revision_reader=committe
             return
         os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve())])
 
+    def start_successor():
+        if successor is not None:
+            successor()
+        else:
+            flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            subprocess.Popen(
+                [sys.executable, str(Path(__file__).resolve())],
+                cwd=REPO_ROOT,
+                close_fds=True,
+                creationflags=flags,
+            )
+        state["successor_started"] = True
+
+    def retire_drained_worker():
+        if retire is not None:
+            retire()
+            return
+        # This process owns no work at this point. A successor already loaded
+        # the new revision, so exiting cannot interrupt a job or reduce the
+        # pre-deployment worker count.
+        os._exit(0)
+
     def claim(job_id=None):
         current = current_revision()
         changed = bool(started_revision and current and current != started_revision)
         if changed:
             if owned:
-                # Returning no job leaves capacity unused while already-owned
-                # work drains. It must not admit another stale-code job.
+                # Never let a long YATRA render freeze unrelated floors after
+                # a commit. Start one fresh successor immediately; this old
+                # interpreter stops claiming but continues only its owned work.
+                # A supplied restart callback is the legacy/unit-test seam: it
+                # replaces only after drain unless an explicit successor seam
+                # is also supplied. Production has neither callback and uses
+                # the immediate detached successor path.
+                can_start_successor = successor is not None or restart is None
+                if can_start_successor and not state["successor_started"]:
+                    print(
+                        f"[one-agents] committed revision changed "
+                        f"{started_revision[:12]} -> {current[:12]}; "
+                        "starting fresh successor while owned work drains",
+                        flush=True,
+                    )
+                    start_successor()
+                return None
+            if state["successor_started"]:
+                retire_drained_worker()
                 return None
             print(
                 f"[one-agents] committed revision changed "

@@ -156,6 +156,15 @@ def apply_packaging(package, strategy, science):
     package['thumbnail_strategy'] = {
         **strategy, 'mode': 'episode_specific_concepts',
         'creative_system': 'planexium_one_visual_sentence_v2',
+        'channel_family': {
+            'system': 'planexium_dark_cyan_family_v1',
+            'constant_elements': ['dark navy/black low-detail headline lane',
+                                  'large white uppercase sans-serif hook',
+                                  'Planexium cyan accent', 'one dominant factual science visual'],
+            'variable_elements': ['hero subject', 'left or right hero placement', 'episode-specific semantic highlight'],
+            'forbidden': ['random typography system', 'boxed label treatment', 'unrelated accent palette',
+                          'catalog-number-only hook', 'generic cosmic wallpaper'],
+        },
         'visual_archetypes': ['phenomenon_closeup', 'human_consequence', 'scale_relationship'],
         'mobile_rules': {'hero_frame_share':[0.45,0.65], 'left_hook_lane':[0.0,0.40],
                          'phone_size_test':'recognizable at 10 percent size',

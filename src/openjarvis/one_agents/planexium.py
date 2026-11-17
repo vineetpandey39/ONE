@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 from dataclasses import replace, asdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -65,6 +65,84 @@ def context_for(mission: str, config: dict) -> ProductionContext:
     if config.get("channel_id"):
         profile = replace(profile, subscribe_url=f"https://www.youtube.com/channel/{config['channel_id']}?sub_confirmation=1")
     return ProductionContext(profile, root.resolve(), mission)
+
+
+def channel_performance_snapshot(config: dict, destination: Path) -> dict:
+    """Read public long-form results from Planexium's own authorised channel.
+
+    This is deliberately not labelled CTR analytics: the current OAuth grant
+    exposes public views, titles and publish dates, but not impressions or
+    retention.  A same-channel cache keeps commissioning resilient to a
+    transient Data API outage without borrowing another brand's audience.
+    """
+    destination = Path(destination)
+    if destination.is_file():
+        try:
+            cached = json.loads(destination.read_text(encoding="utf-8"))
+            observed = datetime.fromisoformat(cached["observed_at"])
+            if datetime.now(timezone.utc) - observed < timedelta(hours=12):
+                return cached
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    try:
+        module = _channel_uploader(config, destination.parent / "channel-insights-ledger.json")
+        access, scopes = module.refresh_access(module.load_credentials())
+        headers = {"Authorization": f"Bearer {access}"}
+        response = module._json(
+            "https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&mine=true",
+            headers=headers)
+        channel = (response.get("items") or [])[0]
+        if channel["id"] != config["channel_id"]:
+            raise ValueError("Channel insights resolved a different YouTube channel")
+        uploads = channel["contentDetails"]["relatedPlaylists"]["uploads"]
+        playlist = module._json(
+            "https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&maxResults=35&playlistId=" + uploads,
+            headers=headers)
+        ids = [row["contentDetails"]["videoId"] for row in playlist.get("items") or []]
+        videos = module._json(
+            "https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,status,contentDetails&id=" + ",".join(ids),
+            headers=headers).get("items") or []
+
+        def seconds(value):
+            match = re.fullmatch(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", value or "")
+            return (int(match.group(1) or 0) * 3600 + int(match.group(2) or 0) * 60
+                    + int(match.group(3) or 0)) if match else 0
+
+        now = datetime.now(timezone.utc)
+        rows = []
+        for video in videos:
+            if seconds(video.get("contentDetails", {}).get("duration")) < 120:
+                continue
+            published = datetime.fromisoformat(video["snippet"]["publishedAt"].replace("Z", "+00:00"))
+            age_hours = max(1.0, (now - published).total_seconds() / 3600)
+            views = int(video.get("statistics", {}).get("viewCount") or 0)
+            rows.append({"video_id": video["id"], "title": video["snippet"]["title"],
+                         "published_at": published.isoformat(), "age_hours": round(age_hours, 1),
+                         "views": views, "views_per_day": round(views / max(age_hours / 24, 1), 2)})
+        recent = rows[:20]
+        mature = [row for row in recent if row["age_hours"] >= 48]
+        ordered = sorted(mature, key=lambda row: row["views"], reverse=True)
+        values = sorted(row["views"] for row in mature)
+        median = values[len(values) // 2] if values else None
+        snapshot = {"available": bool(recent), "source": "youtube_data_api_public_channel_history",
+                    "observed_at": now.isoformat(), "channel_id": channel["id"],
+                    "subscriber_count": int(channel.get("statistics", {}).get("subscriberCount") or 0),
+                    "recent_longform": recent, "median_mature_views": median,
+                    "winners": ordered[:5], "underperformers": list(reversed(ordered[-5:])),
+                    "ctr_analytics_available": "https://www.googleapis.com/auth/yt-analytics.readonly" in scopes,
+                    "limitations": "Views are a topic prior; impressions, CTR and retention are unavailable in this OAuth grant."}
+        _write(destination, snapshot)
+        return snapshot
+    except Exception as exc:
+        if destination.is_file():
+            try:
+                cached = json.loads(destination.read_text(encoding="utf-8"))
+                cached["cache_fallback"] = type(exc).__name__
+                return cached
+            except (OSError, ValueError, TypeError):
+                pass
+        return {"available": False, "source": "youtube_data_api_unavailable",
+                "reason": type(exc).__name__, "ctr_analytics_available": False}
 
 
 def _write(path: Path, value) -> None:
@@ -564,8 +642,11 @@ class Pipeline:
 
 def daily_commission(day: str | None = None) -> dict:
     date = datetime.fromisoformat(day).date() if day else datetime.now(ZoneInfo("Asia/Kolkata")).date()
-    topic = TOPICS[date.toordinal() % len(TOPICS)]
-    return {"brand": "planexium", "production_date": date.isoformat(), "mission_id": f"daily-{date:%Y%m%d}", "auto_discover": True, **topic}
+    # An auto-discovery envelope must not pretend that a rotating placeholder
+    # is the commissioned topic.  The selected topic is written once, with a
+    # demand fingerprint, before any paid narration or media work begins.
+    return {"brand": "planexium", "production_date": date.isoformat(),
+            "mission_id": f"daily-{date:%Y%m%d}", "auto_discover": True}
 
 
 def head_job(job: dict, *, enqueue) -> dict:
@@ -637,11 +718,27 @@ def run_job(job: dict) -> dict:
     commission_path = context.artifact("commission.json")
     if commission_path.exists():
         commission = json.loads(commission_path.read_text(encoding="utf-8"))
+        lineage = commission.get("topic_lineage") or {}
+        if lineage.get("locked"):
+            actual = hashlib.sha256(json.dumps(commission.get("demand_selection") or {},
+                sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            if actual != lineage.get("selection_sha256"):
+                raise ValueError("Locked PLANEXIUM topic lineage changed; targeted research repair required")
     else:
         if commission.get("auto_discover"):
             recent = {row.get("topic", "") for row in ledger.values()}
             from .planexium_demand import select_topic
-            commission.update(select_topic(context.root / 'research-demand', recent))
+            performance = channel_performance_snapshot(config,
+                context.root / 'research-demand' / 'channel-performance.json')
+            commission.update(select_topic(context.root / 'research-demand', recent,
+                                           channel_performance=performance))
+            selection_sha = hashlib.sha256(json.dumps(commission.get("demand_selection") or {},
+                sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            commission["topic_lineage"] = {
+                "locked": True, "selected_at": datetime.now(timezone.utc).isoformat(),
+                "selection_sha256": selection_sha, "source": "vidiq_plus_planexium_channel_history",
+                "requested_topic": None,
+            }
         _write(commission_path, commission)
     if job.get("id"):
         from openjarvis.one_agents import runtime
@@ -674,6 +771,8 @@ def run_job(job: dict) -> dict:
              if not script_sealed and draft_path.is_file() and draft_path.stat().st_size else None)
     result = bound_pipeline(context, {**config, "_agent_job_id": job.get("id"),
         "_production_build": {"pipeline": BUILD_SHA, "adapters": ADAPTER_BUILD}}).produce(commission, plan=draft)
+    result["selected_topic"] = commission.get("topic")
+    result["topic_lineage"] = commission.get("topic_lineage")
     if result.get("production_complete") and requested_commission["mission_id"] != context.mission_id:
         result["deferred_commission"] = requested_commission
     return result

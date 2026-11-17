@@ -201,7 +201,7 @@ class ProductionServices:
         its contract accepts prompt/output and returns a downloaded local path.
         Failure remains failure: no Sonia portrait or local portrait fallback.
         """
-        from openjarvis.one_agents.thumbnail_compose import adaptive_science_accent, compose
+        from openjarvis.one_agents.thumbnail_compose import compose
 
         channel = self.context.channel
         channel.validate_record(package)
@@ -214,12 +214,12 @@ class ProductionServices:
             raise ValueError("Original thumbnail cannot carry portrait inputs")
         chosen = spec["variants"][variant]
         if channel.brand == "planexium":
-            # Science episodes deliberately rotate composition systems.  A
-            # fixed left hook plus green last word made PLANEXIUM visually
-            # indistinguishable from YATRA despite having no host portrait.
+            # Concepts may rotate hero composition, but the channel must still
+            # look like one publication in the Home grid. Keep typography and
+            # cyan identity stable; subject, crop and hero side supply variety.
             text_side = str(chosen.get("text_side") or (("left", "right", "left")[variant % 3]))
-            typography = str(chosen.get("typography") or (("panel", "minimal", "outline")[variant % 3]))
-            vertical_anchor = str(chosen.get("vertical_anchor") or (("top", "adaptive", "bottom")[variant % 3]))
+            typography = "minimal"
+            vertical_anchor = "adaptive"
         else:
             text_side, typography, vertical_anchor = "left", "outline", "bottom"
         from openjarvis.one_agents.youtube_seo import ORIGINAL_THUMBNAIL_PROMPT, PLANEXIUM_THUMBNAIL_PROMPT
@@ -244,6 +244,10 @@ class ProductionServices:
             prompt += (f"\nLAYOUT CONTRACT: reserve the {text_side.upper()} side as the empty low-detail headline "
                        f"lane. Use a {typography} editorial hierarchy with the story phenomenon occupying the "
                        "opposite side or centre. Do not default to a host-style travel thumbnail.")
+            prompt += ("\nPLANEXIUM FAMILY CONTRACT: dark navy/black low-detail headline lane, one dominant "
+                       "factual science visual, clean cinematic contrast, and no boxed label, collage, random "
+                       "typography, logo imitation or generic cosmic wallpaper. Exact white/cyan lettering is "
+                       "added later by the compositor.")
         folder = self.context.artifact(f"thumbnail/variant-{variant + 1}")
         folder.mkdir(parents=True, exist_ok=True)
         generated = generate(prompt=prompt, output=folder / "base.png", brand=channel.brand)
@@ -258,18 +262,8 @@ class ProductionServices:
         # as "METALLICITY" fail only after the expensive provider image had
         # completed.
         accent = tuple(chosen.get("accent_colour", [255, 214, 0]))
-        if channel.brand == "planexium" and "accent_colour" not in chosen:
-            recent = []
-            media_root = self.context.media_root / channel.brand
-            for old_receipt in sorted(media_root.glob("daily-*/thumbnail/variant-*/receipt.json"), reverse=True)[:6]:
-                try:
-                    stored = json.loads(old_receipt.read_text(encoding="utf-8"))
-                    colour = stored.get("qc", {}).get("accent_colour")
-                    if isinstance(colour, list) and len(colour) == 3:
-                        recent.append(tuple(int(value) for value in colour))
-                except (OSError, ValueError, TypeError):
-                    continue
-            accent = adaptive_science_accent(base, recent, side=text_side)
+        if channel.brand == "planexium":
+            accent = (30, 221, 255)
         receipt = compose(base, chosen["text"], folder / "final.png",
                           primary=tuple(chosen.get("primary_colour", [255, 255, 255])),
                           accent=accent,
@@ -354,7 +348,10 @@ class ProductionServices:
             diversity=check_thumbnail_diversity([row['path'] for row in results])
             for row in results:
                 row['preupload_score'].update(scale='internal_design_readiness_0_100',score_purpose='design_readiness_only',not_actual_ctr=True)
-        winner = max(results, key=lambda row: row["preupload_score"]["score"])
+        # For authored PLANEXIUM concepts, the editorial first choice carries
+        # the story promise.  A layout/readability score is a QC signal, not a
+        # proxy for audience CTR, so it must not silently rewrite that choice.
+        winner = results[0] if authored else max(results, key=lambda row: row["preupload_score"]["score"])
         final = self.context.artifact("thumbnail/final" + Path(winner["path"]).suffix)
         shutil.copy2(winner["path"], final)
         result = {"ok": True, "path": str(final), "brand": self.context.channel.brand,
@@ -362,7 +359,7 @@ class ProductionServices:
                   "portrait_used": False, "generator": "chatgpt_image_generation",
                   "selection": "highest QC-passed transparent pre-upload score; stable variant-order tie-break; not actual CTR"}
         if authored:
-            result.update(selection='highest design-readiness score among QC-passed distinct concepts; provisional, not an audience winner',
+            result.update(selection='editorial first choice among QC-passed distinct concepts; provisional, not an audience winner',
                           winner_status='provisional_editorial_default', audience_winner=None,
                           internal_score_role='design_readiness_only', image_diversity=diversity,
                           measurement_plan=package['thumbnail_strategy']['measurement_plan'])
