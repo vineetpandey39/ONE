@@ -205,6 +205,21 @@ class LaoDraft:
                 and re.search(r'within \d+ ms', error) is not None
                 and not any(word in error.casefold() for word in ('authentication','payment','sign in')))
 
+    def recovered_capacity_failure(self, receipt: Path, output_root: Path) -> bool:
+        """Permit one separate-receipt retry after ENOSPC is actually repaired."""
+        if not receipt.is_file():
+            return False
+        saved = json.loads(receipt.read_text(encoding="utf-8"))
+        error = str(saved.get("provider_error") or "").casefold()
+        if saved.get("terminal_status") != "Failed":
+            return False
+        if not ("no space left on device" in error or "errno 28" in error):
+            return False
+        try:
+            return shutil.disk_usage(output_root).free >= 2 * 1024 ** 3
+        except OSError:
+            return False
+
     def artifact(self, outputs: dict, job_id: str, filename: str) -> Path:
         # Reuse the same artifact lookup as current Sonia production. Never
         # inspect unrelated browser profiles or credential files.
@@ -1244,6 +1259,16 @@ class EnvatoAdapter:
                             # unverified asset or retry an active transfer.
                             retry_receipt = receipt.with_name(receipt.stem + '-download-retry.json')
                             out, job = self.draft.run('planexium-envato', asset_steps, inputs, retry_receipt, timeout=10800)
+                            query_positions[query] = candidate
+                            break
+                        if getattr(self.draft, "recovered_capacity_failure",
+                                   lambda _receipt, _root: False)(receipt, Path(output_root)):
+                            # Keep the terminal ENOSPC receipt immutable. The
+                            # repaired-capacity attempt has its own audit trail
+                            # and is bounded to one job for this candidate.
+                            retry_receipt = receipt.with_name(receipt.stem + "-capacity-retry.json")
+                            out, job = self.draft.run("planexium-envato", asset_steps, inputs,
+                                                      retry_receipt, timeout=10800)
                             query_positions[query] = candidate
                             break
                         if getattr(self.draft, "transient_pre_download_failure", lambda _receipt: False)(receipt):
