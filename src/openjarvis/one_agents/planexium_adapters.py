@@ -945,6 +945,11 @@ def stock_context_matches(request, metadata):
             r"\b(?:it\s+)?(?:can|could)\s+(?:also\s+)?be\s+used\b[^.!?]*(?:[.!?]|$)",
             " ", depicted_description,
         )
+        depicted_description = re.sub(
+            r"\b(?:this\s+)?(?:versatile\s+)?(?:visual\s+element\s+)?"
+            r"can\s+enhance\b[^.!?]*(?:[.!?]|$)",
+            " ", depicted_description,
+        )
     text = " ".join((title_tags_text, depicted_description))
     blocked = ["fantasy", "surreal", "alien", *request.get("blocked_keywords", [])]
     # Catalogue prose uses "alien landscape" for lifeless Mars terrain.
