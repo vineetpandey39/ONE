@@ -32,6 +32,22 @@ PIPELINE_LABELS = {
     'Illustrative young-star environment; protostar accretion disk not directly shown',
     'Illustrative energized gas around a star; stellar wind not directly shown',
     'Illustrative moving nebular gas; stellar outflow not directly shown',
+    'Illustrative meteorite specimen; carbonaceous composition not visually verified',
+    'Illustrative metallic asteroid surface; not a recovered meteorite specimen',
+    'Illustrative stony asteroid surface; not a recovered meteorite specimen',
+    'Illustrative asteroid impact/collision animation',
+    'Illustrative binary-asteroid pair animation',
+    'Illustrative laboratory rock-sample analysis; meteorite origin not visually verified',
+    'Illustrative laboratory mineral/rock sample analysis; meteorite origin not visually verified',
+}
+
+PIPELINE_LABEL_ALIASES = {
+    # v35 broadened the verifiable object from literal rock to mineral/rock
+    # sample. Already accepted v33 footage retained the same scientific
+    # limitation with the older wording; accept only that exact prior label.
+    'Illustrative laboratory mineral/rock sample analysis; meteorite origin not visually verified': {
+        'Illustrative laboratory rock-sample analysis; meteorite origin not visually verified',
+    },
 }
 
 
@@ -59,7 +75,10 @@ def bind_pipeline_context(root, plan, stock):
         brief = concrete_stock_brief(plan['stock_requests'][index])
         identity = fingerprint(brief)
         scenes = {int(n) for n, indices in plan['scene_assets'].items() if index in indices}
-        if (label not in PIPELINE_LABELS or brief.get('contextual_label') != label
+        expected_label = brief.get('contextual_label')
+        label_matches = (label == expected_label
+                         or label in PIPELINE_LABEL_ALIASES.get(expected_label, set()))
+        if (label not in PIPELINE_LABELS or not label_matches
                 or not scenes or not scenes.issubset(approved.get(identity, set()))
                 or not all(science['scenes'][n-1].get('illustrative') is True for n in scenes)
                 or hashlib.sha256(Path(asset['path']).read_bytes()).hexdigest() != asset['sha256']):
