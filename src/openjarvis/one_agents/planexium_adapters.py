@@ -16,11 +16,11 @@ from pathlib import Path
 
 from openjarvis.one_agents.youtube_production import resource_lease
 
-# v33 adds the labelled laboratory rock-sample analogue for meteorite briefs.
+# v34 adds a visible two-asteroid formulation for sparse binary-orbit briefs.
 # The namespace bump prevents an unfinished failed receipt from being attached
 # to the materially different verified fallback query. Accepted acquired
 # checkpoints remain reusable; only unfinished searches get new jobs.
-ENVATO_RECEIPT_REVISION = "v33"
+ENVATO_RECEIPT_REVISION = "v34"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -882,6 +882,15 @@ def concrete_stock_brief(request):
         request.update(
             semantic_fallback_query="asteroid impact debris animation",
             contextual_label="Illustrative asteroid impact/collision animation",
+        )
+    elif subject == "asteroid" and "binary" in query and "orbit" in query:
+        # Stock catalogues often describe the independently visible system as
+        # two asteroids orbiting each other instead of using the scientific
+        # class name "binary asteroid". Preserve both bodies and their orbital
+        # relationship; never weaken this coverage shot to one generic rock.
+        request.update(
+            semantic_fallback_query="two asteroids orbiting each other animation",
+            contextual_label="Illustrative binary-asteroid pair animation",
         )
     if "astronaut" in request["query"].casefold():
         request["blocked_keywords"] += ["costume", "comedy", "humor", "urban", "city", "sneakers"]
