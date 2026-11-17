@@ -201,7 +201,8 @@ def select_topic(root, recent, *, client=None, synthesize=None, read=space_resea
         selection['current_demand_support'] = supports[:5]
     except (ValueError,KeyError,StopIteration,TypeError):
         raise ResearchUnavailable('Science demand selection invalid; no paid production started') from None
-    keyword = client.call('vidiq_keyword_research', {'mode':'research','keyword':selection['search_keyword'],'country':'US','limit':8})
+    keyword = client.call('vidiq_keyword_research', {
+        'mode':'research','keyword':selection['search_keyword'],'country':'US','limit':8}, reserved=True)
     (root/'selected-keyword.json').write_text(json.dumps(keyword,indent=2),encoding='utf-8')
     if 'No keyword data was found' in evidence_text(keyword):
         raise ResearchUnavailable('Selected science keyword has no demand data; preserve research for reselection')
