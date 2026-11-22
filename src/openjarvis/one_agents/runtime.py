@@ -2360,6 +2360,22 @@ def _sonia_fallback_context(request_payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _vista_unique_recent(request_payload: dict[str, Any], recent: list[str]) -> list[str]:
+    """Put explicit failed-topic exclusions in every VISTA uniqueness gate.
+
+    Fallback exclusions were previously added only to ``prior`` for scored
+    news selection. The public-search synthesis path compared its proposal
+    against ``recent_stories`` instead, so it could immediately recommission
+    the exact topic whose footage had just failed.
+    """
+    excluded = [
+        str(value).strip()
+        for value in request_payload.get("excluded_topics") or []
+        if str(value).strip()
+    ] if request_payload.get("stage") == "topic_fallback" else []
+    return list(dict.fromkeys([*excluded, *recent]))
+
+
 def _sonia_recent_topics(prior: list[str], *, limit: int = 25,
                          include_shorts: bool = False,
                          within_days: float | None = None) -> list[str]:
@@ -9509,6 +9525,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
             " - ".join(filter(None, (row["headline"], row["destination"])))
             for row in vista_commissions
         ] + prior
+    vista_unique_recent = _vista_unique_recent(request_payload, recent_stories) if is_vista_short else []
 
     grounded_angle = task.strip()
     evidence_path = ""
@@ -9542,7 +9559,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                     output_dir=_home() / "agent_outputs",
                     unique=lambda brief, note, candidate: _sonia_unique_evergreen_brief(
                         brief, note, prompt=candidate["prompt"],
-                        evidence=candidate["synthesis_evidence"], recent=recent_stories),
+                        evidence=candidate["synthesis_evidence"], recent=vista_unique_recent),
                     progress=lambda detail: stages.set_stage(head_id, stages.RESEARCHING, detail),
                     keyword=str(request_payload.get("research_keyword") or ""))
             else:
@@ -9581,7 +9598,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                     "or imply Sonia personally visited. End with COMMISSION: YES or NO. "
                     "The line 'Destination/Topic: <one country or city>' is mandatory. "
                     "The line 'Chosen headline: <the single evidence-backed idea selected>' is mandatory. "
-                    f"Avoid prior topics: {json.dumps((recent_stories[:40] if is_vista_short else prior[:15]), ensure_ascii=False)}")
+                    f"Avoid prior topics: {json.dumps((vista_unique_recent[:40] if is_vista_short else prior[:15]), ensure_ascii=False)}")
                 synthesis_evidence = {"eligible": eligible, "catalog_evidence": [],
                                       "signal_policy": "Google Trends and YouTube public-search metadata are "
                                                        "primary discovery. News is context only. YouTube views are "
@@ -9632,7 +9649,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                     note,
                     prompt=synthesis_prompt,
                     evidence=synthesis_evidence,
-                    recent=recent_stories if is_vista_short else prior,
+                    recent=vista_unique_recent if is_vista_short else prior,
                 )
                 if reselection_attempts:
                     output_dir = _home() / "agent_outputs"
