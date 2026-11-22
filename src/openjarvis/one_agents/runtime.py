@@ -7564,6 +7564,64 @@ def _load_vista_runner() -> Any:
     return runner
 
 
+def _vista_schedule_origin(job: dict[str, Any], payload: dict[str, Any],
+                           is_vista_short: bool = True) -> str:
+    """Return the scheduler-fired HELIOS job that owns a VISTA fallback.
+
+    A fresh HELIOS research job is allowed to replace a topic whose verified
+    footage is unavailable, but it receives no new publication authority. The
+    original trigger receipt remains the only authority carried downstream.
+    """
+    current = str(job.get("id") or "")
+    if is_vista_short and payload.get("stage") == "topic_fallback":
+        fallback_of = str(payload.get("fallback_of") or "").strip()
+        if fallback_of:
+            return fallback_of
+    return current
+
+
+def _vista_footage_topic_fallback(job: dict[str, Any], payload: dict[str, Any],
+                                  reason: str) -> dict[str, Any]:
+    """Commission one secondary VISTA topic after both providers fail truthfully."""
+    attempt = int(payload.get("topic_attempt") or 1)
+    if attempt >= 2:
+        raise RuntimeError("VISTA secondary topic also lacks verified footage; bounded fallback exhausted")
+    spec = payload.get("production_spec") if isinstance(payload.get("production_spec"), dict) else {}
+    story = spec.get("story") if isinstance(spec.get("story"), dict) else {}
+    excluded: list[str] = []
+    for value in [*(payload.get("excluded_topics") or []), story.get("headline"), story.get("destination")]:
+        value = str(value or "").strip()
+        if value and value not in excluded:
+            excluded.append(value)
+    slot = str(payload.get("slot") or "")
+    lane = str(payload.get("lane") or "daily_peak")
+    origin = str(payload.get("origin_job") or "").strip()
+    if slot not in {"0900", "1300", "1800"} or not origin:
+        raise RuntimeError("VISTA footage fallback is missing its original scheduled slot receipt")
+    fallback = enqueue_job(
+        "helios",
+        json.dumps({
+            "brand": "sonia_travel_vlogs",
+            "request": f"[vista-short slot={slot} lane={lane}] Select and complete one fresh secondary topic because the primary topic has no verified footage.",
+            "stage": "topic_fallback",
+            "topic_attempt": attempt + 1,
+            "fallback_of": origin,
+            "failed_vista_job": str(job.get("id") or ""),
+            "excluded_topics": excluded,
+            "reason": reason[:1200],
+        }, ensure_ascii=False),
+        mode="execute",
+        tier="fast",
+        dedupe_key=f"vista:{origin}:{slot}:topic-fallback:{attempt + 1}",
+    )
+    return {
+        "agent": "VISTA", "status": "topic_fallback", "production_complete": False,
+        "reason": "Primary topic lacked verified footage on Envato and Pexels; HELIOS is researching the secondary topic",
+        "excluded_topics": excluded,
+        "handed_to": {"agent": "HELIOS", "job_id": fallback["id"]},
+    }
+
+
 def _run_vista(job: dict[str, Any]) -> dict[str, Any]:
     """Run one HELIOS-researched Short through media, then hand its checkpoint to ARES."""
     payload = _json_task(job)
@@ -7604,8 +7662,13 @@ def _run_vista(job: dict[str, Any]) -> dict[str, Any]:
         ):
             stages.set_stage("vista", stages.EXECUTING,
                              "Producing with VISTA's isolated browser and Envato lane")
-            result = runner.run({**payload, "publish_authorized": True, "trigger_id": trigger_id,
-                                 "_writer": _vista_chatgpt})
+            try:
+                result = runner.run({**payload, "publish_authorized": True, "trigger_id": trigger_id,
+                                     "_writer": _vista_chatgpt})
+            except Exception as exc:
+                if type(exc).__name__ == "VistaFootageUnavailable":
+                    return _vista_footage_topic_fallback(job, payload, str(exc))
+                raise
         handoff = result.get("handoff") if isinstance(result, dict) else None
         if (not isinstance(result, dict) or result.get("status") != "thumbnail_ready"
                 or not isinstance(handoff, (dict, str)) or not handoff):
@@ -9757,9 +9820,10 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
     # through the walking/briefing stages so the building knows which desk
     # to walk to -- see its docstring for why this can't just be a bare
     # set_stage/sleep/enqueue sequence per floor.
+    receipt_origin = _vista_schedule_origin(job, request_payload, is_vista_short)
     if routine_publish_authorized:
         routine_publish_authorized = _job_fired_by_trigger(
-            routine_trigger_id, str(job.get("id") or ""))
+            routine_trigger_id, receipt_origin)
         if not routine_publish_authorized:
             print(f"[one-agents] {job.get('id')} names the {display} schedule but has no fire receipt; "
                   "the worker is briefed without publish authority", flush=True)
@@ -9776,7 +9840,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                         **(_sonia_fallback_context(request_payload)
                            if brand["slug"] == "sonia_travel_vlogs" else {}),
                         **({"language": video_language} if video_language else {}),
-                        "origin_job": job["id"], "evidence_path": evidence_path,
+                        "origin_job": receipt_origin, "evidence_path": evidence_path,
                         "evidence_count": evidence_count,
                         **({"content_format": "youtube_short", "slot": vista_match.group(1),
                             "lane": vista_match.group(2),
