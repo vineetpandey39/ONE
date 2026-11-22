@@ -12,7 +12,7 @@ BRAND='shloka_by_shloka'
 CHANNEL='UCBT4mvZShb768lDFc6NcUvw'
 ROLES={'naad':'Production coordination and package QA','raag':'Lyrics, music direction and existing audio audit','alankaar':'Consistent imagery, local animation, captions and Shorts'}
 ROLES.update(ares='Shloka Unicode-safe metadata',lyra='Shloka verified local package')
-ROLES['echo']='Channel-bound publisher preflight and read-only channel counters'
+ROLES['echo']='Channel-bound publisher preflight, private delivery and read-only channel counters'
 
 def _run_local(job):
     payload=json.loads(job.get('task') or '{}')
@@ -30,7 +30,7 @@ def _run_local(job):
     allowed['alankaar'].add('prepare_draft')
     allowed['alankaar'].add('reframe_shorts')
     allowed.update(ares={'metadata'},lyra={'assemble'})
-    allowed['echo']={'publisher_preflight','analytics'}
+    allowed['echo']={'publisher_preflight','private_upload','analytics'}
     allowed['raag'].add('lyric_audit')
     if action not in allowed.get(agent,set()):
         raise ValueError('Action not assigned to this seat; music spending and publishing require separate approval')
@@ -42,9 +42,11 @@ def _run_local(job):
             result={'status':'BLOCKED' if hold and hold.get('active') is not False else 'READY',
                     'release_hold':hold,'youtube_changes':remote_status(root),
                     'stages':journal.data.get('stages',{}),'render_qa':read(root/'edit/unbranded/qa.json') if (root/'edit/unbranded/qa.json').is_file() else None}
-        elif action in {'publisher_preflight','analytics'}:
-            from .publishing import preflight,analytics
-            result=(preflight if action=='publisher_preflight' else analytics)(root)
+        elif action in {'publisher_preflight','private_upload','analytics'}:
+            from .publishing import preflight,upload_private,analytics
+            if action=='publisher_preflight':result=preflight(root)
+            elif action=='private_upload':result=upload_private(root,private_upload_authorized=payload.get('private_upload_authorized') is True)
+            else:result=analytics(root)
         elif action in {'prepare_edit','prepare_draft'}:
             from .editorial import prepare
             result=prepare(root,draft=action=='prepare_draft')
@@ -217,7 +219,7 @@ def head_job(job,enqueue):
         return commission_daily(job,enqueue)
     payload=bound_payload(job)
     action=payload.get('action','status')
-    seat={'shorts_plan':'raag','shorts_qa':'naad','scripture':'raag','audio_audit':'raag','render':'alankaar','proof':'alankaar','short_labels':'alankaar','status':'naad','audit':'naad','verify_pipeline':'naad'}.get(action)
+    seat={'shorts_plan':'raag','shorts_qa':'naad','scripture':'raag','audio_audit':'raag','render':'alankaar','proof':'alankaar','short_labels':'alankaar','status':'naad','audit':'naad','verify_pipeline':'naad','private_upload':'echo'}.get(action)
     seat=seat or {'lyric_audit':'raag','publisher_preflight':'echo','analytics':'echo','prepare_edit':'alankaar','prepare_draft':'alankaar','reframe_shorts':'alankaar','finish_pipeline':'raag','thumbnails':'alankaar','metadata':'ares','assemble':'lyra','package_pipeline':'alankaar'}.get(action)
     if not seat:raise ValueError('Unknown devotional action')
     follow=handoff(job,payload,seat,enqueue)

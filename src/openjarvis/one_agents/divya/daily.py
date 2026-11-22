@@ -311,7 +311,8 @@ def create_tulsi_vivah_mission(root: Path, *, day: date) -> dict:
         "artifact_roots": ["E:/ONE-Suite/lao-robot/worker"],
         "edit_tools": "C:/Users/pc/Documents/LAO/yatra-edit",
         "uploader_script": "C:/Users/pc/Documents/LAO/yatra-upload/youtube_api_upload.py",
-        "voice_overrides": {}, "credential_asset": None, "channel_id": CHANNEL,
+        "voice_overrides": {}, "credential_asset": None,
+        "oauth_refresh_file": "C:/Users/pc/.one/credentials/youtube/shloka-by-shloka/oauth-refresh.json", "channel_id": CHANNEL,
         "autonomy_policy_path": "E:/ONE-Suite/one-company/floors/floor_12_youtube_studio/shloka_autonomy.json",
         "daily_schedule": {"enabled": False},
     }
@@ -427,7 +428,8 @@ def create_ravi_pradosh_shiva_mission(root: Path, *, day: date) -> dict:
         "artifact_roots": ["E:/ONE-Suite/lao-robot/worker"],
         "edit_tools": "C:/Users/pc/Documents/LAO/yatra-edit",
         "uploader_script": "C:/Users/pc/Documents/LAO/yatra-upload/youtube_api_upload.py",
-        "voice_overrides": {}, "credential_asset": None, "channel_id": CHANNEL,
+        "voice_overrides": {}, "credential_asset": None,
+        "oauth_refresh_file": "C:/Users/pc/.one/credentials/youtube/shloka-by-shloka/oauth-refresh.json", "channel_id": CHANNEL,
         "autonomy_policy_path": "E:/ONE-Suite/one-company/floors/floor_12_youtube_studio/shloka_autonomy.json",
         "daily_schedule": {"enabled": False},
     }
@@ -555,7 +557,8 @@ def create_daily_mission(root: Path, *, day: date, deity: str = "Lakshmi") -> di
         "artifact_roots": ["E:/ONE-Suite/lao-robot/worker"],
         "edit_tools": "C:/Users/pc/Documents/LAO/yatra-edit",
         "uploader_script": "C:/Users/pc/Documents/LAO/yatra-upload/youtube_api_upload.py",
-        "voice_overrides": {}, "credential_asset": None, "channel_id": CHANNEL,
+        "voice_overrides": {}, "credential_asset": None,
+        "oauth_refresh_file": "C:/Users/pc/.one/credentials/youtube/shloka-by-shloka/oauth-refresh.json", "channel_id": CHANNEL,
         "autonomy_policy_path": "E:/ONE-Suite/one-company/floors/floor_12_youtube_studio/shloka_autonomy.json",
         "daily_schedule": {"enabled": False},
     }
