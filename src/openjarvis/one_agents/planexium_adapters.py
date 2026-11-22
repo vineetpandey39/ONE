@@ -1012,7 +1012,7 @@ def stock_context_matches(request, metadata):
         # Remove only explicit suitability clauses; an explosion stated in the
         # descriptive sentences remains a contradiction.
         depicted_description = re.sub(
-            r"\b(?:ideal|perfect|suitable)\s+for\b[^.!?]*(?:[.!?]|$)",
+            r"\b(?:ideal|perfect|suitable|excellent)\s+for\b[^.!?]*(?:[.!?]|$)",
             " ", depicted_description,
         )
         depicted_description = re.sub(
