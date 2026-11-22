@@ -213,7 +213,7 @@ RAVI_PRADOSH_SHIVA_LYRICS = [
 
 RAVI_PRADOSH_SHIVA_SCENES = [
     "Canonical Lord Shiva in serene meditation above the Ganga at Kashi during luminous blue hour, Vishwanath temple silhouettes and antique-gold lamps.",
-    "Close devotional portrait of Shiva, compassionate eyes, crescent moon, flowing matted hair and subtle blue-gold rim light.",
+    "Close devotional portrait of clean-shaven Shiva, compassionate eyes, smooth face with no beard or moustache, crescent moon, flowing matted hair and subtle blue-gold rim light.",
     "Wide aerial view of Kashi ghats at dawn, hundreds of diyas, soft mist and the sacred river reflecting indigo and gold.",
     "Shiva standing calmly beside the Ganga, trident planted nearby, temple spires rising through morning fog.",
     "Ancient Vishwanath-inspired temple corridor with brass lamps, marigolds and a distant respectful Shiva presence.",
@@ -225,7 +225,7 @@ RAVI_PRADOSH_SHIVA_SCENES = [
     "Nandi seated faithfully before a luminous Shiva temple doorway, symmetrical lamps and drifting incense fog.",
     "Wide Kashi alley at early morning with flower stalls, bells and a glowing temple entrance, no modern signage.",
     "Shiva and Parvati seated together respectfully on Kailash, balanced composition and warm family devotion.",
-    "Close devotional portrait of Shiva with soft ash markings, rudraksha beads and natural detailed skin texture.",
+    "Close devotional portrait of clean-shaven Shiva with soft ash markings, rudraksha beads, smooth jaw and natural detailed skin texture, no beard or moustache.",
     "Bel leaves and a copper water vessel arranged before a Shiva lingam, hands of devotees natural and anatomically correct.",
     "Cosmic Shiva silhouette beneath a star-filled indigo sky, subtle nebula and a radiant crescent moon.",
     "Temple bells in foreground with Shiva visible through a carved stone arch, volumetric morning rays and floating dust.",
@@ -376,7 +376,8 @@ def create_ravi_pradosh_shiva_mission(root: Path, *, day: date) -> dict:
         })
     bible = (
         "Premium cinematic Kashi Vishwanath Shiva devotional artwork with one consistent canonical Shiva identity. "
-        "Compassionate mature face, crescent moon, flowing matted hair, rudraksha, subtle blue throat, trident and "
+        "Compassionate youthful-serene clean-shaven face with absolutely no beard, moustache, stubble or facial hair; "
+        "crescent moon, flowing matted hair, rudraksha, subtle blue throat, trident and "
         "damaru only where compositionally appropriate. Sapphire blue, antique gold and warm diya palette, natural "
         "faces and anatomically correct hands. Lord Shiva never worships himself or performs his own puja. No text, "
         "logo, watermark, collage, duplicate deity, malformed fingers, cropped sacred objects or modern brand signs. "
