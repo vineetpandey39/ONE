@@ -395,7 +395,7 @@ def create_ravi_pradosh_shiva_mission(root: Path, *, day: date) -> dict:
         "schema": "one.divya-mission/v2", "brand": BRAND, "agent_id": "naad",
         "head_agent": "helios", "floor_id": "12", "mission_id": mission_id,
         "production_date": day.isoformat(), "deity": "Shiva", "preset": "SHIVA_COSMIC",
-        "vocal_style": "powerful_male_devotional", "composition_type": "original_bhajan",
+        "vocal_style": "powerful_male", "composition_type": "original_bhajan",
         "music_model": "music_v2_5", "title": title, "display_title": "प्रदोष की बेला में शिव",
         "estimated_music_credits": 7200, "lyrics": RAVI_PRADOSH_SHIVA_LYRICS,
         "strict_lyric_plan": True,
