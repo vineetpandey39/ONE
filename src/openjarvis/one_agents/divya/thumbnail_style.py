@@ -78,9 +78,9 @@ def render_thumbnails(config, art_path, out, title_lines, subtitle, hooks):
             title_size=130 if long_title else 166
             portrait=f'''<html lang="hi"><meta charset="utf-8"><style>{common}
             html,body{{width:1080px;height:1920px}}
-            .art{{position:absolute;inset:0;background:url('{art}') 8% top/auto 1480px no-repeat}}
-            .shade{{position:absolute;inset:0;background:linear-gradient(0deg,#03284e 0%,#03284ef5 20%,transparent 55%)}}
-            .part{{position:absolute;left:90px;top:460px;padding:16px 35px;border:3px solid #ffdc62;border-radius:20px;background:linear-gradient(120deg,#7822b7,#bb216c);font:900 72px 'Segoe UI';color:#ffe475}}
+            .art{{position:absolute;inset:0;background:url('{art}') 30% top/auto 1920px no-repeat}}
+            .shade{{position:absolute;inset:0;background:linear-gradient(0deg,#03284ef2 0%,#03284ecc 27%,transparent 64%)}}
+            .part{{position:absolute;left:90px;top:460px;padding:16px 35px;border:3px solid #ffdc62;border-radius:20px;background:linear-gradient(120deg,#7822b7,#bb216c);font-family:'Segoe UI';font-size:72px;font-weight:900;line-height:1.2;color:#ffe475}}
             .copy{{position:absolute;left:45px;right:45px;top:{copy_top}px;text-align:center}}
             .title{{font-size:{title_size}px;line-height:1.3}}.hook{{font:600 48px 'Nirmala UI';color:white;line-height:1.6;margin-top:24px}}
             .brand{{font-size:26px;margin-top:50px}}
