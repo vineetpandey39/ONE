@@ -180,8 +180,22 @@ def frame_sequence(fn,start,count):
         for offset in range(0,count,12):
             yield from pool.map(fn,(start+n/30 for n in range(offset,min(count,offset+12))))
 
+_NVENC_AVAILABLE=None
+
+def _encoder_args():
+    """Use installed NVENC when healthy, otherwise retain a local CPU path."""
+    global _NVENC_AVAILABLE
+    if _NVENC_AVAILABLE is None:
+        probe=['ffmpeg','-y','-v','error','-f','lavfi','-i','color=s=64x64:d=0.04',
+               '-frames:v','1','-c:v','h264_nvenc','-f','null','-']
+        _NVENC_AVAILABLE=subprocess.run(probe,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+                                        env=_ffmpeg_env(probe)).returncode==0
+    if _NVENC_AVAILABLE:
+        return ['-c:v','h264_nvenc','-preset','p5','-cq','19','-b:v','0']
+    return ['-c:v','libx264','-preset','fast','-crf','19']
+
 def encode_frames(target,width,height,frames,seconds,log):
-    cmd=['ffmpeg','-y','-v','error','-f','rawvideo','-pix_fmt','bgr24','-s',f'{width}x{height}','-r','30','-i','-','-an','-t',f'{seconds:.6f}','-c:v','h264_nvenc','-preset','p5','-cq','19','-b:v','0','-pix_fmt','yuv420p','-movflags','+faststart',str(target)]
+    cmd=['ffmpeg','-y','-v','error','-f','rawvideo','-pix_fmt','bgr24','-s',f'{width}x{height}','-r','30','-i','-','-an','-t',f'{seconds:.6f}',*_encoder_args(),'-pix_fmt','yuv420p','-movflags','+faststart',str(target)]
     with log.open('a') as err:
         proc=subprocess.Popen(cmd,stdin=subprocess.PIPE,stderr=err,env=_ffmpeg_env(cmd))
         try:
