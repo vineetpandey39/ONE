@@ -108,6 +108,53 @@ def upload_private(root, *, private_upload_authorized=False):
     write(root/'publishing/private-upload-receipt.json',receipt)
     return receipt
 
+
+def release_public(root, *, public_release_authorized=False):
+    """Idempotently release only the three hash-bound private review uploads."""
+    root=Path(root)
+    if not public_release_authorized:
+        raise Blocked('Explicit public release authorization is required')
+    receipt=read(root/'publishing/private-upload-receipt.json')
+    items=receipt.get('items') or []
+    if receipt.get('status')!='UPLOADED_PRIVATE' or len(items)!=3:
+        raise Blocked('Complete three-item private upload receipt is required')
+    expected={'long','short-1','short-2'}
+    if {item.get('id') for item in items}!=expected:
+        raise Blocked('Private receipt does not identify the expected long video and two Shorts')
+    module,access,scopes,channel=client(root)
+    force_ssl='https://www.googleapis.com/auth/youtube.force-ssl'
+    if channel.get('id')!=CHANNEL or force_ssl not in scopes:
+        raise Blocked('Public release needs the verified Shloka channel and youtube.force-ssl scope')
+    auth={'Authorization':'Bearer '+access};released=[]
+    for item in items:
+        video_id=item['video_id']
+        data=module._json('https://www.googleapis.com/youtube/v3/videos?part=snippet,status,processingDetails&id='+video_id,headers=auth)
+        current=(data.get('items') or [None])[0]
+        if not current or current.get('snippet',{}).get('channelId')!=CHANNEL:
+            raise Blocked(f'Public release target {video_id} is missing or belongs to another channel')
+        if current.get('processingDetails',{}).get('processingStatus')!='succeeded':
+            raise Blocked(f'Public release target {video_id} has not finished processing')
+        status=current.get('status') or {};before=status.get('privacyStatus')
+        if before not in {'private','public'}:
+            raise Blocked(f'Unexpected visibility for {video_id}: {before}')
+        if before!='public':
+            mutable={key:status[key] for key in ('license','embeddable','publicStatsViewable','selfDeclaredMadeForKids','containsSyntheticMedia') if key in status}
+            mutable['privacyStatus']='public'
+            module._json('https://www.googleapis.com/youtube/v3/videos?part=status',headers=auth,
+                         method='PUT',data={'id':video_id,'status':mutable})
+        verified=module._json('https://www.googleapis.com/youtube/v3/videos?part=snippet,status&id='+video_id,headers=auth)
+        actual=(verified.get('items') or [None])[0]
+        if (not actual or actual.get('snippet',{}).get('channelId')!=CHANNEL or
+                actual.get('status',{}).get('privacyStatus')!='public'):
+            raise Blocked(f'Public visibility verification failed for {video_id}')
+        released.append({'id':item['id'],'video_id':video_id,'visibility':'public',
+                         'url':f'https://youtu.be/{video_id}','channel_id':CHANNEL,
+                         'master_sha256':item['master_sha256']})
+    result={'status':'PUBLISHED_PUBLIC','channel_id':CHANNEL,'items':released,
+            'public_release_authorized':True,'additional_music_credits':0}
+    write(root/'publishing/public-release-receipt.json',result)
+    return result
+
 def preflight(root):
     from .release_quality import require_no_hold
     require_no_hold(root)
