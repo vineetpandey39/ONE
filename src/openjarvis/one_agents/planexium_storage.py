@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,12 +62,14 @@ def _eligible(mission: Path, *, now: datetime, minimum_age_seconds: int) -> bool
                 and any(str(key).startswith("caption_") for key in delivery))
 
 
-def sweep_finished_missions(root: Path, current_mission: str, *, minimum_age_seconds: int = 600) -> dict:
+def sweep_finished_missions(root: Path, current_mission: str, *, minimum_age_seconds: int = 600,
+                            segment_root: Path | None = None) -> dict:
     """Remove only reproducible media from older verified private missions."""
     root = Path(root).resolve()
     now = datetime.now(timezone.utc)
     freed = 0
     cleaned: list[str] = []
+    delivered_master_hashes: set[str] = set()
     if not root.is_dir():
         return {"freed_bytes": 0, "missions_cleaned": 0, "skipped": "mission root is unavailable"}
     for mission in sorted(root.glob("daily-*")):
@@ -74,6 +77,7 @@ def sweep_finished_missions(root: Path, current_mission: str, *, minimum_age_sec
                 or mission.parent.resolve() != root
                 or not _eligible(mission, now=now, minimum_age_seconds=minimum_age_seconds)):
             continue
+        delivered_master_hashes.add(_sha256(mission / "edit" / "master.mp4"))
         targets = [mission / "edit" / "cinematic", mission / "edit" / "picture.mp4",
                    mission / "edit" / "soundtrack.m4a", mission / "edit" / "music-bed.m4a"]
         before = 0
@@ -93,5 +97,20 @@ def sweep_finished_missions(root: Path, current_mission: str, *, minimum_age_sec
         if before:
             freed += before
             cleaned.append(mission.name)
+    segments_cleaned: list[str] = []
+    segment_root = Path(segment_root).resolve() if segment_root else None
+    if segment_root and segment_root.is_dir():
+        for directory in sorted(segment_root.iterdir()):
+            if (not directory.is_dir() or directory.parent.resolve() != segment_root
+                    or not re.fullmatch(r"[0-9a-f]{20}", directory.name)):
+                continue
+            resolved = directory / "resolve-master.mp4"
+            if not resolved.is_file() or _sha256(resolved) not in delivered_master_hashes:
+                continue
+            size = sum(path.stat().st_size for path in directory.rglob("*") if path.is_file())
+            shutil.rmtree(directory)
+            freed += size
+            segments_cleaned.append(directory.name)
     return {"freed_bytes": freed, "missions_cleaned": len(cleaned), "missions": cleaned,
+            "resolve_segments_cleaned": segments_cleaned,
             "preserved": ["master", "narration", "thumbnails", "metadata", "QC", "checkpoints", "JSON receipts"]}
