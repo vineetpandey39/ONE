@@ -437,10 +437,24 @@ def create_ravi_pradosh_shiva_mission(root: Path, *, day: date) -> dict:
     write(root / "channel-binding.json", {"brand": BRAND, "channel_id": CHANNEL, "mission_id": mission_id})
     write(root / "review-package/music-request.json", request)
     write(root / "review-package/metadata-brief.json", {
+        "keyword": "Pradosh Shiv Bhajan",
         "primary_keyword": "Pradosh Shiv Bhajan",
         "secondary_keywords": ["Kashi Vishwanath Bhajan", "Shiv Bhajan 2026", "Ravi Pradosh Vrat"],
         "description": "Original Hindi Shiva bhajan for Ravi Pradosh, Kashi Vishwanath devotion, prayer and meditation.",
         "tags": ["pradosh shiv bhajan", "प्रदोष शिव भजन", "kashi vishwanath bhajan", "shiv bhajan 2026", "ravi pradosh vrat", "mahadev bhajan", "har har mahadev"],
+    })
+    write(root / "review-package/thumbnail-brief.json", {
+        "art": "images-quality-v2/quality-18.png",
+        "title_lines": ["प्रदोष में", "शिव"],
+        "subtitle": "8 मिनट का काशी विश्वनाथ भजन",
+        "hooks": ["शिव-नाम सुना दो", "विश्वास जगा दो"],
+        "style": "SHLOKA_GOLDEN_BLUE_V1",
+        "composition": "Shiva on the left; clean sapphire-and-gold Kashi text-safe area on the right",
+        "ctr_rules": [
+            "large correct Hindi title", "no text over deity face or body",
+            "no line or banner behind text", "mobile readability at 320x180",
+            "single dominant subject", "no fake views or claims",
+        ],
     })
     write(root / "review-package/commission.json", {
         "duration_seconds": 480, "variants": 1, "paid_attempts_authorized": 0,
