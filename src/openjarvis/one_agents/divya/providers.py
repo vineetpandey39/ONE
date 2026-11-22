@@ -195,6 +195,19 @@ def generate_image(root, config, scene, reference=None):
     sidecar = target.with_suffix('.json')
     if target.is_file() and sidecar.is_file():
         saved = read(sidecar)
+        saved_request = dict(saved.get('request') or {})
+        if (context_url and 'context_url' not in saved_request
+                and saved.get('chat_url') == context_url):
+            # The first canonical image creates the single production chat.
+            # Once that URL is bound into config, reconcile the immutable first
+            # receipt instead of treating the context binding as a new image.
+            saved_request['context_url'] = context_url
+            if saved_request == request and saved.get('sha256') == digest(target):
+                saved['request'] = saved_request
+                saved['request_sha256'] = fingerprint(request)
+                write(sidecar, saved)
+                return {'files':[str(target),str(sidecar)],'reused':True,
+                        'context_reconciled':True}
         if saved['request_sha256'] == fingerprint(request) and saved['sha256'] == digest(target):
             return {'files':[str(target),str(sidecar)],'reused':True}
         raise Blocked('Existing image differs from request; use a new scene revision')
