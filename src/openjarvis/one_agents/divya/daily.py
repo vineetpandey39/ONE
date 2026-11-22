@@ -212,7 +212,7 @@ RAVI_PRADOSH_SHIVA_LYRICS = [
 
 
 RAVI_PRADOSH_SHIVA_SCENES = [
-    "Canonical Lord Shiva in serene meditation above the Ganga at Kashi during luminous blue hour, Vishwanath temple silhouettes and antique-gold lamps.",
+    "Medium waist-up portrait of canonical Lord Shiva in serene meditation above the Ganga at Kashi during luminous blue hour; frame ends above the hips so no knees, legs, feet or toes are visible; Vishwanath temple silhouettes and antique-gold lamps.",
     "Close devotional portrait of clean-shaven Shiva, compassionate eyes, smooth face with no beard or moustache, crescent moon, flowing matted hair and subtle blue-gold rim light.",
     "Wide aerial view of Kashi ghats at dawn, hundreds of diyas, soft mist and the sacred river reflecting indigo and gold.",
     "Shiva standing calmly beside the Ganga, trident planted nearby, temple spires rising through morning fog.",
@@ -379,7 +379,9 @@ def create_ravi_pradosh_shiva_mission(root: Path, *, day: date) -> dict:
         "Compassionate youthful-serene clean-shaven face with absolutely no beard, moustache, stubble or facial hair; "
         "crescent moon, flowing matted hair, rudraksha, subtle blue throat, trident and "
         "damaru only where compositionally appropriate. Sapphire blue, antique gold and warm diya palette, natural "
-        "faces and anatomically correct hands. Lord Shiva never worships himself or performs his own puja. No text, "
+        "faces and anatomically correct hands. Exactly two arms and two legs; no duplicated limbs, feet or toes, no "
+        "foot above a calf, and every visible lower limb must connect naturally from hip to knee to ankle to one foot. "
+        "Lord Shiva never worships himself or performs his own puja. No text, "
         "logo, watermark, collage, duplicate deity, malformed fingers, cropped sacred objects or modern brand signs. "
         "Each shot must be a genuinely distinct location, camera distance, pose and lighting setup. 16:9 landscape "
         "with safe 9:16 crop, cinematic depth, photoreal devotional illustration and controlled volumetric light. "
