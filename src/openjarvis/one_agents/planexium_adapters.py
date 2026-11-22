@@ -21,7 +21,7 @@ from openjarvis.one_agents.youtube_production import resource_lease
 # The namespace bump prevents an unfinished failed receipt from being attached
 # to the materially different verified fallback query. Accepted acquired
 # checkpoints remain reusable; only unfinished searches get new jobs.
-ENVATO_RECEIPT_REVISION = "v35"
+ENVATO_RECEIPT_REVISION = "v36"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -698,6 +698,13 @@ def concrete_stock_brief(request):
     request = {**request, "blocked_keywords": list(request.get("blocked_keywords", []))}
     subject = request["subject"].casefold().strip()
     query = request["query"].casefold()
+    if subject == "mineral" and query.strip() == "mineral specimens geology laboratory":
+        # Envato commonly describes visible geological specimens as "core
+        # samples".  Bind the independent laboratory context to that literal
+        # catalogue language instead of requiring the editorial synonym
+        # "specimens".  The mineral subject and all preview/contradiction
+        # gates remain mandatory.
+        request.update(query="mineral samples geology laboratory")
     if subject == 'auditorium' and query.strip() == 'houston science auditorium audience':
         # This commissioned opening explicitly imagines an audience cutaway;
         # it does not require a recording of the announced NASA homecoming.
