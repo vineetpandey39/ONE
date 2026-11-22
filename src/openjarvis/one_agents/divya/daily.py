@@ -444,7 +444,7 @@ def create_ravi_pradosh_shiva_mission(root: Path, *, day: date) -> dict:
         "tags": ["pradosh shiv bhajan", "प्रदोष शिव भजन", "kashi vishwanath bhajan", "shiv bhajan 2026", "ravi pradosh vrat", "mahadev bhajan", "har har mahadev"],
     })
     write(root / "review-package/thumbnail-brief.json", {
-        "art": "images-quality-v2/quality-18.png",
+        "art": "images-quality-v2/quality-24.png",
         "title_lines": ["प्रदोष में", "शिव"],
         "subtitle": "8 मिनट का काशी विश्वनाथ भजन",
         "hooks": ["शिव-नाम सुना दो", "विश्वास जगा दो"],
