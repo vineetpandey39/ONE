@@ -39,6 +39,7 @@ PIPELINE_LABELS = {
     'Illustrative binary-asteroid pair animation',
     'Illustrative laboratory rock-sample analysis; meteorite origin not visually verified',
     'Illustrative laboratory mineral/rock sample analysis; meteorite origin not visually verified',
+    'Illustrative laboratory spectrophotometer; not Curiosity instrument footage',
 }
 
 PIPELINE_LABEL_ALIASES = {
