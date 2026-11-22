@@ -167,6 +167,78 @@ TULSI_VIVAH_SCENES = [
 ]
 
 
+RAVI_PRADOSH_SHIVA_LYRICS = [
+    "प्रदोष की बेला में, शिव-नाम सुना दो।",
+    "मन के अँधेरों में, विश्वास जगा दो।",
+    "काशी के विश्वेश्वर, करुणा बरसाओ।",
+    "भटके हुए मन को, सच्ची राह दिखाओ।",
+    "गंगा की लहरों में, पावन स्वर बहता।",
+    "हर-हर महादेव कहे, काशी का कण-कण।",
+    "डमरू की धुन सुनकर, संशय सब खोए।",
+    "भोले की नगरी में, सोया मन जागे।",
+    "नीलकंठ महादेव, धीरज हमें देना।",
+    "विष पीकर भी जग को, अमृत-सा सुख देना।",
+    "क्रोध की अग्नि बुझाकर, करुणा सिखा दो।",
+    "मन के हर विकार को, चरणों में मिटा दो।",
+    "त्रिनेत्र की ज्योति से, सत्य हमें दिखता।",
+    "चन्द्रमा-सा शीतल हो, हर बोल हमारा।",
+    "नंदी की निष्ठा-सा, विश्वास अटल हो।",
+    "सेवा से जीवन का, हर मार्ग सरल हो।",
+    "कैलाश की चोटी-सा, संकल्प दृढ़ कर दो।",
+    "मौन की गहराई में, अपना स्वर भर दो।",
+    "गौरी-शंकर जैसा, सम्मान सिखाओ।",
+    "घर-घर में प्रेम और, सद्भाव बढ़ाओ।",
+    "बेलपत्र की खुशबू, आँगन में छाए।",
+    "दीपों की पंक्ति से, आशा जगमगाए।",
+    "जल की हर बूँद हमें, संयम सिखलाए।",
+    "सच्ची श्रद्धा मन को, निर्मल कर जाए।",
+    "दुख की घड़ी आए तो, साहस न खोएँ।",
+    "सुख के उजाले में भी, विनम्र हम रहें।",
+    "शिव का स्मरण हर पल, विवेक जगाए।",
+    "कर्मों की राहों में, ईमान बढ़ाए।",
+    "समय के महाकाल, भय दूर भगाओ।",
+    "टूटी हुई आशा को, फिर से सजाओ।",
+    "दीनों के सहचर हो, असहाय के स्वामी।",
+    "सबके ही अंतर में, बसते हो अन्तर्यामी।",
+    "भस्म की रेखा कहे, अभिमान मिटाना।",
+    "रुद्राक्ष की माला कहे, मन को सँभालना।",
+    "हर श्वास में नाम रहे, हर कर्म में पूजा।",
+    "सत्य और दया से हो, जीवन की आराधना।",
+    "प्रदोष की बेला में, शिव-नाम सुना दो।",
+    "मन के अँधेरों में, विश्वास जगा दो।",
+    "काशी के विश्वेश्वर, करुणा बरसाओ।",
+    "हर-हर महादेव कहे, यह जीवन सारा।",
+]
+
+
+RAVI_PRADOSH_SHIVA_SCENES = [
+    "Canonical Lord Shiva in serene meditation above the Ganga at Kashi during luminous blue hour, Vishwanath temple silhouettes and antique-gold lamps.",
+    "Close devotional portrait of Shiva, compassionate eyes, crescent moon, flowing matted hair and subtle blue-gold rim light.",
+    "Wide aerial view of Kashi ghats at dawn, hundreds of diyas, soft mist and the sacred river reflecting indigo and gold.",
+    "Shiva standing calmly beside the Ganga, trident planted nearby, temple spires rising through morning fog.",
+    "Ancient Vishwanath-inspired temple corridor with brass lamps, marigolds and a distant respectful Shiva presence.",
+    "Close view of Shiva's damaru and trident against a storm-cleared sapphire sky, sacred objects intact and sharply detailed.",
+    "Moonlit Kailash landscape with Shiva seated in meditation, silver snow and restrained golden god rays.",
+    "Devotees offering water to a Shiva lingam at a Kashi temple, Shiva represented only as distant iconography and never worshipping himself.",
+    "Serene Ganga aarti viewed from the river, priests and lamps in the distance, cinematic blue-gold reflections.",
+    "Shiva as Neelkanth in a dignified close portrait, gentle blue throat glow and calm compassionate expression.",
+    "Nandi seated faithfully before a luminous Shiva temple doorway, symmetrical lamps and drifting incense fog.",
+    "Wide Kashi alley at early morning with flower stalls, bells and a glowing temple entrance, no modern signage.",
+    "Shiva and Parvati seated together respectfully on Kailash, balanced composition and warm family devotion.",
+    "Close devotional portrait of Shiva with soft ash markings, rudraksha beads and natural detailed skin texture.",
+    "Bel leaves and a copper water vessel arranged before a Shiva lingam, hands of devotees natural and anatomically correct.",
+    "Cosmic Shiva silhouette beneath a star-filled indigo sky, subtle nebula and a radiant crescent moon.",
+    "Temple bells in foreground with Shiva visible through a carved stone arch, volumetric morning rays and floating dust.",
+    "Riverside meditation scene at sunset, Shiva in profile, orange lamps and blue water creating strong color contrast.",
+    "Dramatic monsoon clouds opening above Kashi, golden sunlight illuminating the Vishwanath temple spires.",
+    "Shiva blessing a diverse group of devotees from a respectful distance, natural faces and hands, no self-worship.",
+    "Close image of flowing Ganga emerging from Shiva's matted hair, symbolic, elegant and anatomically coherent.",
+    "A quiet cremation-ghat horizon interpreted respectfully as impermanence, distant lamps and peaceful moonlight, no graphic imagery.",
+    "Grand final Kashi tableau with Shiva, the Ganga, temple spires, trident and thousands of lamps in cinematic sapphire and gold.",
+    "Closing prayer image with Shiva's calm face beside one steady diya and clean dark-blue negative space.",
+]
+
+
 def create_tulsi_vivah_mission(root: Path, *, day: date) -> dict:
     """Prepare an original, no-spend Tulsi Vivah production commission."""
     title = "तुलसी मैया संग शालिग्राम | Tulsi Vivah Bhajan 2026 | Shloka By Shloka"
@@ -273,6 +345,120 @@ def create_tulsi_vivah_mission(root: Path, *, day: date) -> dict:
             "duration_seconds": 480, "paid_attempts_authorized": 0}
 
 
+def create_ravi_pradosh_shiva_mission(root: Path, *, day: date) -> dict:
+    """Prepare today's original Kashi Vishwanath / Ravi Pradosh Shiva package."""
+    root = Path(root).resolve()
+    if (root / "mission.json").exists():
+        return {"status": "existing", "root": str(root), "mission": str(root / "mission.json")}
+    section_names = [
+        "Immediate Pradosh hook", "Kashi awakening", "Neelkanth courage", "Sacred virtues",
+        "Kailash resolve", "Lamp and offering", "Courage and humility", "Mahakal hope",
+        "Inner worship", "Final Vishweshwara blessing",
+    ]
+    section_styles = [
+        "Powerful male lead starts on beat one; complete the first couplet before any flute answer",
+        "Warm harmonium and bansuri support a clear vocal-forward Kashi atmosphere",
+        "Low male register with restrained chorus only after complete written lines",
+        "Steady dholak and manjira; every consonant remains clear and uncovered",
+        "Open melodic lift with tanpura and strings, no invented alaap syllables",
+        "Temple bells appear only between completed lyric lines",
+        "Intimate lead vocal over harmonium before the full Keharwa groove returns",
+        "Confident melodic rise without speeding up or repeating unwritten words",
+        "Deeply devotional ensemble, exact written order and no refrain loop",
+        "Complete every final word, then a short damaru-and-bell resolution only",
+    ]
+    sections = []
+    for index, (name, style) in enumerate(zip(section_names, section_styles)):
+        lines = RAVI_PRADOSH_SHIVA_LYRICS[index * 4:(index + 1) * 4]
+        sections.append({
+            "name": name, "duration": 48, "lines": lines,
+            "styles": [style, "82 BPM Keharwa 8-beat Shiva bhajan", "precise Hindi diction"],
+        })
+    bible = (
+        "Premium cinematic Kashi Vishwanath Shiva devotional artwork with one consistent canonical Shiva identity. "
+        "Compassionate mature face, crescent moon, flowing matted hair, rudraksha, subtle blue throat, trident and "
+        "damaru only where compositionally appropriate. Sapphire blue, antique gold and warm diya palette, natural "
+        "faces and anatomically correct hands. Lord Shiva never worships himself or performs his own puja. No text, "
+        "logo, watermark, collage, duplicate deity, malformed fingers, cropped sacred objects or modern brand signs. "
+        "Each shot must be a genuinely distinct location, camera distance, pose and lighting setup. 16:9 landscape "
+        "with safe 9:16 crop, cinematic depth, photoreal devotional illustration and controlled volumetric light. "
+    )
+    scenes = [
+        {"id": f"shiva-{i:02d}", "image": f"images-quality-v2/quality-{i:02d}.png",
+         "duration": 20, "reference_mode": "none" if i == 1 else "canonical",
+         "prompt": bible + detail}
+        for i, detail in enumerate(RAVI_PRADOSH_SHIVA_SCENES, 1)
+    ]
+    mission_id = root.name
+    title = "प्रदोष की बेला में शिव | काशी विश्वनाथ भजन 2026 | Shloka By Shloka"
+    mission = {
+        "schema": "one.divya-mission/v2", "brand": BRAND, "agent_id": "naad",
+        "head_agent": "helios", "floor_id": "12", "mission_id": mission_id,
+        "production_date": day.isoformat(), "deity": "Shiva", "preset": "SHIVA_COSMIC",
+        "vocal_style": "powerful_male_devotional", "composition_type": "original_bhajan",
+        "music_model": "music_v2_5", "title": title, "display_title": "प्रदोष की बेला में शिव",
+        "estimated_music_credits": 7200, "lyrics": RAVI_PRADOSH_SHIVA_LYRICS,
+        "strict_lyric_plan": True,
+        "allowed_repeat_lines": [
+            "प्रदोष की बेला में, शिव-नाम सुना दो।",
+            "मन के अँधेरों में, विश्वास जगा दो।",
+            "काशी के विश्वेश्वर, करुणा बरसाओ।",
+        ],
+        "text_origin": "Original Hindi devotional lyrics for Ravi Pradosh and Kashi Vishwanath; not a scripture quotation",
+        "scripture_sources": [], "text_review": "PENDING", "pronunciation_review": "PENDING",
+        "requested_duration_seconds": 480, "sections": sections, "scenes": scenes,
+        "music_direction": {
+            "bpm": 82, "rhythm": "Keharwa, steady 8-beat devotional groove",
+            "melodic_language": "Accessible Shiva-bhajan contour with a memorable immediate hook and Kashi temple atmosphere",
+            "vocal_delivery": "Powerful warm Indian male devotional lead from beat one, clear Hindi diction, restrained response chorus",
+            "instruments": ["tanpura", "harmonium", "dholak", "tabla", "manjira", "bansuri", "damaru", "restrained temple bells"],
+            "phrasing": "Sing each four-line block exactly once; complete every word before instrumental answers",
+            "sync": "Resolve each couplet on sam; Shorts start on complete vocal hooks and end on complete phrases",
+            "avoid": "No long intro, missing or substituted words, invented lyrics, endless hook loop, spoken narration, EDM or excessive alaap",
+        },
+        "shorts_policy": "vocals_first_v1", "shorts": [], "channel_id": CHANNEL,
+        "public_publish_authorized": False, "upload_authorized": False, "schedule_enabled": False,
+    }
+    config = {
+        "lao_folder_id": "446427d7-5722-4d59-a487-8de321325cbc",
+        "artifact_roots": ["E:/ONE-Suite/lao-robot/worker"],
+        "edit_tools": "C:/Users/pc/Documents/LAO/yatra-edit",
+        "uploader_script": "C:/Users/pc/Documents/LAO/yatra-upload/youtube_api_upload.py",
+        "voice_overrides": {}, "credential_asset": None, "channel_id": CHANNEL,
+        "autonomy_policy_path": "E:/ONE-Suite/one-company/floors/floor_12_youtube_studio/shloka_autonomy.json",
+        "daily_schedule": {"enabled": False},
+    }
+    request = music_payload(mission)
+    write(root / "mission.json", mission)
+    write(root / "config.json", config)
+    write(root / "channel-binding.json", {"brand": BRAND, "channel_id": CHANNEL, "mission_id": mission_id})
+    write(root / "review-package/music-request.json", request)
+    write(root / "review-package/metadata-brief.json", {
+        "primary_keyword": "Pradosh Shiv Bhajan",
+        "secondary_keywords": ["Kashi Vishwanath Bhajan", "Shiv Bhajan 2026", "Ravi Pradosh Vrat"],
+        "description": "Original Hindi Shiva bhajan for Ravi Pradosh, Kashi Vishwanath devotion, prayer and meditation.",
+        "tags": ["pradosh shiv bhajan", "प्रदोष शिव भजन", "kashi vishwanath bhajan", "shiv bhajan 2026", "ravi pradosh vrat", "mahadev bhajan", "har har mahadev"],
+    })
+    write(root / "review-package/commission.json", {
+        "duration_seconds": 480, "variants": 1, "paid_attempts_authorized": 0,
+        "credit_quote": 7200, "automatic_paid_retry": False,
+        "lyrics_review": "PENDING", "pronunciation_review": "PENDING", "publish": False,
+    })
+    write(root / "review-package/review-templates.json", {
+        purpose: {"approved": False, "reviewer": None, "authorization_reference": None,
+                  "binding_sha256": fingerprint(binding)}
+        for purpose, binding in (("lyrics", lyrics_binding(mission)), ("music-spend-and-rights", request))
+    })
+    journal = Journal(root)
+    journal.stage("TOPIC_SELECTION", {"mission_id": mission_id},
+                  lambda: {"files": [str(root / "mission.json")], "deity": "Shiva", "cost_usd": 0})
+    for name in STAGES[1:]:
+        journal.data["stages"].setdefault(name, {"status": "PENDING", "attempts": 0, "cost_usd": 0})
+    journal.save()
+    return {"status": "REVIEW_READY", "root": str(root), "mission": str(root / "mission.json"),
+            "duration_seconds": 480, "estimated_music_credits": 7200, "paid_attempts_authorized": 0}
+
+
 def create_daily_mission(root: Path, *, day: date, deity: str = "Lakshmi") -> dict:
     """Create today's review package without provider or publishing side effects."""
     root = Path(root).resolve()
@@ -280,6 +466,8 @@ def create_daily_mission(root: Path, *, day: date, deity: str = "Lakshmi") -> di
         return {"status": "existing", "root": str(root), "mission": str(root / "mission.json")}
     if deity.casefold() in {"tulsi", "tulsi-vishnu", "tulsi_vivah", "tulsi vivah"}:
         return create_tulsi_vivah_mission(root, day=day)
+    if deity.casefold() in {"shiva", "ravi pradosh", "pradosh", "kashi vishwanath"}:
+        return create_ravi_pradosh_shiva_mission(root, day=day)
     if deity.casefold() != "lakshmi":
         raise ValueError("This reviewed daily template currently supports Lakshmi and Tulsi Vivah")
 
