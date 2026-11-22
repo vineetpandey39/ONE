@@ -20,9 +20,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GREEN = (126, 217, 87)
 WHITE = (255, 255, 255)
 
-FONT_HOOK = ["/usr/share/fonts/opentype/inter/InterDisplay-Black.otf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
-FONT_NUM = ["/usr/share/fonts/opentype/inter/InterDisplay-Black.otf", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"]
-FONT_TXT = ["/usr/share/fonts/opentype/inter/Inter-SemiBold.otf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+WINF = os.path.join(os.environ.get("WINDIR", "C:/Windows"), "Fonts")
+MACF = "/System/Library/Fonts/Supplemental"
+FONT_HOOK = ["/usr/share/fonts/opentype/inter/InterDisplay-Black.otf", os.path.join(WINF, "ariblk.ttf"),
+             os.path.join(MACF, "Arial Black.ttf"), "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
+FONT_NUM = FONT_HOOK
+FONT_TXT = ["/usr/share/fonts/opentype/inter/Inter-SemiBold.otf", os.path.join(WINF, "seguisb.ttf"), os.path.join(WINF, "arialbd.ttf"),
+            os.path.join(MACF, "Arial Bold.ttf"), "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+try:
+    from PIL import features as _pf
+    TNUM = {"features": ["tnum"]} if _pf.check("raqm") else {}
+except Exception:
+    TNUM = {}
 
 
 def font(cands, size, override=None):
@@ -164,9 +173,9 @@ class Overlay:
         tx = x + 34
         d.text((tx, 905), m["label"], font=self.f_lbl, fill=(220, 220, 220, a))
         val = m["format"].format(interp(m["keys"], t))
-        d.text((tx, 945), val, font=self.f_num, features=["tnum"], fill=WHITE + (a,), stroke_width=3, stroke_fill=(0, 0, 0, a))
+        d.text((tx, 945), val, font=self.f_num, **TNUM, fill=WHITE + (a,), stroke_width=3, stroke_fill=(0, 0, 0, a))
         if m.get("unit"):
-            nx = tx + d.textlength(val, font=self.f_num, features=["tnum"]) + 14
+            nx = tx + d.textlength(val, font=self.f_num, **TNUM) + 14
             d.text((nx, 1010), m["unit"], font=self.f_sub, fill=WHITE + (a,), stroke_width=2, stroke_fill=(0, 0, 0, a))
         # sublabel (cross-fade between entries)
         subs = self.c.get("sublabels", [])
@@ -181,7 +190,7 @@ class Overlay:
         m2 = self.c.get("meter2")
         if m2:
             d.text((tx, 1165), m2["label"], font=self.f_lbl, fill=(200, 200, 200, a))
-            d.text((tx, 1200), m2["format"].format(interp(m2["keys"], t)), font=self.f_m2, features=["tnum"], fill=WHITE + (a,), stroke_width=2, stroke_fill=(0, 0, 0, a))
+            d.text((tx, 1200), m2["format"].format(interp(m2["keys"], t)), font=self.f_m2, **TNUM, fill=WHITE + (a,), stroke_width=2, stroke_fill=(0, 0, 0, a))
 
 
 # ---------- backgrounds ----------
