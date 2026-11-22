@@ -46,7 +46,20 @@ def render_thumbnails(config, art_path, out, title_lines, subtitle, hooks):
     <div class="brand">SHLOKA BY SHLOKA</div><div class="copy"><div class="title">{title}</div>
     <div class="sub">{escape(subtitle)}</div></div></html>'''
     files=[]
-    with cards_module(config).CardRenderer() as r:
+    cards=cards_module(config)
+    # A lost CUDA/NVIDIA device can also break Chrome's screenshot compositor.
+    # Thumbnail typography still needs Chromium shaping, so launch this scoped
+    # renderer with software compositing rather than degrading Hindi to Pillow.
+    def software_chromium(pw):
+        errors=[]
+        for channel in ('chrome','msedge'):
+            try:
+                return pw.chromium.launch(channel=channel,args=['--disable-gpu','--disable-gpu-compositing'])
+            except Exception as exc:
+                errors.append(f'{channel}: {str(exc).splitlines()[0]}')
+        raise RuntimeError('No software Chromium renderer: '+' | '.join(errors))
+    cards.launch_chromium=software_chromium
+    with cards.CardRenderer() as r:
         p=r.page
         def capture(name, markup, w, h):
             p.set_viewport_size({'width':w,'height':h});p.set_content(markup);p.evaluate('document.fonts.ready')
