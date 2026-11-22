@@ -1,0 +1,463 @@
+{
+  "_notes": "Overlay config for render_short.py. Words wrapped in *asterisks* render in Planexium green. Times are in seconds. Every short is 30 s, 9:16.",
+  "brand": "PLANEXIUM",
+  "shorts": {
+    "mercury": {
+      "day": 1,
+      "hook": "ONE DAY HERE LASTS|*LONGER THAN A YEAR*",
+      "tease": "Watch the temperature when the Sun goes down...",
+      "meter": {
+        "label": "SURFACE TEMPERATURE",
+        "unit": "°C",
+        "format": "{:+.0f}",
+        "keys": [
+          [
+            0,
+            430
+          ],
+          [
+            5,
+            430
+          ],
+          [
+            24,
+            -180
+          ],
+          [
+            30,
+            -180
+          ]
+        ]
+      },
+      "meter2": {
+        "label": "EARTH DAYS SINCE SUNRISE",
+        "format": "{:.0f}",
+        "keys": [
+          [
+            0,
+            44
+          ],
+          [
+            24,
+            132
+          ],
+          [
+            30,
+            132
+          ]
+        ]
+      },
+      "sublabels": [
+        [
+          0,
+          "high noon on Mercury"
+        ],
+        [
+          6,
+          "the Sun starts to set"
+        ],
+        [
+          14,
+          "no air to hold the heat"
+        ],
+        [
+          21,
+          "midnight... and 44 more days until dawn"
+        ]
+      ],
+      "reveal_at": 25,
+      "reveal": "1 DAY = *176* EARTH DAYS.|1 YEAR = *88*.",
+      "next": "TOMORROW: THE PLANET THAT *COOKED ITSELF*"
+    },
+    "venus": {
+      "day": 2,
+      "hook": "THIS PLANET HAD *OCEANS*...|THEN IT *COOKED ITSELF*",
+      "tease": "Scientists think one runaway mistake did it...",
+      "meter": {
+        "label": "SURFACE TEMPERATURE",
+        "unit": "°C",
+        "format": "{:.0f}",
+        "keys": [
+          [
+            0,
+            15
+          ],
+          [
+            4,
+            15
+          ],
+          [
+            24,
+            465
+          ],
+          [
+            30,
+            465
+          ]
+        ]
+      },
+      "meter2": {
+        "label": "AIR PRESSURE (EARTH = 1)",
+        "format": "{:.0f}×",
+        "keys": [
+          [
+            0,
+            1
+          ],
+          [
+            6,
+            1
+          ],
+          [
+            24,
+            92
+          ],
+          [
+            30,
+            92
+          ]
+        ]
+      },
+      "sublabels": [
+        [
+          0,
+          "a possible ocean world"
+        ],
+        [
+          6,
+          "the oceans start to boil"
+        ],
+        [
+          13,
+          "steam traps more heat"
+        ],
+        [
+          19,
+          "the trap never opens again"
+        ]
+      ],
+      "reveal_at": 25,
+      "reveal": "STANDING HERE =|BEING *900 m*|*UNDERWATER*",
+      "next": "TOMORROW: A PLANET THAT *WAS MURDERED*"
+    },
+    "mars": {
+      "day": 3,
+      "hook": "MARS DIDN'T DIE.|*SOMETHING KILLED IT.*",
+      "tease": "Watch the air disappear...",
+      "meter": {
+        "label": "AIR PRESSURE (EST.)",
+        "unit": "mbar",
+        "format": "{:,.0f}",
+        "keys": [
+          [
+            0,
+            1000
+          ],
+          [
+            6,
+            1000
+          ],
+          [
+            24,
+            6
+          ],
+          [
+            30,
+            6
+          ]
+        ]
+      },
+      "meter2": {
+        "label": "MAGNETIC SHIELD",
+        "format": "{:.0f}%",
+        "keys": [
+          [
+            0,
+            100
+          ],
+          [
+            3,
+            100
+          ],
+          [
+            8,
+            0
+          ],
+          [
+            30,
+            0
+          ]
+        ]
+      },
+      "sublabels": [
+        [
+          0,
+          "4 billion years ago"
+        ],
+        [
+          4,
+          "the core goes cold"
+        ],
+        [
+          9,
+          "the shield is gone"
+        ],
+        [
+          14,
+          "something is stripping the air"
+        ],
+        [
+          21,
+          "the oceans boil away"
+        ]
+      ],
+      "reveal_at": 25,
+      "reveal": "THE KILLER?|*THE SUN.*",
+      "next": "TOMORROW: THE PLANET THAT *ALMOST BECAME A STAR*"
+    },
+    "jupiter": {
+      "day": 4,
+      "hook": "KEEP FEEDING JUPITER|AND IT *TURNS INTO|A STAR*",
+      "tease": "Keep adding mass to Jupiter and watch what happens...",
+      "meter": {
+        "label": "JUPITER'S MASS",
+        "unit": "",
+        "format": "×{:.0f}",
+        "keys": [
+          [
+            0,
+            1
+          ],
+          [
+            4,
+            1
+          ],
+          [
+            23,
+            80
+          ],
+          [
+            30,
+            80
+          ]
+        ]
+      },
+      "meter2": {
+        "label": "SIZE",
+        "format": "{:.2f}× today",
+        "keys": [
+          [
+            0,
+            1.0
+          ],
+          [
+            4,
+            1.0
+          ],
+          [
+            12,
+            1.1
+          ],
+          [
+            23,
+            0.95
+          ],
+          [
+            30,
+            0.95
+          ]
+        ]
+      },
+      "sublabels": [
+        [
+          0,
+          "the biggest planet we have"
+        ],
+        [
+          6,
+          "it gets heavier..."
+        ],
+        [
+          12,
+          "...but stops getting bigger"
+        ],
+        [
+          18,
+          "the core is igniting"
+        ]
+      ],
+      "reveal_at": 24,
+      "reveal": "AT ~80× ITS MASS,|*FUSION IGNITES.*|WE'D HAVE *TWO SUNS*.",
+      "next": "TOMORROW: RINGS *YOUNGER THAN DINOSAURS?*"
+    },
+    "saturn": {
+      "day": 5,
+      "hook": "SATURN'S RINGS MAY BE|*YOUNGER THAN|THE DINOSAURS*",
+      "tease": "This is how a moon becomes a ring...",
+      "meter": {
+        "label": "DISTANCE TO THE DEATH LINE",
+        "unit": "km",
+        "format": "{:,.0f}",
+        "keys": [
+          [
+            0,
+            60000
+          ],
+          [
+            17,
+            0
+          ],
+          [
+            30,
+            0
+          ]
+        ]
+      },
+      "sublabels": [
+        [
+          0,
+          "an icy moon drifts closer"
+        ],
+        [
+          9,
+          "Saturn's gravity pulls harder"
+        ],
+        [
+          17,
+          "Roche limit crossed"
+        ],
+        [
+          20,
+          "the moon is torn apart"
+        ]
+      ],
+      "reveal_at": 24,
+      "reveal": "280,000 km WIDE.|IN PLACES|ONLY *~10 m THICK*.",
+      "next": "TOMORROW: A PLANET WHERE NIGHT LASTS *42 YEARS*"
+    },
+    "uranus": {
+      "day": 6,
+      "hook": "ON THIS PLANET,|NIGHT LASTS *42 YEARS*",
+      "tease": "Something hit it so hard it fell over...",
+      "meter": {
+        "label": "AXIAL TILT",
+        "unit": "°",
+        "format": "{:.0f}",
+        "keys": [
+          [
+            0,
+            0
+          ],
+          [
+            7,
+            0
+          ],
+          [
+            9,
+            40
+          ],
+          [
+            20,
+            98
+          ],
+          [
+            30,
+            98
+          ]
+        ]
+      },
+      "sublabels": [
+        [
+          0,
+          "a normal, upright planet"
+        ],
+        [
+          5,
+          "something is coming"
+        ],
+        [
+          9,
+          "impact"
+        ],
+        [
+          14,
+          "it never stands up again"
+        ],
+        [
+          20,
+          "now it rolls around the Sun"
+        ]
+      ],
+      "reveal_at": 24,
+      "reveal": "*42 YEARS* OF DAYLIGHT.|THEN *42 YEARS*|OF DARKNESS.",
+      "next": "FINAL DAY: IT RAINS *DIAMONDS* HERE"
+    },
+    "neptune": {
+      "day": 7,
+      "hook": "IT DOESN'T RAIN WATER HERE.|IT RAINS *DIAMONDS*.",
+      "tease": "Fall into Neptune and watch the depth...",
+      "meter": {
+        "label": "DEPTH",
+        "unit": "km",
+        "format": "{:,.0f}",
+        "keys": [
+          [
+            0,
+            0
+          ],
+          [
+            24,
+            7000
+          ],
+          [
+            30,
+            7000
+          ]
+        ]
+      },
+      "meter2": {
+        "label": "WIND SPEED",
+        "format": "{:,.0f} km/h",
+        "keys": [
+          [
+            0,
+            2100
+          ],
+          [
+            6,
+            2100
+          ],
+          [
+            12,
+            0
+          ],
+          [
+            30,
+            0
+          ]
+        ]
+      },
+      "sublabels": [
+        [
+          0,
+          "the fastest winds in the solar system"
+        ],
+        [
+          8,
+          "methane breaks apart"
+        ],
+        [
+          15,
+          "carbon is crushed"
+        ],
+        [
+          20,
+          "diamonds begin to fall"
+        ]
+      ],
+      "reveal_at": 25,
+      "reveal": "THE BIGGEST DIAMONDS|IN THE SOLAR SYSTEM?|*NO ONE CAN|EVER TOUCH THEM*",
+      "next": "SEASON 2: WHAT IF *THE SUN* DISAPPEARED?"
+    }
+  }
+}
