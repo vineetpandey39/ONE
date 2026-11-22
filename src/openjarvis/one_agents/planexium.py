@@ -699,6 +699,8 @@ def run_job(job: dict) -> dict:
     commission = payload.get("commission") or daily_commission(payload.get("production_date"))
     requested_commission = dict(commission)
     context = context_for(commission["mission_id"], config)
+    from openjarvis.one_agents.planexium_storage import sweep_finished_missions
+    storage_cleanup = sweep_finished_missions(context.root.parent, commission["mission_id"])
     ledger_path = context.root.parent / "production-ledger.json"
     ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.exists() else {}
     unfinished = next((key for key, row in ledger.items() if row.get("status") in {"producing", "needs_resume"}), None)
@@ -773,6 +775,7 @@ def run_job(job: dict) -> dict:
         "_production_build": {"pipeline": BUILD_SHA, "adapters": ADAPTER_BUILD}}).produce(commission, plan=draft)
     result["selected_topic"] = commission.get("topic")
     result["topic_lineage"] = commission.get("topic_lineage")
+    result["storage_cleanup"] = storage_cleanup
     if result.get("production_complete") and requested_commission["mission_id"] != context.mission_id:
         result["deferred_commission"] = requested_commission
     return result
