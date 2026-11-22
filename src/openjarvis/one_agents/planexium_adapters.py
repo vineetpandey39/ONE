@@ -21,7 +21,7 @@ from openjarvis.one_agents.youtube_production import resource_lease
 # The namespace bump prevents an unfinished failed receipt from being attached
 # to the materially different verified fallback query. Accepted acquired
 # checkpoints remain reusable; only unfinished searches get new jobs.
-ENVATO_RECEIPT_REVISION = "v36"
+ENVATO_RECEIPT_REVISION = "v37"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -737,6 +737,20 @@ def concrete_stock_brief(request):
         # Keep the aerodynamic context, but require the concrete object that
         # can actually be verified in metadata and preview frames.
         request.update(query="aircraft wing aerodynamics", subject="wing")
+    elif (subject == "spectrometer"
+          and query.strip() == "scientific spectrometer laboratory equipment"):
+        # A spectrophotometer is a laboratory spectrometer that measures
+        # light intensity by wavelength.  Stock catalogues use that narrower
+        # visible instrument name, so bind the request to it instead of
+        # rejecting signed preview evidence merely because the authored brief
+        # used the broader family name.  This remains illustrative laboratory
+        # footage and does not claim to show Curiosity's flight hardware.
+        request.update(
+            query="scientific spectrophotometer laboratory equipment",
+            subject="spectrophotometer",
+            contextual_label=("Illustrative laboratory spectrophotometer; "
+                              "not Curiosity instrument footage"),
+        )
     elif subject == "cupola":
         # Catalog stemming turns "cupola" into cupcake results, while valid
         # ISS-window footage is normally titled as a space-station window or
