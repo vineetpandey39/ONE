@@ -74,6 +74,28 @@ def music_payload(mission):
                      'positive_local_styles':s['styles'],'negative_local_styles':[], 'lines':s['lines']}
                     for s in mission['sections']]}}
 
+def approved_music_budget(mission, review):
+    """Validate either subscription credits or the legacy USD rate approval."""
+    import math
+    if review.get('billing_mode') == 'subscription_credits':
+        estimate = int(mission.get('estimated_music_credits') or 0)
+        maximum = review.get('maximum_credits')
+        if estimate <= 0 or not isinstance(maximum, int) or maximum <= 0:
+            raise Blocked('Exact subscription Music credit approval is required before spending')
+        if estimate > maximum:
+            raise Blocked('Music request exceeds approved subscription credits')
+        return {'billing_mode':'subscription_credits', 'estimated_credits':estimate,
+                'maximum_credits':maximum, 'estimated_usd':None, 'maximum_usd':None}
+    rate = review.get('quoted_usd_per_minute')
+    maximum = review.get('maximum_usd')
+    if not isinstance(rate,(int,float)) or not math.isfinite(rate) or rate <= 0:
+        raise Blocked('A verified Music rate is required before spending')
+    estimate = sum(s['duration'] for s in mission['sections'])/60*rate
+    if not isinstance(maximum,(int,float)) or not math.isfinite(maximum) or estimate > maximum:
+        raise Blocked('Music request exceeds approved budget')
+    return {'billing_mode':'usd', 'estimated_credits':None, 'maximum_credits':None,
+            'estimated_usd':estimate, 'maximum_usd':maximum}
+
 def compose(root, config, mission):
     """Exactly one approved billable attempt. Unknown outcomes require reconciliation."""
     root = Path(root)
@@ -81,14 +103,7 @@ def compose(root, config, mission):
     review = require_review(root, 'music-spend-and-rights', payload)
     if review.get('commercial_music_rights_confirmed') is not True or not review.get('rights_evidence'):
         raise Blocked('Music commercial rights have not been confirmed')
-    rate = review.get('quoted_usd_per_minute')
-    maximum = review.get('maximum_usd')
-    import math
-    if not isinstance(rate,(int,float)) or not math.isfinite(rate) or rate <= 0:
-        raise Blocked('A verified Music rate is required before spending')
-    estimate = sum(s['duration'] for s in mission['sections'])/60*rate
-    if not isinstance(maximum,(int,float)) or not math.isfinite(maximum) or estimate > maximum:
-        raise Blocked('Music request exceeds approved budget')
+    budget = approved_music_budget(mission, review)
     receipt_path = root/'runtime/music-request.json'
     target = root/'audio/composition.mp3'
     if receipt_path.exists():
@@ -110,8 +125,8 @@ def compose(root, config, mission):
         credits = int(mission.get('estimated_music_credits') or
                       autonomy_policy.get('estimated_music_credits_per_job') or 0)
         credit_reservation = reserve_music_credits(autonomy_policy, mission['mission_id'], credits)
-    receipt = {'status':'SUBMITTING','request_sha256':fingerprint(payload),'estimated_usd':estimate,
-               'maximum_usd':maximum,'actual_usd':None,'started_at':time.time(),'provider':'ElevenLabs Music',
+    receipt = {'status':'SUBMITTING','request_sha256':fingerprint(payload),**budget,
+               'actual_usd':None,'started_at':time.time(),'provider':'ElevenLabs Music',
                'credit_reservation':credit_reservation}
     write(receipt_path,receipt)
     import httpx
@@ -148,7 +163,7 @@ def compose(root, config, mission):
         if autonomy_policy:
             from .autonomy import mark_music_outcome
             mark_music_outcome(autonomy_policy, mission['mission_id'], 'COMPLETE')
-        return {'files':[str(target),str(receipt_path)],'estimated_usd':estimate,'actual_usd':None}
+        return {'files':[str(target),str(receipt_path)],**budget,'actual_usd':None}
     except Blocked:
         if autonomy_policy:
             from .autonomy import mark_music_outcome
