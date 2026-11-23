@@ -17,7 +17,7 @@ STYLE = {
               'Correct Nirmala UI shaping; no AI lettering',
               'No invented view counts, scripture claims or duration badges',
               'Inspect at 320x180 before upload; retain title safe space',
-              'Shorts use portrait crop and explicit PART number'],
+              'Shorts use portrait crop and a truthful curiosity hook, never PART labels'],
 }
 
 def render_thumbnails(config, art_path, out, title_lines, subtitle, hooks):
@@ -80,12 +80,12 @@ def render_thumbnails(config, art_path, out, title_lines, subtitle, hooks):
             html,body{{width:1080px;height:1920px}}
             .art{{position:absolute;inset:0;background:url('{art}') 30% top/auto 1920px no-repeat}}
             .shade{{position:absolute;inset:0;background:linear-gradient(0deg,#03284ef2 0%,#03284ecc 27%,transparent 64%)}}
-            .part{{position:absolute;right:70px;top:110px;padding:16px 35px;border:3px solid #ffdc62;border-radius:20px;background:linear-gradient(120deg,#7822b7,#bb216c);font-family:'Segoe UI';font-size:72px;font-weight:900;line-height:1.2;color:#ffe475}}
+            .part{{position:absolute;left:55px;right:55px;top:105px;padding:18px 28px;border:3px solid #ffdc62;border-radius:20px;background:linear-gradient(120deg,#7822b7ee,#bb216cee);font-family:'Nirmala UI';font-size:62px;font-weight:900;line-height:1.35;color:#ffe475;text-align:center}}
             .copy{{position:absolute;left:45px;right:45px;top:{copy_top}px;text-align:center}}
             .title{{font-size:{title_size}px;line-height:1.3}}.hook{{font:600 48px 'Nirmala UI';color:white;line-height:1.6;margin-top:24px}}
             .brand{{font-size:26px;margin-top:50px}}
-            </style><div class="art"></div><div class="shade"></div><div class="part">PART {n}</div>
-            <div class="copy"><div class="title">{portrait_title}</div><div class="hook">{escape(hook)}</div>
+            </style><div class="art"></div><div class="shade"></div><div class="part">{escape(hook)}</div>
+            <div class="copy"><div class="title">{portrait_title}</div>
             <div class="brand">SHLOKA BY SHLOKA</div></div></html>'''
             capture(f'short-{n}-thumbnail-golden-blue-v2',portrait,1080,1920)
     manifest={'style':STYLE,'art_path':str(art_path),'art_sha256':digest(art_path),'outputs':files,

@@ -2,7 +2,7 @@
 import math
 from .core import Blocked, read, write, digest
 
-POLICY = 'vocals_first_v1'
+POLICY = 'vocals_first_retention_hooks_v2'
 
 HOOK_RULES = (
     (('संकट',), ('संकट कैसे दूर हों?', 'उत्तर अगली पंक्ति में')),

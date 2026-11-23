@@ -167,11 +167,20 @@ class Revision(Motion):
         if t<6.4 and not current:self.paste_text(frame,self.display_title,1400,1000)
         if self.brand_label:
             cv2.putText(frame,self.brand_label,(55,100),cv2.FONT_HERSHEY_SIMPLEX,.8,(220,225,232),1,cv2.LINE_AA)
-        part=getattr(self,'active_short_number',None)
-        if part:
-            cv2.rectangle(frame,(60,240),(435,350),(130,30,105),-1)
-            cv2.rectangle(frame,(60,240),(435,350),(60,210,255),3)
-            cv2.putText(frame,f'PART {part}',(90,316),cv2.FONT_HERSHEY_DUPLEX,1.85,(60,225,255),4,cv2.LINE_AA)
+        short=getattr(self,'active_short',None)
+        if short:
+            offset=t-float(short['start'])
+            hook=next((item for item in short.get('hook_overlays',[])
+                       if float(item['start_offset'])<=offset<float(item['end_offset'])),None)
+            if hook:
+                edge=min(offset-float(hook['start_offset']),float(hook['end_offset'])-offset)
+                opacity=min(1.0,max(0.0,edge*5.0))
+                # A lower-middle glass panel preserves the deity face and keeps
+                # the first ten seconds legible on the Shorts action-button UI.
+                panel=frame[1050:1275,40:1040]
+                panel[:]=(panel*(1-.62*opacity)).astype(np.uint8)
+                cv2.rectangle(frame,(40,1050),(1040,1275),(70,195,246),3,cv2.LINE_AA)
+                self.paste_text(frame,hook['text'],1065,1000,opacity)
         return frame
 
 def frame_sequence(fn,start,count):
@@ -216,14 +225,16 @@ def main():
     cv2.imwrite(str(out/'portrait-proof.jpg'),motion.portrait(min(52,motion.duration/2)))
     if args.proof:return
     # New renders must use the measured vocal-first plan; historic exports stay intact.
-    from .shorts_policy import validate_cut
+    from .shorts_policy import validate_cut, validate_retention_hooks
     from .core import Blocked
     plan_path=root/'edit/v2/vocals-first-plan.json'
     if not plan_path.exists():raise Blocked('RAAG shorts_plan required before rendering')
     plan=read(plan_path)
     if plan.get('source_sha256')!=digest(root/'audio/composition.mp3') or plan.get('cue_sha256')!=digest(root/'edit/v2/caption-cues.json'):
         raise Blocked('Vocal-first plan is stale')
-    for cut in plan['shorts']:validate_cut(cut,motion.cues,plan['beats'],float(_probe(root/'audio/composition.mp3')['format']['duration']))
+    for cut in plan['shorts']:
+        validate_cut(cut,motion.cues,plan['beats'],float(_probe(root/'audio/composition.mp3')['format']['duration']))
+        validate_retention_hooks(cut)
     beatmap=plan
     signature=fingerprint({'editorial_profile':motion.profile,'code':digest(Path(__file__)),'parent':digest(Path(__file__).with_name('local_finish.py')),'brand_label':motion.brand_label,'images':[digest(p) for p in motion.bank],'atlas':read(root/'edit/v2/caption-atlas.json'),'beats':beatmap,'cues':motion.cues})
     chunks=out/'chunks';chunks.mkdir(exist_ok=True);paths=[]
@@ -242,7 +253,7 @@ def main():
     elif not target.exists():raise Blocked('Existing long-form required for Shorts-only correction')
     outputs=[target]
     for short_number,short in enumerate(beatmap['shorts'],1):
-        motion.active_short_number=short_number
+        motion.active_short=short
         start=short['start'];end=short['end'];duration=end-start
         silent=out/(short['id']+'-silent.mp4');dest=out/(short['id']+'-v2.mp4')
         print(f"Rendering {short['id']} musical excerpt {start:.3f}–{end:.3f}",flush=True)

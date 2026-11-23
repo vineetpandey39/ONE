@@ -25,6 +25,8 @@ def _short_hook(root,m,number):
         cues=read(cues_path);cuts=read(plan_path).get('shorts',[])
         if len(cuts)>=number:
             cut=cuts[number-1]
+            hooks=cut.get('hook_overlays') or []
+            if hooks:return _clean_hook(hooks[0]['text'])
             inside=[c for c in cues if float(c['start'])>=float(cut['start'])-0.05 and float(c['start'])<float(cut['end'])]
             if inside:return _clean_hook(min(inside,key=lambda c:float(c['start']))['text'])
     lyrics=m.get('lyrics') or []
@@ -34,12 +36,12 @@ def _short_hook(root,m,number):
 def _short_title(hook,keyword,number,deity=''):
     deity_emoji={'shiva':'🔱','krishna':'🪈','hanuman':'🚩','durga':'🔴','lakshmi':'🪷','tulsi-vishnu':'🪷','vishnu':'🪷'}
     emoji=deity_emoji.get(str(deity).casefold(),'✨')
-    candidates=[f'{hook} {emoji} | {keyword} | Part {number} #Shorts',
-                f'{hook} | {keyword} | Part {number} #Shorts',
-                f'{hook} | Part {number} #Shorts']
+    candidates=[f'{hook} {emoji} | {keyword} #Shorts',
+                f'{hook} | {keyword} #Shorts',
+                f'{hook} #Shorts']
     for title in candidates:
         if len(title)<=100:return title
-    suffix=f' | Part {number} #Shorts'
+    suffix=' #Shorts'
     return hook[:100-len(suffix)].rstrip()+suffix
 
 def _visible_hashtags(m):
@@ -154,7 +156,7 @@ def _short_description(m,keyword,hook,number):
                  'हमारे मूल हिंदी devotional bhajan')
     rights_line=('यह पारंपरिक पाठ है; recording और arrangement नए हैं, किसी third-party audio को copy नहीं किया गया।' if traditional else
                  'यह मूल भक्ति-गीत है, धर्मग्रंथ का उद्धरण नहीं।')
-    return (f'{keyword} “{display}” • PART {number}\n'
+    return (f'{keyword} “{display}”\n'
             f'{hook} — {format_line} का यह beat-synced अंश सुनें।\n\n'
             f'पूरा गीत / Full song:\n{full_song}\n\n'
             f'{rights_line} AI-assisted music, vocals and imagery; '
@@ -165,7 +167,7 @@ def _short_description(m,keyword,hook,number):
 def _short_tags(m,tags,keyword,hook,number):
     deity=str(m.get('deity','Shiva')).casefold()
     additions=[f'{keyword} shorts',hook,'devotional shorts','bhakti shorts','hindi devotional song',
-               'morning bhajan','spiritual music','Shloka By Shloka','shlokabyshloka',f'part {number}']
+               'morning bhajan','spiritual music','Shloka By Shloka','shlokabyshloka']
     additions+=_DEITY_TERMS.get(deity,[f'{deity} bhajan shorts','hindi bhajan shorts'])
     return valid_tags(additions+tags)
 
@@ -177,6 +179,7 @@ def _validate_short_seo(item,hook,keyword):
     if not title.startswith(hook):problems.append('title is not lyric-hook first')
     if keyword.casefold() not in title.casefold():problems.append('keyword missing from title')
     if title.casefold().count('#shorts')!=1:problems.append('title must contain one #Shorts')
+    if re.search(r'\bpart\s*\d+\b',title+' '+description,re.I):problems.append('PART labels are forbidden')
     if hook not in description:problems.append('hook missing from description')
     if 'Full song:' not in description or 'Subscribe:' not in description:problems.append('conversion links missing')
     if not 3<=len(hashtags)<=5:problems.append('visible hashtag count must be 3-5')
@@ -211,7 +214,8 @@ def thumbnails(root):
     art=artifact(root,b['art'])
     if digest(art)!=read(art.with_suffix('.json'))['sha256']:
         raise Blocked('Thumbnail artwork provenance mismatch')
-    result=render_thumbnails(read(root/'config.json'),art,root/'publishing/thumbnails',b['title_lines'],b['subtitle'],b['hooks'])
+    hooks=[_short_hook(root,read(root/'mission.json'),n) for n in (1,2)]
+    result=render_thumbnails(read(root/'config.json'),art,root/'publishing/thumbnails',b['title_lines'],b['subtitle'],hooks)
     return {'status':'REVIEW_READY','manifest':result,'visual_review':'PENDING'}
 
 def assemble(root):
