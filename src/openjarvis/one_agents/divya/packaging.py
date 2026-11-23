@@ -26,7 +26,7 @@ def _short_hook(root,m,number):
         if len(cuts)>=number:
             cut=cuts[number-1]
             hooks=cut.get('hook_overlays') or []
-            if hooks:return _clean_hook(hooks[0]['text'])
+            if hooks:return re.sub(r'\s+',' ',str(hooks[0]['text'])).strip()
             inside=[c for c in cues if float(c['start'])>=float(cut['start'])-0.05 and float(c['start'])<float(cut['end'])]
             if inside:return _clean_hook(min(inside,key=lambda c:float(c['start']))['text'])
     lyrics=m.get('lyrics') or []
