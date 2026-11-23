@@ -478,6 +478,156 @@ def create_ravi_pradosh_shiva_mission(root: Path, *, day: date) -> dict:
             "duration_seconds": 480, "estimated_music_credits": 7200, "paid_attempts_authorized": 0}
 
 
+def create_kartik_purnima_vishnu_mission(root: Path, *, day: date) -> dict:
+    """Prepare a no-spend public-domain Vishnu Aarti for Kartik Purnima search demand."""
+    root = Path(root).resolve()
+    if (root / "mission.json").exists():
+        return {"status": "existing", "root": str(root), "mission": str(root / "mission.json")}
+    refrain = [
+        "ॐ जय जगदीश हरे, स्वामी जय जगदीश हरे।",
+        "भक्त जनों के संकट, दास जनों के संकट, क्षण में दूर करे॥",
+    ]
+    verses = [
+        ["जो ध्यावे फल पावे, दुख बिनसे मन का।", "सुख-सम्पति घर आवे, कष्ट मिटे तन का॥"],
+        ["मात-पिता तुम मेरे, शरण गहूँ मैं किसकी।", "तुम बिन और न दूजा, आस करूँ मैं जिसकी॥"],
+        ["तुम पूरण परमात्मा, तुम अन्तर्यामी।", "पारब्रह्म परमेश्वर, तुम सबके स्वामी॥"],
+        ["तुम करुणा के सागर, तुम पालनकर्ता।", "मैं मूरख खल कामी, कृपा करो भर्ता॥"],
+        ["तुम हो एक अगोचर, सबके प्राणपति।", "किस विधि मिलूँ दयामय, तुमको मैं कुमति॥"],
+        ["दीनबन्धु दुखहर्ता, ठाकुर तुम मेरे।", "अपने हाथ उठाओ, द्वार पड़ा तेरे॥"],
+        ["विषय-विकार मिटाओ, पाप हरो देवा।", "श्रद्धा-भक्ति बढ़ाओ, सन्तन की सेवा॥"],
+        ["तन-मन-धन सब है तेरा, स्वामी सब कुछ है तेरा।", "तेरा तुझको अर्पण, क्या लागे मेरा॥"],
+    ]
+    source_lyrics = refrain + [line for verse in verses for line in verse]
+    rows = [("Immediate Aarti hook", refrain,
+             "Lead and congregation begin in the first second; no instrumental-only intro")]
+    rows.extend((f"Aarti verse {index}", verse + refrain,
+                 "Clear warm male lead with a restrained mixed response chorus; sing every printed word once")
+                for index, verse in enumerate(verses, 1))
+    rows.append(("Closing refrain", refrain * 2,
+                 "Complete the final refrain before a short temple-bell and reverb tail"))
+    sections = [{"name": name, "duration": 48, "lines": lines,
+                 "styles": [style, "82 BPM steady Keharwa 8-beat Aarti cycle", "precise Hindi diction"]}
+                for name, lines, style in rows]
+    lyrics = [line for section in sections for line in section["lines"]]
+    scene_details = [
+        "Canonical four-armed Lord Vishnu standing beneath a luminous temple arch, serene blessing gesture.",
+        "Close devotional portrait of Vishnu with compassionate eyes, ornate crown and sapphire-gold rim light.",
+        "Vishnu reclining peacefully on Sheshnag over the cosmic ocean, traditional iconography and coherent anatomy.",
+        "Wide Dev Deepawali view of Kashi ghats with thousands of diyas reflected in the Ganga; no deity figure.",
+        "Vishnu and Lakshmi seated respectfully together on Vaikuntha lotuses, neither deity worshipping themselves.",
+        "Temple devotees performing Aarti before a distant Vishnu murti; Vishnu is not holding the ritual lamp.",
+        "Close view of intact shankha and chakra with Vishnu's calm face visible behind them.",
+        "Garuda kneeling respectfully before a standing Vishnu in a grand golden temple courtyard.",
+        "Moonlit Kartik Purnima riverbank with floating diyas and a distant Vishnu temple silhouette.",
+        "Vishnu blessing a diverse family of devotees from a respectful distance, natural hands and faces.",
+        "Ancient stone corridor lined with brass lamps leading toward a softly illuminated Vishnu shrine.",
+        "Cosmic Vishnu presence against a deep indigo star field with a restrained golden halo.",
+        "Wide temple pond at sunrise, Vishnu reflected in still water amid lotus flowers.",
+        "Side-profile Vishnu portrait, clean dark-blue negative space, warm diya bokeh and subtle god rays.",
+        "Kartik Purnima deepdaan seen from above, symmetrical riverside lamp patterns and soft mist.",
+        "Vishnu beneath a flowering kadamba tree, conch and lotus held naturally, calm pastoral dawn.",
+        "Grand Vaikuntha tableau with Vishnu, Lakshmi, Garuda and luminous clouds in balanced composition.",
+        "Devotees singing Aarti in a temple hall, cymbals and lamps, Vishnu murti framed in the background.",
+        "Close devotional portrait with one blessing hand, facial identity consistent and all four arms coherent.",
+        "Golden temple bells in foreground with Vishnu visible through a carved arch, floating dust in sun rays.",
+        "Vishnu beside the sacred river at blue hour, upright trident-free Vaishnava iconography and lotus garland.",
+        "A sea of lamps on Kashi ghats under the full moon, sapphire and antique-gold cinematic palette.",
+        "Final lifted tableau of Vishnu above the Ganga with temple spires, full moon and radiant diyas.",
+        "Closing prayer portrait of Vishnu beside one steady diya with uncluttered dark-blue background.",
+    ]
+    bible = (
+        "Premium cinematic Kartik Purnima Vishnu devotional artwork with one consistent canonical Vishnu identity. "
+        "Youthful-serene clean-shaven face, traditional gold crown, yellow pitambar, Vaijayanti mala, blue skin and "
+        "exactly four anatomically coherent arms when Vishnu is visible; shankha, chakra, gada and lotus only in "
+        "natural connected hands. No beard, moustache, duplicate limbs, detached feet, malformed fingers or mixed "
+        "deity iconography. Vishnu never worships himself or performs his own Aarti. No text, logo, watermark or "
+        "modern signs. 16:9 landscape with a safe 9:16 crop, photoreal devotional illustration, sapphire blue, "
+        "antique gold and warm diya palette, controlled bloom and volumetric light. "
+    )
+    scenes = [{"id": f"vishnu-{index:02d}", "image": f"images-quality-v2/quality-{index:02d}.png",
+               "duration": 20, "reference_mode": "none" if index == 1 else "canonical",
+               "prompt": bible + detail}
+              for index, detail in enumerate(scene_details, 1)]
+    mission_id = root.name
+    mission = {
+        "schema": "one.divya-mission/v2", "brand": BRAND, "agent_id": "naad",
+        "head_agent": "helios", "floor_id": "12", "mission_id": mission_id,
+        "production_date": day.isoformat(), "deity": "Vishnu", "preset": "KRISHNA_VRINDAVAN",
+        "vocal_style": "soft_male", "composition_type": "traditional_aarti",
+        "music_model": "music_v2_5", "title": "ॐ जय जगदीश हरे | Kartik Purnima Vishnu Aarti | Shloka By Shloka",
+        "display_title": "ॐ जय जगदीश हरे", "estimated_music_credits": 7198,
+        "lyrics": lyrics, "source_lyrics": source_lyrics, "strict_lyric_plan": True,
+        "allowed_repeat_lines": refrain,
+        "text_origin": ("Public-domain Hindi Aarti traditionally attributed to Pt. Shardha Ram Phillauri "
+                        "(1837–1881); fresh recording and arrangement; no third-party sound recording copied."),
+        "scripture_sources": [
+            "https://vedicdrishti.in/devotion/om-jai-jagdish-hare",
+            "https://archive.org/details/arti-sangrah-khemraj-publishers",
+            "https://the-epoch-institute.org/songs/om-jai-jagdish-hare",
+        ],
+        "text_review": "PENDING", "pronunciation_review": "PENDING",
+        "requested_duration_seconds": 480, "sections": sections, "scenes": scenes,
+        "music_direction": {
+            "bpm": 82, "rhythm": "steady Keharwa 8-beat congregational Aarti cycle",
+            "melodic_language": "Familiar North Indian Aarti contour in a fresh independent composition",
+            "vocal_delivery": "Warm clear male lead, mixed response chorus, immediate hook, minimal melisma and exact Hindi words",
+            "instruments": ["tanpura", "harmonium", "tabla", "bansuri", "soft manjira", "temple bells", "restrained strings"],
+            "phrasing": "Each two-line verse resolves before the complete refrain; never omit or improvise words",
+            "sync": "Vocal begins under one second; verse and refrain resolve on sam; instrumental answers only between complete lines",
+            "avoid": "No long intro, missing lines, refrain-only looping, ad-libs, English lyrics, trailer drums or copied commercial melody",
+        },
+        "pronunciation_notes": {"जगदीश": "jag-deesh", "गहूँ": "ga-hoon", "अन्तर्यामी": "an-tar-yaa-mee",
+                                "अगोचर": "a-go-char", "दीनबन्धु": "deen-ban-dhu", "सन्तन": "san-tan"},
+        "shorts_policy": "vocals_first_v1", "shorts": [], "channel_id": CHANNEL,
+        "public_publish_authorized": False, "upload_authorized": False, "schedule_enabled": False,
+    }
+    config = {
+        "lao_folder_id": "446427d7-5722-4d59-a487-8de321325cbc",
+        "artifact_roots": ["E:/ONE-Suite/lao-robot/worker"],
+        "edit_tools": "C:/Users/pc/Documents/LAO/yatra-edit",
+        "uploader_script": "C:/Users/pc/Documents/LAO/yatra-upload/youtube_api_upload.py",
+        "voice_overrides": {}, "credential_asset": None,
+        "oauth_refresh_file": "C:/Users/pc/.one/credentials/youtube/shloka-by-shloka/oauth-refresh.json",
+        "channel_id": CHANNEL,
+        "autonomy_policy_path": "E:/ONE-Suite/one-company/floors/floor_12_youtube_studio/shloka_autonomy.json",
+        "daily_schedule": {"enabled": False},
+    }
+    request = music_payload(mission)
+    write(root / "mission.json", mission)
+    write(root / "config.json", config)
+    write(root / "channel-binding.json", {"brand": BRAND, "channel_id": CHANNEL, "mission_id": mission_id})
+    write(root / "review-package/music-request.json", request)
+    write(root / "review-package/metadata-brief.json", {
+        "keyword": "Om Jai Jagdish Hare Aarti",
+        "description": "Kartik Purnima and Dev Deepawali special Vishnu Aarti with clear Hindi lyrics and a fresh devotional arrangement.",
+        "tags": ["om jai jagdish hare aarti", "ॐ जय जगदीश हरे", "vishnu aarti", "kartik purnima 2026",
+                 "dev deepawali 2026", "jai shri hari", "hindi aarti"],
+    })
+    write(root / "review-package/thumbnail-brief.json", {
+        "art": "images-quality-v2/quality-22.png", "title_lines": ["ॐ जय", "जगदीश हरे"],
+        "subtitle": "कार्तिक पूर्णिमा विष्णु आरती", "hooks": ["संकट दूर करे", "जय श्री हरि"],
+    })
+    write(root / "review-package/commission.json", {
+        "duration_seconds": 480, "variants": 1, "paid_attempts_authorized": 0,
+        "credit_quote": None, "automatic_paid_retry": False, "lyrics_review": "PENDING",
+        "pronunciation_review": "PENDING", "publish": False,
+        "rights_basis": "Public-domain text; fresh recording and arrangement; source-edition review required",
+    })
+    write(root / "review-package/review-templates.json", {
+        purpose: {"approved": False, "reviewer": None, "authorization_reference": None,
+                  "binding_sha256": fingerprint(binding)}
+        for purpose, binding in (("lyrics", lyrics_binding(mission)), ("music-spend-and-rights", request))
+    })
+    journal = Journal(root)
+    journal.stage("TOPIC_SELECTION", {"mission_id": mission_id},
+                  lambda: {"files": [str(root / "mission.json")], "deity": "Vishnu", "cost_usd": 0})
+    for name in STAGES[1:]:
+        journal.data["stages"].setdefault(name, {"status": "PENDING", "attempts": 0, "cost_usd": 0})
+    journal.save()
+    return {"status": "REVIEW_READY", "root": str(root), "mission": str(root / "mission.json"),
+            "duration_seconds": 480, "estimated_music_credits": 7198, "paid_attempts_authorized": 0}
+
+
 def create_daily_mission(root: Path, *, day: date, deity: str = "Lakshmi") -> dict:
     """Create today's review package without provider or publishing side effects."""
     root = Path(root).resolve()
@@ -487,6 +637,8 @@ def create_daily_mission(root: Path, *, day: date, deity: str = "Lakshmi") -> di
         return create_tulsi_vivah_mission(root, day=day)
     if deity.casefold() in {"shiva", "ravi pradosh", "pradosh", "kashi vishwanath"}:
         return create_ravi_pradosh_shiva_mission(root, day=day)
+    if deity.casefold() in {"vishnu", "kartik purnima", "dev deepawali", "om jai jagdish hare"}:
+        return create_kartik_purnima_vishnu_mission(root, day=day)
     if deity.casefold() != "lakshmi":
         raise ValueError("This reviewed daily template currently supports Lakshmi and Tulsi Vivah")
 
