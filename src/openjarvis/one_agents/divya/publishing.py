@@ -53,6 +53,12 @@ def upload_private(root, *, private_upload_authorized=False):
     if package.get('privacy')!='private' or package.get('published') is not False:
         raise Blocked('Package is not locked to private review')
     seo=read(root/'publishing/seo.json')
+    mission=read(root/'mission.json')
+    devotion_label={
+        'shiva':'शिव-नाम और ध्यान','vishnu':'विष्णु-नाम और ध्यान',
+        'krishna':'कृष्ण-नाम और ध्यान','hanuman':'हनुमान-नाम और ध्यान',
+        'durga':'माता-नाम और ध्यान','lakshmi':'लक्ष्मी-नाम और ध्यान',
+    }.get(str(mission.get('deity') or '').casefold(),'भक्ति और ध्यान')
     module,_,_,channel=client(root)
     if channel.get('id')!=CHANNEL:
         raise Blocked('Authenticated upload channel mismatch')
@@ -78,7 +84,7 @@ def upload_private(root, *, private_upload_authorized=False):
             # package.  Three meaningful ten-second beats satisfy that shared
             # gate without weakening or patching another channel's uploader.
             item['description']=item['description'].rstrip()+(
-                '\n\n0:00 भक्ति आरंभ\n0:10 शिव-नाम और ध्यान\n0:20 प्रार्थना और समापन')
+                f'\n\n0:00 भक्ति आरंभ\n0:10 {devotion_label}\n0:20 प्रार्थना और समापन')
         for path in (item['master'],item['thumbnail']):
             if not path.is_file():raise Blocked(f'Upload artifact missing: {path.name}')
         pkg={'brand':'shloka_by_shloka','channel_id':CHANNEL,'master':str(item['master']),
