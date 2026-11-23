@@ -123,7 +123,15 @@ def _ares_long_form(root,m,brief):
     llm=None if m.get('seo_model')=='deterministic_test' else youtube_seo.ollama_json
     package=youtube_seo.build_package(record,master=master,plan_path=root/'mission.json',
                                       channel=SHLOKA_BY_SHLOKA,llm=llm)
-    package['description']=_replace_visible_hashtag_line(package.get('description'),_long_visible_hashtags(m))[:5000]
+    description=str(package.get('description') or '')
+    deity_repairs={
+        'vishnu': [('राम भक्ति','विष्णु भक्ति'),('Ram devotional','Vishnu devotional'),
+                   ('Original devotional text reviewed for pronunciation',
+                    'Traditional Aarti text; final sung pronunciation review pending')],
+    }
+    for wrong,correct in deity_repairs.get(deity_key,[]):
+        description=description.replace(wrong,correct)
+    package['description']=_replace_visible_hashtag_line(description,_long_visible_hashtags(m))[:5000]
     package['description_audit']=youtube_seo.description_audit(
         package['description'],package.get('primary_query',''),list(package.get('tags') or []),SHLOKA_BY_SHLOKA)
     package.update(channel_id=m['channel_id'],content_format='long_form',contains_synthetic_media=True)
