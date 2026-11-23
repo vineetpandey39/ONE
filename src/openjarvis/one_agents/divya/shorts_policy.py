@@ -16,8 +16,12 @@ def retention_hook_copy(cut, cues):
     """Create two truthful curiosity beats from words actually inside the cut."""
     inside=' '.join(c['text'] for c in cues
                     if float(c['end'])>float(cut['start']) and float(c['start'])<float(cut['end']))
-    pair=next((hooks for needles,hooks in HOOK_RULES if any(word in inside for word in needles)),
-              ('यह पंक्ति क्यों खास है?', 'अगले शब्द ध्यान से सुनें'))
+    matches=[]
+    for rule_index,(needles,hooks) in enumerate(HOOK_RULES):
+        positions=[inside.find(word) for word in needles if word in inside]
+        if positions:matches.append((min(positions),rule_index,hooks))
+    pair=min(matches,key=lambda item:(item[0],item[1]))[2] if matches else (
+        'यह पंक्ति क्यों खास है?', 'अगले शब्द ध्यान से सुनें')
     return [
         {'text':pair[0],'start_offset':0.0,'end_offset':5.0,'role':'curiosity'},
         {'text':pair[1],'start_offset':5.0,'end_offset':10.0,'role':'payoff_bridge'},
