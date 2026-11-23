@@ -91,12 +91,16 @@ def prepare(root, draft=False):
              'camera_modes':[s.get('camera_mode','motion') for s in m['scenes']]}
     write(root/'edit/v2/editorial-profile.json',profile)
     write(root/'edit/v2/caption-cues.json',cs)
+    from .shorts_policy import plan
+    result=plan(root)
+    hook_texts={hook['text'] for short in result['shorts'] for hook in short['hook_overlays']}
     atlas=[]
     with cards_module(config).CardRenderer() as r:
         p=r.page
         p.set_content('''<html lang="hi"><meta charset="utf-8"><style>html,body{margin:0;background:transparent}#tile{width:1440px;height:180px;display:flex;align-items:center;justify-content:center;font-family:"Nirmala UI";font-size:64px;line-height:1.7;color:#fff3d6;white-space:nowrap}</style><div id="tile"></div></html>''')
-        for n,text in enumerate(dict.fromkeys([c['text'] for c in cs]+[m['display_title']])):
+        for n,text in enumerate(dict.fromkeys([c['text'] for c in cs]+[m['display_title']]+sorted(hook_texts))):
             p.locator('#tile').evaluate('(el,text)=>el.textContent=text',text)
+            p.locator('#tile').evaluate('(el,isHook)=>{el.style.fontSize=isHook?"92px":"64px";el.style.fontWeight=isHook?"800":"400"}',text in hook_texts)
             p.evaluate('document.fonts.ready')
             if p.locator('#tile').evaluate('(el)=>el.scrollWidth>el.clientWidth'):
                 raise Blocked('Hindi caption too long; split at measured word boundary')
@@ -104,6 +108,4 @@ def prepare(root, draft=False):
             p.locator('#tile').screenshot(path=str(path),omit_background=True)
             atlas.append({'text':text,'file':str(path.relative_to(root)),'sha256':digest(path),'renderer':'Chromium complex-script shaping'})
     write(root/'edit/v2/caption-atlas.json',atlas)
-    from .shorts_policy import plan
-    result=plan(root)
     return {'status':'REVIEW_READY','files':[str(root/'edit/v2/editorial-profile.json'),str(root/'edit/v2/caption-atlas.json')]+result['files']}

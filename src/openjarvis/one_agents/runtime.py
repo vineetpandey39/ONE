@@ -7596,12 +7596,24 @@ def _vista_schedule_origin(job: dict[str, Any], payload: dict[str, Any],
     return current
 
 
+VISTA_MAX_TOPIC_ATTEMPTS = 4
+
+
 def _vista_footage_topic_fallback(job: dict[str, Any], payload: dict[str, Any],
                                   reason: str) -> dict[str, Any]:
-    """Commission one secondary VISTA topic after both providers fail truthfully."""
+    """Commission the next grounded VISTA topic after both footage providers fail.
+
+    One secondary topic was too brittle for a daily slot: two geographically
+    difficult stories could leave the entire day empty even though HELIOS had
+    more fresh candidates.  Keep every failed headline and destination in the
+    exclusion list and allow four total attempts.  This remains bounded, keeps
+    the original scheduler authority, and never relaxes footage grounding.
+    """
     attempt = int(payload.get("topic_attempt") or 1)
-    if attempt >= 2:
-        raise RuntimeError("VISTA secondary topic also lacks verified footage; bounded fallback exhausted")
+    if attempt >= VISTA_MAX_TOPIC_ATTEMPTS:
+        raise RuntimeError(
+            f"VISTA verified-footage fallback exhausted after {VISTA_MAX_TOPIC_ATTEMPTS} grounded topics"
+        )
     spec = payload.get("production_spec") if isinstance(payload.get("production_spec"), dict) else {}
     story = spec.get("story") if isinstance(spec.get("story"), dict) else {}
     excluded: list[str] = []
@@ -7618,7 +7630,8 @@ def _vista_footage_topic_fallback(job: dict[str, Any], payload: dict[str, Any],
         "helios",
         json.dumps({
             "brand": "sonia_travel_vlogs",
-            "request": f"[vista-short slot={slot} lane={lane}] Select and complete one fresh secondary topic because the primary topic has no verified footage.",
+            "request": (f"[vista-short slot={slot} lane={lane}] Select and complete the next fresh topic "
+                        "because every excluded topic lacks verified footage."),
             "stage": "topic_fallback",
             "topic_attempt": attempt + 1,
             "fallback_of": origin,
@@ -7632,7 +7645,8 @@ def _vista_footage_topic_fallback(job: dict[str, Any], payload: dict[str, Any],
     )
     return {
         "agent": "VISTA", "status": "topic_fallback", "production_complete": False,
-        "reason": "Primary topic lacked verified footage on Envato and Pexels; HELIOS is researching the secondary topic",
+        "reason": ("Current topic lacked verified footage on Envato and Pexels; "
+                   f"HELIOS is researching grounded attempt {attempt + 1}/{VISTA_MAX_TOPIC_ATTEMPTS}"),
         "excluded_topics": excluded,
         "handed_to": {"agent": "HELIOS", "job_id": fallback["id"]},
     }

@@ -4,6 +4,38 @@ from .core import Blocked, read, write, digest
 
 POLICY = 'vocals_first_v1'
 
+HOOK_RULES = (
+    (('संकट',), ('संकट कैसे दूर हों?', 'उत्तर अगली पंक्ति में')),
+    (('परमात्मा','परमेश्वर','पारब्रह्म'), ('परमात्मा कहाँ हैं?', 'अगली पंक्ति उत्तर है')),
+    (('शरण',), ('सच्ची शरण किसकी?', 'उत्तर ध्यान से सुनें')),
+    (('करुणा','कृपा'), ('कृपा किसे मिलती है?', 'अगली पंक्ति ध्यान से')),
+    (('दुख','दीनबन्धु','दुखहर्ता'), ('दुख कौन हरता है?', 'उत्तर इसी प्रार्थना में')),
+)
+
+def retention_hook_copy(cut, cues):
+    """Create two truthful curiosity beats from words actually inside the cut."""
+    inside=' '.join(c['text'] for c in cues
+                    if float(c['end'])>float(cut['start']) and float(c['start'])<float(cut['end']))
+    pair=next((hooks for needles,hooks in HOOK_RULES if any(word in inside for word in needles)),
+              ('यह पंक्ति क्यों खास है?', 'अगले शब्द ध्यान से सुनें'))
+    return [
+        {'text':pair[0],'start_offset':0.0,'end_offset':5.0,'role':'curiosity'},
+        {'text':pair[1],'start_offset':5.0,'end_offset':10.0,'role':'payoff_bridge'},
+    ]
+
+def validate_retention_hooks(cut):
+    hooks=cut.get('hook_overlays') or []
+    if len(hooks)!=2:
+        raise Blocked('Every Short requires exactly two retention hook overlays')
+    expected=[(0.0,5.0),(5.0,10.0)]
+    for hook,(start,end) in zip(hooks,expected):
+        text=str(hook.get('text') or '').strip()
+        if (float(hook.get('start_offset',-1)),float(hook.get('end_offset',-1)))!=(start,end):
+            raise Blocked('Retention hooks must cover the first ten seconds without a gap')
+        if not 6<=len(text)<=32 or 'PART ' in text.upper():
+            raise Blocked('Retention hook copy is missing, too long, or uses a PART label')
+    return hooks
+
 def validate_cut(cut, cues, beats, duration):
     start,end=float(cut['start']),float(cut['end'])
     if not all(math.isfinite(x) for x in (start,end,duration)) or not 0<=start<end<=duration:
@@ -57,8 +89,14 @@ def select_cuts(cues, beats, duration, count=2):
         if len(chosen)==count:break
     if len(chosen)!=count:
         raise Blocked('Not enough complete, non-overlapping vocal-first phrases; review timing manually')
-    return [dict(c,id=f'short-{i:02}',rationale='Complete sung sentences, vocal entry under one second, measured beats')
-            for i,c in enumerate(sorted(chosen,key=lambda c:c['start']),1)]
+    result=[]
+    for i,cut in enumerate(sorted(chosen,key=lambda c:c['start']),1):
+        item=dict(cut,id=f'short-{i:02}',
+                  rationale='Complete sung sentences, vocal entry under one second, measured beats')
+        item['hook_overlays']=retention_hook_copy(item,cues)
+        validate_retention_hooks(item)
+        result.append(item)
+    return result
 
 def plan(root):
     from .render import _probe
