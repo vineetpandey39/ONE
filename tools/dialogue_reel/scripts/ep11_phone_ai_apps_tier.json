@@ -1,0 +1,183 @@
+{
+  "id": "ep11_phone_ai_apps_tier",
+  "title": "Phone ke AI apps: tier list",
+  "location": "classroom",
+  "board_title": "Tier List",
+  "characters": {
+    "VINEET": {
+      "voice": "hm_omega",
+      "pitch": 1.0,
+      "speed": 1.05,
+      "eleven_voice_id": "TX3LPaxmHKxFdv7VOQHJ",
+      "eleven_speed": 1.05
+    },
+    "ONE": {
+      "voice": "hm_psi",
+      "pitch": 1.22,
+      "speed": 1.08,
+      "eleven_voice_id": "cgSgspJ2msm6clMCkdW9",
+      "eleven_speed": 1.08,
+      "eleven_pitch": 1.07
+    }
+  },
+  "lines": [
+    {
+      "who": "VINEET",
+      "shot": "hook",
+      "caption": "ONE, phone ke kaunse AI apps sach me kaam ke hain? Tier list bana!",
+      "tts": "वन, फ़ोन के कौन से ए आई ऐप्स सच में काम के हैं? टियर लिस्ट बना!"
+    },
+    {
+      "who": "ONE",
+      "shot": "tier",
+      "caption": "S tier me: Google Lens. Photo kheencho, translate karo, search karo. Sab ek tap me.",
+      "tts": "एस टियर में: गूगल लेंस. फ़ोटो खींचो, ट्रांसलेट करो, सर्च करो. सब एक टैप में.",
+      "overlay": {
+        "type": "tier",
+        "add": [
+          {
+            "name": "Google Lens",
+            "tier": "S"
+          }
+        ],
+        "title": "Phone ke AI apps: kaam ke ya bekaar?"
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "argue",
+      "caption": "Lens S tier me? ChatGPT se upar?",
+      "tts": "लेंस एस टियर में? चैट जी पी टी से ऊपर?"
+    },
+    {
+      "who": "ONE",
+      "shot": "tier",
+      "caption": "ChatGPT A tier. Voice me baat karo, Hindi me bhi. Bas facts check karna.",
+      "tts": "चैट जी पी टी, ए टियर. वॉइस में बात करो, हिंदी में भी. बस फ़ैक्ट्स चेक करना.",
+      "overlay": {
+        "type": "tier",
+        "add": [
+          {
+            "name": "ChatGPT",
+            "tier": "A"
+          }
+        ]
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "tier",
+      "caption": "Gemini bhi A tier. Gmail aur Google apps ke saath kaam aata hai.",
+      "tts": "जेमिनी भी ए टियर. जीमेल और गूगल ऐप्स के साथ काम आता है.",
+      "overlay": {
+        "type": "tier",
+        "add": [
+          {
+            "name": "Gemini",
+            "tier": "A"
+          }
+        ]
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "tier",
+      "caption": "AI photo filter apps, B tier. Mazedaar, par apni photos soch samajh ke do.",
+      "tts": "ए आई फ़ोटो फ़िल्टर ऐप्स, बी टियर. मज़ेदार, पर अपनी फ़ोटोज़ सोच समझ के दो.",
+      "overlay": {
+        "type": "tier",
+        "add": [
+          {
+            "name": "AI photo filter apps",
+            "tier": "B"
+          }
+        ]
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "argue",
+      "caption": "Aur C tier me kaun?",
+      "tts": "और सी टियर में कौन?"
+    },
+    {
+      "who": "ONE",
+      "shot": "tier",
+      "caption": "C tier: jo apps bina wajah poori gallery aur contacts maangte hain. Turant delete.",
+      "tts": "सी टियर: जो ऐप्स बिना वजह पूरी गैलरी और कॉन्टैक्ट्स माँगते हैं. तुरंत डिलीट.",
+      "overlay": {
+        "type": "tier",
+        "add": [
+          {
+            "name": "Gallery + contacts maangne wale apps",
+            "tier": "C"
+          }
+        ]
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "realize",
+      "caption": "Matlab app se pehle permissions dekhni hain.",
+      "tts": "मतलब ऐप से पहले परमिशन्स देखनी हैं."
+    },
+    {
+      "who": "ONE",
+      "shot": "payoff",
+      "caption": "Bilkul. Smart app, smart permission.",
+      "tts": "बिल्कुल. स्मार्ट ऐप, स्मार्ट परमिशन."
+    },
+    {
+      "who": "VINEET",
+      "shot": "cta",
+      "caption": "Aapka favourite AI app kaunsa? Comment karo APPS, poori list DM me.",
+      "tts": "आपका फ़ेवरेट ए आई ऐप कौन सा? कमेंट करो, APPS. पूरी लिस्ट डी एम में.",
+      "cta_card": {
+        "type": "comment",
+        "keyword": "APPS"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "follow",
+      "caption": "Aur follow kar lo. Agli tier list jaldi!",
+      "tts": "और फ़ॉलो कर लो. अगली टियर लिस्ट जल्दी!",
+      "cta_card": {
+        "type": "follow"
+      }
+    }
+  ],
+  "post_caption": "Phone ke AI apps 📱 Kaam ke ya bekaar? Tier List (Hindi)\n\nS: Google Lens (photo se translate, search, sab ek tap me)\nA: ChatGPT (voice me baat, Hindi me bhi; facts check karo)\nA: Gemini (Gmail aur Google apps ke saath)\nB: AI photo filter apps (mazedaar, par photos soch ke do)\nC: Bina wajah gallery + contacts maangne wale apps (turant delete)\n\nSmart app, smart permission. 🔒\n\n👉 Aapka favourite AI app kaunsa? Comment me batao aur \"APPS\" likho, poori list DM me bhej dunga.\n\n💾 Save karo, aur ghar walon ko bhejo.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#aiapps #googlelens #chatgpt #aihindi #techtips",
+  "seo": {
+    "pinned_comment": "📌 Apna favourite AI app comment karo + \"APPS\" likho 👇 kaam ke AI apps ki poori list DM me bhejta hoon.",
+    "alt_text": "Animated Hindi tier list in a study room: the AI mascot ONE ranks phone AI apps while VINEET argues. S tier Google Lens, A tier ChatGPT and Gemini, B tier AI photo filter apps, C tier apps that ask for the whole gallery and contacts without reason. Message: check app permissions.",
+    "cover_text": [
+      "PHONE AI APPS",
+      "Tier List"
+    ],
+    "keywords": [
+      "best AI apps Hindi",
+      "phone AI apps",
+      "AI apps tier list",
+      "Google Lens kaise use kare",
+      "free AI apps Android",
+      "app permissions"
+    ],
+    "youtube": {
+      "title": "Phone ke AI apps 📱 Kaam ke ya bekaar? Tier List | Google Lens, ChatGPT, Gemini (Hindi) #shorts",
+      "description": "Best AI apps for phone, tier list in Hindi: Google Lens, ChatGPT, Gemini, AI photo apps. Smart app, smart permission.\n\nApna favourite AI app comment karo + APPS likho.\nRoz ek AI concept: subscribe karo.\n\n#AIApps #GoogleLens #ChatGPT #AIHindi #Shorts",
+      "tags": [
+        "best ai apps",
+        "ai apps hindi",
+        "ai apps tier list",
+        "google lens hindi",
+        "chatgpt app hindi",
+        "gemini app",
+        "app permissions",
+        "tech tips hindi",
+        "aibyvineet"
+      ]
+    },
+    "file_name": "phone-ai-apps-tier-list-hindi.mp4"
+  }
+}

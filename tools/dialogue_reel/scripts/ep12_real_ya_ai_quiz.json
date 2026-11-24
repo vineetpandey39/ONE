@@ -1,0 +1,236 @@
+{
+  "id": "ep12_real_ya_ai_quiz",
+  "title": "AI Quiz: Real ya AI? Nakli photo pehchano",
+  "location": "studio",
+  "board_style": "sign",
+  "board_title": "REAL YA AI?",
+  "characters": {
+    "VINEET": {
+      "voice": "hm_omega",
+      "pitch": 1.0,
+      "speed": 1.05,
+      "eleven_voice_id": "TX3LPaxmHKxFdv7VOQHJ",
+      "eleven_speed": 1.05
+    },
+    "ONE": {
+      "voice": "hm_psi",
+      "pitch": 1.22,
+      "speed": 1.08,
+      "eleven_voice_id": "cgSgspJ2msm6clMCkdW9",
+      "eleven_speed": 1.08,
+      "eleven_pitch": 1.07
+    }
+  },
+  "quiz": {
+    "q1": {
+      "q": "AI se bani photo me aksar kya gadbad hoti hai?",
+      "options": [
+        "Haath aur ungliyan ajeeb",
+        "Photo blurry hoti hai",
+        "Rang zyada bright",
+        "File size badi"
+      ],
+      "answer": 0
+    },
+    "q2": {
+      "q": "AI image me likha text kaisa dikhta hai?",
+      "options": [
+        "Bilkul saaf",
+        "Sirf English me",
+        "Ulta-pulta, bina matlab ke letters",
+        "Text hota hi nahi"
+      ],
+      "answer": 2
+    },
+    "q3": {
+      "q": "Viral photo asli hai ya nahi, sabse pakka tareeka?",
+      "options": [
+        "Likes count dekho",
+        "Reverse image search karo",
+        "Comments padho",
+        "Zoom karke dekho"
+      ],
+      "answer": 1
+    }
+  },
+  "lines": [
+    {
+      "who": "ONE",
+      "shot": "question",
+      "caption": "Swagat hai AI Quiz me! Aaj ka round: Real ya AI? Har sahi jawab pe ek samosa.",
+      "tts": "स्वागत है ए आई क्विज़ में! आज का राउंड: रियल या ए आई? हर सही जवाब पे एक समोसा."
+    },
+    {
+      "who": "VINEET",
+      "shot": "react",
+      "caption": "Nakli photo pehchanna? Easy hai!",
+      "tts": "नकली फ़ोटो पहचानना? ईज़ी है!"
+    },
+    {
+      "who": "ONE",
+      "shot": "question",
+      "caption": "Pehla sawal. AI se bani photo me aksar kya gadbad hoti hai?",
+      "tts": "पहला सवाल. ए आई से बनी फ़ोटो में अक्सर क्या गड़बड़ होती है?",
+      "overlay": {
+        "type": "quiz",
+        "id": "q1",
+        "stage": "ask"
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "answer",
+      "caption": "B! Photo blurry hoti hai.",
+      "tts": "बी! फ़ोटो ब्लरी होती है.",
+      "overlay": {
+        "type": "quiz",
+        "id": "q1",
+        "stage": "pick",
+        "pick": 1
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "result",
+      "caption": "Galat! Haath aur ungliyan. Kabhi chhe ungliyan, kabhi mude hue haath.",
+      "tts": "गलत! हाथ और उंगलियाँ. कभी छह उंगलियाँ, कभी मुड़े हुए हाथ.",
+      "overlay": {
+        "type": "quiz",
+        "id": "q1",
+        "stage": "reveal"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "question",
+      "caption": "Doosra sawal. AI image me likha text kaisa dikhta hai?",
+      "tts": "दूसरा सवाल. ए आई इमेज में लिखा टेक्स्ट कैसा दिखता है?",
+      "overlay": {
+        "type": "quiz",
+        "id": "q2",
+        "stage": "ask"
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "answer",
+      "caption": "C. Ulta-pulta letters.",
+      "tts": "सी. उल्टा पुल्टा लेटर्स.",
+      "overlay": {
+        "type": "quiz",
+        "id": "q2",
+        "stage": "pick",
+        "pick": 2
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "result",
+      "caption": "Sahi! Poster ya board pe ajeeb letters dikhein, toh shak karo.",
+      "tts": "सही! पोस्टर या बोर्ड पे अजीब लेटर्स दिखें, तो शक करो.",
+      "overlay": {
+        "type": "quiz",
+        "id": "q2",
+        "stage": "reveal"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "question",
+      "caption": "Aakhri sawal. Viral photo asli hai ya nahi, sabse pakka tareeka?",
+      "tts": "आख़िरी सवाल. वायरल फ़ोटो असली है या नहीं, सबसे पक्का तरीका?",
+      "overlay": {
+        "type": "quiz",
+        "id": "q3",
+        "stage": "ask"
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "answer",
+      "caption": "B. Reverse image search.",
+      "tts": "बी. रिवर्स इमेज सर्च.",
+      "overlay": {
+        "type": "quiz",
+        "id": "q3",
+        "stage": "pick",
+        "pick": 1
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "result",
+      "caption": "Sahi! Google Lens se search karo aur asli source dhoondho.",
+      "tts": "सही! गूगल लेंस से सर्च करो और असली सोर्स ढूँढो.",
+      "overlay": {
+        "type": "quiz",
+        "id": "q3",
+        "stage": "reveal"
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "realize",
+      "caption": "3 me se 2! Ab forward karne se pehle check karunga.",
+      "tts": "तीन में से दो! अब फ़ॉरवर्ड करने से पहले चेक करूँगा."
+    },
+    {
+      "who": "ONE",
+      "shot": "payoff",
+      "caption": "Yahi toh. Forward se pehle, fact check.",
+      "tts": "यही तो. फ़ॉरवर्ड से पहले, फ़ैक्ट चेक."
+    },
+    {
+      "who": "VINEET",
+      "shot": "cta",
+      "caption": "Aapka score kitna? Comment karo REAL aur score. Agla quiz DM me.",
+      "tts": "आपका स्कोर कितना? कमेंट करो, REAL, और स्कोर. अगला क्विज़ डी एम में.",
+      "cta_card": {
+        "type": "comment",
+        "keyword": "REAL"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "follow",
+      "caption": "Aur follow kar lo. Agla quiz jaldi!",
+      "tts": "और फ़ॉलो कर लो. अगला क्विज़ जल्दी!",
+      "cta_card": {
+        "type": "follow"
+      }
+    }
+  ],
+  "post_caption": "Real ya AI? 🧐 Nakli photo pehchano, quiz (Hindi)\n\nVINEET ne 3 me se 2 sahi kiye. Aap?\n1️⃣ AI photo me aksar kya gadbad hoti hai?\n2️⃣ AI image me text kaisa dikhta hai?\n3️⃣ Viral photo check karne ka sabse pakka tareeka?\n\nReel pause karo, pehle khud answer do. 😄\n\nYaad rakho: forward se pehle, fact check. ✅\n\n👉 Comment me apna score likho aur \"REAL\" likho, agla quiz DM me bhej dunga.\n\n💾 Save karo, family group me bhejo.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#realyaai #aiimages #factcheck #aihindi #aiquiz",
+  "seo": {
+    "pinned_comment": "📌 Apna score comment karo + \"REAL\" likho 👇 agla Real ya AI quiz DM me bhejta hoon.",
+    "alt_text": "Animated Hindi quiz show 'Real ya AI?': the AI mascot ONE hosts and VINEET plays in a neon studio. Questions on spotting AI images: strange hands and fingers, garbled text, and checking viral photos with reverse image search such as Google Lens. VINEET scores 2 out of 3.",
+    "cover_text": [
+      "REAL YA AI?",
+      "Nakli photo pehchano"
+    ],
+    "keywords": [
+      "AI image kaise pehchane",
+      "real ya AI",
+      "fake photo kaise pehchane",
+      "AI generated image check",
+      "reverse image search Hindi",
+      "fact check Hindi"
+    ],
+    "youtube": {
+      "title": "Real ya AI? 🧐 Nakli photo kaise pehchane | AI image quiz (Hindi) #shorts",
+      "description": "AI se bani photo kaise pehchane: haath aur ungliyan, ajeeb text, aur reverse image search (Google Lens). Forward se pehle fact check!\n\nApna score comment karo + REAL likho.\nRoz ek AI concept: subscribe karo.\n\n#RealYaAI #AIImages #FactCheck #AIHindi #Shorts",
+      "tags": [
+        "real ya ai",
+        "ai image kaise pehchane",
+        "fake photo check",
+        "ai generated image",
+        "reverse image search hindi",
+        "google lens",
+        "fact check hindi",
+        "ai hindi",
+        "aibyvineet"
+      ]
+    },
+    "file_name": "real-ya-ai-photo-quiz-hindi.mp4"
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "id": "ep10_ai_resume_prompt",
+  "title": "AI se resume: galat vs sahi prompt",
+  "location": "terrace",
+  "board_style": "none",
+  "board_title": "",
+  "characters": {
+    "VINEET": {
+      "voice": "hm_omega",
+      "pitch": 1.0,
+      "speed": 1.05,
+      "eleven_voice_id": "TX3LPaxmHKxFdv7VOQHJ",
+      "eleven_speed": 1.05
+    },
+    "ONE": {
+      "voice": "hm_psi",
+      "pitch": 1.22,
+      "speed": 1.08,
+      "eleven_voice_id": "cgSgspJ2msm6clMCkdW9",
+      "eleven_speed": 1.08,
+      "eleven_pitch": 1.07
+    }
+  },
+  "lines": [
+    {
+      "who": "VINEET",
+      "shot": "hook",
+      "caption": "ONE, AI se resume banwaya. HR ne 10 second me reject kar diya!",
+      "tts": "वन, ए आई से रिज़्यूमे बनवाया. एच आर ने दस सेकंड में रिजेक्ट कर दिया!"
+    },
+    {
+      "who": "VINEET",
+      "shot": "chat",
+      "caption": "Maine likha, mera resume bana do. Aur ye mila.",
+      "tts": "मैंने लिखा, मेरा रिज़्यूमे बना दो. और ये मिला.",
+      "overlay": {
+        "type": "chat",
+        "msgs": [
+          {
+            "from": "me",
+            "text": "Mera resume bana do"
+          },
+          {
+            "from": "ai",
+            "text": "Zaroor! Ye raha ek professional resume:\nObjective: Ek mehnati aur dedicated professional jo growth chahta hai.\nSkills: Communication, Teamwork, MS Office."
+          }
+        ]
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "react",
+      "caption": "Ye toh har kisi ka resume hai. Isme tum kahan ho?",
+      "tts": "ये तो हर किसी का रिज़्यूमे है. इसमें तुम कहाँ हो?"
+    },
+    {
+      "who": "ONE",
+      "shot": "react",
+      "caption": "AI ko batao: kaunsi job, tumhara experience, numbers, aur job description.",
+      "tts": "ए आई को बताओ: कौन सी जॉब, तुम्हारा एक्सपीरियंस, नंबर्स, और जॉब डिस्क्रिप्शन."
+    },
+    {
+      "who": "VINEET",
+      "shot": "chat",
+      "caption": "Theek hai. Sales job, 2 saal retail, target 120 percent, 300 customers. Bullet points do.",
+      "tts": "ठीक है. सेल्स जॉब, दो साल रिटेल, टारगेट एक सौ बीस परसेंट, तीन सौ कस्टमर्स. बुलेट पॉइंट्स दो.",
+      "overlay": {
+        "type": "chat",
+        "msgs": [
+          {
+            "from": "me",
+            "text": "Sales Executive job. 2 saal retail experience. Monthly target ka 120% achieve kiya. 300+ regular customers. JD neeche hai. Strong bullet points do."
+          },
+          {
+            "from": "ai",
+            "text": "Sales Associate, Retail (2 saal)\n• Monthly sales target ka 120% achieve kiya\n• 300+ regular customers ke saath strong relationship banaya\nSummary: Target-driven retail sales professional, customer-first approach."
+          }
+        ]
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "realize",
+      "caption": "Arre! Ab lag raha hai ye main hoon.",
+      "tts": "अरे! अब लग रहा है ये मैं हूँ."
+    },
+    {
+      "who": "ONE",
+      "shot": "payoff",
+      "caption": "Aur ek rule: jo kiya nahi, wo AI se mat likhwana. Interview me pakde jaoge.",
+      "tts": "और एक रूल: जो किया नहीं, वो ए आई से मत लिखवाना. इंटरव्यू में पकड़े जाओगे."
+    },
+    {
+      "who": "VINEET",
+      "shot": "cta",
+      "caption": "Mera resume prompt chahiye? Comment karo RESUME. DM me bhejta hoon.",
+      "tts": "मेरा रिज़्यूमे प्रॉम्प्ट चाहिए? कमेंट करो, RESUME. डी एम में भेजता हूँ.",
+      "cta_card": {
+        "type": "comment",
+        "keyword": "RESUME"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "follow",
+      "caption": "Aur follow kar lo. Kal ek naya AI jugaad!",
+      "tts": "और फ़ॉलो कर लो. कल एक नया ए आई जुगाड़!",
+      "cta_card": {
+        "type": "follow"
+      }
+    }
+  ],
+  "post_caption": "AI se resume banwaya, reject ho gaya? 📄 Galat vs sahi prompt (Hindi)\n\n\"Mera resume bana do\" likha, toh mila wahi generic: \"mehnati aur dedicated professional\". 😑 HR roz aise 100 dekhta hai.\n\nSahi tarika, AI ko do:\n1️⃣ Kaunsi job\n2️⃣ Tumhara experience\n3️⃣ Numbers (target %, customers, results)\n4️⃣ Job description\n\nAur ek rule: jo kiya nahi, wo AI se mat likhwana. Interview me pakde jaoge. ⚠️\n\n👉 Mera resume prompt chahiye? Comment karo \"RESUME\", DM me bhej dunga.\n\n💾 Save karo, job dhoondhne wale dost ko bhejo.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#resumetips #chatgpt #jobsearch #aihindi #careertips",
+  "seo": {
+    "pinned_comment": "📌 \"RESUME\" comment karo 👇 mera copy-paste resume prompt DM me bhejta hoon.",
+    "alt_text": "Animated Hindi reel on a rooftop at sunset: VINEET shows the AI mascot ONE a phone chat. 'Mera resume bana do' gets a generic resume; a prompt with the job, experience, numbers and job description gets strong bullet points. Rule: never let AI add things you did not do.",
+    "cover_text": [
+      "AI se RESUME?",
+      "Galat vs sahi prompt"
+    ],
+    "keywords": [
+      "AI se resume kaise banaye",
+      "ChatGPT resume Hindi",
+      "resume tips Hindi",
+      "resume reject kyun hota hai",
+      "ChatGPT prompt for resume",
+      "job search tips"
+    ],
+    "youtube": {
+      "title": "AI se resume banwaya, reject? 📄 Galat vs sahi prompt | ChatGPT resume (Hindi) #shorts",
+      "description": "ChatGPT se resume kaise banwaye: 'mera resume bana do' vs detailed prompt. AI ko do: job, experience, numbers, job description. Jo kiya nahi, wo mat likhwao.\n\nResume prompt chahiye? Comment karo RESUME.\nRoz ek AI concept: subscribe karo.\n\n#ResumeTips #ChatGPT #JobSearch #AIHindi #Shorts",
+      "tags": [
+        "ai resume",
+        "chatgpt resume hindi",
+        "resume tips hindi",
+        "resume kaise banaye",
+        "chatgpt prompt resume",
+        "job search tips hindi",
+        "career tips",
+        "ai hindi",
+        "aibyvineet"
+      ]
+    },
+    "file_name": "ai-se-resume-galat-vs-sahi-prompt-hindi.mp4"
+  }
+}

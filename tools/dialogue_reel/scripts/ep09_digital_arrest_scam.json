@@ -1,0 +1,194 @@
+{
+  "id": "ep09_digital_arrest_scam",
+  "title": "Digital Arrest scam: nakli CBI call (scam call simulator)",
+  "location": "bedroom",
+  "board_style": "none",
+  "board_title": "",
+  "characters": {
+    "VINEET": {
+      "voice": "hm_omega",
+      "pitch": 1.0,
+      "speed": 1.05,
+      "eleven_voice_id": "TX3LPaxmHKxFdv7VOQHJ",
+      "eleven_speed": 1.05
+    },
+    "ONE": {
+      "voice": "hm_psi",
+      "pitch": 1.22,
+      "speed": 1.08,
+      "eleven_voice_id": "cgSgspJ2msm6clMCkdW9",
+      "eleven_speed": 1.08,
+      "eleven_pitch": 1.07
+    },
+    "CALLER": {
+      "voice": "hm_omega",
+      "pitch": 0.95,
+      "speed": 1.0,
+      "eleven_voice_id": "iP95p4xoKVk53GoZ742B",
+      "eleven_speed": 0.98,
+      "phone": true
+    }
+  },
+  "lines": [
+    {
+      "who": "VINEET",
+      "shot": "call",
+      "caption": "Anjaan number se video call? Uthata hoon...",
+      "tts": "अनजान नंबर से वीडियो कॉल? उठाता हूँ...",
+      "overlay": {
+        "type": "call",
+        "name": "Unknown Number",
+        "stage": "ring"
+      }
+    },
+    {
+      "who": "CALLER",
+      "shot": "call",
+      "caption": "Caller: Main CBI officer bol raha hoon. Aapke naam ke parcel me drugs mile hain.",
+      "tts": "मैं सी बी आई ऑफ़िसर बोल रहा हूँ. आपके नाम के पार्सल में ड्रग्स मिले हैं.",
+      "overlay": {
+        "type": "call",
+        "name": "Unknown Number",
+        "stage": "talk"
+      }
+    },
+    {
+      "who": "CALLER",
+      "shot": "call",
+      "caption": "Caller: Aap digital arrest me ho. Call mat kaatna, kisi ko mat batana.",
+      "tts": "आप डिजिटल अरेस्ट में हो. कॉल मत काटना, किसी को मत बताना.",
+      "overlay": {
+        "type": "call",
+        "name": "Unknown Number",
+        "stage": "talk"
+      }
+    },
+    {
+      "who": "CALLER",
+      "shot": "call",
+      "caption": "Caller: Case band karna hai toh abhi 50 hazaar transfer karo.",
+      "tts": "केस बंद करना है तो अभी पचास हज़ार ट्रांसफ़र करो.",
+      "overlay": {
+        "type": "call",
+        "name": "Unknown Number",
+        "stage": "talk"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "react",
+      "caption": "Call kaato! Ye scam hai. Police video call pe arrest nahi karti.",
+      "tts": "कॉल काटो! ये स्कैम है. पुलिस वीडियो कॉल पे अरेस्ट नहीं करती.",
+      "overlay": {
+        "type": "call",
+        "name": "Unknown Number",
+        "stage": "end"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "flag",
+      "caption": "Red flags dekho. Video call pe police. Aur digital arrest jaisi koi cheez hoti hi nahi.",
+      "tts": "रेड फ़्लैग्स देखो. वीडियो कॉल पे पुलिस. और डिजिटल अरेस्ट जैसी कोई चीज़ होती ही नहीं.",
+      "overlay": {
+        "type": "flags",
+        "items": [
+          "Video call pe 'police' ya 'CBI'",
+          "'Digital arrest': aisa kuch hota hi nahi"
+        ],
+        "title": "DIGITAL ARREST SCAM: RED FLAGS"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "flag",
+      "caption": "Aur 'kisi ko mat batana', 'abhi paise bhejo'. Pakka scam.",
+      "tts": "और, किसी को मत बताना, अभी पैसे भेजो. पक्का स्कैम.",
+      "overlay": {
+        "type": "flags",
+        "items": [
+          "'Kisi ko mat batana'",
+          "Case band karne ke liye paise"
+        ]
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "argue",
+      "caption": "Par peeche police station dikh raha tha, uniform bhi tha!",
+      "tts": "पर पीछे पुलिस स्टेशन दिख रहा था, यूनिफ़ॉर्म भी था!"
+    },
+    {
+      "who": "ONE",
+      "shot": "payoff",
+      "caption": "Wo sab nakli set ho sakta hai, AI se bhi. Asli police paise leke case band nahi karti.",
+      "tts": "वो सब नकली सेट हो सकता है, ए आई से भी. असली पुलिस पैसे लेके केस बंद नहीं करती."
+    },
+    {
+      "who": "ONE",
+      "shot": "flag",
+      "caption": "Rule: call kaato, ghar walon ko batao, aur cybercrime dot gov dot in pe report karo.",
+      "tts": "रूल: कॉल काटो, घर वालों को बताओ, और साइबरक्राइम डॉट जी ओ वी डॉट इन पे रिपोर्ट करो.",
+      "overlay": {
+        "type": "flags",
+        "items": [
+          "Call kaato, ghabrao mat",
+          "Ghar walon ko turant batao",
+          "Report: cybercrime.gov.in"
+        ]
+      }
+    },
+    {
+      "who": "VINEET",
+      "shot": "cta",
+      "caption": "Family ke liye scam alert checklist chahiye? Comment karo ALERT.",
+      "tts": "फ़ैमिली के लिए स्कैम अलर्ट चेकलिस्ट चाहिए? कमेंट करो, ALERT.",
+      "cta_card": {
+        "type": "comment",
+        "keyword": "ALERT"
+      }
+    },
+    {
+      "who": "ONE",
+      "shot": "follow",
+      "caption": "Ye reel family group me bhejo. Aur follow kar lo!",
+      "tts": "ये रील फ़ैमिली ग्रुप में भेजो. और फ़ॉलो कर लो!",
+      "cta_card": {
+        "type": "follow"
+      }
+    }
+  ],
+  "post_caption": "Digital Arrest Scam 🚨 Ye video call aaye toh paise mat bhejna (Hindi)\n\nAnjaan number se video call: \"Main CBI officer hoon. Aapke parcel me drugs mile. Aap digital arrest me ho, kisi ko mat batana. Case band karna hai toh 50 hazaar bhejo.\" Peeche police station, uniform, sab. 😨\n\nSach: 'digital arrest' jaisa kuch hota hi nahi. Police video call pe arrest nahi karti, aur paise leke case band nahi karti.\n\n🚩 Red flags:\n1️⃣ Video call pe 'police' ya 'CBI'\n2️⃣ 'Kisi ko mat batana'\n3️⃣ Case band karne ke liye paise\n\n✅ Rule: call kaato, ghar walon ko batao, cybercrime.gov.in pe report karo.\n\n👉 Family scam alert checklist chahiye? Comment karo \"ALERT\", DM me bhej dunga.\n\n📲 Ye reel family group me zaroor bhejo.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#digitalarrest #scamalert #cybersafety #deepfake #aihindi",
+  "seo": {
+    "pinned_comment": "📌 \"ALERT\" comment karo 👇 family ke liye scam alert checklist DM me bhejta hoon.",
+    "alt_text": "Animated Hindi scam-call simulation: a fake 'CBI officer' video-calls VINEET, claims drugs were found in his parcel, says he is under 'digital arrest', demands secrecy and 50,000 rupees. The AI mascot ONE stops him and lists red flags; rule: hang up, tell family, report on cybercrime.gov.in.",
+    "cover_text": [
+      "DIGITAL ARREST? 🚨",
+      "Nakli CBI call pehchano"
+    ],
+    "keywords": [
+      "digital arrest scam",
+      "digital arrest kya hai",
+      "fake CBI call scam",
+      "video call scam Hindi",
+      "cyber fraud kaise bache",
+      "deepfake scam India"
+    ],
+    "youtube": {
+      "title": "Digital Arrest Scam 🚨 Nakli CBI video call aaye toh kya karein? (Hindi) #shorts",
+      "description": "Digital arrest scam kya hai, scam call simulation ke saath. Sach: digital arrest jaisa kuch nahi hota, police video call pe arrest nahi karti. Rule: call kaato, ghar walon ko batao, cybercrime.gov.in pe report karo.\n\nFamily scam alert checklist chahiye? Comment karo ALERT.\nRoz ek AI concept: subscribe karo.\n\n#DigitalArrest #ScamAlert #CyberSafety #AIHindi #Shorts",
+      "tags": [
+        "digital arrest scam",
+        "digital arrest kya hai",
+        "fake cbi call",
+        "video call scam",
+        "cyber fraud hindi",
+        "scam alert hindi",
+        "deepfake scam",
+        "cyber safety hindi",
+        "aibyvineet"
+      ]
+    },
+    "file_name": "digital-arrest-scam-fake-cbi-call-hindi.mp4"
+  }
+}
