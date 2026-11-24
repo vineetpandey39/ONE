@@ -1071,9 +1071,11 @@ function drawChat(g, t) {
     const rows = typing ? [''] : text.split('\n').flatMap(p => wrap(g, p, bw - 36));
     return { m, rows, typing, h: rows.length * lineH + 30 };
   });
-  const total = items.reduce((s, it) => s + it.h + 14, 0);
+  // scroll target grows with each bubble's fade-in; speed capped so text never jumps between frames
+  const total = items.reduce((s, it) => s + (it.h + 14) * ease(clamp01((t - it.m.t0) / 0.4)), 0);
   const want = Math.max(0, total - (ph - 110));
-  chatScroll += (want - chatScroll) * 0.25;
+  const step = (want - chatScroll) * 0.15;
+  chatScroll += Math.max(-9, Math.min(9, step));
   let y = py + 100 - chatScroll;
   for (const it of items) {
     const me = it.m.from === 'me', w = it.typing ? 96 : Math.min(bw, Math.max(...it.rows.map(r => g.measureText(r).width)) + 36);
