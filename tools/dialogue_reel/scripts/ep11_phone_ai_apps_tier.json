@@ -130,11 +130,11 @@
     {
       "who": "VINEET",
       "shot": "cta",
-      "caption": "Aapka favourite AI app kaunsa? Comment karo APPS, poori list DM me.",
-      "tts": "आपका फ़ेवरेट ए आई ऐप कौन सा? कमेंट करो, APPS. पूरी लिस्ट डी एम में.",
+      "caption": "Aapka favourite AI app kaunsa? Comment karo PHONE, poori list DM me.",
+      "tts": "आपका फ़ेवरेट ए आई ऐप कौन सा? कमेंट करो, PHONE. पूरी लिस्ट डी एम में.",
       "cta_card": {
         "type": "comment",
-        "keyword": "APPS"
+        "keyword": "PHONE"
       }
     },
     {
@@ -147,9 +147,9 @@
       }
     }
   ],
-  "post_caption": "Phone ke AI apps 📱 Kaam ke ya bekaar? Tier List (Hindi)\n\nS: Google Lens (photo se translate, search, sab ek tap me)\nA: ChatGPT (voice me baat, Hindi me bhi; facts check karo)\nA: Gemini (Gmail aur Google apps ke saath)\nB: AI photo filter apps (mazedaar, par photos soch ke do)\nC: Bina wajah gallery + contacts maangne wale apps (turant delete)\n\nSmart app, smart permission. 🔒\n\n👉 Aapka favourite AI app kaunsa? Comment me batao aur \"APPS\" likho, poori list DM me bhej dunga.\n\n💾 Save karo, aur ghar walon ko bhejo.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#aiapps #googlelens #chatgpt #aihindi #techtips",
+  "post_caption": "Phone ke AI apps 📱 Kaam ke ya bekaar? Tier List (Hindi)\n\nS: Google Lens (photo se translate, search, sab ek tap me)\nA: ChatGPT (voice me baat, Hindi me bhi; facts check karo)\nA: Gemini (Gmail aur Google apps ke saath)\nB: AI photo filter apps (mazedaar, par photos soch ke do)\nC: Bina wajah gallery + contacts maangne wale apps (turant delete)\n\nSmart app, smart permission. 🔒\n\n👉 Aapka favourite AI app kaunsa? Comment me batao aur \"PHONE\" likho, poori list DM me bhej dunga.\n\n💾 Save karo, aur ghar walon ko bhejo.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#aiapps #googlelens #chatgpt #aihindi #techtips",
   "seo": {
-    "pinned_comment": "📌 Apna favourite AI app comment karo + \"APPS\" likho 👇 kaam ke AI apps ki poori list DM me bhejta hoon.",
+    "pinned_comment": "📌 Apna favourite AI app comment karo + \"PHONE\" likho 👇 kaam ke AI apps ki poori list DM me bhejta hoon.",
     "alt_text": "Animated Hindi tier list in a study room: the AI mascot ONE ranks phone AI apps while VINEET argues. S tier Google Lens, A tier ChatGPT and Gemini, B tier AI photo filter apps, C tier apps that ask for the whole gallery and contacts without reason. Message: check app permissions.",
     "cover_text": [
       "PHONE AI APPS",
@@ -165,7 +165,7 @@
     ],
     "youtube": {
       "title": "Phone ke AI apps 📱 Kaam ke ya bekaar? Tier List | Google Lens, ChatGPT, Gemini (Hindi) #shorts",
-      "description": "Best AI apps for phone, tier list in Hindi: Google Lens, ChatGPT, Gemini, AI photo apps. Smart app, smart permission.\n\nApna favourite AI app comment karo + APPS likho.\nRoz ek AI concept: subscribe karo.\n\n#AIApps #GoogleLens #ChatGPT #AIHindi #Shorts",
+      "description": "Best AI apps for phone, tier list in Hindi: Google Lens, ChatGPT, Gemini, AI photo apps. Smart app, smart permission.\n\nApna favourite AI app comment karo + PHONE likho.\nRoz ek AI concept: subscribe karo.\n\n#AIApps #GoogleLens #ChatGPT #AIHindi #Shorts",
       "tags": [
         "best ai apps",
         "ai apps hindi",

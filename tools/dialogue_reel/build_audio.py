@@ -140,7 +140,8 @@ def transcribe(x: np.ndarray) -> str:
 
 
 _DEVA = dict(zip("कखगघचछजझटठडढणतथदधनपफबभमयरलवशषसहंँ",
-                 "kkggccjjttddntttddnpfbbmyrlvsssshnn"))
+                 "kkggccjjttddnttddnpfbbmyrlvssshnn"))
+assert len(_DEVA) == 33
 _NUMBER_WORDS = {"एक", "दो", "तीन", "चार", "पाँच", "पांच", "छह", "सात", "आठ", "नौ", "दस", "ग्यारह", "बारह",
                  "बीस", "तीस", "पचास", "सौ", "हज़ार", "हजार", "लाख", "पंद्रह", "उन्नीस"}
 
@@ -152,8 +153,10 @@ def skeleton(word: str) -> str:
     if re.search(r"[\u0900-\u097F]", w):
         out = "".join(_DEVA.get(ch, "") for ch in w.replace("\u093c", ""))
     else:
-        for a2, b2 in (("ph", "f"), ("sh", "s"), ("ch", "c"), ("th", "t"), ("kh", "k"), ("gh", "g"),
-                       ("bh", "b"), ("dh", "d"), ("w", "v"), ("z", "j"), ("q", "k"), ("x", "ks")):
+        w = re.sub(r"c(?=[eiy])", "s", w)            # police -> polise, cyber -> syber
+        w = w.replace("ck", "k").replace("mb", "nb").replace("mp", "np")
+        for a2, b2 in (("ph", "f"), ("sh", "s"), ("ch", "C"), ("th", "t"), ("kh", "k"), ("gh", "g"),
+                       ("bh", "b"), ("dh", "d"), ("w", "v"), ("z", "j"), ("q", "k"), ("x", "ks"), ("c", "k"), ("C", "c")):
             w = w.replace(a2, b2)
         out = re.sub(r"[aeiouh0-9]", "", w)
     out = out.replace("h", "")
