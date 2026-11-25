@@ -53,6 +53,34 @@ def subject_anchor(subject):
     return (words[-1] if words else (tokens[-1] if tokens else '')).strip()
 
 
+def location_subject_anchor(place, subject):
+    """Return one visible noun while the separate place gate stays strict.
+
+    Provider metadata commonly reorders the director's phrase (for example
+    ``Geiranger fjord ... Norway`` rather than ``Norway fjord landscape``).
+    Requiring that full prose contiguously rejected correct-location footage.
+    The place is still independently mandatory; this only selects one useful
+    subject word from the same contracted description.
+    """
+    place_words = norm(place).split()
+    stop = _CAMERA_WORDS | {
+        'beautiful', 'landscape', 'picturesque', 'scenic', 'surrounded',
+        'the', 'with', 'by', 'in', 'at', 'of', 'and',
+    }
+    candidates = []
+    for word in norm(subject).split():
+        if word in stop or word in place_words:
+            continue
+        # Norway/Norwegian and Greece/Greek are the same geographic evidence,
+        # not the independent visible subject.
+        if any(len(p) >= 4 and word.startswith(p[:4]) for p in place_words):
+            continue
+        candidates.append(word)
+    if not candidates:
+        raise ValueError('Location-proof subject lacks an independent visible noun')
+    return candidates[0]
+
+
 def subject_matches(text, subject):
     if contains(text, subject):
         return True
@@ -84,7 +112,8 @@ def acquisition_gate(requirement):
     # Workflow assert_destination_subject reads alternateTitleKeyword as the
     # subject. Leaving it blank silently drops the landmark-specific check.
     return {'requiredTitleKeyword': requirement['place'],
-            'alternateTitleKeyword': requirement['subject'],
+            'alternateTitleKeyword': location_subject_anchor(
+                requirement['place'], requirement['subject']),
             'locationMatch': False, 'subjectMatch': True,
             'contextualMatch': False,
             'regionalContext': False, 'regionalContextLabel': ''}
