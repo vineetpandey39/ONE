@@ -1054,7 +1054,7 @@ function placeCamera(t) {
 }
 
 // ---------- character behaviour (stateful, frames rendered in order) ----------
-let boyYaw = 0.0, boyPitch = 0, oneYaw = 0.5, stickAim = new THREE.Vector3(), nodSm = 0, mB = 0, mO = 0, oneEnv = 0;
+let boyYaw = 0.0, boyPitch = 0, oneYaw = 0.5, stickAim = new THREE.Vector3(), nodSm = 0, mB = 0, mO = 0, oneEnv = 0, oneEnv1 = 0, shBs = 0.5, shOs = 0.5;
 // Natural blinking: irregular gaps (2-5 s), smooth close/open, sometimes a double blink.
 function blinkTrack(seed, total) {
   let s = seed; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
@@ -1077,10 +1077,14 @@ function animate(t, f) {
   const l = lineAt(t);
   const speaker = l ? l.who : null;
   // mouth/voice envelopes smoothed a little so no single-frame pops
-  mB += ((TL.amp.VINEET?.[f] || 0) - mB) * 0.6; mO += ((TL.amp.ONE?.[f] || 0) - mO) * 0.6;
-  oneEnv += ((TL.amp.ONE?.[f] || 0) - oneEnv) * 0.25;   // slower envelope for ONE's body/glow (mouth keeps mO)
+  mB += ((TL.amp.VINEET?.[f] || 0) - mB) * 0.5; mO += ((TL.amp.ONE?.[f] || 0) - mO) * 0.5;
+  // two-pole envelope for ONE's body/glow (mouth keeps mO): a one-pole filter still left V-shaped
+  // dips that read as a 1px body jolt in close-ups
+  oneEnv1 += ((TL.amp.ONE?.[f] || 0) - oneEnv1) * 0.22; oneEnv += (oneEnv1 - oneEnv) * 0.22;
   const aB = mB, aO = mO;
-  const shB = TL.shape?.VINEET?.[f] ?? 0.5, shO = TL.shape?.ONE?.[f] ?? 0.5;
+  // vowel shape smoothed too: a raw per-frame width change read as a one-frame mouth pop in close-ups
+  shBs += ((TL.shape?.VINEET?.[f] ?? 0.5) - shBs) * 0.35; shOs += ((TL.shape?.ONE?.[f] ?? 0.5) - shOs) * 0.35;
+  const shB = shBs, shO = shOs;
   const writing = ops.find(o => t >= o.t0 - 0.1 && t <= o.t1 + 0.2);
   const recent = lastLineBefore(t);
 
@@ -1688,6 +1692,7 @@ window.stepFrame = (f) => {
   return { tip: tip.toArray().map(v => +v.toFixed(2)), base: base.toArray().map(v => +v.toFixed(2)), aim: stickAim.toArray().map(v => +v.toFixed(2)), t, cam: camera.position.toArray().map(v => +v.toFixed(2)), fov: +camera.fov.toFixed(1), head: h.toArray().map(v => +v.toFixed(2)), yaw: +boyYaw.toFixed(2) };
 };
 window.KFDBG = () => KF.map(k => [k.t.toFixed(2), k.blend, k.name]);
+window.DBG2 = () => ({ cam: camera.position.toArray().map(v => +v.toFixed(5)), q: camera.quaternion.toArray().map(v => +v.toFixed(5)), fov: +camera.fov.toFixed(4), ob: oneBody.position.y.toFixed(5), os: oneBody.scale.x.toFixed(5), yaw: oneYaw.toFixed(5), env: oneEnv.toFixed(4) });
 window.pick = (nx, ny) => {
   const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(nx, ny), camera);
   const hit = rc.intersectObjects(scene.children, true)[0];
