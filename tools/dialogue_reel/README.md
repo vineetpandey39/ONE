@@ -61,6 +61,19 @@ Locations (`"location"` in the script; characters, shots and board logic stay th
 - `classroom`: study room, whiteboard, night city window (episodes 1-2)
 - `tapri`: night chai stall, chalkboard menu (`board_style: chalk`), street bokeh (episode 3)
 
+- `studio` (quiz show), `terrace` (sunset roof, chat demo), `bedroom` (night room, scam call)
+- `court`: AI Adalat, maroon case plaque (`board_style: plaque`, `board_sub`), ONE as judge with a gavel
+- `newsroom`: news desk, video wall with the current headline (`board_style: news`), lower third + ticker
+- `podcast`: two mics, ON AIR sign (`board_style: onair`), rapid-fire timer
+- `office`: HR cabin; ONE in a tie scores answers on an HR scorecard
+
+`costume` (judge | tie | anchor | headset) adds an accessory to ONE; defaults per location. The
+character models never change.
+
+New shots: `charge` (ONE speaks as judge/anchor; `"gavel": true` adds "Order, order!" knocks), `gavel`
+(verdict: knocks, low shot, punch), `news`, `rapidq` / `rapida` (hard cuts), `ask`, `score`.
+New overlays: `verdict`, `news`, `rapid` (with `buzz`), `score`. Format rules: `prompts/dialogue_writer.md`.
+
 Optional painted backdrop per location: `assets/backdrop_<location>.jpg`.
 
 ## Placeholders to swap later

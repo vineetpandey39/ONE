@@ -1,0 +1,166 @@
+{
+ "id": "ep14_scam_news_bulletin",
+ "title": "ONE News: 3 scam khabrein (deepfake ads, task scam, QR scam)",
+ "location": "newsroom",
+ "board_title": "AI NEWS",
+ "board_sub": "Fraud Bulletin",
+ "costume": "anchor",
+ "characters": {
+  "VINEET": {
+   "voice": "hm_omega",
+   "pitch": 1.0,
+   "speed": 1.05,
+   "eleven_voice_id": "TX3LPaxmHKxFdv7VOQHJ",
+   "eleven_speed": 1.05
+  },
+  "ONE": {
+   "voice": "hm_psi",
+   "pitch": 1.22,
+   "speed": 1.08,
+   "eleven_voice_id": "cgSgspJ2msm6clMCkdW9",
+   "eleven_speed": 1.08,
+   "eleven_pitch": 1.07
+  }
+ },
+ "lines": [
+  {
+   "who": "ONE",
+   "shot": "charge",
+   "caption": "Namaskar, ye hai ONE News. Aaj teen khabrein, jo paisa bacha sakti hain.",
+   "tts": "नमस्कार, ये है वन न्यूज़. आज तीन ख़बरें, जो पैसा बचा सकती हैं."
+  },
+  {
+   "who": "ONE",
+   "shot": "news",
+   "caption": "Pehli khabar: famous logon ke deepfake video ads. Bolte hain, is app me paisa lagao, double hoga.",
+   "tts": "पहली ख़बर: फ़ेमस लोगों के डीपफ़ेक वीडियो ऐड्स. बोलते हैं, इस ऐप में पैसा लगाओ, डबल होगा.",
+   "overlay": {
+    "type": "news",
+    "headline": "Deepfake ads: nakli celebrity, nakli app",
+    "ticker": "Celebrity wala investment ad? Pehle verify karo"
+   }
+  },
+  {
+   "who": "VINEET",
+   "shot": "react",
+   "caption": "Toh mere liye kya?",
+   "tts": "तो मेरे लिए क्या?"
+  },
+  {
+   "who": "ONE",
+   "shot": "charge",
+   "caption": "Video kitna bhi real lage, paisa sirf official, registered app me lagao.",
+   "tts": "वीडियो कितना भी रियल लगे, पैसा सिर्फ़ ऑफ़िशियल, रजिस्टर्ड ऐप में लगाओ."
+  },
+  {
+   "who": "ONE",
+   "shot": "news",
+   "caption": "Doosri khabar: video like karo, paise kamao. Pehle thode paise dete hain, phir bada deposit maangte hain.",
+   "tts": "दूसरी ख़बर: वीडियो लाइक करो, पैसे कमाओ. पहले थोड़े पैसे देते हैं, फिर बड़ा डिपॉज़िट माँगते हैं.",
+   "overlay": {
+    "type": "news",
+    "headline": "Task scam: like karo, kamao... phir deposit do",
+    "ticker": "Ghar baithe kamai ka message? Block aur report"
+   }
+  },
+  {
+   "who": "VINEET",
+   "shot": "react",
+   "caption": "Ye mere group me bhi aaya tha!",
+   "tts": "ये मेरे ग्रुप में भी आया था!"
+  },
+  {
+   "who": "ONE",
+   "shot": "charge",
+   "caption": "Rule simple: kamaane ke liye kabhi paise mat bharo.",
+   "tts": "रूल सिंपल: कमाने के लिए कभी पैसे मत भरो."
+  },
+  {
+   "who": "ONE",
+   "shot": "news",
+   "caption": "Teesri khabar: OLX pe buyer bolta hai, QR scan karo, paise aa jayenge.",
+   "tts": "तीसरी ख़बर: ओ एल एक्स पे बायर बोलता है, क्यू आर स्कैन करो, पैसे आ जाएँगे.",
+   "overlay": {
+    "type": "news",
+    "headline": "QR scam: paise lene ke liye PIN nahi lagta",
+    "ticker": "UPI PIN sirf paise bhejne ke liye lagta hai"
+   }
+  },
+  {
+   "who": "VINEET",
+   "shot": "react",
+   "caption": "Aur PIN daalte hi?",
+   "tts": "और पिन डालते ही?"
+  },
+  {
+   "who": "ONE",
+   "shot": "charge",
+   "caption": "Paise aate nahi, jaate hain. Paise lene me PIN kabhi nahi lagta.",
+   "tts": "पैसे आते नहीं, जाते हैं. पैसे लेने में पिन कभी नहीं लगता."
+  },
+  {
+   "who": "VINEET",
+   "shot": "realize",
+   "caption": "Matlab teeno me ek hi cheez: jaldi paisa, aur jaldi faisla.",
+   "tts": "मतलब तीनों में एक ही चीज़: जल्दी पैसा, और जल्दी फ़ैसला."
+  },
+  {
+   "who": "ONE",
+   "shot": "payoff",
+   "caption": "Jahan jaldi ho, wahan ruko. Yahi aaj ki sabse badi khabar.",
+   "tts": "जहाँ जल्दी हो, वहाँ रुको. यही आज की सबसे बड़ी ख़बर."
+  },
+  {
+   "who": "VINEET",
+   "shot": "cta",
+   "caption": "Har hafte ka scam bulletin chahiye? Comment karo NEWS. DM me bhejta hoon.",
+   "tts": "हर हफ़्ते का स्कैम बुलेटिन चाहिए? कमेंट करो, NEWS. डी एम में भेजता हूँ.",
+   "cta_card": {
+    "type": "comment",
+    "keyword": "NEWS"
+   }
+  },
+  {
+   "who": "ONE",
+   "shot": "follow",
+   "caption": "Aur follow karo. Agle hafte, nayi khabrein!",
+   "tts": "और फ़ॉलो करो. अगले हफ़्ते, नई ख़बरें!",
+   "cta_card": {
+    "type": "follow"
+   }
+  }
+ ],
+ "post_caption": "Online scam news 📰 3 fraud jo abhi chal rahe hain (Hindi)\n\nONE News Fraud Bulletin, aaj ki 3 khabrein:\n\n1️⃣ Deepfake ads: famous logon ke nakli video, \"is app me paisa lagao, double hoga\". Paisa sirf official, registered app me lagao.\n2️⃣ Task scam: \"video like karo, paise kamao\". Pehle thode paise, phir bada deposit. Kamaane ke liye kabhi paise mat bharo.\n3️⃣ QR scam: \"QR scan karo, paise aa jayenge\". Paise lene ke liye UPI PIN kabhi nahi lagta.\n\nTeeno me ek cheez common: jaldi paisa, jaldi faisla. Jahan jaldi ho, wahan ruko. ✋\n\n👉 Har hafte ka scam bulletin chahiye? Comment karo \"NEWS\", DM me bhej dunga.\n\n📲 Family group me zaroor bhejo.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#onlinescam #scamalert #deepfake #upiscam #cybersafety",
+ "seo": {
+  "keywords": [
+   "online scam news",
+   "task scam kya hai",
+   "deepfake ad scam",
+   "qr code scam upi",
+   "upi pin scam",
+   "online fraud hindi"
+  ],
+  "alt_text": "Animated TV news bulletin where the ONE mascot anchors three online scam stories in Hindi: deepfake celebrity investment ads, the like-and-earn task scam, and the QR code UPI PIN scam.",
+  "cover_text": [
+   "SCAM NEWS 📰",
+   "3 fraud abhi chal rahe"
+  ],
+  "pinned_comment": "📌 \"NEWS\" comment karo 👇 har hafte ka scam bulletin DM me bhejta hoon.",
+  "youtube": {
+   "title": "Scam News 📰 Deepfake ads, Task scam, QR scam: bacho! (Hindi) #shorts",
+   "description": "Online scam news in Hindi: deepfake celebrity ads, task scam (like karo kamao), aur QR code scam. Paise lene ke liye UPI PIN kabhi nahi lagta. Kamaane ke liye kabhi paise mat bharo.\n\nScam bulletin chahiye? Comment karo NEWS.\nRoz ek AI concept: subscribe karo.\n\n#OnlineScam #ScamAlert #Deepfake #UPIScam #Shorts",
+   "tags": [
+    "online scam news",
+    "task scam",
+    "deepfake ad scam",
+    "qr code scam",
+    "upi pin scam",
+    "online fraud hindi",
+    "scam alert hindi",
+    "cyber safety",
+    "aibyvineet"
+   ]
+  },
+  "file_name": "online-scam-news-deepfake-task-qr-scam-hindi.mp4"
+ }
+}

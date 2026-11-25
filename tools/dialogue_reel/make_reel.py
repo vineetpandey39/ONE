@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SHOTS = {"hook", "explain", "simpler", "story", "reveal", "realize", "payoff", "cta", "follow", "claim", "verdict", "question", "answer", "result", "chat", "react", "call", "flag", "tier", "argue"}
-LOCATIONS = {"classroom", "tapri", "studio", "terrace", "bedroom"}
+SHOTS = {"hook", "explain", "simpler", "story", "reveal", "realize", "payoff", "cta", "follow", "claim", "verdict", "question", "answer", "result", "chat", "react", "call", "flag", "tier", "argue", "charge", "gavel", "news", "rapidq", "rapida", "ask", "score"}
+LOCATIONS = {"classroom", "tapri", "studio", "terrace", "bedroom", "court", "newsroom", "podcast", "office"}
 
 
 def validate(script: dict) -> list[str]:
@@ -27,6 +28,8 @@ def validate(script: dict) -> list[str]:
             errs.append(f"missing '{k}'")
     if errs:
         return errs
+    if script.get("costume", "") not in ("", "judge", "tie", "anchor", "headset"):
+        errs.append("costume must be judge | tie | anchor | headset")
     if script.get("location", "classroom") not in LOCATIONS:
         errs.append(f"unknown location {script.get('location')!r}; one of {sorted(LOCATIONS)}")
     for i, ln in enumerate(script["lines"], 1):
@@ -49,6 +52,18 @@ def validate(script: dict) -> list[str]:
         elif ov and ov.get("type") == "tier":
             if not all(it.get("name") and it.get("tier") in ("S", "A", "B", "C") for it in ov.get("add", [])):
                 errs.append(f"line {i}: tier add items need name and tier S/A/B/C")
+        elif ov and ov.get("type") == "verdict":
+            if not ov.get("text") or not 0 <= float(ov.get("at", 0.35)) <= 1:
+                errs.append(f"line {i}: verdict needs text (and at 0..1)")
+        elif ov and ov.get("type") == "news":
+            if not ov.get("headline") or len(ov["headline"]) > 60:
+                errs.append(f"line {i}: news needs a headline of at most 60 chars")
+        elif ov and ov.get("type") == "rapid":
+            if not (isinstance(ov.get("n"), int) and isinstance(ov.get("of"), int)) or i == 1:
+                errs.append(f"line {i}: rapid needs integer n/of and must follow its question line")
+        elif ov and ov.get("type") == "score":
+            if not isinstance(ov.get("score"), (int, float)) or not 0 <= ov["score"] <= ov.get("max", 10):
+                errs.append(f"line {i}: score needs score between 0 and max")
         elif ov:
             errs.append(f"line {i}: unknown overlay type {ov.get('type')!r}")
     ids: set[str] = set()
@@ -61,7 +76,8 @@ def validate(script: dict) -> list[str]:
         for k in ("caption", "tts"):
             if not str(ln.get(k, "")).strip():
                 errs.append(f"line {i}: empty {k}")
-        tts = str(ln.get("tts", ""))
+        # Latin capitals are allowed for words that must be heard exactly (the CTA keyword)
+        tts = re.sub(r"\b[A-Z]{2,}\b", "", str(ln.get("tts", "")))
         letters = [c for c in tts if c.isalpha()]
         deva = sum("\u0900" <= c <= "\u097f" for c in letters)
         if letters and deva / len(letters) < 0.8:

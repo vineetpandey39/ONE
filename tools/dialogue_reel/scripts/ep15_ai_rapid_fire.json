@@ -1,0 +1,252 @@
+{
+ "id": "ep15_ai_rapid_fire",
+ "title": "AI Rapid Fire: 8 sawaal, 5 second",
+ "location": "podcast",
+ "board_title": "RAPID FIRE",
+ "board_sub": "5 second, 5 shabd",
+ "costume": "headset",
+ "characters": {
+  "VINEET": {
+   "voice": "hm_omega",
+   "pitch": 1.0,
+   "speed": 1.05,
+   "eleven_voice_id": "TX3LPaxmHKxFdv7VOQHJ",
+   "eleven_speed": 1.05
+  },
+  "ONE": {
+   "voice": "hm_psi",
+   "pitch": 1.22,
+   "speed": 1.08,
+   "eleven_voice_id": "cgSgspJ2msm6clMCkdW9",
+   "eleven_speed": 1.08,
+   "eleven_pitch": 1.07
+  }
+ },
+ "lines": [
+  {
+   "who": "VINEET",
+   "shot": "hook",
+   "caption": "ONE, aaj rapid fire! 8 sawaal, har jawab 5 second me.",
+   "tts": "वन, आज रैपिड फ़ायर! आठ सवाल, हर जवाब पाँच सेकंड में."
+  },
+  {
+   "who": "ONE",
+   "shot": "payoff",
+   "caption": "Challenge accepted. Timer chalu karo!",
+   "tts": "चैलेंज एक्सेप्टेड. टाइमर चालू करो!"
+  },
+  {
+   "who": "VINEET",
+   "shot": "rapidq",
+   "caption": "ChatGPT free hai?",
+   "tts": "चैट जी पी टी फ़्री है?"
+  },
+  {
+   "who": "ONE",
+   "shot": "rapida",
+   "caption": "Haan, basic version free.",
+   "tts": "हाँ, बेसिक वर्ज़न फ़्री.",
+   "overlay": {
+    "type": "rapid",
+    "n": 1,
+    "of": 8
+   }
+  },
+  {
+   "who": "VINEET",
+   "shot": "rapidq",
+   "caption": "AI kabhi galat bolta hai?",
+   "tts": "ए आई कभी ग़लत बोलता है?"
+  },
+  {
+   "who": "ONE",
+   "shot": "rapida",
+   "caption": "Haan, isliye check karo.",
+   "tts": "हाँ, इसलिए चेक करो.",
+   "overlay": {
+    "type": "rapid",
+    "n": 2,
+    "of": 8
+   }
+  },
+  {
+   "who": "VINEET",
+   "shot": "rapidq",
+   "caption": "Prompt matlab?",
+   "tts": "प्रॉम्प्ट मतलब?"
+  },
+  {
+   "who": "ONE",
+   "shot": "rapida",
+   "caption": "AI ko diya gaya instruction.",
+   "tts": "ए आई को दिया गया इंस्ट्रक्शन.",
+   "overlay": {
+    "type": "rapid",
+    "n": 3,
+    "of": 8
+   }
+  },
+  {
+   "who": "VINEET",
+   "shot": "rapidq",
+   "caption": "Password AI ko de sakte?",
+   "tts": "पासवर्ड ए आई को दे सकते?"
+  },
+  {
+   "who": "ONE",
+   "shot": "rapida",
+   "caption": "Kabhi nahi!",
+   "tts": "कभी नहीं!",
+   "overlay": {
+    "type": "rapid",
+    "n": 4,
+    "of": 8
+   }
+  },
+  {
+   "who": "VINEET",
+   "shot": "rapidq",
+   "caption": "AI meri job le lega?",
+   "tts": "ए आई मेरी जॉब ले लेगा?"
+  },
+  {
+   "who": "ONE",
+   "shot": "rapida",
+   "caption": "Dekho, ye depend karta hai ki industry kaunsi hai, skills kaunsi hain, aur...",
+   "tts": "देखो, ये डिपेंड करता है कि इंडस्ट्री कौन सी है, स्किल्स कौन सी हैं, और...",
+   "overlay": {
+    "type": "rapid",
+    "n": 5,
+    "of": 8,
+    "buzz": true
+   }
+  },
+  {
+   "who": "VINEET",
+   "shot": "argue",
+   "caption": "Time up! Ek line me bolo.",
+   "tts": "टाइम अप! एक लाइन में बोलो."
+  },
+  {
+   "who": "ONE",
+   "shot": "payoff",
+   "caption": "Job nahi, kaam badlega. AI seekho.",
+   "tts": "जॉब नहीं, काम बदलेगा. ए आई सीखो."
+  },
+  {
+   "who": "VINEET",
+   "shot": "rapidq",
+   "caption": "Sabse best AI tool?",
+   "tts": "सबसे बेस्ट ए आई टूल?"
+  },
+  {
+   "who": "ONE",
+   "shot": "rapida",
+   "caption": "Jo aapka kaam kare.",
+   "tts": "जो आपका काम करे.",
+   "overlay": {
+    "type": "rapid",
+    "n": 6,
+    "of": 8
+   }
+  },
+  {
+   "who": "VINEET",
+   "shot": "rapidq",
+   "caption": "AI se photo ban sakti hai?",
+   "tts": "ए आई से फ़ोटो बन सकती है?"
+  },
+  {
+   "who": "ONE",
+   "shot": "rapida",
+   "caption": "Haan, bas likho kaisi chahiye.",
+   "tts": "हाँ, बस लिखो कैसी चाहिए.",
+   "overlay": {
+    "type": "rapid",
+    "n": 7,
+    "of": 8
+   }
+  },
+  {
+   "who": "VINEET",
+   "shot": "rapidq",
+   "caption": "AI seekhne ki sahi umar?",
+   "tts": "ए आई सीखने की सही उम्र?"
+  },
+  {
+   "who": "ONE",
+   "shot": "rapida",
+   "caption": "Aaj. Abhi.",
+   "tts": "आज. अभी.",
+   "overlay": {
+    "type": "rapid",
+    "n": 8,
+    "of": 8
+   }
+  },
+  {
+   "who": "VINEET",
+   "shot": "realize",
+   "caption": "Saat out of aath! Sirf job wale pe atak gaye.",
+   "tts": "सात आउट ऑफ़ आठ! सिर्फ़ जॉब वाले पे अटक गए."
+  },
+  {
+   "who": "ONE",
+   "shot": "payoff",
+   "caption": "Lamba jawab AI dega. Sahi sawaal aap pucho.",
+   "tts": "लंबा जवाब ए आई देगा. सही सवाल आप पूछो."
+  },
+  {
+   "who": "VINEET",
+   "shot": "cta",
+   "caption": "AI basics ki free list chahiye? Comment karo BASICS. DM me bhejta hoon.",
+   "tts": "ए आई बेसिक्स की फ़्री लिस्ट चाहिए? कमेंट करो, BASICS. डी एम में भेजता हूँ.",
+   "cta_card": {
+    "type": "comment",
+    "keyword": "BASICS"
+   }
+  },
+  {
+   "who": "ONE",
+   "shot": "follow",
+   "caption": "Aur follow karo. Agla rapid fire, aapke sawaalon pe!",
+   "tts": "और फ़ॉलो करो. अगला रैपिड फ़ायर, आपके सवालों पे!",
+   "cta_card": {
+    "type": "follow"
+   }
+  }
+ ],
+ "post_caption": "AI ke basic sawaal 🔥 Rapid Fire: 8 sawaal, 5 second (Hindi)\n\nONE ke saath rapid fire, har jawab 5 second me:\n⚡ ChatGPT free hai? Haan, basic version free.\n⚡ AI galat bolta hai? Haan, isliye check karo.\n⚡ Prompt matlab? AI ko diya gaya instruction.\n⚡ Password AI ko? Kabhi nahi!\n⚡ AI job le lega? ⏰ TIME UP... Job nahi, kaam badlega. AI seekho.\n\nScore: 7/8. Lamba jawab AI dega, sahi sawaal aap pucho. 😄\n\n👉 AI basics ki free list chahiye? Comment karo \"BASICS\", DM me bhej dunga.\n💬 Agle rapid fire ke liye apna sawaal comment me likho!\n\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#aibasics #chatgpthindi #rapidfire #aihindi #learnai",
+ "seo": {
+  "keywords": [
+   "ai basics hindi",
+   "ai kya hai",
+   "chatgpt free hai",
+   "ai for beginners hindi",
+   "ai rapid fire",
+   "ai job le lega"
+  ],
+  "alt_text": "Animated podcast-style rapid fire where VINEET asks the ONE mascot eight beginner AI questions in Hindi with a 5-second timer, covering ChatGPT, prompts, passwords and AI jobs.",
+  "cover_text": [
+   "AI RAPID FIRE 🔥",
+   "8 sawaal, 5 second"
+  ],
+  "pinned_comment": "📌 \"BASICS\" comment karo 👇 AI basics ki free list DM me bhejta hoon. Agla sawaal bhi likho!",
+  "youtube": {
+   "title": "AI Rapid Fire 🔥 8 sawaal, 5 second! AI basics for beginners (Hindi) #shorts",
+   "description": "AI basics in Hindi, rapid fire style: ChatGPT free hai? AI galat bolta hai? Prompt kya hai? AI job le lega? 8 sawaal, 5 second.\n\nAI basics list chahiye? Comment karo BASICS.\nRoz ek AI concept: subscribe karo.\n\n#AIBasics #ChatGPT #RapidFire #AIHindi #Shorts",
+   "tags": [
+    "ai basics hindi",
+    "ai for beginners",
+    "chatgpt free hai",
+    "prompt kya hai",
+    "ai job le lega",
+    "ai rapid fire",
+    "learn ai hindi",
+    "ai hindi",
+    "aibyvineet"
+   ]
+  },
+  "file_name": "ai-rapid-fire-basics-hindi.mp4"
+ }
+}

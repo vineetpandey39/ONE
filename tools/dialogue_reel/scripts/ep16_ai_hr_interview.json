@@ -1,0 +1,188 @@
+{
+ "id": "ep16_ai_hr_interview",
+ "title": "Agar AI HR ho: mock interview + STAR method",
+ "location": "office",
+ "board_style": "none",
+ "board_title": "",
+ "costume": "tie",
+ "characters": {
+  "VINEET": {
+   "voice": "hm_omega",
+   "pitch": 1.0,
+   "speed": 1.05,
+   "eleven_voice_id": "TX3LPaxmHKxFdv7VOQHJ",
+   "eleven_speed": 1.05
+  },
+  "ONE": {
+   "voice": "hm_psi",
+   "pitch": 1.22,
+   "speed": 1.08,
+   "eleven_voice_id": "cgSgspJ2msm6clMCkdW9",
+   "eleven_speed": 1.08,
+   "eleven_pitch": 1.07
+  }
+ },
+ "lines": [
+  {
+   "who": "VINEET",
+   "shot": "hook",
+   "caption": "Kal mera pehla job interview hai. Bahut nervous hoon.",
+   "tts": "कल मेरा पहला जॉब इंटरव्यू है. बहुत नर्वस हूँ."
+  },
+  {
+   "who": "ONE",
+   "shot": "ask",
+   "caption": "Aaj main HR hoon. Mock interview shuru: apne baare me batao.",
+   "tts": "आज मैं एच आर हूँ. मॉक इंटरव्यू शुरू: अपने बारे में बताओ."
+  },
+  {
+   "who": "VINEET",
+   "shot": "answer",
+   "caption": "Main Vineet hoon. Main hardworking hoon, aur mujhe ye job chahiye.",
+   "tts": "मैं विनीत हूँ. मैं हार्डवर्किंग हूँ, और मुझे ये जॉब चाहिए."
+  },
+  {
+   "who": "ONE",
+   "shot": "score",
+   "caption": "Teen out of das. Hardworking sab bolte hain, proof kahan?",
+   "tts": "तीन आउट ऑफ़ दस. हार्डवर्किंग सब बोलते हैं, प्रूफ़ कहाँ?",
+   "overlay": {
+    "type": "score",
+    "label": "Intro",
+    "score": 3,
+    "max": 10,
+    "note": "Generic. Proof kahan hai?"
+   }
+  },
+  {
+   "who": "ONE",
+   "shot": "ask",
+   "caption": "Agla sawaal: koi galti, jisse kuch seekha?",
+   "tts": "अगला सवाल: कोई ग़लती, जिससे कुछ सीखा?"
+  },
+  {
+   "who": "VINEET",
+   "shot": "answer",
+   "caption": "Meri koi galti nahi hai. Main perfect hoon.",
+   "tts": "मेरी कोई ग़लती नहीं है. मैं परफ़ेक्ट हूँ."
+  },
+  {
+   "who": "ONE",
+   "shot": "score",
+   "caption": "Ek out of das! Ye sunke HR bolega: next.",
+   "tts": "एक आउट ऑफ़ दस! ये सुनके एच आर बोलेगा: नेक्स्ट.",
+   "overlay": {
+    "type": "score",
+    "label": "Galti",
+    "score": 1,
+    "max": 10,
+    "note": "Red flag: over-confidence"
+   }
+  },
+  {
+   "who": "VINEET",
+   "shot": "argue",
+   "caption": "Toh sahi jawab kaise banaun?",
+   "tts": "तो सही जवाब कैसे बनाऊँ?"
+  },
+  {
+   "who": "ONE",
+   "shot": "flag",
+   "caption": "STAR method: Situation, Task, Action, Result. Chhoti kahani, ek number.",
+   "tts": "स्टार मेथड: सिचुएशन, टास्क, एक्शन, रिज़ल्ट. छोटी कहानी, एक नंबर.",
+   "overlay": {
+    "type": "flags",
+    "title": "STAR METHOD",
+    "items": [
+     "S: Situation",
+     "T: Task",
+     "A: Action",
+     "R: Result + ek number"
+    ]
+   }
+  },
+  {
+   "who": "VINEET",
+   "shot": "answer",
+   "caption": "College fest ke sponsor nahi mil rahe the. Maine 20 shops ko pitch kiya, 6 maan gaye.",
+   "tts": "कॉलेज फ़ेस्ट के स्पॉन्सर नहीं मिल रहे थे. मैंने बीस शॉप्स को पिच किया, छह मान गए."
+  },
+  {
+   "who": "ONE",
+   "shot": "score",
+   "caption": "Aath out of das! Kahani bhi, number bhi. Ab HR yaad rakhega.",
+   "tts": "आठ आउट ऑफ़ दस! कहानी भी, नंबर भी. अब एच आर याद रखेगा.",
+   "overlay": {
+    "type": "score",
+    "label": "STAR answer",
+    "score": 8,
+    "max": 10,
+    "note": "Kahani + number = yaad rehta hai"
+   }
+  },
+  {
+   "who": "VINEET",
+   "shot": "realize",
+   "caption": "Aur ye practice ChatGPT ke voice mode pe roz ho sakti hai!",
+   "tts": "और ये प्रैक्टिस चैट जी पी टी के वॉइस मोड पे रोज़ हो सकती है!"
+  },
+  {
+   "who": "ONE",
+   "shot": "payoff",
+   "caption": "Interview ratne se nahi, practice se clear hota hai.",
+   "tts": "इंटरव्यू रटने से नहीं, प्रैक्टिस से क्लियर होता है."
+  },
+  {
+   "who": "VINEET",
+   "shot": "cta",
+   "caption": "Mera mock interview prompt chahiye? Comment karo INTERVIEW. DM me bhejta hoon.",
+   "tts": "मेरा मॉक इंटरव्यू वाला प्रॉम्प्ट चाहिए? तो कमेंट करो, INTERVIEW. डी एम में भेज देता हूँ.",
+   "cta_card": {
+    "type": "comment",
+    "keyword": "INTERVIEW"
+   }
+  },
+  {
+   "who": "ONE",
+   "shot": "follow",
+   "caption": "Aur follow karo. Kal ONE ka naya avatar!",
+   "tts": "और फ़ॉलो करो. कल वन का नया अवतार!",
+   "cta_card": {
+    "type": "follow"
+   }
+  }
+ ],
+ "post_caption": "Interview me kya bole? 💼 Agar AI HR ho toh... (Hindi)\n\nONE bana HR, Vineet ka mock interview:\n❌ \"Main hardworking hoon\" → 3/10 (sab yahi bolte hain, proof kahan?)\n❌ \"Meri koi galti nahi, main perfect hoon\" → 1/10 (red flag!)\n✅ STAR answer, kahani + number → 8/10\n\n⭐ STAR method:\nS: Situation\nT: Task\nA: Action\nR: Result + ek number\n\nAur practice? ChatGPT ke voice mode pe roz mock interview do. Interview ratne se nahi, practice se clear hota hai. 💪\n\n👉 Mera mock interview prompt chahiye? Comment karo \"INTERVIEW\", DM me bhej dunga.\n\n💾 Save karo, job dhoondhne wale dost ko bhejo.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#interviewtips #jobinterview #starmethod #chatgpthindi #careertips",
+ "seo": {
+  "keywords": [
+   "interview tips hindi",
+   "interview me kya bole",
+   "star method interview",
+   "mock interview chatgpt",
+   "tell me about yourself hindi",
+   "job interview tips"
+  ],
+  "alt_text": "Animated sketch where the ONE mascot plays an HR manager and scores VINEET's interview answers, teaching the STAR method and mock interview practice with ChatGPT voice mode, in Hindi.",
+  "cover_text": [
+   "AI BANA HR 💼",
+   "Interview me kya bole?"
+  ],
+  "pinned_comment": "📌 \"INTERVIEW\" comment karo 👇 mera mock interview prompt DM me bhejta hoon.",
+  "youtube": {
+   "title": "Agar AI HR ho 💼 Interview me kya bole? STAR method (Hindi) #shorts",
+   "description": "Interview tips in Hindi: 'main hardworking hoon' kyun kaam nahi karta, STAR method (Situation, Task, Action, Result), aur ChatGPT voice mode se mock interview practice.\n\nMock interview prompt chahiye? Comment karo INTERVIEW.\nRoz ek AI concept: subscribe karo.\n\n#InterviewTips #STARMethod #ChatGPT #CareerTips #Shorts",
+   "tags": [
+    "interview tips hindi",
+    "star method",
+    "mock interview",
+    "chatgpt interview practice",
+    "tell me about yourself",
+    "job interview tips",
+    "career tips hindi",
+    "ai hindi",
+    "aibyvineet"
+   ]
+  },
+  "file_name": "ai-hr-mock-interview-star-method-hindi.mp4"
+ }
+}

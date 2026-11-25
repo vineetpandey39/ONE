@@ -1,0 +1,155 @@
+{
+ "id": "ep13_ai_adalat_chatgpt",
+ "title": "AI Adalat: ChatGPT pe case (AI hallucination)",
+ "location": "court",
+ "board_title": "AI ADALAT",
+ "board_sub": "Case 420: Vineet vs ChatGPT",
+ "costume": "judge",
+ "characters": {
+  "VINEET": {
+   "voice": "hm_omega",
+   "pitch": 1.0,
+   "speed": 1.05,
+   "eleven_voice_id": "TX3LPaxmHKxFdv7VOQHJ",
+   "eleven_speed": 1.05
+  },
+  "ONE": {
+   "voice": "hm_psi",
+   "pitch": 1.22,
+   "speed": 1.08,
+   "eleven_voice_id": "cgSgspJ2msm6clMCkdW9",
+   "eleven_speed": 1.08,
+   "eleven_pitch": 1.07
+  }
+ },
+ "lines": [
+  {
+   "who": "ONE",
+   "shot": "charge",
+   "caption": "Order, order! Aaj ka mujrim: ChatGPT. Iljaam: assignment me jhooth bolna.",
+   "tts": "ऑर्डर, ऑर्डर! आज का मुजरिम: चैट जी पी टी. इल्ज़ाम: असाइनमेंट में झूठ बोलना.",
+   "gavel": true
+  },
+  {
+   "who": "VINEET",
+   "shot": "argue",
+   "caption": "My lord, maine 3 book references maange. Isne teeno books khud bana di!",
+   "tts": "माय लॉर्ड, मैंने तीन बुक रेफ़रेंसेज़ माँगे. इसने तीनों बुक्स ख़ुद बना दीं!"
+  },
+  {
+   "who": "ONE",
+   "shot": "react",
+   "caption": "Matlab wo books exist hi nahi karti?",
+   "tts": "मतलब वो बुक्स एग्ज़िस्ट ही नहीं करतीं?"
+  },
+  {
+   "who": "VINEET",
+   "shot": "argue",
+   "caption": "Nahi! Author, page number, sab nakli. Teacher ne zero de diya.",
+   "tts": "नहीं! ऑथर, पेज नंबर, सब नक़ली. टीचर ने ज़ीरो दे दिया."
+  },
+  {
+   "who": "ONE",
+   "shot": "charge",
+   "caption": "Mujrim ki safai: AI agla word guess karta hai. Sach nahi jaanta, bas convincing likhta hai.",
+   "tts": "मुजरिम की सफ़ाई: ए आई अगला वर्ड गेस करता है. सच नहीं जानता, बस कन्विंसिंग लिखता है."
+  },
+  {
+   "who": "VINEET",
+   "shot": "argue",
+   "caption": "Toh galti kiski hai, my lord?",
+   "tts": "तो ग़लती किसकी है, माय लॉर्ड?"
+  },
+  {
+   "who": "ONE",
+   "shot": "gavel",
+   "caption": "Faisla: ChatGPT guilty! Par aadhi galti aapki bhi. Bina check kiye copy kiya.",
+   "tts": "फ़ैसला: चैट जी पी टी गिल्टी! पर आधी ग़लती आपकी भी. बिना चेक किए कॉपी किया.",
+   "overlay": {
+    "type": "verdict",
+    "text": "GUILTY",
+    "sub": "Par aadhi galti user ki",
+    "at": 0.22
+   }
+  },
+  {
+   "who": "ONE",
+   "shot": "flag",
+   "caption": "Saza: har fact ka source maango, link khud kholo, aur important baat Google pe check karo.",
+   "tts": "सज़ा: हर फ़ैक्ट का सोर्स माँगो, लिंक ख़ुद खोलो, और इम्पॉर्टेंट बात गूगल पे चेक करो.",
+   "overlay": {
+    "type": "flags",
+    "title": "SAZA (har baar)",
+    "items": [
+     "Har fact ka source maango",
+     "Link khud kholke dekho",
+     "Important baat Google pe check"
+    ]
+   }
+  },
+  {
+   "who": "VINEET",
+   "shot": "realize",
+   "caption": "Matlab AI se draft lo, par facts khud verify karo. Case closed!",
+   "tts": "मतलब ए आई से ड्राफ़्ट लो, पर फ़ैक्ट्स ख़ुद वेरिफ़ाई करो. केस क्लोज़्ड!"
+  },
+  {
+   "who": "ONE",
+   "shot": "payoff",
+   "caption": "AI vakeel ban sakta hai. Gawah nahi.",
+   "tts": "ए आई वकील बन सकता है. गवाह नहीं."
+  },
+  {
+   "who": "VINEET",
+   "shot": "cta",
+   "caption": "Meri fact-check checklist chahiye? Comment karo CHECK. DM me bhejta hoon.",
+   "tts": "मेरी फ़ैक्ट चेक चेकलिस्ट चाहिए? कमेंट करो, CHECK. डी एम में भेजता हूँ.",
+   "cta_card": {
+    "type": "comment",
+    "keyword": "CHECK"
+   }
+  },
+  {
+   "who": "ONE",
+   "shot": "follow",
+   "caption": "Aur follow karo. Agli sunwai me, AI pe naya case!",
+   "tts": "और फ़ॉलो करो. अगली सुनवाई में, ए आई पे नया केस!",
+   "cta_card": {
+    "type": "follow"
+   }
+  }
+ ],
+ "post_caption": "ChatGPT galat answer kyun deta hai? ⚖️ AI Adalat (Hindi)\n\nCase 420: Vineet vs ChatGPT. Iljaam: assignment ke liye 3 book references maange, aur ChatGPT ne teeno books khud bana di. Author, page number, sab nakli. 😵\n\nIsko kehte hain AI hallucination: AI agla word guess karta hai, sach nahi jaanta. Isliye galat baat bhi poore confidence se likh deta hai.\n\nFaisla: ChatGPT guilty. Par aadhi galti user ki bhi, bina check kiye copy kiya. 🔨\n\n✅ Saza (har baar):\n1️⃣ Har fact ka source maango\n2️⃣ Link khud kholke dekho\n3️⃣ Important baat Google pe check karo\n\n👉 Meri fact-check checklist chahiye? Comment karo \"CHECK\", DM me bhej dunga.\n\n💾 Save karo, assignment wale dost ko bhejo.\n🔔 Follow @aibyvineet: roz ek AI concept, 5 saal wala version.\n\n#aihallucination #chatgpthindi #factcheck #studytips #aihindi",
+ "seo": {
+  "keywords": [
+   "chatgpt galat answer",
+   "ai hallucination kya hai",
+   "chatgpt fake references",
+   "ai hallucination in hindi",
+   "chatgpt fact check",
+   "chatgpt for students"
+  ],
+  "alt_text": "Animated courtroom sketch where the ONE mascot, as judge, puts ChatGPT on trial for inventing book references, explaining AI hallucination in Hindi and how to fact-check AI answers.",
+  "cover_text": [
+   "AI ADALAT ⚖️",
+   "ChatGPT pe case!"
+  ],
+  "pinned_comment": "📌 \"CHECK\" comment karo 👇 meri fact-check checklist DM me bhejta hoon.",
+  "youtube": {
+   "title": "AI Adalat ⚖️ ChatGPT ne nakli books bana di! AI hallucination (Hindi) #shorts",
+   "description": "ChatGPT galat answer kyun deta hai? AI hallucination: AI agla word guess karta hai, sach nahi jaanta. Har fact ka source maango, link khud kholo, Google pe check karo.\n\nFact-check checklist chahiye? Comment karo CHECK.\nRoz ek AI concept: subscribe karo.\n\n#AIHallucination #ChatGPT #FactCheck #AIHindi #Shorts",
+   "tags": [
+    "chatgpt galat answer",
+    "ai hallucination",
+    "ai hallucination hindi",
+    "chatgpt fake references",
+    "chatgpt for students",
+    "fact check ai",
+    "chatgpt hindi",
+    "ai hindi",
+    "aibyvineet"
+   ]
+  },
+  "file_name": "ai-adalat-chatgpt-hallucination-hindi.mp4"
+ }
+}

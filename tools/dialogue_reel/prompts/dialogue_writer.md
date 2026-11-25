@@ -14,7 +14,8 @@ Characters:
   always lands on a desi everyday analogy. Recurring world: Mummy, Chhotu (the
   kid who runs errands), Sharma ji ki dukaan, chai, cricket, auto-rickshaw.
 
-Pick a location (`"location"`: classroom | tapri) and one structure.
+Pick one structure (A-J below); each names its location (`"location"`: classroom | tapri | studio | terrace |
+bedroom | court | newsroom | podcast | office).
 
 Structure A, "Nahi. Aur simple." (classroom, whiteboard):
 1. `hook`: VINEET asks ONE to explain {TOPIC} "like I'm 5".
@@ -61,7 +62,32 @@ Structure F, Tier List (any location; tapri works): ONE `tier` lines with `"over
 in between ("X S tier me nahi?!"). Say tiers as "S tier / A tier / B tier / C tier" (a bare "S" or "B"
 is misheard as "yes"/"bhi"). End with `realize`, `payoff`, `cta` ("apni tier list comment karo"), `follow`.
 
-Rotate structures and locations day to day; never the same structure twice in a row.
+Structure G, AI Adalat (`location: court`, `costume: judge`, board_title "AI ADALAT", `board_sub`
+"Case <no>: Vineet vs <AI tool>"): ONE is the judge. ONE `charge` with `"gavel": true` ("Order, order! Aaj ka
+mujrim: ... Iljaam: ..."), VINEET `argue` x2 (the complaint, with a concrete example), ONE `react`, ONE `charge`
+(the defence: why the AI did it, in one line), VINEET `argue` ("galti kiski hai?"), ONE `gavel` with
+`"overlay": {"type": "verdict", "text": "GUILTY"|"NOT GUILTY", "sub": "<twist>", "at": 0.2-0.3}` (three knocks,
+then the verdict card), ONE `flag` with a flags overlay titled "SAZA" (the rules), `realize`, `payoff`, `cta`, `follow`.
+
+Structure H, News Bulletin (`location: newsroom`, `costume: anchor`, board_title "AI NEWS", `board_sub`
+"<bulletin name>"): ONE `charge` (intro), then 3 x [ONE `news` with `"overlay": {"type": "news", "headline":
+"<= 60 chars", "ticker": "<one-line tip>"}`, VINEET `react` ("Toh mere liye kya?"), ONE `charge` (the rule)].
+Then `realize`, `payoff`, `cta`, `follow`. Evergreen facts only (no "this week" claims without SOURCES).
+
+Structure I, Rapid Fire (`location: podcast`, `costume: headset`, board_title "RAPID FIRE"): VINEET `hook`
+("8 sawaal, 5 second"), ONE `payoff` ("Challenge accepted"), then 8 x [VINEET `rapidq` (<= 6 words), ONE `rapida`
+(<= 5 words) with `"overlay": {"type": "rapid", "n": k, "of": 8}`]. Exactly one answer rambles with `"buzz": true`
+(the timer runs out, buzzer, "TIME UP!"), followed by VINEET `argue` ("Time up! Ek line me bolo.") and ONE's one-line
+answer. End with `realize` (score), `payoff`, `cta`, `follow` (ask for their questions in the comments).
+
+Structure J, Roleplay sketch (`location: office`, `costume: tie`; ONE plays a role: HR, landlord, teacher, bank
+manager): VINEET `hook` (his problem), ONE `ask` (in role), VINEET `answer` (bad answer, funny), ONE `score` with
+`"overlay": {"type": "score", "label": "...", "score": 0-10, "max": 10, "note": "<why>"}`, repeat once, VINEET
+`argue` ("sahi kaise?"), ONE `flag` (the method as a flags list), VINEET `answer` (good answer), ONE `score`
+(high), `realize`, `payoff`, `cta`, `follow`.
+
+Rotation: never the same structure twice in a row, and no structure (or location) more than once in any
+7-day window. A week of 4 reels uses 4 different structures and 4 different locations.
 
 Analogies: vary them (cricket, Bollywood, office, college, shaadi, traffic, exams, food delivery).
 Mummy/Chhotu may appear at most once a week; never in two episodes in a row.

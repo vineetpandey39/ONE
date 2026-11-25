@@ -188,6 +188,36 @@ def pop(dur: float = 0.09) -> np.ndarray:
     return (0.25 * np.sin(2 * np.pi * f * t) * np.exp(-t * 40)).astype(np.float32)
 
 
+def knock(dur: float = 0.2) -> np.ndarray:
+    """Gavel on wood: low thump + short click."""
+    t = np.arange(int(dur * SR)) / SR
+    body = np.sin(2 * np.pi * 140 * t) * np.exp(-t * 28) + 0.5 * np.sin(2 * np.pi * 310 * t) * np.exp(-t * 45)
+    click = np.random.default_rng(3).standard_normal(len(t)) * np.exp(-t * 300) * 0.6
+    return (0.45 * (body + click) / 1.6).astype(np.float32)
+
+
+def buzzer(dur: float = 0.55) -> np.ndarray:
+    """Game-show "time up" buzzer."""
+    t = np.arange(int(dur * SR)) / SR
+    x = np.sign(np.sin(2 * np.pi * 110 * t)) + 0.6 * np.sign(np.sin(2 * np.pi * 167 * t))
+    env = np.minimum(1, t / 0.01) * np.minimum(1, (dur - t) / 0.06)
+    return (0.16 * x * env).astype(np.float32)
+
+
+def ding(dur: float = 0.5) -> np.ndarray:
+    t = np.arange(int(dur * SR)) / SR
+    return (0.22 * (np.sin(2 * np.pi * 1320 * t) + 0.5 * np.sin(2 * np.pi * 1980 * t)) * np.exp(-t * 7)).astype(np.float32)
+
+
+def sting(dur: float = 0.6) -> np.ndarray:
+    """News bulletin two-note sting."""
+    t = np.arange(int(dur * SR)) / SR
+    a = np.where(t < 0.22, np.sin(2 * np.pi * 523 * t), np.sin(2 * np.pi * 784 * t))
+    a += 0.4 * np.where(t < 0.22, np.sin(2 * np.pi * 1046 * t), np.sin(2 * np.pi * 1568 * t))
+    env = np.exp(-np.where(t < 0.22, t, t - 0.22) * 6) * np.minimum(1, (dur - t) / 0.05)
+    return (0.14 * a * env).astype(np.float32)
+
+
 def music_bed(total: float) -> np.ndarray:
     """Soft lo-fi pad: Am - F - C - G, 2s per chord, plus gentle plucks."""
     n = int(total * SR)
@@ -305,6 +335,11 @@ def main() -> None:
     sfx_dir = Path(a.sfx_dir) if a.sfx_dir else None
     w = load_audio(f) * 0.8 if (f := find(sfx_dir, "whoosh")) else whoosh()
     p = load_audio(f) * 0.6 if (f := find(sfx_dir, "pop")) else pop()
+    def add(clip: np.ndarray, at: float, gain: float = 1.0) -> None:
+        s0 = max(0, int(at * SR))
+        seg = clip[: max(0, n - s0)]
+        sfx[s0:s0 + len(seg)] += gain * seg
+
     for line in script["lines"]:
         ov = line.get("overlay") or {}
         if ov.get("type") == "quiz" and ov.get("stage") == "reveal":
@@ -316,6 +351,20 @@ def main() -> None:
         if line.get("shot") in ("simpler", "payoff", "hook", "verdict", "result"):
             s = max(0, int((line["start"] - 0.25) * SR))
             sfx[s:s + len(w)] += w[: n - s]
+        d = line["end"] - line["start"]
+        if ov.get("type") == "verdict":                      # three knocks, the last one is the verdict
+            tb = line["start"] + ov.get("at", 0.35) * d
+            for k, dt in enumerate((-0.44, -0.22, 0.0)):
+                add(knock(), tb + dt, 1.4 if k == 2 else 1.0)
+        if line.get("gavel"):                                # "Order, order!"
+            for dt in (0.1, 0.36):
+                add(knock(), line["start"] + dt)
+        if ov.get("type") == "rapid":
+            add(buzzer() if ov.get("buzz") else ding(), line["end"] + 0.03)
+        if ov.get("type") == "news":
+            add(sting(), line["start"] - 0.45)
+        if ov.get("type") == "score":
+            add(p, line["start"] + 0.9)
         for op in line.get("board", []):
             if op["op"] in ("circle", "stamp"):
                 s = int((line["start"] + op["at"] * (line["end"] - line["start"])) * SR)
@@ -365,7 +414,8 @@ def main() -> None:
     timeline = {"fps": FPS, "duration": round(total, 3), "frames": frames,
                 "board_title": script.get("board_title", ""), "lines": script["lines"], "amp": amp, "shape": shape,
                 "location": script.get("location", "classroom"), "board_style": script.get("board_style", ""),
-                "quiz": script.get("quiz", {})}
+                "quiz": script.get("quiz", {}),
+                "board_sub": script.get("board_sub", ""), "costume": script.get("costume", "")}
     (out_dir / "timeline.json").write_text(json.dumps(timeline, ensure_ascii=False), encoding="utf-8")
     print(f"total {total:.2f}s, {frames} frames", flush=True)
 

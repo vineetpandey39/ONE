@@ -79,7 +79,8 @@ scene.add(lamp);
 // board on the back wall, a counter/desk where VINEET's arms rest (top ~0.84 m),
 // ONE's perch at x -0.95 / z -0.45, VINEET's seat at x 1.2 / z -0.95.
 const LOC = TL.location || 'classroom';
-const BSTYLE = TL.board_style || ({ tapri: 'chalk', studio: 'sign', terrace: 'none', bedroom: 'none' }[LOC] || 'white');
+const BSTYLE = TL.board_style || ({ tapri: 'chalk', studio: 'sign', terrace: 'none', bedroom: 'none', court: 'plaque',
+  newsroom: 'news', podcast: 'onair', office: 'none' }[LOC] || 'white');
 const CHALK = BSTYLE === 'chalk';
 const BOARD = { x: -0.35, y: 2.15, z: -3.25, w: 2.7, h: 2.7 / 1.6 };
 const boardC = document.createElement('canvas'); boardC.width = 1024; boardC.height = 640;
@@ -422,7 +423,155 @@ function buildBedroom() {
     mesh(new THREE.SphereGeometry(0.045, 10, 6), new THREE.MeshBasicMaterial({ color: c }), -1.6 + i * 0.8, 3.12 - 0.06 * Math.sin(i * 1.2), -3.85));
 }
 
-({ tapri: buildTapri, studio: buildStudio, terrace: buildTerrace, bedroom: buildBedroom }[LOC] || buildClassroom)();
+// Canvas-text plate (name plates, desk logos): big, flat, static so nothing shimmers.
+function plate(text, w, h, bg, fg, font = '800 120px Poppins') {
+  const c = document.createElement('canvas'); c.width = 1024; c.height = Math.round(1024 * h / w);
+  const g = c.getContext('2d');
+  g.fillStyle = bg; g.fillRect(0, 0, c.width, c.height);
+  g.fillStyle = fg; g.font = font; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, c.width / 2, c.height / 2 + 6);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.MeshBasicMaterial({ map: t });
+}
+function addChair(col, dark) {
+  mesh(box(0.6, 0.07, 0.55), flat(col), 1.2, 0.5, -0.95);
+  mesh(box(0.6, 0.7, 0.07), flat(col), 1.42, 0.85, -1.15).rotation.y = -0.6;
+  for (const [dx, dz] of [[-0.25, -0.22], [0.25, -0.22], [-0.25, 0.22], [0.25, 0.22]])
+    mesh(box(0.05, 0.47, 0.05), flat(dark), 1.2 + dx, 0.24, -0.95 + dz);
+}
+
+// Courtroom: wood-panelled wall, maroon case plaque where the board is, judge's
+// bench (ONE) with a gavel, lawyer's table with red-tape files, the accused's dock.
+function buildCourt() {
+  scene.background = new THREE.Color('#2a1b12');
+  mesh(box(12, 0.1, 10), flat('#6e4a2e'), 0, -0.05, -1);
+  mesh(box(10, 4.6, 0.15), flat('#5a3a22'), 0, 2.3, -3.6);
+  for (const x of [-3.6, -2.0, 1.4, 3.0]) mesh(box(0.34, 4.4, 0.1), flat('#47301c'), x, 2.2, -3.5);   // pilasters
+  mesh(box(10, 0.16, 0.12), flat('#3a2616'), 0, 1.0, -3.5);                                          // dado rail
+  mesh(box(BOARD.w + 0.24, BOARD.h + 0.24, 0.06), flat('#c9a14a', { roughness: 0.5 }), BOARD.x, BOARD.y, BOARD.z - 0.04);
+  // wall clock (big and simple)
+  mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.05, 24), flat('#f3ead6', { flatShading: false }), 2.25, 3.25, -3.45).rotation.x = Math.PI / 2;
+  mesh(box(0.025, 0.2, 0.02), flat('#222'), 2.25, 3.3, -3.41);
+  mesh(box(0.15, 0.025, 0.02), flat('#222'), 2.31, 3.25, -3.41);
+  // lawyer's table (desk footprint) + red-tape files
+  mesh(box(3.0, 0.08, 1.1), flat('#7a4f2c'), 0.15, 0.8, -0.55);
+  mesh(box(2.9, 0.75, 0.06), flat('#5e3c21'), 0.15, 0.4, -0.02);
+  for (const [x, z, n] of [[0.35, -0.45, 3], [0.75, -0.6, 2]]) for (let i = 0; i < n; i++) {
+    mesh(box(0.34, 0.06, 0.26), flat(['#d8c9a3', '#cdb98c', '#e2d4b0'][i]), x, 0.87 + i * 0.065, z);
+    mesh(box(0.35, 0.012, 0.03), flat('#b3261e'), x, 0.87 + i * 0.065, z);
+  }
+  // judge's bench on the table: panelled block up to ONE's perch height + gavel
+  mesh(box(0.72, STACK_TOP - 0.84, 0.5), flat('#4a2f1a'), -0.95, 0.84 + (STACK_TOP - 0.84) / 2, -0.45);
+  mesh(box(0.8, 0.04, 0.56), flat('#6b4426'), -0.95, STACK_TOP - 0.02, -0.45);
+  mesh(box(0.42, 0.24, 0.01), plate('JUDGE', 0.42, 0.24, '#2a1a0e', '#e2c16a'), -0.95, 1.04, -0.195);
+  mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.03, 14), flat('#3a2414', { flatShading: false }), -0.6, STACK_TOP + 0.015, -0.3);
+  // the accused's dock (kathghara) at the back right, with the "mujrim": a laptop
+  mesh(box(1.1, 0.9, 0.08), flat('#5e3c21'), 2.6, 0.45, -2.2);
+  for (const x of [2.1, 2.35, 2.6, 2.85, 3.1]) mesh(box(0.05, 0.5, 0.05), flat('#3a2616'), x, 1.15, -2.2);
+  mesh(box(1.15, 0.06, 0.12), flat('#3a2616'), 2.6, 1.42, -2.2);
+  mesh(box(0.5, 0.02, 0.34), flat('#9aa1ab'), 2.6, 0.93, -2.55);
+  const lid = mesh(box(0.5, 0.32, 0.02), flat('#9aa1ab'), 2.6, 1.08, -2.73); lid.rotation.x = -0.2;
+  mesh(box(0.44, 0.27, 0.005), new THREE.MeshBasicMaterial({ color: '#5ff2df' }), 2.6, 1.08, -2.715).rotation.x = -0.2;
+  addChair('#7a2a2a', '#3a1414');
+  const warm = new THREE.PointLight('#ffc07a', 5, 7); warm.position.set(0.5, 3.2, -1.2); scene.add(warm);
+}
+
+// TV newsroom: navy set, big video wall (board), side screens with the city,
+// glossy anchor desk with the channel logo, red accent strips.
+function buildNewsroom() {
+  scene.background = new THREE.Color('#070c1c');
+  mesh(box(12, 0.1, 10), flat('#141a30', { roughness: 0.5 }), 0, -0.05, -1);
+  mesh(box(10, 4.6, 0.15), flat('#0e1630'), 0, 2.3, -3.6);
+  mesh(box(BOARD.w + 0.16, BOARD.h + 0.16, 0.06), flat('#05070f'), BOARD.x, BOARD.y, BOARD.z - 0.04);
+  const city = new THREE.MeshBasicMaterial({ map: paintBackdrop('city') });
+  for (const x of [-2.75, 2.35]) {
+    mesh(box(1.5, 1.9, 0.05), flat('#05070f'), x, 2.2, -3.45);
+    const s = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.8), city); s.position.set(x, 2.2, -3.42); scene.add(s);
+  }
+  for (const y of [0.55, 3.95]) mesh(box(9.6, 0.06, 0.04), new THREE.MeshBasicMaterial({ color: '#e8213b' }), 0, y, -3.5);
+  // anchor desk (desk footprint): dark top, logo front, red light strip
+  mesh(box(3.0, 0.08, 1.1), flat('#1c2440', { roughness: 0.35 }), 0.15, 0.8, -0.55);
+  mesh(box(2.9, 0.75, 0.06), flat('#111933'), 0.15, 0.4, -0.02);
+  mesh(box(1.3, 0.3, 0.01), plate('ONE NEWS', 1.3, 0.3, '#c8102e', '#ffffff'), 0.15, 0.45, 0.015);
+  mesh(box(2.9, 0.04, 0.07), new THREE.MeshBasicMaterial({ color: '#4fb3ff' }), 0.15, 0.74, 0.0);
+  mesh(box(0.22, 0.012, 0.3), flat('#eeeeee'), 0.45, 0.845, -0.35);                               // script papers
+  // ONE's riser on the desk
+  mesh(new THREE.CylinderGeometry(0.2, 0.25, STACK_TOP - 0.84, 14), flat('#2a3560', { flatShading: false, roughness: 0.4 }), -0.95, 0.84 + (STACK_TOP - 0.84) / 2, -0.45);
+  mesh(new THREE.CylinderGeometry(0.23, 0.23, 0.02, 14), new THREE.MeshBasicMaterial({ color: '#e8213b' }), -0.95, STACK_TOP - 0.01, -0.45);
+  addChair('#2a3560', '#141a30');
+  const blue = new THREE.PointLight('#4fa3ff', 5, 7); blue.position.set(2.4, 2.8, -0.8); scene.add(blue);
+  const red = new THREE.PointLight('#ff3048', 3, 6); red.position.set(-2.6, 2.6, -1.2); scene.add(red);
+}
+
+// Podcast room: warm wall with big acoustic panels, ON AIR neon sign (board),
+// two boom mics on the table, mug, plant, shelf with records.
+let micArms = [];
+function buildPodcast() {
+  scene.background = new THREE.Color('#1e1418');
+  mesh(box(12, 0.1, 10), flat('#4a3530'), 0, -0.05, -1);
+  mesh(box(3.2, 0.02, 2.4), flat('#7a2e3a'), 0.3, 0.01, -1.4);                                    // rug
+  mesh(box(10, 4.6, 0.15), flat('#3a2a30'), 0, 2.3, -3.6);
+  for (const [x, y, c] of [[-3.0, 2.6, '#c25b3a'], [-2.1, 1.7, '#7a3550'], [1.9, 2.9, '#2f5a6a'], [2.9, 1.8, '#c25b3a'], [2.2, 1.0, '#7a3550']])
+    mesh(box(0.8, 0.8, 0.12), flat(c, { roughness: 1 }), x, y, -3.45);                             // acoustic panels
+  mesh(box(BOARD.w + 0.16, BOARD.h + 0.16, 0.06), flat('#120c10'), BOARD.x, BOARD.y, BOARD.z - 0.04);
+  mesh(box(1.4, 0.05, 0.3), flat('#5a3a2a'), -2.7, 1.25, -3.4);
+  ['#1b1b1b', '#c94c4c', '#1b1b1b', '#f2c14e', '#1b1b1b'].forEach((c, i) => mesh(box(0.04, 0.34, 0.3), flat(c), -3.2 + i * 0.12, 1.45, -3.4));
+  // table (desk footprint) + mics on boom arms + mug + plant
+  mesh(box(3.0, 0.08, 1.1), flat('#6b4630'), 0.15, 0.8, -0.55);
+  mesh(box(2.9, 0.75, 0.06), flat('#4e3222'), 0.15, 0.4, -0.02);
+  for (const [x, z, ry] of [[0.55, -0.35, -0.5], [-0.45, -0.3, 0.6]]) {
+    mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.03, 12), flat('#222'), x, 0.855, z);
+    const arm = mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.4, 6), flat('#2a2a2a'), x, 1.05, z); arm.rotation.z = ry * 0.4;
+    const mic = mesh(new THREE.CapsuleGeometry(0.045, 0.1, 4, 10), flat('#3a3a3f', { flatShading: false, roughness: 0.4 }), x - ry * 0.16, 1.27, z);
+    mic.rotation.z = ry; micArms.push(mic);
+  }
+  mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.11, 12), flat('#f2c14e', { flatShading: false }), 0.95, 0.895, -0.75);
+  mesh(new THREE.CylinderGeometry(0.2, 0.15, 0.3, 10), flat('#b5562f'), 3.0, 0.15, -2.4);
+  mesh(new THREE.IcosahedronGeometry(0.34, 0), flat('#3d8b4d'), 3.0, 0.55, -2.4);
+  // ONE's perch: crate + headphones case
+  mesh(box(0.46, 0.24, 0.36), flat('#8a6a4a'), -0.95, 0.96, -0.45);
+  mesh(new THREE.CylinderGeometry(0.17, 0.2, STACK_TOP - 1.08, 14), flat('#2b2b33', { flatShading: false }), -0.95, 1.08 + (STACK_TOP - 1.08) / 2, -0.45);
+  addChair('#c25b3a', '#4a2a20');
+  const warm = new THREE.PointLight('#ff9a6b', 5, 6); warm.position.set(1.8, 2.6, -0.6); scene.add(warm);
+  const pink = new THREE.PointLight('#ff3f6a', 3, 5); pink.position.set(-1.2, 2.6, -2.4); scene.add(pink);
+}
+
+// HR interview cabin: light walls, window with the city, company logo, plant,
+// water cooler, desk with nameplate, files and laptop.
+function buildOffice() {
+  scene.background = new THREE.Color('#d9dde4');
+  mesh(box(12, 0.1, 10), flat('#8c8f96'), 0, -0.05, -1);
+  const wall = flat('#e3e6ec');
+  mesh(box(3.0, 4.4, 0.15), wall, -3.4, 2.2, -4);
+  mesh(box(2.6, 4.4, 0.15), wall, 3.3, 2.2, -4);
+  mesh(box(4.2, 0.9, 0.15), wall, 0.0, 0.45, -4);
+  mesh(box(4.2, 1.1, 0.15), wall, 0.0, 3.85, -4);
+  for (const x of [-1.95, 0.0, 1.95]) mesh(box(0.07, 2.4, 0.12), flat('#9aa0aa'), x, 2.1, -3.95);
+  for (const y of [0.92, 3.3]) mesh(box(4.0, 0.07, 0.12), flat('#9aa0aa'), 0, y, -3.95);
+  mesh(box(1.1, 0.4, 0.02), plate('AI Pvt Ltd', 1.1, 0.4, '#2b3a8c', '#ffffff', '800 150px Poppins'), -3.3, 3.0, -3.91);
+  mesh(box(0.8, 1.0, 0.02), flat('#f2c14e'), 3.2, 2.5, -3.91);
+  mesh(box(0.56, 0.12, 0.02), flat('#1b1b1b'), 3.2, 2.3, -3.9);
+  // water cooler + plant
+  mesh(box(0.4, 1.0, 0.4), flat('#f4f4f4'), -2.9, 0.5, -3.2);
+  mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.42, 14), flat('#7fc4ff', { flatShading: false, roughness: 0.3 }), -2.9, 1.22, -3.2);
+  mesh(new THREE.CylinderGeometry(0.2, 0.15, 0.32, 10), flat('#e8e8e8'), 2.9, 0.16, -2.6);
+  mesh(new THREE.IcosahedronGeometry(0.38, 0), flat('#3d8b4d'), 2.9, 0.6, -2.6);
+  // desk (desk footprint) + files + laptop + nameplate in front of ONE
+  mesh(box(3.0, 0.08, 1.1), flat('#b98b5e'), 0.15, 0.8, -0.55);
+  mesh(box(2.9, 0.75, 0.06), flat('#9a7048'), 0.15, 0.4, -0.02);
+  for (let i = 0; i < 3; i++) mesh(box(0.3, 0.03, 0.24), flat(['#2b3a8c', '#c94c4c', '#2bb3a3'][i]), 0.65, 0.855 + i * 0.032, -0.7);
+  mesh(box(0.5, 0.02, 0.34), flat('#9aa1ab'), 0.2, 0.85, -0.75);
+  const lid = mesh(box(0.5, 0.32, 0.02), flat('#9aa1ab'), 0.2, 1.0, -0.93); lid.rotation.x = -0.25;
+  mesh(box(0.38, 0.1, 0.06), plate('HR', 0.38, 0.1, '#1b1b1b', '#f2c14e'), -0.95, 0.9, -0.12);
+  // ONE's perch: office chair cushion on a box file stack
+  mesh(box(0.44, 0.3, 0.32), flat('#5a6475'), -0.95, 0.99, -0.45);
+  mesh(new THREE.CylinderGeometry(0.2, 0.2, STACK_TOP - 1.14, 14), flat('#2f3442', { flatShading: false }), -0.95, 1.14 + (STACK_TOP - 1.14) / 2, -0.45);
+  addChair('#2f3442', '#1b1e26');
+  const day = new THREE.PointLight('#ffffff', 4, 8); day.position.set(0.5, 3.2, -1.0); scene.add(day);
+}
+
+({ tapri: buildTapri, studio: buildStudio, terrace: buildTerrace, bedroom: buildBedroom, court: buildCourt,
+   newsroom: buildNewsroom, podcast: buildPodcast, office: buildOffice }[LOC] || buildClassroom)();
 await addBackdrop({ tapri: 'street', studio: 'studio', terrace: 'sunset' }[LOC] || 'city');
 
 // ---------- VINEET (low-poly boy: hoodie, headphones round the neck, quiff) ----------
@@ -517,6 +666,35 @@ const stickPivot = new THREE.Group(); stickPivot.position.set(0.19, 0.18, 0.03);
 mesh(new THREE.CapsuleGeometry(0.028, 0.05, 3, 6), tealMat, 0, 0.0, 0, stickPivot);
 const stick = mesh(new THREE.CylinderGeometry(0.008, 0.012, 1.0, 5), flat('#f1e3b8'), 0, 0.5, 0, stickPivot);
 stick.castShadow = false;
+// The pointer stick only makes sense when ONE writes on a board.
+stick.visible = stickPivot.visible = TL.lines.some(l => (l.board || []).some(o => o.op === 'write'));
+
+// Gavel in ONE's right hand (court episodes): swings down on every knock.
+const gavel = new THREE.Group(); gavel.position.set(0.2, 0.17, 0.08); oneBody.add(gavel);
+mesh(new THREE.CapsuleGeometry(0.028, 0.05, 3, 6), tealMat, 0, 0, 0, gavel);
+mesh(new THREE.CylinderGeometry(0.012, 0.014, 0.24, 8), flat('#7a4a22', { flatShading: false }), 0.12, 0, 0, gavel).rotation.z = Math.PI / 2;
+mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.12, 12), flat('#5a3418', { flatShading: false }), 0.24, 0, 0, gavel).rotation.x = Math.PI / 2;
+gavel.visible = LOC === 'court';
+
+// Costume accessories on ONE (the character itself never changes): judge | tie | anchor | headset
+const COSTUME = TL.costume || ({ court: 'judge', office: 'tie', newsroom: 'anchor', podcast: 'headset' }[LOC] || '');
+if (COSTUME === 'judge') {
+  mesh(new THREE.CylinderGeometry(0.15, 0.17, 0.05, 16), flat('#16161a', { flatShading: false }), 0, 0.045, 0, oneBody);
+  for (const x of [-0.019, 0.019]) { const b = mesh(box(0.026, 0.06, 0.008), flat('#f6f6f2'), x, 0.05, 0.17, oneBody); b.rotation.x = 0.35; }
+}
+if (COSTUME === 'tie' || COSTUME === 'anchor') {
+  const col = COSTUME === 'tie' ? '#c62a3a' : '#1f4fa8';
+  mesh(new THREE.CylinderGeometry(0.15, 0.17, 0.04, 16), flat('#f4f4f4', { flatShading: false }), 0, 0.04, 0, oneBody);
+  mesh(box(0.034, 0.03, 0.012), flat(col), 0, 0.075, 0.175, oneBody).rotation.x = 0.4;
+  const tie = mesh(new THREE.ConeGeometry(0.026, 0.09, 4), flat(col), 0, 0.03, 0.172, oneBody); tie.rotation.x = Math.PI + 0.4; tie.rotation.y = Math.PI / 4;
+  if (COSTUME === 'anchor') mesh(box(0.02, 0.026, 0.012), flat('#111'), 0.06, 0.07, 0.165, oneBody).rotation.x = 0.4;
+}
+if (COSTUME === 'headset') {
+  const band = mesh(new THREE.TorusGeometry(0.215, 0.014, 6, 20, Math.PI), flat('#222', { flatShading: false }), 0, 0.22, -0.02, oneBody);
+  for (const x of [-0.215, 0.215]) mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.04, 14), flat('#ff5c74', { flatShading: false }), x, 0.22, -0.02, oneBody).rotation.z = Math.PI / 2;
+  const boom = mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.16, 5), flat('#222'), -0.2, 0.15, 0.08, oneBody); boom.rotation.x = 1.2; boom.rotation.z = 0.5;
+  mesh(new THREE.SphereGeometry(0.016, 8, 6), flat('#222'), -0.15, 0.13, 0.15, oneBody);
+}
 
 // ---------- timeline helpers ----------
 const lines = TL.lines;
@@ -538,6 +716,27 @@ for (const o of Object.values(byId)) { bctx.font = writeFont(o); o.width = bctx.
 for (const o of ops) if (o.op === 'stamp') { o.penX = o.x; o.size = o.size || 64; }
 for (const o of ops) if (o.op !== 'write' && o.op !== 'stamp' && byId[o.target]) { o.y = byId[o.target].y; o.size = byId[o.target].size; o.x = byId[o.target].x; o.penX = o.x; }
 
+// overlay data (used by the director, the board screens and the 2D overlays)
+const NEWS = lines.filter(l => l.overlay?.type === 'news').map(l => ({ headline: l.overlay.headline || '', ticker: l.overlay.ticker || '', t0: l.start, line: l }));
+const RAPID = lines.map((l, i) => ({ l, i })).filter(({ l }) => l.overlay?.type === 'rapid').map(({ l, i }) => {
+  const q = lines[i - 1] || l;
+  return { n: l.overlay.n, of: l.overlay.of, buzz: !!l.overlay.buzz, limit: l.overlay.limit || 5, qStart: q.start, qEnd: q.end, aStart: l.start, aEnd: l.end };
+});
+const VERDICTS = lines.filter(l => l.overlay?.type === 'verdict').map(l => ({ ...l.overlay, tb: l.start + (l.overlay.at ?? 0.35) * (l.end - l.start), line: l }));
+const SCORES = lines.filter(l => l.overlay?.type === 'score').map(l => ({ ...l.overlay, t0: l.start, t1: l.end }));
+// gavel knocks: three before each verdict, two on lines marked "gavel": true ("Order, order!")
+const KNOCKS = [...VERDICTS.flatMap(v => [v.tb - 0.44, v.tb - 0.22, v.tb]),
+                ...lines.filter(l => l.gavel).flatMap(l => [l.start + 0.1, l.start + 0.36])].sort((a, b) => a - b);
+function gavelAngle(t) {   // rest raised (+0.35); each knock: lift, strike down (-0.42), back up
+  let a = 0.35;
+  for (const k of KNOCKS) {
+    const d = t - k;
+    if (d > -0.1 && d <= 0) a = 0.35 - 0.77 * ease((d + 0.1) / 0.1);
+    else if (d > 0 && d < 0.12) a = -0.42 + 0.77 * ease(d / 0.12);
+  }
+  return a;
+}
+
 function drawBoard(t) {
   const g = bctx;
   if (BSTYLE === 'none') return null;
@@ -553,6 +752,11 @@ function drawBoard(t) {
     boardTex.needsUpdate = true;
     return null;
   }
+  if (BSTYLE === 'news') { drawNewsScreen(g, t); boardTex.needsUpdate = true; return null; }
+  if (BSTYLE === 'onair') { drawOnAir(g, t); boardTex.needsUpdate = true; return null; }
+  const PLAQUE = BSTYLE === 'plaque';
+  if (PLAQUE) drawPlaque(g);
+  else {
   g.fillStyle = CHALK ? '#243b30' : '#f6f5f0'; g.fillRect(0, 0, 1024, 640);
   if (CHALK) {   // old chalk dust: big soft smudges only (no fine grain that could shimmer)
     for (const [x, y, r] of [[220, 420, 260], [760, 260, 300], [520, 560, 220]]) {
@@ -567,6 +771,7 @@ function drawBoard(t) {
   g.fillStyle = CHALK ? '#f4f1e8' : '#1b1b1b'; g.font = '700 58px Kalam'; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
   g.fillText(TL.board_title, 512, 95);
   g.fillRect(260, 118, 504, 6);
+  }
   g.textAlign = 'left';
   let pen = null;
   for (const o of ops) {
@@ -608,6 +813,61 @@ function drawBoard(t) {
   boardTex.needsUpdate = true;
   return pen;
 }
+// Court case plaque: maroon cloth, gold border, scales, case title.
+function drawPlaque(g) {
+  const bg = g.createLinearGradient(0, 0, 0, 640); bg.addColorStop(0, '#6a1f26'); bg.addColorStop(1, '#4a1218');
+  g.fillStyle = bg; g.fillRect(0, 0, 1024, 640);
+  g.strokeStyle = '#e2c16a'; g.lineWidth = 10; g.strokeRect(26, 26, 972, 588); g.lineWidth = 3; g.strokeRect(44, 44, 936, 552);
+  g.strokeStyle = '#e2c16a'; g.fillStyle = '#e2c16a'; g.lineWidth = 8; g.lineCap = 'round';        // scales of justice
+  g.beginPath(); g.moveTo(512, 90); g.lineTo(512, 250); g.moveTo(400, 130); g.lineTo(624, 130); g.moveTo(470, 250); g.lineTo(554, 250); g.stroke();
+  for (const x of [400, 624]) {
+    g.lineWidth = 3; g.beginPath(); g.moveTo(x, 130); g.lineTo(x - 40, 200); g.moveTo(x, 130); g.lineTo(x + 40, 200); g.stroke();
+    g.beginPath(); g.arc(x, 200, 42, 0, Math.PI); g.fill();
+  }
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = '800 110px Poppins'; g.fillText(TL.board_title || 'AI ADALAT', 512, 365);
+  g.fillStyle = '#f6e7c1'; g.font = '700 44px Poppins'; g.fillText(TL.board_sub || '', 512, 470);
+  g.textBaseline = 'alphabetic';
+}
+// Newsroom video wall: channel tag, LIVE, the current headline (cross-fades on change).
+function drawNewsScreen(g, t) {
+  const bg = g.createLinearGradient(0, 0, 1024, 640); bg.addColorStop(0, '#0d2a78'); bg.addColorStop(1, '#071338');
+  g.fillStyle = bg; g.fillRect(0, 0, 1024, 640);
+  g.fillStyle = 'rgba(79,179,255,0.10)'; for (let k = 0; k < 4; k++) { g.beginPath(); g.arc(860, 520, 160 + k * 120, 0, Math.PI * 2); g.lineWidth = 26; g.strokeStyle = 'rgba(79,179,255,0.07)'; g.stroke(); }
+  g.fillStyle = '#c8102e'; g.fillRect(40, 40, 330, 86);
+  g.fillStyle = '#fff'; g.font = '800 52px Poppins'; g.textAlign = 'left'; g.textBaseline = 'middle'; g.fillText(TL.board_title || 'AI NEWS', 62, 85);
+  g.fillStyle = '#ffffff'; g.fillRect(800, 52, 180, 62);
+  g.fillStyle = '#c8102e'; g.beginPath(); g.arc(832, 83, 13, 0, Math.PI * 2); g.fill();
+  g.font = '800 40px Poppins'; g.fillText('LIVE', 856, 85);
+  const i = NEWS.reduce((k, n, j) => (t >= n.t0 - 0.1 ? j : k), -1);
+  const head = k => (k < 0 ? TL.board_sub || 'Aaj ki khabrein' : NEWS[k].headline);
+  const k = i < 0 ? 1 : ease(clamp01((t - NEWS[i].t0 + 0.1) / 0.35));
+  const drawHead = (txt, a) => {
+    g.globalAlpha = a; g.fillStyle = '#ffffff'; g.font = '800 68px Poppins'; g.textAlign = 'center';
+    const rows = wrap(g, txt, 900).slice(0, 3);
+    rows.forEach((r, n) => g.fillText(r, 512, 330 - (rows.length - 1) * 40 + n * 80));
+  };
+  if (k < 1 && i >= 0) drawHead(head(i - 1), 1 - k);
+  drawHead(head(i), k); g.globalAlpha = 1;
+  if (NEWS.length) {
+    g.fillStyle = '#ffd23f'; g.font = '700 38px Poppins'; g.textAlign = 'center';
+    g.fillText(i < 0 ? `${NEWS.length} khabrein` : `KHABAR ${i + 1} / ${NEWS.length}`, 512, 560);
+  }
+  g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+}
+// Podcast "ON AIR" neon sign + show title + question counter.
+function drawOnAir(g, t) {
+  g.fillStyle = '#100a0e'; g.fillRect(0, 0, 1024, 640);
+  g.save(); g.shadowColor = '#ff2a4a'; g.shadowBlur = 30; g.strokeStyle = '#ff5c74'; g.lineWidth = 10;
+  roundRect(g, 262, 60, 500, 170, 40); g.stroke();
+  g.fillStyle = '#ffd0d8'; g.font = '800 110px Poppins'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('ON AIR', 512, 150); g.restore();
+  g.save(); g.shadowColor = '#36e0ff'; g.shadowBlur = 20; g.fillStyle = '#c9f6ff'; g.font = '800 96px Poppins';
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(TL.board_title || 'RAPID FIRE', 512, 360); g.restore();
+  const cur = [...RAPID].reverse().find(r => t >= r.qStart - 0.1);
+  g.fillStyle = '#ffd23f'; g.font = '700 54px Poppins'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(cur ? `SAWAAL ${cur.n} / ${cur.of}` : (TL.board_sub || '5 second, 5 shabd'), 512, 520);
+  g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+}
 const activeOp = t => ops.find(o => t >= o.t0 - 0.25 && t <= o.t1 + 0.6);
 
 // ---------- auto-director ----------
@@ -622,6 +882,11 @@ const SHOTS = {
   BOY_CAM: () => { const h = boyHeadW(); return { pos: h.clone().add(P(-0.75, 0.08, 1.6)), tgt: h.clone().add(P(0, -0.18, 0)), fov: 40 }; },
   ONE_CU: () => { const o = oneW(); return { pos: o.clone().add(P(0.5, 0.12, 1.05)), tgt: o.clone().add(P(0, 0.02, 0)), fov: 38 }; },
   ONE_MED: () => { const o = oneW(); return { pos: o.clone().add(P(0.9, 0.35, 1.7)), tgt: o.clone().add(P(0.15, 0.25, -0.4)), fov: 44 }; },
+  ONE_LOW: () => { const o = oneW(); return { pos: o.clone().add(P(0.8, -0.04, 1.35)), tgt: o.clone().add(P(0.22, -0.08, 0)), fov: 42 }; },
+  // HR scorecard framing: ONE high in frame, card underneath
+  ONE_HIGH: () => { const o = oneW(); return { pos: o.clone().add(P(0.55, 0.1, 1.35)), tgt: o.clone().add(P(0.05, -0.17, 0)), fov: 40 }; },
+  // anchor framing: ONE in the upper middle, so the news lower third sits under the face
+  ANCHOR: () => { const o = oneW(); return { pos: o.clone().add(P(0.55, 0.15, 1.45)), tgt: o.clone().add(P(0.1, -0.06, 0)), fov: 40 }; },
   OTS: () => ({ pos: P(1.75, 1.85, 0.35), tgt: P(-0.75, 1.55, -1.7), fov: 50 }),
   BOARD_FULL: () => ({ pos: P(BOARD.x + 0.2, 1.95, BOARD.z + 5.2), tgt: P(BOARD.x, 1.85, BOARD.z), fov: 50 }),
   BOARD_TRACK: (op) => () => {
@@ -695,6 +960,37 @@ for (const l of lines) {
       break;
     case 'argue':      // VINEET objects
       add(l.start - 0.05, SHOTS.BOY_PUNCH, 0.25, 0.07, 0.35);
+      break;
+    case 'charge':     // judge / host speaks; "Order, order!" opens on a low shot of the gavel
+      if (l.gavel) { add(l.start - 0.05, SHOTS.ONE_LOW, 0, 0.05, 0.6); add(l.start + 1.0, SHOTS.ONE_MED, 0.6, 0.04); }
+      else add(l.start - 0.05, LOC === 'newsroom' ? SHOTS.ANCHOR : SHOTS.ONE_MED, 0.4, 0.03);
+      add(l.start + d * 0.6, LOC === 'newsroom' ? SHOTS.ANCHOR : SHOTS.ONE_CU, 0.8, 0.03);
+      break;
+    case 'gavel': {    // verdict: ONE close, cut low for the knocks, punch on the final bang, pull back
+      const v = VERDICTS.find(v => v.line === l), tb = v ? v.tb : l.start + d * 0.35;
+      add(l.start - 0.05, SHOTS.ONE_CU, 0.3, 0.06);
+      add(tb - 0.6, SHOTS.ONE_LOW, 0, 0.04);
+      add(tb, SHOTS.ONE_LOW, 0, 0.05, 1);
+      add(tb + 0.9, SHOTS.ONE_MED, 0.6, 0.03);
+      break;
+    }
+    case 'news':       // anchor reads; the video wall shows the headline
+      add(l.start - 0.05, SHOTS.ANCHOR, 0.45, 0.02);
+      add(l.start + d * 0.3, SHOTS.BOARD_FULL, 0.6, 0.03);
+      add(l.start + d * 0.68, SHOTS.ANCHOR, 0.6, 0.03);
+      break;
+    case 'rapidq':     // rapid fire: hard cuts back and forth
+      add(l.start - 0.03, SHOTS.BOY_PUNCH, 0, 0.06, 0.35);
+      break;
+    case 'rapida':
+      add(l.start - 0.03, SHOTS.ONE_CU, 0, 0.08, 0.35);
+      break;
+    case 'ask':        // interviewer asks
+      add(l.start - 0.05, SHOTS.ONE_MED, 0.4, 0.04);
+      add(l.start + d * 0.55, SHOTS.ONE_CU, 0.7, 0.03);
+      break;
+    case 'score':      // interviewer scores the answer
+      add(l.start - 0.05, SHOTS.ONE_HIGH, 0.3, 0.03, 0.3);
       break;
     case 'realize':
       add(l.start - 0.05, SHOTS.OTS, 0.5, 0.03);
@@ -842,6 +1138,7 @@ function animate(t, f) {
   bulb.position.y = 0.55 + 0.01 * Math.sin(t * 6);
   oneMouth.scale.set(0.8 + shO * 0.7 + (happy ? 0.4 : 0), 1 + aO * 3.4, 1);
   armOne.rotation.z = -0.5 - (speaker === 'ONE' ? 0.5 * oneEnv + 0.15 * Math.sin(t * 5) : 0);
+  if (gavel.visible) gavel.rotation.z = gavelAngle(t);
 
   // pointer stick aims at the pen while writing, else rests diagonally up-left
   const aim = writing ? boardToWorld(writing.penX, writing.y - 10)
@@ -1145,9 +1442,15 @@ for (const l of flagLines) {
   const items = l.overlay.items || [], d = l.end - l.start;
   items.forEach((txt, k) => FLAGS.push({ txt, t0: l.start + ((k + 0.3) / items.length) * d * 0.9 }));
 }
+// A list card stays up until the CTA, or until a later line brings a different overlay.
+function listEnd(type, lastLine) {
+  const i = lines.indexOf(lastLine);
+  const next = lines.slice(i + 1).find(l => l.overlay && l.overlay.type !== type);
+  return Math.min((CTA[0]?.t0 ?? TL.duration) - 0.1, next ? next.start - 0.45 : TL.duration);
+}
 function drawFlags(g, t) {
   if (!FLAGS.length) return false;
-  const endAt = (CTA[0]?.t0 ?? TL.duration) - 0.1, t0 = FLAGS[0].t0 - 0.4;
+  const endAt = listEnd('flags', flagLines[flagLines.length - 1]), t0 = FLAGS[0].t0 - 0.4;
   if (t < t0 || t > endAt + 0.4) return false;
   const vis = Math.min(ease(clamp01((t - t0) / 0.35)), ease(clamp01((endAt + 0.4 - t) / 0.35)));
   const cw = W * 0.88, x0 = (W - cw) / 2, rowH = 74, title = flagLines[0].overlay.title || 'RED FLAGS';
@@ -1179,7 +1482,7 @@ for (const l of tierLines) {
 const TIERS = [['S', '#ff5c7a'], ['A', '#ff9f43'], ['B', '#ffd23f'], ['C', '#7bd88f']];
 function drawTier(g, t) {
   if (!TIER_ITEMS.length) return false;
-  const t0 = tierLines[0].start - 0.2, endAt = (CTA[0]?.t0 ?? TL.duration) - 0.1;
+  const t0 = tierLines[0].start - 0.2, endAt = listEnd('tier', tierLines[tierLines.length - 1]);
   if (t < t0 || t > endAt + 0.4) return false;
   const vis = Math.min(ease(clamp01((t - t0) / 0.35)), ease(clamp01((endAt + 0.4 - t) / 0.35)));
   const cw = W * 0.92, x0 = (W - cw) / 2, rh = 92, y0 = H * 0.44 + (1 - vis) * 200;
@@ -1208,13 +1511,127 @@ function drawTier(g, t) {
   return vis > 0.3;
 }
 
+// ---------- court verdict, news lower third + ticker, rapid-fire timer, HR scorecard ----------
+function drawVerdict(g, t) {
+  const v = [...VERDICTS].reverse().find(v => t >= v.tb - 0.02);
+  if (!v) return false;
+  const tEnd = v.line.end + (v.hold ?? 0.2);
+  if (t > tEnd + 0.3) return false;
+  const k = ease(clamp01((t - v.tb + 0.02) / 0.22)), out = ease(clamp01((tEnd + 0.3 - t) / 0.3));
+  const sc = 1 + 0.55 * (1 - k), col = v.color || (/NOT/i.test(v.text) ? '#2fbf71' : '#e5262f');
+  g.save(); g.globalAlpha = Math.min(k, out);
+  g.translate(W / 2, H * 0.47); g.rotate(-0.06); g.scale(sc, sc);
+  g.font = '800 92px Poppins'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  const w = Math.max(460, g.measureText(v.text).width + 90), h = v.sub ? 250 : 180;
+  g.fillStyle = 'rgba(16,12,10,0.88)'; roundRect(g, -w / 2, -h / 2, w, h, 26); g.fill();
+  g.strokeStyle = col; g.lineWidth = 8; roundRect(g, -w / 2 + 12, -h / 2 + 12, w - 24, h - 24, 18); g.stroke();
+  g.fillStyle = col; g.fillText(v.text, 0, v.sub ? -30 : 4);
+  if (v.sub) { g.fillStyle = '#ffffff'; g.font = '700 30px Poppins'; g.fillText(v.sub, 0, 62); }
+  g.restore();
+  return true;
+}
+
+const TICKER = NEWS.map(n => n.ticker || n.headline).filter(Boolean).join('   •   ');
+function drawNews(g, t) {
+  if (!NEWS.length) return false;
+  const t0 = NEWS[0].t0 - 0.2, endAt = (CTA[0]?.t0 ?? TL.duration) - 0.1;
+  if (t < t0 || t > endAt + 0.4) return false;
+  const vis = Math.min(ease(clamp01((t - t0) / 0.35)), ease(clamp01((endAt + 0.4 - t) / 0.35)));
+  const i = NEWS.reduce((k, n, j) => (t >= n.t0 - 0.1 ? j : k), 0), n = NEWS[i];
+  const k = ease(clamp01((t - n.t0 + 0.1) / 0.35));
+  g.save(); g.globalAlpha = vis;
+  // lower third: red BREAKING tag + white headline bar sliding in
+  const y = H * 0.625;
+  g.font = '800 28px Poppins'; g.textBaseline = 'middle'; g.textAlign = 'left';
+  const rows = wrap(g, n.headline, W * 0.86).slice(0, 2), bh = rows.length * 40 + 26;
+  g.fillStyle = '#c8102e'; g.fillRect(28, y - 44, 220, 44);
+  g.fillStyle = '#ffffff'; g.fillText('BREAKING', 44, y - 21);
+  g.globalAlpha = vis * k;
+  const sx = (1 - k) * -80;
+  g.fillStyle = 'rgba(255,255,255,0.96)'; g.fillRect(28 + sx, y, W - 56, bh);
+  g.fillStyle = '#0d1a40'; rows.forEach((r, m) => g.fillText(r, 46 + sx, y + 13 + 20 + m * 40));
+  g.globalAlpha = vis;
+  // ticker: constant slow crawl (no jumps), below the faces
+  const ty = H * 0.735, th = 46;
+  g.fillStyle = '#0b1636'; g.fillRect(0, ty, W, th);
+  g.save(); g.beginPath(); g.rect(150, ty, W - 150, th); g.clip();
+  g.fillStyle = '#ffffff'; g.font = '700 24px Poppins';
+  const txt = TICKER + '   •   ', tw = g.measureText(txt).width;
+  let x = 150 - (((t - t0) * 80) % tw);
+  for (; x < W; x += tw) g.fillText(txt, x, ty + th / 2 + 1);
+  g.restore();
+  g.fillStyle = '#ffd23f'; g.fillRect(0, ty, 150, th);
+  g.fillStyle = '#0b1636'; g.font = '800 24px Poppins'; g.fillText(TL.board_title || 'AI NEWS', 14, ty + th / 2 + 1);
+  g.restore();
+  return true;
+}
+
+function drawRapid(g, t) {
+  if (!RAPID.length) return false;
+  const t0 = RAPID[0].qStart - 0.2, endAt = (CTA[0]?.t0 ?? TL.duration) - 0.1;
+  if (t < t0 || t > endAt + 0.4) return false;
+  const vis = Math.min(ease(clamp01((t - t0) / 0.35)), ease(clamp01((endAt + 0.4 - t) / 0.35)));
+  const r = [...RAPID].reverse().find(r => t >= r.qStart - 0.1) || RAPID[0];
+  const span = Math.max(0.3, r.aEnd - r.qEnd);
+  const el = Math.min(r.limit, Math.max(0, t - r.qEnd) * (r.buzz ? r.limit / span : 1));
+  const left = r.limit - el, done = t >= r.aEnd;
+  const frac = left / r.limit;
+  g.save(); g.globalAlpha = vis;
+  // question counter pill (top left, under the caption)
+  const py = H * 0.29;
+  g.fillStyle = 'rgba(16,10,14,0.85)'; roundRect(g, 30, py - 34, 190, 68, 34); g.fill();
+  g.fillStyle = '#ffd23f'; g.font = '800 34px Poppins'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(`Q ${r.n}/${r.of}`, 125, py + 2);
+  // countdown ring (top right)
+  const cxr = W - 92, cyr = py, rad = 54;
+  const col = r.buzz && done ? '#e5262f' : frac > 0.5 ? '#2fbf71' : frac > 0.25 ? '#ffb020' : '#e5262f';
+  g.fillStyle = 'rgba(16,10,14,0.85)'; g.beginPath(); g.arc(cxr, cyr, rad + 12, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,0.15)'; g.lineWidth = 10; g.beginPath(); g.arc(cxr, cyr, rad, 0, Math.PI * 2); g.stroke();
+  g.strokeStyle = col; g.lineCap = 'round'; g.beginPath(); g.arc(cxr, cyr, rad, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac); g.stroke();
+  g.fillStyle = '#ffffff'; g.font = '800 44px Poppins';
+  g.fillText(done && !r.buzz ? `${el.toFixed(1)}` : `${Math.ceil(left - 1e-6)}`, cxr, cyr + 2);
+  if (done && !r.buzz) { g.fillStyle = '#2fbf71'; g.font = '800 24px Poppins'; g.fillText('✓ sec', cxr, cyr + rad + 34); }
+  // TIME UP banner after a buzz (eases in, holds ~1 s)
+  if (r.buzz && done) {
+    const a = Math.min(ease(clamp01((t - r.aEnd) / 0.18)), ease(clamp01((r.aEnd + 1.4 - t) / 0.3)));
+    if (a > 0) {
+      g.globalAlpha = vis * a; g.save(); g.translate(W / 2, H * 0.47); g.rotate(-0.05); g.scale(1 + 0.3 * (1 - a), 1 + 0.3 * (1 - a));
+      g.fillStyle = '#e5262f'; roundRect(g, -250, -70, 500, 140, 24); g.fill();
+      g.fillStyle = '#ffffff'; g.font = '800 78px Poppins'; g.fillText('TIME UP!', 0, 4); g.restore();
+    }
+  }
+  g.restore();
+  return true;
+}
+
+function drawScore(g, t) {
+  const s = [...SCORES].reverse().find(s => t >= s.t0 - 0.05);
+  if (!s || t > s.t1 + 0.9) return false;
+  const vis = Math.min(ease(clamp01((t - s.t0 + 0.05) / 0.3)), ease(clamp01((s.t1 + 0.9 - t) / 0.3)));
+  const max = s.max || 10, fill = ease(clamp01((t - s.t0 - 0.2) / 0.7)) * s.score / max;
+  const col = s.score / max < 0.4 ? '#e5262f' : s.score / max < 0.7 ? '#ffb020' : '#2fbf71';
+  const cw = W * 0.86, x0 = (W - cw) / 2, y0 = H * 0.655 + (1 - vis) * 120, ch = s.note ? 196 : 150;
+  g.save(); g.globalAlpha = vis;
+  g.fillStyle = 'rgba(255,255,255,0.95)'; roundRect(g, x0, y0, cw, ch, 24); g.fill();
+  g.fillStyle = '#2b3a8c'; g.font = '800 26px Poppins'; g.textAlign = 'left'; g.textBaseline = 'middle';
+  g.fillText(`HR SCORE · ${s.label || ''}`, x0 + 24, y0 + 34);
+  g.fillStyle = '#e6e8ef'; roundRect(g, x0 + 24, y0 + 64, cw - 170, 40, 20); g.fill();
+  g.fillStyle = col; roundRect(g, x0 + 24, y0 + 64, Math.max(40, (cw - 170) * fill), 40, 20); g.fill();
+  g.fillStyle = '#1b1b1b'; g.font = '800 40px Poppins'; g.textAlign = 'right';
+  g.fillText(`${Math.round(fill * max)}/${max}`, x0 + cw - 22, y0 + 86);
+  if (s.note) { g.textAlign = 'left'; g.fillStyle = col; g.font = '700 26px Poppins'; g.fillText(s.note, x0 + 24, y0 + 148); }
+  g.restore();
+  return true;
+}
+
 function drawOverlay(t) {
   const g = cx;
   // vignette
   const vg = g.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.75);
   vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.38)');
   g.fillStyle = vg; g.fillRect(0, 0, W, H);
-  const busy = drawChat(g, t) | drawQuiz(g, t) | drawCall(g, t, Math.round(t * FPS)) | drawFlags(g, t) | drawTier(g, t);
+  const busy = drawChat(g, t) | drawQuiz(g, t) | drawCall(g, t, Math.round(t * FPS)) | drawFlags(g, t) | drawTier(g, t)
+    | drawNews(g, t) | drawRapid(g, t) | drawScore(g, t) | drawVerdict(g, t);
   // caption
   const c = CAPS.find(c => t >= c.t0 - 0.03 && t < c.t1 + 0.15) ;
   if (c) {
