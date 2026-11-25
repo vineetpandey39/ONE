@@ -258,7 +258,8 @@ def generate_image(root, config, scene, reference=None):
     write(sidecar,{'provider':'ChatGPT via existing LAO','provider_job':job,'sha256':source_hash,
                    'request_sha256':fingerprint(request),'request':request,'chat_url':result.get('episode_chat_url'),
                    'visual_review':'PENDING','incremental_api_cost_usd':0,'cost_basis':'existing ChatGPT subscription workflow; quota usage not measured'})
-    return {'files':[str(target),str(sidecar),str(receipt)]}
+    return {'files':[str(target),str(sidecar),str(receipt)],
+            'chat_url':result.get('episode_chat_url')}
 
 
 def unsent_image_recovery_receipt(receipt):

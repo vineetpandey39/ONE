@@ -14,6 +14,7 @@ _DEITY_TERMS={
     'tulsi-vishnu':['tulsi vivah shorts','tulsi mata bhajan','shaligram bhajan','तुलसी विवाह भजन','तुलसी मैया','शालिग्राम','dev uthani ekadashi','shri hari bhajan'],
     'vishnu':['om jai jagdish hare','om jai jagdish hare aarti','vishnu aarti','vishnu bhajan shorts','shri hari bhajan','narayan bhajan','ॐ जय जगदीश हरे','विष्णु आरती','श्री हरि','नारायण','kartik purnima aarti','dev deepawali 2026'],
     'lakshmi':['lakshmi aarti shorts','om jai lakshmi mata','laxmi ji ki aarti','माँ लक्ष्मी आरती','लक्ष्मी माता की आरती','friday aarti','mahalakshmi aarti'],
+    'ganesh':['ganesh bhajan shorts','ganpati bhajan','ganesh ji ke bhajan','बुधवार गणेश भजन','गणपति भजन','ganesh song 2026','lord ganesha'],
 }
 def _clean_hook(value):
     return re.sub(r'\s+',' ',str(value or '')).strip().rstrip('।.!? ')
@@ -34,7 +35,7 @@ def _short_hook(root,m,number):
     return _clean_hook(m.get('display_title') or m['title'].split('|',1)[0])
 
 def _short_title(hook,keyword,number,deity=''):
-    deity_emoji={'shiva':'🔱','krishna':'🪈','hanuman':'🚩','durga':'🔴','lakshmi':'🪷','tulsi-vishnu':'🪷','vishnu':'🪷'}
+    deity_emoji={'shiva':'🔱','krishna':'🪈','hanuman':'🚩','durga':'🔴','lakshmi':'🪷','ganesh':'🪔','tulsi-vishnu':'🪷','vishnu':'🪷'}
     emoji=deity_emoji.get(str(deity).casefold(),'✨')
     candidates=[f'{hook} {emoji} | {keyword} #Shorts',
                 f'{hook} | {keyword} #Shorts',
@@ -46,8 +47,8 @@ def _short_title(hook,keyword,number,deity=''):
 
 def _visible_hashtags(m):
     deity=str(m.get('deity','Shiva')).casefold()
-    first={'shiva':'#ShivBhajan','krishna':'#KrishnaBhajan','hanuman':'#HanumanBhajan','durga':'#DurgaBhajan','lakshmi':'#LakshmiAarti','tulsi-vishnu':'#TulsiVivah','vishnu':'#VishnuAarti'}.get(deity,'#Bhakti')
-    second={'shiva':'#Mahadev','krishna':'#RadhaKrishna','hanuman':'#Bajrangbali','durga':'#MataRani','lakshmi':'#MaaLakshmi','tulsi-vishnu':'#TulsiMata','vishnu':'#OmJaiJagdishHare'}.get(deity,'#Devotional')
+    first={'shiva':'#ShivBhajan','krishna':'#KrishnaBhajan','hanuman':'#HanumanBhajan','durga':'#DurgaBhajan','lakshmi':'#LakshmiAarti','ganesh':'#GaneshBhajan','tulsi-vishnu':'#TulsiVivah','vishnu':'#VishnuAarti'}.get(deity,'#Bhakti')
+    second={'shiva':'#Mahadev','krishna':'#RadhaKrishna','hanuman':'#Bajrangbali','durga':'#MataRani','lakshmi':'#MaaLakshmi','ganesh':'#GanpatiBappa','tulsi-vishnu':'#TulsiMata','vishnu':'#OmJaiJagdishHare'}.get(deity,'#Devotional')
     return [first,second,'#Shorts']
 
 def _long_visible_hashtags(m):
@@ -72,13 +73,13 @@ def _ares_long_form(root,m,brief):
     keyword=brief['keyword'].strip()
     deity=str(m.get('deity') or 'Devotional').strip()
     deity_key=deity.casefold()
-    deity_emoji={'shiva':'🔱','krishna':'🪈','hanuman':'🚩','durga':'🔴','lakshmi':'🪷','tulsi-vishnu':'🪷','vishnu':'🪷'}.get(deity_key,'✨')
+    deity_emoji={'shiva':'🔱','krishna':'🪈','hanuman':'🚩','durga':'🔴','lakshmi':'🪷','ganesh':'🪔','tulsi-vishnu':'🪷','vishnu':'🪷'}.get(deity_key,'✨')
     worship_label={'shiva':'शिव आराधना','krishna':'कृष्ण भक्ति','hanuman':'हनुमान भक्ति',
-                   'durga':'माता की आराधना','lakshmi':'लक्ष्मी आरती',
+                   'durga':'माता की आराधना','lakshmi':'लक्ष्मी आरती','ganesh':'गणपति आराधना',
                    'tulsi-vishnu':'तुलसी-श्रीहरि भक्ति','vishnu':'विष्णु आरती'}.get(deity_key,'भक्ति और आराधना')
     english_hybrid={'shiva':'Peaceful Mahadev Bhajan 2026','krishna':'Peaceful Krishna Bhajan 2026',
                     'hanuman':'Powerful Hanuman Bhajan 2026','durga':'Powerful Mata Bhajan 2026',
-                    'lakshmi':'Full Lakshmi Aarti with Lyrics',
+                    'lakshmi':'Full Lakshmi Aarti with Lyrics','ganesh':'Powerful Ganesh Bhajan 2026',
                     'tulsi-vishnu':'Peaceful Tulsi Vivah Bhajan 2026','vishnu':'Full Vishnu Aarti with Lyrics'}.get(deity_key,f'Peaceful {deity} Devotional 2026')
     traditional=m.get('composition_type') in {'traditional_aarti','traditional_mantra','traditional_stuti'}
     year_suffix='' if re.search(r'\b20\d{2}\b',keyword) else ' 2026'

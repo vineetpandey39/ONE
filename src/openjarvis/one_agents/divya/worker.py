@@ -73,6 +73,12 @@ def images(root, config, mission, limit=None):
     for scene in scenes:
         result=generate_image(root,config,scene,None if scene.get('reference_mode')=='none' else reference)
         files.extend(result['files'])
+        if not config.get('image_context_url') and result.get('chat_url'):
+            # Bind the first successful generation conversation so every
+            # following scene stays in one reference-aware production chat.
+            config['image_context_url']=result['chat_url']
+            config['reuse_logged_in_image_session']=True
+            write(root/'config.json',config)
         if reference is None:
             reference=artifact(root,scene['image'])
     return {'files':files,'scene_count':len(scenes),'complete_scene_set':len(scenes)==len(mission['scenes'])}
