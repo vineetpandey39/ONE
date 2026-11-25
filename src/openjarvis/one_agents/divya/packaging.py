@@ -16,6 +16,29 @@ _DEITY_TERMS={
     'lakshmi':['lakshmi aarti shorts','om jai lakshmi mata','laxmi ji ki aarti','माँ लक्ष्मी आरती','लक्ष्मी माता की आरती','friday aarti','mahalakshmi aarti'],
     'ganesh':['ganesh bhajan shorts','ganpati bhajan','ganesh ji ke bhajan','बुधवार गणेश भजन','गणपति भजन','ganesh song 2026','lord ganesha'],
 }
+_DEITY_MARKERS={
+    'shiva':('shiv','shiva','mahadev','भोलेनाथ','शिव','महादेव'),
+    'krishna':('krishna','radha','kanha','कृष्ण','राधा','कान्हा'),
+    'hanuman':('hanuman','bajrang','हनुमान','बजरंग'),
+    'durga':('durga','mata rani','दुर्गा','माता रानी'),
+    'tulsi-vishnu':('tulsi','shaligram','तुलसी','शालिग्राम'),
+    'vishnu':('vishnu','jagdish','narayan','विष्णु','जगदीश','नारायण'),
+    'lakshmi':('lakshmi','laxmi','mahalakshmi','लक्ष्मी'),
+    'ganesh':('ganesh','ganpati','ganesha','गणेश','गणपति','गजानन'),
+}
+
+def _topic_safe_tags(m,brief,generated):
+    """Keep ARES discovery coverage while removing cross-deity leakage."""
+    deity=str(m.get('deity') or '').casefold()
+    forbidden=tuple(marker for key,markers in _DEITY_MARKERS.items() if key!=deity for marker in markers)
+    safe=[tag for tag in generated if not any(marker in str(tag).casefold() for marker in forbidden)]
+    keyword=str(brief.get('keyword') or '').strip()
+    display=_clean_hook(m.get('display_title') or m.get('title','').split('|',1)[0])
+    additions=[keyword,display,f'{keyword} hindi',f'{keyword} lyrics',f'{keyword} morning prayer',
+               'hindi devotional song','bhakti songs','morning bhajan','devotional music',
+               'Shloka By Shloka','shlokabyshloka']
+    additions+=list(brief.get('tags') or [])+_DEITY_TERMS.get(deity,[])
+    return valid_tags(additions+safe)
 def _clean_hook(value):
     return re.sub(r'\s+',' ',str(value or '')).strip().rstrip('।.!? ')
 
@@ -126,6 +149,7 @@ def _ares_long_form(root,m,brief):
     llm=None if m.get('seo_model')=='deterministic_test' else youtube_seo.ollama_json
     package=youtube_seo.build_package(record,master=master,plan_path=root/'mission.json',
                                       channel=SHLOKA_BY_SHLOKA,llm=llm)
+    package['tags']=_topic_safe_tags(m,brief,list(package.get('tags') or []))
     description=str(package.get('description') or '')
     deity_repairs={
         'vishnu': [('राम भक्ति','विष्णु भक्ति'),('Ram devotional','Vishnu devotional'),
