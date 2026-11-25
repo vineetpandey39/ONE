@@ -95,6 +95,78 @@ LAKSHMI_AARTI_SOURCES = [
 ]
 
 
+WEDNESDAY_GANESH_LYRICS = [
+    "प्रथम पुकार में, गणपति आओ।",
+    "सोए साहस को आज जगाओ।",
+    "विघ्नों से हम डरें न स्वामी।",
+    "सच्ची दिशा का दीप जलाओ।",
+    "बुद्धि को निर्मल, वाणी मधुर हो।",
+    "कर्म हमारे सच्चे, सुंदर हों।",
+    "जल्दबाज़ मन धीरज सीखे।",
+    "हर निर्णय में विवेक जगाओ।",
+    "छोटा कदम भी आगे बढ़े तो।",
+    "आशा का फिर अंकुर फूटे।",
+    "हार मिली तो सीख सँजोएँ।",
+    "फिर से उठने की शक्ति दिलाओ।",
+    "मूषक संग तुम संदेश सुनाते।",
+    "नम्र बने तो पथ खुल जाते।",
+    "अहंकार की गाँठें खोलें।",
+    "सेवा का सच्चा भाव जगाओ।",
+    "मोदक जैसी मधुर हो मेहनत।",
+    "फल से पहले कर्म की चाहत।",
+    "लोभ नहीं, संतोष हमारा।",
+    "मन में ऐसी रीति बसाओ।",
+    "घर के मनमुटाव मिटें सब।",
+    "मीठी बोली जोड़ सके मन।",
+    "क्षमा, भरोसा, प्रेम बढ़े तो।",
+    "हर आँगन उत्सव बन जाए।",
+    "पढ़ने वाले मन को एकाग्र।",
+    "श्रम करने वाले हाथ निरंतर।",
+    "ज्ञान बने जब लोक-कल्याण।",
+    "ऐसी उजली बुद्धि जगाओ।",
+    "संकट आए, श्वास सँभालें।",
+    "सत्य पकड़कर कदम बढ़ाएँ।",
+    "भीतर बैठे डर से कह दें।",
+    "गणपति नाम से हिम्मत पाएँ।",
+    "भोर तुम्हारा स्मरण कराए।",
+    "साँझ कृतज्ञता गीत सुनाए।",
+    "दिन का हर शुभ कर्म तुम्हारे।",
+    "चरणों में सम्मान चढ़ाए।",
+    "गौरीसुत, मंगल के दाता।",
+    "जन-जन का विश्वास बढ़ाओ।",
+    "प्रथम पुकार का भाव सँजोकर।",
+    "जीवन-पथ शुभ आज बनाओ।",
+]
+
+
+GANESH_SCENES = [
+    "Canonical Lord Ganesha seated in a sunrise temple courtyard, warm blessing gesture and luminous arch.",
+    "Close serene Ganesha portrait, compassionate eyes, gold crown, large natural ears and soft diya bokeh.",
+    "Wide riverside temple at dawn with Ganesha shrine centered and marigold petals on the steps.",
+    "Ganesha beneath an antique carved mandap, one blessing hand, modak bowl and restrained lamps.",
+    "Side-profile devotional portrait with sapphire shadows, antique-gold rim light and clean caption space.",
+    "Quiet study chamber blessed by a distant Ganesha presence, palm-leaf books and one steady lamp.",
+    "Temple garden with red hibiscus, lotus pond and Ganesha seated beneath a flowering tree.",
+    "Grand but uncluttered sanctum, symmetrical lamps, subtle god rays and deep vermilion drapery.",
+    "Close view of Ganesha blessing hand and modak bowl while the complete face remains visible.",
+    "Moonlit temple steps with a small respectful mouse companion near the foreground lamp.",
+    "Wide village festival courtyard at blue hour, rangoli leading toward a luminous Ganesha shrine.",
+    "Ganesha seated beside a calm lotus lake, morning mist and distant temple silhouette.",
+    "Compassionate frontal portrait against a circular sacred motif, crisp eyes and clean negative space.",
+    "Golden forest pavilion with Ganesha, soft falling petals and gentle sunbeams through leaves.",
+    "Devotional still life of hibiscus, durva grass, modak and brass diya before a distant shrine.",
+    "Temple corridor perspective with alternating lamps and Ganesha framed at the far arch.",
+    "Ganesha in a peaceful mountain shrine at first light, warm clouds and restrained mist.",
+    "Close devotional portrait with a single broken tusk clearly depicted and natural trunk curve.",
+    "Festival evening with suspended lamps, flower strings and Ganesha as the single dominant subject.",
+    "Quiet rain-washed courtyard reflecting temple lamps, Ganesha sheltered beneath a carved canopy.",
+    "Wide sunrise tableau with devotees seen only as distant respectful silhouettes below the shrine.",
+    "Ganesha seated on a lotus pedestal with expanding warm light and subtle floating gold particles.",
+    "Final uplifted temple tableau, marigolds, diyas and a clear central path toward Ganesha.",
+    "Closing prayer image of Ganesha softly lit against midnight blue with one steady diya.",
+]
+
+
 TULSI_VIVAH_LYRICS = [
     "तुलसी मैया का आँगन आज, मंगल दीप सजाए।",
     "शालिग्राम संग शुभ मिलन पर, हरि का नाम सुनाए।",
@@ -628,6 +700,125 @@ def create_kartik_purnima_vishnu_mission(root: Path, *, day: date) -> dict:
             "duration_seconds": 480, "estimated_music_credits": 7198, "paid_attempts_authorized": 0}
 
 
+def create_wednesday_ganesh_mission(root: Path, *, day: date) -> dict:
+    """Prepare a strict original Wednesday Ganesh bhajan without provider side effects."""
+    root = Path(root).resolve()
+    if (root / "mission.json").exists():
+        return {"status": "existing", "root": str(root), "mission": str(root / "mission.json")}
+    section_names = [
+        "Immediate Ganesh hook", "Wisdom and speech", "Courage after failure", "Humility",
+        "Honest work", "Harmony at home", "Focused learning", "Courage in crisis",
+        "Morning gratitude", "Final auspicious prayer",
+    ]
+    section_styles = [
+        "Warm male lead begins on beat one; complete all four lines before any shehnai answer",
+        "Clear syllabic delivery over harmonium and light dholak, no melismatic word loss",
+        "A gentle melodic lift with restrained response chorus only after full written lines",
+        "Strip back to voice and tanpura, then return to the groove after the fourth line",
+        "Steady devotional pulse with soft manjira and no invented refrain",
+        "Warm ensemble response after each complete couplet, lead remains forward",
+        "Focused vocal delivery, sparse bansuri answers only between completed lines",
+        "Confident rise without speeding up, substituting words or extending alaap",
+        "Bright morning texture with harmonium and dholak under exact Hindi lyrics",
+        "Strongest ensemble, complete the final word before a short bell resolution",
+    ]
+    sections = [
+        {"name": name, "duration": 48,
+         "lines": WEDNESDAY_GANESH_LYRICS[index * 4:(index + 1) * 4],
+         "styles": [style, "92 BPM Keharwa 8-beat Ganesh bhajan", "precise Hindi diction"]}
+        for index, (name, style) in enumerate(zip(section_names, section_styles))
+    ]
+    bible = (
+        "Premium cinematic Hindu devotional artwork with one consistent canonical Lord Ganesha identity. "
+        "Serene elephant face, compassionate eyes, one naturally curved trunk, two tusks with one traditionally "
+        "broken, large ears, gold crown and red-gold garments. Exactly four anatomically coherent arms in every "
+        "deity shot, with blessing hand, lotus, modak bowl or symbolic implement placed naturally; no extra hands, "
+        "trunks, tusks, legs, feet, fingers or floating objects. Ganesha never worships himself or performs his own "
+        "puja. The mouse companion may appear only as a small respectful secondary figure. No text, logo, watermark, "
+        "collage, duplicate deity, malformed anatomy, cropped face or modern branding. Each scene must use a distinct "
+        "location, camera distance, pose and lighting design. 16:9 landscape with safe 9:16 crop, sapphire, vermilion "
+        "and antique-gold palette, cinematic depth and controlled volumetric light. "
+    )
+    scenes = [
+        {"id": f"ganesh-{index:02d}", "image": f"images-quality-v2/quality-{index:02d}.png",
+         "duration": 20, "reference_mode": "none" if index == 1 else "canonical",
+         "prompt": bible + detail}
+        for index, detail in enumerate(GANESH_SCENES, 1)
+    ]
+    mission_id = root.name
+    mission = {
+        "schema": "one.divya-mission/v2", "brand": BRAND, "agent_id": "naad",
+        "head_agent": "helios", "floor_id": "12", "mission_id": mission_id,
+        "production_date": day.isoformat(), "deity": "Ganesh", "preset": "GANESH_FESTIVAL",
+        "vocal_style": "powerful_male", "composition_type": "original_bhajan",
+        "music_model": "music_v2_5", "title": "प्रथम पुकार में गणपति | बुधवार गणेश भजन | Shloka By Shloka",
+        "display_title": "प्रथम पुकार में गणपति", "estimated_music_credits": 7198,
+        "lyrics": WEDNESDAY_GANESH_LYRICS, "strict_lyric_plan": True,
+        "allowed_repeat_lines": [],
+        "text_origin": "Original Hindi Ganesh devotional lyrics; not a scripture quotation",
+        "scripture_sources": [], "text_review": "PENDING", "pronunciation_review": "PENDING",
+        "requested_duration_seconds": 480, "sections": sections, "scenes": scenes,
+        "music_direction": {
+            "bpm": 92, "rhythm": "Keharwa, steady 8-beat devotional groove",
+            "melodic_language": "Accessible festive Ganesh-bhajan melody with an immediate vocal hook and warm temple atmosphere",
+            "vocal_delivery": "Warm powerful Indian male devotional lead from beat one, exact Hindi words, restrained response chorus",
+            "instruments": ["tanpura", "harmonium", "dholak", "tabla", "manjira", "bansuri", "restrained shehnai", "temple bells"],
+            "phrasing": "Sing each four-line block exactly once in written order; complete words before instrumental answers",
+            "sync": "Resolve each couplet on sam; keep the lead vocal continuous enough for two complete vocal-first Shorts",
+            "avoid": "No long intro, missing or substituted words, invented lyrics, repeated chorus loop, spoken narration, EDM or excessive alaap",
+        },
+        "shorts_policy": "vocals_first_retention_hooks_v2", "shorts": [], "channel_id": CHANNEL,
+        "public_publish_authorized": False, "upload_authorized": False, "schedule_enabled": False,
+    }
+    config = {
+        "lao_folder_id": "446427d7-5722-4d59-a487-8de321325cbc",
+        "artifact_roots": ["E:/ONE-Suite/lao-robot/worker"],
+        "edit_tools": "C:/Users/pc/Documents/LAO/yatra-edit",
+        "uploader_script": "C:/Users/pc/Documents/LAO/yatra-upload/youtube_api_upload.py",
+        "voice_overrides": {}, "credential_asset": None,
+        "oauth_refresh_file": "C:/Users/pc/.one/credentials/youtube/shloka-by-shloka/oauth-refresh.json",
+        "channel_id": CHANNEL, "reuse_logged_in_image_session": True,
+        "autonomy_policy_path": "E:/ONE-Suite/one-company/floors/floor_12_youtube_studio/shloka_autonomy.json",
+        "daily_schedule": {"enabled": False},
+    }
+    request = music_payload(mission)
+    write(root / "mission.json", mission)
+    write(root / "config.json", config)
+    write(root / "channel-binding.json", {"brand": BRAND, "channel_id": CHANNEL, "mission_id": mission_id})
+    write(root / "review-package/music-request.json", request)
+    write(root / "review-package/metadata-brief.json", {
+        "keyword": "Ganesh Bhajan 2026", "primary_keyword": "Ganesh Bhajan 2026",
+        "secondary_keywords": ["Wednesday Ganesh Bhajan", "Ganpati Bhajan", "बुधवार गणेश भजन"],
+        "description": "Original Hindi Wednesday Ganesh bhajan for wisdom, courage, focus and an auspicious beginning.",
+        "tags": ["ganesh bhajan 2026", "बुधवार गणेश भजन", "ganpati bhajan", "ganesh ji ke bhajan", "hindi devotional song", "ganesh song"],
+    })
+    write(root / "review-package/thumbnail-brief.json", {
+        "art": "images-quality-v2/quality-18.png", "title_lines": ["प्रथम पुकार", "गणपति"],
+        "subtitle": "8 मिनट का बुधवार गणेश भजन", "hooks": ["विघ्न कैसे दूर हों?", "बुद्धि कैसे जागे?"],
+        "style": "SHLOKA_GOLDEN_BLUE_V1",
+        "composition": "Ganesha on the left; clean sapphire-and-gold text-safe area on the right",
+        "ctr_rules": ["large correct Hindi title", "no text over deity face or body", "mobile readability at 320x180", "single dominant subject", "no fake views or claims"],
+    })
+    write(root / "review-package/commission.json", {
+        "duration_seconds": 480, "variants": 1, "paid_attempts_authorized": 0,
+        "credit_quote": 7198, "automatic_paid_retry": False,
+        "lyrics_review": "PENDING", "pronunciation_review": "PENDING", "publish": False,
+    })
+    write(root / "review-package/review-templates.json", {
+        purpose: {"approved": False, "reviewer": None, "authorization_reference": None,
+                  "binding_sha256": fingerprint(binding)}
+        for purpose, binding in (("lyrics", lyrics_binding(mission)), ("music-spend-and-rights", request))
+    })
+    journal = Journal(root)
+    journal.stage("TOPIC_SELECTION", {"mission_id": mission_id},
+                  lambda: {"files": [str(root / "mission.json")], "deity": "Ganesh", "cost_usd": 0})
+    for name in STAGES[1:]:
+        journal.data["stages"].setdefault(name, {"status": "PENDING", "attempts": 0, "cost_usd": 0})
+    journal.save()
+    return {"status": "REVIEW_READY", "root": str(root), "mission": str(root / "mission.json"),
+            "duration_seconds": 480, "estimated_music_credits": 7198, "paid_attempts_authorized": 0}
+
+
 def create_daily_mission(root: Path, *, day: date, deity: str = "Lakshmi") -> dict:
     """Create today's review package without provider or publishing side effects."""
     root = Path(root).resolve()
@@ -639,8 +830,10 @@ def create_daily_mission(root: Path, *, day: date, deity: str = "Lakshmi") -> di
         return create_ravi_pradosh_shiva_mission(root, day=day)
     if deity.casefold() in {"vishnu", "kartik purnima", "dev deepawali", "om jai jagdish hare"}:
         return create_kartik_purnima_vishnu_mission(root, day=day)
+    if deity.casefold() in {"ganesh", "ganesha", "ganpati", "wednesday ganesh"}:
+        return create_wednesday_ganesh_mission(root, day=day)
     if deity.casefold() != "lakshmi":
-        raise ValueError("This reviewed daily template currently supports Lakshmi and Tulsi Vivah")
+        raise ValueError("This reviewed daily template currently supports Lakshmi, Ganesh and approved festival presets")
 
     title = "माँ लक्ष्मी आओ, दीप जलाओ | Lakshmi Bhajan | Shloka By Shloka"
     hook = FRIDAY_LAKSHMI_LYRICS[:4]
