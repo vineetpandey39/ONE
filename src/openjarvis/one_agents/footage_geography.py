@@ -22,9 +22,56 @@ def contains(text, phrase):
     return bool(norm(phrase)) and (' ' + norm(phrase) + ' ') in (' ' + norm(text) + ' ')
 
 
+LOCATION_PROOF = 'location_proof'
+CONTEXTUAL = 'contextual'
+_CAMERA_WORDS = {'aerial', 'drone', 'vertical', 'cinematic', 'wide', 'close', 'view', 'shot', 'footage'}
+_SUBJECT_ALIASES = {
+    'aircraft': ('aircraft', 'airplane', 'aeroplane', 'plane', 'airliner', 'jet'),
+    'airplane': ('airplane', 'aircraft', 'aeroplane', 'plane', 'airliner', 'jet'),
+    'airport': ('airport', 'terminal'), 'bus': ('bus', 'coach'),
+    'coastline': ('coastline', 'coast', 'coastal', 'shoreline'),
+    'hotel': ('hotel', 'resort'), 'island': ('island', 'islands', 'islet'),
+    'islands': ('island', 'islands', 'islet'), 'road': ('road', 'street', 'highway'),
+}
+_PLACE_ALIASES = {
+    'murdeshwar': ('murdeshwar', 'murudeshwar'),
+    'murudeshwar': ('murdeshwar', 'murudeshwar'),
+}
+
+
+def claim_scope(requirement):
+    return str(requirement.get('claim_scope') or LOCATION_PROOF).strip().lower()
+
+
+def subject_anchor(subject):
+    """Return one provider-friendly subject noun, never a geography assertion."""
+    words = [w for w in norm(subject).split() if w not in _CAMERA_WORDS]
+    return (words[-1] if words else norm(subject).split()[-1]).strip()
+
+
+def subject_matches(text, subject):
+    if contains(text, subject):
+        return True
+    anchor = subject_anchor(subject)
+    return any(contains(text, term) for term in _SUBJECT_ALIASES.get(anchor, (anchor,)))
+
+
+def place_matches(text, place):
+    key = norm(place)
+    return any(contains(text, term) for term in _PLACE_ALIASES.get(key, (key,)))
+
+
 def acquisition_gate(requirement):
-    if not requirement.get('place') or not requirement.get('subject'):
-        raise ValueError('Cannot enable acquisition without place and subject')
+    scope = claim_scope(requirement)
+    if not requirement.get('subject') or (scope == LOCATION_PROOF and not requirement.get('place')):
+        raise ValueError('Cannot enable acquisition without the evidence required by its claim scope')
+    if scope == CONTEXTUAL:
+        # Reuse the workflow's metadata + selected-preview gate with a subject
+        # noun. This admits context without making a geographic claim.
+        anchor = subject_anchor(requirement['subject'])
+        return {'requiredTitleKeyword': anchor, 'alternateTitleKeyword': '',
+                'locationMatch': True, 'subjectMatch': False,
+                'regionalContext': True, 'regionalContextLabel': 'Illustrative context'}
     # Workflow assert_destination_subject reads alternateTitleKeyword as the
     # subject. Leaving it blank silently drops the landmark-specific check.
     return {'requiredTitleKeyword': requirement['place'],
@@ -38,12 +85,29 @@ def requirements(spec):
     queries = spec.get('stock_queries') or []
     if not isinstance(rows, list) or len(rows) != len(queries) or not rows:
         raise ValueError('Geography requires one explicit subject contract per stock query; no country fallback')
+    explicit_scopes = any(isinstance(row, dict) and row.get('claim_scope') for row in rows)
+    normalized = []
     for i, row in enumerate(rows):
-        if not isinstance(row, dict) or not row.get('place') or not row.get('subject'):
-            raise ValueError(f'Geography slot {i+1}: missing exact place/subject')
-        if not contains(queries[i], row['place']) or not contains(queries[i], row['subject']):
-            raise ValueError(f'Geography slot {i+1}: query must name contracted place and subject')
-    return rows
+        if not isinstance(row, dict) or not row.get('subject'):
+            raise ValueError(f'Footage slot {i+1}: missing subject')
+        item = dict(row)
+        scope = claim_scope(item)
+        if scope not in {LOCATION_PROOF, CONTEXTUAL}:
+            raise ValueError(f'Footage slot {i+1}: unsupported claim_scope {scope!r}')
+        item['claim_scope'] = scope
+        if scope == LOCATION_PROOF:
+            if not item.get('place'):
+                raise ValueError(f'Location-proof slot {i+1}: missing place')
+            if not contains(queries[i], item['place']) or not subject_matches(queries[i], item['subject']):
+                raise ValueError(f'Location-proof slot {i+1}: query must name contracted place and subject')
+        elif not subject_matches(queries[i], item['subject']):
+            raise ValueError(f'Contextual slot {i+1}: query must name its visible subject')
+        normalized.append(item)
+    if explicit_scopes and len(normalized) >= 8:
+        proof = sum(claim_scope(row) == LOCATION_PROOF for row in normalized)
+        if proof not in {2, 3}:
+            raise ValueError('Eight-clip VISTA plans require 2-3 location-proof slots; remaining slots are contextual')
+    return normalized
 
 
 def provider_evidence(path, requirement, receipt_dir):
@@ -53,8 +117,10 @@ def provider_evidence(path, requirement, receipt_dir):
         if Path(str(receipt.get('downloaded_asset') or '')).resolve() != Path(path).resolve():
             continue
         title = receipt.get('selected_asset_title') or ''
-        if (contains(title, requirement['place']) and contains(title, requirement['subject'])
-                and receipt.get('acquisition_receipt')):
+        scope = claim_scope(requirement)
+        matches = (place_matches(title, requirement.get('place')) and subject_matches(title, requirement['subject'])
+                   if scope == LOCATION_PROOF else subject_matches(title, requirement['subject']))
+        if matches and receipt.get('acquisition_receipt'):
             return {'receipt': str(receipt_path), 'receipt_sha256': sha(receipt_path),
                     'provider_title': title, 'requirement': requirement}
     raise ValueError(f'No matching provider geography receipt for {Path(path).name}')
@@ -86,7 +152,7 @@ def validate(spec, manifest, *, visual=True):
             for sample in samples:
                 if not Path(sample['path']).is_file() or sha(sample['path']) != sample.get('sha256'):
                     raise ValueError('Visual geography sample missing or changed')
-    return {'ok': True, 'slots': len(rows), 'policy': 'provider-and-visual-geography-v1'}
+    return {'ok': True, 'slots': len(rows), 'policy': 'risk-scoped-provider-and-visual-footage-v2'}
 
 
 def validate_run(root):
