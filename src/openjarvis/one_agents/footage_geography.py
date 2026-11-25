@@ -29,9 +29,12 @@ _SUBJECT_ALIASES = {
     'aircraft': ('aircraft', 'airplane', 'aeroplane', 'plane', 'airliner', 'jet'),
     'airplane': ('airplane', 'aircraft', 'aeroplane', 'plane', 'airliner', 'jet'),
     'airport': ('airport', 'terminal'), 'bus': ('bus', 'coach'),
+    'budget': ('budget', 'expense', 'expenses', 'money', 'saving', 'savings'),
+    'expenses': ('expenses', 'expense', 'budget', 'money', 'saving', 'savings'),
     'coastline': ('coastline', 'coast', 'coastal', 'shoreline'),
     'hotel': ('hotel', 'resort'), 'island': ('island', 'islands', 'islet'),
     'islands': ('island', 'islands', 'islet'), 'road': ('road', 'street', 'highway'),
+    'traveller': ('traveller', 'traveler', 'travel', 'tourist'),
 }
 _PLACE_ALIASES = {
     'murdeshwar': ('murdeshwar', 'murudeshwar'),
