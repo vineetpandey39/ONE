@@ -171,7 +171,9 @@ def voice_score(tts: str, heard: str, keyword: str | None) -> tuple[float, list[
     said = [w for w in words(tts) if w not in _NUMBER_WORDS and len(skeleton(w)) >= 2]
     got_sk = [skeleton(w) for w in words(heard)]
     got_sk += [a2 + b2 for a2, b2 in zip(got_sk, got_sk[1:])]          # 'notebook lm' vs 'नोटबुकएलएम'
-    hit = sum(1 for w in said if difflib.get_close_matches(skeleton(w), got_sk, n=1, cutoff=0.6)) / max(1, len(said))
+    # a word counts as heard if it sounds close, or is part of a joined word ('चैट जी पी टी' vs 'ChatGPT')
+    heard_ok = lambda sk: difflib.get_close_matches(sk, got_sk, n=1, cutoff=0.6) or any(sk in g for g in got_sk)
+    hit = sum(1 for w in said if heard_ok(skeleton(w))) / len(said) if said else 1.0   # tiny lines: nothing to compare
     issues = []
     if hit < 0.6:
         issues.append(f"only {hit:.0%} of words heard")
