@@ -1,12 +1,9 @@
-"""Receipted long-form Sonia research with vidIQ -> Sanjeevani failover."""
+"""Receipted long-form Sonia research from Sanjeevani evidence."""
 from __future__ import annotations
 
 import json
 import re
 from pathlib import Path
-
-from openjarvis.one_agents import vidiq_research
-
 
 def _accepted(brief: str) -> bool:
     return bool(re.search(r"(?im)^\s*(?:\*\*)?COMMISSION:\s*YES\b", brief)) and not bool(
@@ -44,7 +41,7 @@ def _lacks_longform_travel_depth(brief: str) -> bool:
 def commission_longform(job_id, prior, *, reusable, synthesize, pick_story,
                         output_dir, progress=lambda detail: None, keyword="",
                         unique=None):
-    """Choose one sourced long-form topic without making vidIQ a single point of failure.
+    """Choose one sourced long-form topic through Sanjeevani only.
 
     Each provider attempt is persisted. vidIQ still gets first use and its
     selected keyword still has to validate. Any provider/cap/selection/
@@ -86,8 +83,6 @@ def commission_longform(job_id, prior, *, reusable, synthesize, pick_story,
                 attempt.update(status="rejected", note=repeated or note or "Reselection rejected")
                 save()
                 return None
-        if story["status"] == "vidiq":
-            story["_keyword_receipt"] = vidiq_research.validate_keyword(brief)
         if story["status"] == "sanjeevani":
             urls = [str(row.get("url") or row.get("source_url") or "")
                     for row in story.get("evidence") or []]
@@ -101,32 +96,7 @@ def commission_longform(job_id, prior, *, reusable, synthesize, pick_story,
                 "_dedupe_checked": unique is not None,
                 "fallback_receipt": str(path)}
 
-    # A recovery commission may explicitly choose Sanjeevani-first research by
-    # using the ``sanjeevani:`` research-keyword prefix.  This is deliberately
-    # opt-in: ordinary scheduled videos retain the normal vidIQ -> Sanjeevani
-    # order, while an editor can escape a bad vidIQ topic loop without
-    # disabling vidIQ globally or weakening any downstream QC gate.
-    sanjeevani_first = str(keyword or "").strip().lower().startswith("sanjeevani:")
-    vidiq_keyword = "" if sanjeevani_first else keyword
-    if sanjeevani_first:
-        attempts.append({"provider": "vidIQ", "status": "skipped",
-                         "reason": "Explicit Sanjeevani-first recovery commission"})
-        save()
-    else:
-        progress("YATRA research: checking relevant vidIQ evidence")
-        try:
-            selected = evaluate(
-                vidiq_research.collect_story(job_id, prior, short=False, keyword=vidiq_keyword),
-                "vidIQ",
-            )
-            if selected:
-                return selected
-        except Exception as exc:  # provider failure is evidence for failover
-            attempts.append({"provider": "vidIQ", "status": "unavailable",
-                             "reason": f"{type(exc).__name__}: {exc}"[:500]})
-            save()
-
-    progress("YATRA fallback: Sanjeevani scored travel discovery")
+    progress("YATRA research: Sanjeevani scored travel discovery")
     try:
         story = pick_story()
         if story.get("status") == "picked":
@@ -188,4 +158,4 @@ def commission_longform(job_id, prior, *, reusable, synthesize, pick_story,
                              "status": "unavailable",
                              "reason": f"{type(exc).__name__}: {exc}"[:500]})
             save()
-    raise RuntimeError(f"YATRA exhausted relevant vidIQ and Sanjeevani research; see {path}")
+    raise RuntimeError(f"YATRA exhausted relevant Sanjeevani research; see {path}")

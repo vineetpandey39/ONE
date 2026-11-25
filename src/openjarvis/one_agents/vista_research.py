@@ -1,12 +1,9 @@
-"""Bounded VISTA commissioning with an explicit, receipted local fallback."""
+"""Bounded VISTA commissioning from receipted Sanjeevani evidence."""
 from __future__ import annotations
 
 import json
 import re
 from pathlib import Path
-
-from openjarvis.one_agents import vidiq_research
-
 
 def accepted(brief: str) -> bool:
     return bool(re.search(r"(?im)^\s*(?:\*\*)?COMMISSION:\s*YES\b", brief)) and not bool(
@@ -15,7 +12,7 @@ def accepted(brief: str) -> bool:
 
 def commission(job_id, prior, *, reusable, synthesize, pick_story, output_dir,
                progress=lambda detail: None, keyword="", unique=None):
-    """Try vidIQ once, then scored Sanjeevani news and two public-search packs.
+    """Try scored Sanjeevani news, then two bounded public-search packs.
 
     No extra paid retries and no fabricated demand metrics. Every attempted
     provider, rejection and selected evidence is persisted before production.
@@ -48,8 +45,6 @@ def commission(job_id, prior, *, reusable, synthesize, pick_story, output_dir,
                 attempt.update(status="rejected", note=repeated or note or "Reselection rejected")
                 save()
                 return None
-        if story["status"] == "vidiq":
-            story["_keyword_receipt"] = vidiq_research.validate_keyword(brief)
         # Public search supports topic selection, not invented travel rules.
         if story["status"] == "sanjeevani":
             urls = [str(r.get("url") or "") for r in story["evidence"]]
@@ -63,18 +58,7 @@ def commission(job_id, prior, *, reusable, synthesize, pick_story, output_dir,
                 "_dedupe_checked": unique is not None,
                 "fallback_receipt": str(path)}
 
-    progress("VISTA research: checking relevant vidIQ evidence")
-    try:
-        result = evaluate(vidiq_research.collect_story(job_id, prior, short=True,
-                                                       keyword=keyword), "vidIQ")
-        if result:
-            return result
-    except Exception as exc:
-        attempts.append({"provider": "vidIQ", "status": "unavailable",
-                         "reason": f"{type(exc).__name__}: {exc}"[:500]})
-        save()
-
-    progress("VISTA fallback: Sanjeevani scored travel discovery")
+    progress("VISTA research: Sanjeevani scored travel discovery")
     try:
         story = pick_story()
         if story.get("status") == "picked":
@@ -127,4 +111,4 @@ def commission(job_id, prior, *, reusable, synthesize, pick_story, output_dir,
             attempts.append({"provider": "Sanjeevani public search", "query": query,
                              "status": "unavailable", "reason": str(exc)[:500]})
             save()
-    raise RuntimeError(f"VISTA exhausted relevant vidIQ and Sanjeevani research; see {path}")
+    raise RuntimeError(f"VISTA exhausted relevant Sanjeevani research; see {path}")

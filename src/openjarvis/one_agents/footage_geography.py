@@ -53,8 +53,9 @@ def subject_anchor(subject):
 def subject_matches(text, subject):
     if contains(text, subject):
         return True
-    anchor = subject_anchor(subject)
-    return any(contains(text, term) for term in _SUBJECT_ALIASES.get(anchor, (anchor,)))
+    anchors = [word for word in norm(subject).split() if word not in _CAMERA_WORDS]
+    return any(contains(text, term) for anchor in anchors
+               for term in _SUBJECT_ALIASES.get(anchor, (anchor,)))
 
 
 def place_matches(text, place):
