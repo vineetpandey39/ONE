@@ -68,17 +68,22 @@ def acquisition_gate(requirement):
     if not requirement.get('subject') or (scope == LOCATION_PROOF and not requirement.get('place')):
         raise ValueError('Cannot enable acquisition without the evidence required by its claim scope')
     if scope == CONTEXTUAL:
-        # Reuse the workflow's metadata + selected-preview gate with a subject
-        # noun. This admits context without making a geographic claim.
+        # Context is a visible subject, not a location assertion. Route it to
+        # the acquisition package's selected-title gate; the former
+        # location-only vision path took up to two minutes per candidate and
+        # could reject a plainly titled notebook/airport visual as if it were
+        # supposed to prove a landmark.
         anchor = subject_anchor(requirement['subject'])
         return {'requiredTitleKeyword': anchor, 'alternateTitleKeyword': '',
-                'locationMatch': True, 'subjectMatch': False,
+                'locationMatch': False, 'subjectMatch': False,
+                'contextualMatch': True,
                 'regionalContext': True, 'regionalContextLabel': 'Illustrative context'}
     # Workflow assert_destination_subject reads alternateTitleKeyword as the
     # subject. Leaving it blank silently drops the landmark-specific check.
     return {'requiredTitleKeyword': requirement['place'],
             'alternateTitleKeyword': requirement['subject'],
             'locationMatch': False, 'subjectMatch': True,
+            'contextualMatch': False,
             'regionalContext': False, 'regionalContextLabel': ''}
 
 
