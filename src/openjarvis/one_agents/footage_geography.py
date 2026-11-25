@@ -31,6 +31,8 @@ _SUBJECT_ALIASES = {
     'airport': ('airport', 'terminal'), 'bus': ('bus', 'coach'),
     'budget': ('budget', 'expense', 'expenses', 'money', 'saving', 'savings'),
     'expenses': ('expenses', 'expense', 'budget', 'money', 'saving', 'savings'),
+    'coastal': ('coastal', 'coast', 'coastline', 'shoreline', 'seashore', 'seafront',
+                'waterfront', 'harbor', 'harbour', 'marina'),
     'coastline': ('coastline', 'coast', 'coastal', 'shoreline'),
     'hotel': ('hotel', 'resort'), 'island': ('island', 'islands', 'islet'),
     'islands': ('island', 'islands', 'islet'), 'road': ('road', 'street', 'highway'),
