@@ -45,8 +45,9 @@ def claim_scope(requirement):
 
 def subject_anchor(subject):
     """Return one provider-friendly subject noun, never a geography assertion."""
-    words = [w for w in norm(subject).split() if w not in _CAMERA_WORDS]
-    return (words[-1] if words else norm(subject).split()[-1]).strip()
+    tokens = norm(subject).split()
+    words = [w for w in tokens if w not in _CAMERA_WORDS]
+    return (words[-1] if words else (tokens[-1] if tokens else '')).strip()
 
 
 def subject_matches(text, subject):
@@ -94,7 +95,8 @@ def requirements(spec):
         scope = claim_scope(item)
         if scope not in {LOCATION_PROOF, CONTEXTUAL}:
             raise ValueError(f'Footage slot {i+1}: unsupported claim_scope {scope!r}')
-        item['claim_scope'] = scope
+        if explicit_scopes:
+            item['claim_scope'] = scope
         if scope == LOCATION_PROOF:
             if not item.get('place'):
                 raise ValueError(f'Location-proof slot {i+1}: missing place')
