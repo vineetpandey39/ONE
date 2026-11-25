@@ -221,7 +221,9 @@ if (-not $env:ONE_KDP_ASSIGN_FREE_ISBN) { $env:ONE_KDP_ASSIGN_FREE_ISBN = 'true'
 # num_ctx 16384, num_gpu 0, two runs each: 9.30 tok/s at 8 threads, 10.01 at
 # 14 - only +7.6%, because a 9B model on CPU is bound by memory bandwidth, not
 # by compute. Worth taking, but it is not the reason research takes minutes.
-if (-not $env:ONE_LLM_THREADS) { $env:ONE_LLM_THREADS = '14' }
+# Prefer desktop responsiveness: the benchmark above gained only 7.6% from
+# six extra threads. Keep those cores available to interactive applications.
+if (-not $env:ONE_LLM_THREADS) { $env:ONE_LLM_THREADS = '8' }
 if (-not $env:PADDLE_PDX_CACHE_HOME) { $env:PADDLE_PDX_CACHE_HOME = Join-Path $modelCacheRoot "paddlex" }
 if (-not $env:HF_HOME) { $env:HF_HOME = Join-Path $modelCacheRoot "huggingface" }
 if (-not $env:TORCH_HOME) { $env:TORCH_HOME = Join-Path $modelCacheRoot "torch" }
@@ -345,6 +347,22 @@ if (($env:ONE_SYNC_ON_START -ne "false")) {
 if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
     Start-Process -FilePath $ollama -ArgumentList "serve" -WindowStyle Hidden
     Start-Sleep -Seconds 2
+}
+
+# Background inference should yield to the interactive desktop. Reapply on
+# health checks as well as boot, without interrupting any active generation.
+Get-Process ollama,llama-server -ErrorAction SilentlyContinue | ForEach-Object {
+    try {
+        $_.PriorityClass = 'BelowNormal'
+        if ($_.ProcessName -eq 'llama-server') {
+            # Bound existing runners too: their thread count cannot change
+            # until the next model load, and callers can request more threads.
+            $inferenceCores = [Math]::Min(8, [Environment]::ProcessorCount)
+            $_.ProcessorAffinity = [IntPtr]((1L -shl $inferenceCores) - 1)
+        }
+    } catch {
+        Write-Verbose "Could not lower inference priority for PID $($_.Id)"
+    }
 }
 
 # Guard the canonical E: model inventory on every ONE boot. A missing model is
