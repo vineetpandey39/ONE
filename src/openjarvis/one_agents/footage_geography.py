@@ -78,7 +78,14 @@ def location_subject_anchor(place, subject):
         candidates.append(word)
     if not candidates:
         raise ValueError('Location-proof subject lacks an independent visible noun')
-    return candidates[0]
+    anchor = candidates[0]
+    # Provider titles freely alternate common singular/plural labels
+    # (``fjord``/``fjords``, ``village``/``villages``).  The destination is
+    # independently exact, so canonicalising a simple plural here removes a
+    # spelling-only rejection without weakening geographic identity.
+    if len(anchor) > 4 and anchor.endswith('s') and not anchor.endswith('ss'):
+        anchor = anchor[:-1]
+    return anchor
 
 
 def subject_matches(text, subject):
