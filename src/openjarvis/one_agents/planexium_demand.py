@@ -21,10 +21,7 @@ _BROAD_DEMAND_WORDS = {
     'earth', 'jupiter', 'mars', 'moon', 'planet', 'planets', 'saturn',
     'solar', 'system',
 }
-_SPECIFIC_ENTITY_ANCHORS = {
-    'artemis', 'asteroid', 'asteroids', 'curiosity', 'dart', 'falcon', 'iss',
-    'jwst', 'spacex', 'starship', 'voyager', 'webb',
-}
+_SINGLE_TERM_ENTITY_ANCHORS = {'asteroid', 'asteroids'}
 _OFFICIAL_EVERGREEN = (
     {'topic': 'Why NASA studies asteroids and what they reveal about the solar system',
      'sources': ['https://science.nasa.gov/solar-system/asteroids/facts/']},
@@ -106,7 +103,7 @@ def demand_support(receipt, candidate, keyword):
         # planet-size simulation tagged ``mars`` to validate a Curiosity
         # sampling episode, and a generic Moon video to validate Artemis.
         if ((len(overlap) >= 2 and distinctive)
-                or bool(set(overlap) & _SPECIFIC_ENTITY_ANCHORS)):
+                or bool(set(overlap) & _SINGLE_TERM_ENTITY_ANCHORS)):
             support.append({'video_id': video.get('videoId'), 'title': video.get('videoTitle'),
                             'vph': float(video.get('vph') or 0), 'matched_terms': overlap})
     return sorted(support, key=lambda row: row['vph'], reverse=True)
@@ -128,14 +125,14 @@ def grounded_keyword(selection, receipt):
         overlap = terms & _terms(row['keyword'])
         distinctive = overlap - _BROAD_DEMAND_WORDS
         if (_measured(row) and ((len(overlap) >= 2 and distinctive)
-                or bool(overlap & _SPECIFIC_ENTITY_ANCHORS))):
+                or bool(overlap & _SINGLE_TERM_ENTITY_ANCHORS))):
             matched.append((row, overlap))
     if matched:
         # A broad phrase such as "solar system" may have more volume, but it
         # must not displace the recognizable subject that earned the trend
         # match (for example "asteroids").
         chosen, overlap = max(matched, key=lambda item: (
-            bool(item[1] & _SPECIFIC_ENTITY_ANCHORS),
+            bool(item[1] & _SINGLE_TERM_ENTITY_ANCHORS),
             len(item[1]), item[0]['volume'], item[0]['monthly']))
         return {**selection, 'original_search_keyword': seed, 'search_keyword': chosen['keyword'],
                 'keyword_validation': {'validated': True, 'mode': 'topic-bound-related',
@@ -166,6 +163,45 @@ def candidates(recent, read=space_research.read_public):
     if not rows:
         raise ResearchUnavailable('No unused official science candidate; no paid production started')
     return rows
+
+
+def _eligible_candidates(rows, receipts, client, missing):
+    """Bounded candidate-specific recovery when a broad niche search is noisy.
+
+    Broad space queries routinely surface astrology, LEGO, games and generic
+    planet simulations.  Do not ask the synthesizer to imagine a relationship.
+    Give each unsupported official candidate one exact outlier search, retain
+    only candidates with signed title/tag overlap, and stop after this bounded
+    pass so research cannot loop or drain shared credits.
+    """
+    eligible = []
+    for row in rows:
+        support = []
+        evidence_ids = []
+        for index, receipt in enumerate(receipts):
+            current = demand_support(receipt, row, row['topic'])
+            support += current
+            if current:
+                evidence_ids.append(f'vidiq-{index}')
+        if not support:
+            try:
+                targeted = client.call('vidiq_outliers', {
+                    'keyword': row['topic'], 'language': 'en', 'contentType': 'long',
+                    'publishedWithin': 'thisMonth', 'limit': 12, 'sort': 'vph'})
+                if 'No keyword data was found' in evidence_text(targeted):
+                    missing.append({'tool': 'vidiq_outliers', 'candidate_id': row['id'],
+                                    'reason': 'No candidate-specific demand data'})
+                else:
+                    receipts.append(targeted)
+                    support = demand_support(targeted, row, row['topic'])
+                    if support:
+                        evidence_ids.append(f'vidiq-{len(receipts)-1}')
+            except ResearchUnavailable as exc:
+                missing.append({'tool': 'vidiq_outliers', 'candidate_id': row['id'],
+                                'reason': str(exc)})
+        if support:
+            eligible.append({**row, '_demand_evidence_ids': evidence_ids})
+    return eligible
 
 
 def select_topic(root, recent, *, client=None, synthesize=None, read=space_research.read_public,
@@ -202,6 +238,9 @@ def select_topic(root, recent, *, client=None, synthesize=None, read=space_resea
     if not receipts:
         raise ResearchUnavailable('No usable vidIQ science demand evidence; no paid production started')
     rows = candidates(recent, read)
+    rows = _eligible_candidates(rows, receipts, client, missing)
+    if not rows:
+        raise ResearchUnavailable('No official candidate has candidate-bound current demand; preserve research for the next run')
     evidence = {'official_candidates': rows,
                 'demand': [{'id': f'vidiq-{i}', 'data': evidence_text(r)} for i,r in enumerate(receipts)],
                 'channel_performance': channel_performance or {'available': False},
@@ -228,8 +267,11 @@ def select_topic(root, recent, *, client=None, synthesize=None, read=space_resea
     try:
         selection = json.loads(text[text.index('{'):text.rindex('}')+1])
         chosen = next(r for r in rows if r['id']==str(selection['candidate_id']))
-        ids = selection['demand_evidence_ids']
-        if not ids or any(i not in {f'vidiq-{j}' for j in range(len(receipts))} for i in ids): raise ValueError('evidence IDs')
+        # Evidence membership is computed from signed title/tag overlap above;
+        # the synthesizer chooses the candidate but cannot fabricate or borrow
+        # an evidence ID from another candidate.
+        ids = chosen['_demand_evidence_ids']
+        selection['demand_evidence_ids'] = ids
         required = ['search_keyword','reason','hook','viewer_payoff','channel_fit','why_now','alternatives_rejected']
         if not all(str(selection.get(k,'')).strip() for k in required): raise ValueError('incomplete selection')
         supports = []
@@ -249,7 +291,7 @@ def select_topic(root, recent, *, client=None, synthesize=None, read=space_resea
     selection = grounded_keyword(selection, keyword)
     if not selection['keyword_validation'].get('validated'):
         raise ResearchUnavailable('Selected science keyword lacks measured candidate-bound demand; preserve research for reselection')
-    result = {k:v for k,v in chosen.items() if k!='id'}
+    result = {k:v for k,v in chosen.items() if k!='id' and not k.startswith('_')}
     result.update(discovery='vidIQ demand + NASA primary sources', demand_research=str(receipt_path), demand_selection=selection,
                   channel_analytics_available='UCuPYr5_YFDy7f_nt-iT6vDQ' in evidence_text(channels))
     sealed.write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
