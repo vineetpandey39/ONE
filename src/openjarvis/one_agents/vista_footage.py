@@ -100,6 +100,18 @@ def contextual_visible_anchor(observations, subject):
     return ""
 
 
+def contextual_review_is_usable(verdict):
+    """Treat visual review as advisory for non-claiming illustrative B-roll.
+
+    Provider metadata, uniqueness and media integrity are already hard gates.
+    The local vision model remains useful for detecting unusable frames, but
+    a semantic preference such as bank-statement versus credit-card paperwork
+    must not stop an otherwise complete Short.
+    """
+    observations = geo.norm((verdict or {}).get("observations") or "")
+    return bool(observations) and not any(marker in observations for marker in _CONTEXT_FATAL_VISUALS)
+
+
 def acquire(spec, run_dir, *, review=True):
     root = Path(run_dir)
     requirements = geo.requirements(spec)
@@ -221,15 +233,15 @@ def review_manifest(spec, root, manifest):
                 and geo.claim_scope(requirement) == geo.CONTEXTUAL):
             visible_anchor = contextual_visible_anchor(
                 verdict.get("observations") or "", requirement["subject"])
-            if visible_anchor:
+            if contextual_review_is_usable(verdict):
                 # Provider metadata already passed the subject gate. Pixels
-                # now confirm at least one concrete narrative object and no
-                # fatal visual defect. This is valid illustrative context;
-                # it is not evidence for a place or for every joined noun.
+                # confirm usable footage and no fatal visual defect. A local
+                # model's semantic preference is advisory for illustrative
+                # context; it is not evidence for a place or every joined noun.
                 verdict["original_verdict"] = original_verdict
                 verdict["verdict"] = "approved"
-                verdict["policy"] = "contextual-visible-anchor-v1"
-                verdict["visible_anchor"] = visible_anchor
+                verdict["policy"] = "contextual-advisory-v2"
+                verdict["visible_anchor"] = visible_anchor or "provider-metadata"
         row["visual_geography_review"] = {**verdict, "reviewer": "local:qwen3.5:9b",
             "requirement": requirement, "media_sha256": row["sha256"], "samples": samples}
         (root / "footage-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

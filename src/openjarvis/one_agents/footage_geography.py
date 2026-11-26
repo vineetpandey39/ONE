@@ -85,7 +85,8 @@ def location_subject_anchor(place, subject):
     # (``fjord``/``fjords``, ``village``/``villages``).  The destination is
     # independently exact, so canonicalising a simple plural here removes a
     # spelling-only rejection without weakening geographic identity.
-    if len(anchor) > 4 and anchor.endswith('s') and not anchor.endswith('ss'):
+    if (len(anchor) > 4 and anchor.endswith('s')
+            and not anchor.endswith(('ss', 'is', 'us'))):
         anchor = anchor[:-1]
     return anchor
 
