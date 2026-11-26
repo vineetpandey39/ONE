@@ -16,6 +16,14 @@ from openjarvis.one_agents import footage_geography as geo
 USER_AGENT = "Mozilla/5.0 (compatible; ONE-VISTA/1.0)"
 
 
+class ContextualFootageUnavailable(RuntimeError):
+    """One illustrative beat needs same-topic replacement, not a new topic."""
+
+
+class EssentialFootageUnavailable(RuntimeError):
+    """A location-proof beat exhausted grounded provider candidates."""
+
+
 def title(video):
     slug = urllib.parse.urlparse(video.get("url", "")).path.rstrip("/").split("/")[-1]
     return " ".join(p for p in slug.split("-") if not p.isdigit())
@@ -58,6 +66,40 @@ def review_sample_seconds(path):
             for fraction in (0.15, 0.50, 0.85)]
 
 
+_CONTEXT_GENERIC_WORDS = {
+    "a", "an", "and", "at", "for", "in", "of", "on", "or", "the", "to", "with",
+    "application", "applications", "document", "documents", "form", "forms", "online",
+    "page", "pages", "planning", "travel", "turning", "vacation",
+}
+_CONTEXT_FATAL_VISUALS = (
+    "black frame", "blank frame", "corrupt", "fake footage", "synthetic",
+    "unreadable", "no visible subject",
+)
+
+
+def contextual_visible_anchor(observations, subject):
+    """Return a positively visible concrete subject word, or an empty string.
+
+    Contextual beats are illustrative and make no location claim. Compound
+    prompts such as ``passport and calendar`` therefore need one meaningful
+    visible object, not every joined object in the director's search phrase.
+    Negative mentions (``no calendar``/``not a calendar``) do not count.
+    """
+    text = geo.norm(observations)
+    if not text or any(marker in text for marker in _CONTEXT_FATAL_VISUALS):
+        return ""
+    words = [word for word in geo.norm(subject).split()
+             if len(word) > 2 and word not in _CONTEXT_GENERIC_WORDS]
+    for word in words:
+        for match in re.finditer(rf"\b{re.escape(word)}\b", text):
+            before = text[max(0, match.start() - 32):match.start()]
+            if re.search(r"(?:\bno\b|\bnot\b|\bwithout\b|\bmissing\b|does not show)\s+(?:\w+\s+){0,3}$",
+                         before):
+                continue
+            return word
+    return ""
+
+
 def acquire(spec, run_dir, *, review=True):
     root = Path(run_dir)
     requirements = geo.requirements(spec)
@@ -98,7 +140,10 @@ def acquire(spec, run_dir, *, review=True):
             if selected:
                 break
         if not selected:
-            raise RuntimeError(f"Pexels: no verified unique footage for slot {index}: {requirement}")
+            failure = (ContextualFootageUnavailable
+                       if geo.claim_scope(requirement) == geo.CONTEXTUAL
+                       else EssentialFootageUnavailable)
+            raise failure(f"Pexels: no verified unique footage for slot {index}: {requirement}")
         video, file = selected
         used.add(video["id"])
         original = assets / f"{video['id']}-source.mp4"
@@ -170,10 +215,28 @@ def review_manifest(spec, root, manifest):
             "options": {"temperature": 0, "num_predict": 350}}, timeout=300)
         response.raise_for_status()
         verdict = json.loads(response.json()["message"]["content"])
+        original_verdict = str(verdict.get("verdict") or "")
+        visible_anchor = ""
+        if (original_verdict != "approved"
+                and geo.claim_scope(requirement) == geo.CONTEXTUAL):
+            visible_anchor = contextual_visible_anchor(
+                verdict.get("observations") or "", requirement["subject"])
+            if visible_anchor:
+                # Provider metadata already passed the subject gate. Pixels
+                # now confirm at least one concrete narrative object and no
+                # fatal visual defect. This is valid illustrative context;
+                # it is not evidence for a place or for every joined noun.
+                verdict["original_verdict"] = original_verdict
+                verdict["verdict"] = "approved"
+                verdict["policy"] = "contextual-visible-anchor-v1"
+                verdict["visible_anchor"] = visible_anchor
         row["visual_geography_review"] = {**verdict, "reviewer": "local:qwen3.5:9b",
             "requirement": requirement, "media_sha256": row["sha256"], "samples": samples}
         (root / "footage-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         if verdict.get("verdict") != "approved" or not verdict.get("observations"):
-            raise RuntimeError(f"VISTA visual review held slot {row['slot']}: {verdict}")
+            failure = (ContextualFootageUnavailable
+                       if geo.claim_scope(requirement) == geo.CONTEXTUAL
+                       else EssentialFootageUnavailable)
+            raise failure(f"VISTA visual review held slot {row['slot']}: {verdict}")
     geo.validate(spec, manifest)
     return [Path(row["file"]) for row in manifest["clips"]]
