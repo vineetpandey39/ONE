@@ -21,7 +21,7 @@ from openjarvis.one_agents.youtube_production import resource_lease
 # The namespace bump prevents an unfinished failed receipt from being attached
 # to the materially different verified fallback query. Accepted acquired
 # checkpoints remain reusable; only unfinished searches get new jobs.
-ENVATO_RECEIPT_REVISION = "v37"
+ENVATO_RECEIPT_REVISION = "v38"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -74,6 +74,22 @@ def stock_search(description: str) -> tuple[str, str, list[str]]:
         negatives.extend(w.casefold() for w in re.findall(r"[A-Za-z]+", phrase)
                          if w.casefold() in {"rocket", "spacecraft", "launch", "astronaut", "people", "person", "text"})
     return query, subject, sorted(set(negatives))
+
+
+def tolerate_catalog_evidence_capture(steps: list[dict]) -> list[dict]:
+    """Keep catalogue evidence best-effort without weakening asset admission.
+
+    Envato's infinite results page can finish loading yet hang Playwright's
+    screenshot while it waits on late web fonts.  This image is diagnostic
+    only: the selected item's metadata, two preview frames, subject/context
+    verdict and download checks remain mandatory later in the workflow.
+    """
+    for step in steps:
+        args = step.get("args", {}) if isinstance(step, dict) else {}
+        if step.get("action") == "save_artifact" and args.get("as") == "envato_results_proof":
+            step["optional"] = True
+            args["viewport_only"] = True
+    return steps
 
 
 class LaoDraft:
@@ -1194,7 +1210,7 @@ class EnvatoAdapter:
             raise ValueError("Envato channel output identity mismatch")
         workflow = yaml.safe_load(self.workflow.read_text(encoding="utf-8"))
         # Keep all installed validation gates, without dismissing the selected item.
-        steps = preserve_selected_envato_panel(workflow["steps"])
+        steps = tolerate_catalog_evidence_capture(preserve_selected_envato_panel(workflow["steps"]))
         requires_context = any(s.get("action") == "assert_destination_subject" for s in steps)
         for step in steps:
             if step.get("action") == "open_browser":
