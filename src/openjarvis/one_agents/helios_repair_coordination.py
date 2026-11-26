@@ -23,6 +23,46 @@ def home():
     return Path(os.environ.get("OPENJARVIS_HOME", Path.home() / ".openjarvis"))
 
 
+def _stable_operator_db() -> Path:
+    return Path(__file__).resolve().parents[4] / "data" / "repair_operator" / "state" / "operator.db"
+
+
+def ensure_operator_store(config: Path) -> Path:
+    """Keep repair ownership on ONE storage, never an ephemeral Codex task.
+
+    A blank store grants no authority: the guard still requires a live claimed
+    queue row and matching token whenever an external owner is supplied.
+    """
+    configured = None
+    if config.exists():
+        try:
+            configured = Path(json.loads(config.read_text(encoding="utf-8"))["operator_db"])
+        except (OSError, ValueError, KeyError, TypeError):
+            configured = None
+    unstable = (configured is None or not configured.is_absolute()
+                or "\\documents\\codex\\" in str(configured).replace("/", "\\").casefold())
+    path = _stable_operator_db() if unstable else configured
+    if path != _stable_operator_db() and not path.exists():
+        raise RepairDeferred("configured external repair store unavailable or invalid")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as db:
+        db.executescript("""
+          CREATE TABLE IF NOT EXISTS queue(
+            key TEXT PRIMARY KEY, token TEXT, lease_until REAL NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'pending');
+          CREATE TABLE IF NOT EXISTS receipts(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL,
+            at REAL NOT NULL, status TEXT NOT NULL,
+            evidence TEXT NOT NULL DEFAULT '[]');
+        """)
+    if unstable:
+        config.parent.mkdir(parents=True, exist_ok=True)
+        temporary = config.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"operator_db": path.as_posix()}, indent=2), encoding="utf-8")
+        temporary.replace(config)
+    return path
+
+
 def mission(row):
     try:
         task = json.loads(row.get("task") or "{}")
@@ -53,7 +93,7 @@ def external_repair_guard(connect, previous, *, owner=None):
             yield
             return
         try:
-            path = Path(override or json.loads(config.read_text(encoding="utf-8"))["operator_db"])
+            path = Path(override) if override else ensure_operator_store(config)
             if not path.is_absolute():
                 raise ValueError("absolute operator database required")
             db = sqlite3.connect(path.as_uri() + "?mode=rw", uri=True, timeout=2)

@@ -93,6 +93,82 @@ def load_config(path: Path | None = None) -> dict:
     return config
 
 
+def bau_preflight(context: ProductionContext, config: dict, *, require_resolve: bool = True,
+                  lao_tool=None, uploader_factory=None, resolve_probe=None) -> dict:
+    """Prove every downstream BAU dependency before spending on a new run.
+
+    This receipt deliberately lives with the ONE-owned mission. It prevents a
+    healthy research/narration half-run from discovering hours later that LAO,
+    Resolve or the Planexium YouTube binding disappeared with a Codex workspace.
+    """
+    receipt_path = context.artifact("preflight/planexium-bau.json")
+    checks: list[dict] = []
+
+    def passed(name: str, **evidence) -> None:
+        checks.append({"name": name, "status": "passed", **evidence})
+
+    current = "stable_runtime_paths"
+    try:
+        resolve = config.get("resolve") or {}
+        required_files = {
+            "resolve_server": Path(str(resolve.get("server") or "")),
+            "resolve_python": Path(str(resolve.get("python") or "")),
+            "resolve_bridge_config": Path(str(resolve.get("bridge_config") or "")),
+            "resolve_autostart_hook": Path(str((resolve.get("autostart") or {}).get("hook") or "")),
+            "resolve_executable": Path(str((resolve.get("autostart") or {}).get("executable") or "")),
+            "youtube_uploader": Path(config.get("lao_root") or Path.home() / "Documents" / "LAO")
+                / "yatra-upload" / "youtube_api_upload.py",
+        }
+        for name, path in required_files.items():
+            normalized = str(path).replace("/", "\\").casefold()
+            if not path.is_absolute() or "\\documents\\codex\\" in normalized or not path.is_file():
+                raise RuntimeError(f"{name} is not a stable ONE-owned file")
+        passed(current, files=sorted(required_files))
+
+        current = "lao_control_plane"
+        if lao_tool is None:
+            from openjarvis.tools.lao_orchestrator import LaoOrchestratorTool
+            lao_tool = LaoOrchestratorTool()
+        lao = lao_tool.execute(action="list_processes", scope="production", timeout=20)
+        if not getattr(lao, "success", False):
+            raise RuntimeError("LAO authenticated process inventory is unavailable")
+        passed(current, authenticated=True)
+
+        current = "planexium_youtube_binding"
+        factory = uploader_factory or _channel_uploader
+        uploader = factory(config, context.artifact("upload-ledger.json"))
+        access, scopes = uploader.refresh_access(uploader.load_credentials())
+        response = uploader._json(
+            "https://www.googleapis.com/youtube/v3/channels?part=id&mine=true",
+            headers={"Authorization": f"Bearer {access}"})
+        channel = (response.get("items") or [{}])[0].get("id")
+        if channel != config.get("channel_id"):
+            raise RuntimeError("YouTube credential is not bound to the configured Planexium channel")
+        passed(current, channel_id=channel, scope_count=len(scopes or ()))
+
+        if require_resolve:
+            current = "resolve_fusion_bridge"
+            if resolve_probe is None:
+                from openjarvis.one_agents.planexium_resolve import preflight as resolve_probe
+            resolve_probe(context.root, resolve)
+            passed(current, autostart=True, segmented=bool(resolve.get("segmented")))
+        else:
+            checks.append({"name": "resolve_fusion_bridge", "status": "checkpoint_preserved"})
+
+        receipt = {"schema": "one.planexium-bau-preflight/v1", "status": "passed",
+                   "mission_id": context.mission_id,
+                   "checked_at": datetime.now(timezone.utc).isoformat(),
+                   "build_sha256": BUILD_SHA, "checks": checks}
+        _write(receipt_path, receipt)
+        return receipt
+    except Exception as exc:
+        _write(receipt_path, {"schema": "one.planexium-bau-preflight/v1", "status": "failed",
+            "mission_id": context.mission_id, "checked_at": datetime.now(timezone.utc).isoformat(),
+            "build_sha256": BUILD_SHA, "failed_check": current,
+            "error_class": type(exc).__name__, "checks": checks})
+        raise RuntimeError(f"PLANEXIUM BAU preflight failed at {current}: {exc}") from None
+
+
 def context_for(mission: str, config: dict) -> ProductionContext:
     root = Path(config.get("media_root") or SUITE / "data" / "planexium" / "media")
     voice = config.get("voice") or {}
@@ -763,6 +839,12 @@ def run_job(job: dict) -> dict:
                 unfinished = None
     if unfinished:
         context = context_for(unfinished, config)
+    # Prove the whole downstream control plane before topic discovery, provider
+    # spend or narration. A sealed render/package never reopens Resolve merely
+    # to finish the independent SEO/private-delivery tail.
+    bau_preflight(context, config, require_resolve=(
+        payload.get("resume_stage") != "package"
+        and not context.artifact("checkpoints/render.json").is_file()))
     commission_path = context.artifact("commission.json")
     if commission_path.exists():
         commission = json.loads(commission_path.read_text(encoding="utf-8"))
@@ -955,8 +1037,8 @@ def repackage_job(payload: dict) -> dict:
     return {**result, "agent": "LYRA"}
 
 
-def install_disabled_trigger() -> dict:
-    """Explicit operator setup only; never auto-enables a daily schedule."""
+def install_bau_trigger() -> dict:
+    """Install/reconcile the reviewed Floor-12 BAU trigger definition."""
     import importlib.util
 
     path = SUITE / "one-company" / "floors" / "_work" / "triggers.py"
@@ -965,15 +1047,14 @@ def install_disabled_trigger() -> dict:
     spec.loader.exec_module(module)
     definition = SUITE / "one-company" / "floors" / "floor_12_youtube_studio" / "agents" / "planexium" / "daily-trigger.json"
     trigger = json.loads(definition.read_text())
-    if trigger.get("enabled") is not False:
-        raise ValueError("PLANEXIUM trigger definition must remain disabled during setup")
-    db_path = SUITE / "data" / "company_triggers.db"
-    if db_path.exists():
-        with sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True) as db:
-            existing = db.execute("SELECT enabled FROM triggers WHERE id=?", (trigger["id"],)).fetchone()
-        if existing:
-            return {"status": "already_present", "enabled": bool(existing[0]), "unchanged": True}
+    if trigger.get("enabled") is not True or trigger.get("agent_id") != "helios":
+        raise ValueError("PLANEXIUM BAU trigger must be enabled and enter through HELIOS")
     return module.upsert(trigger)
+
+
+def install_disabled_trigger() -> dict:
+    """Backward-compatible command name; the reviewed definition is authoritative."""
+    return install_bau_trigger()
 
 
 STANDING_PRIVATE_SCOPE = "private_upload_standing"
