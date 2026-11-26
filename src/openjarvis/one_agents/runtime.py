@@ -1962,6 +1962,9 @@ def _ia_peek_candidate_weight(entry: dict, weights: dict | None) -> float:
 def _ia_peek_pick_from_zone(zone_name: str, manifest: dict, today, cooldown_days: int, water_blocked: bool,
                             weights: dict | None = None):
     entries = manifest.get("zones", {}).get(zone_name, [])
+    # V10: exclude religious sites before every tier/fallback selection.
+    entries = [e for e in entries if not e.get("sacred") and not re.search(
+        '\\b(temples?|mandir|mosque|masjid|church|gurdwara|gurudwara|monastery|shrine|dargah|pilgrim|ghat|basilica|cathedral|stupa|tirupati|vaishno)\\b', str(e.get("name", "")) + " " + str(e.get("type", "")), re.I)]
     state_last_used: dict[str, str] = {}
     for entry in entries:
         used_date = entry.get("used_date")
@@ -8253,6 +8256,11 @@ def _run_iris(job: dict[str, Any]) -> dict[str, Any]:
         }
     if brand and brand.get("slug") != "imagineindia":
         return _iris_dispatch_brand(job, brand)
+
+    if "[imagineindia-v10-restoration]" in task and mode != "report":
+        from openjarvis.one_agents import imagineindia_v10
+        import sys
+        return imagineindia_v10.commission(job, sys.modules[__name__])
 
     stages.set_stage("ia", stages.RESEARCHING,
                      task.strip()[:180] or "Choosing the next ImagineIndia reel")
