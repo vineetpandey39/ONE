@@ -21,7 +21,7 @@ from openjarvis.one_agents.youtube_production import resource_lease
 # The namespace bump prevents an unfinished failed receipt from being attached
 # to the materially different verified fallback query. Accepted acquired
 # checkpoints remain reusable; only unfinished searches get new jobs.
-ENVATO_RECEIPT_REVISION = "v39"
+ENVATO_RECEIPT_REVISION = "v40"
 
 BUILD_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
@@ -729,7 +729,6 @@ def concrete_stock_brief(request):
         # ten near-identical candidates or weakening to a generic laboratory.
         request.update(
             semantic_fallback_query="laboratory isolation chamber gloves",
-            semantic_fallback_subject="chamber",
             contextual_label=("Illustrative clean-laboratory isolation chamber; "
                               "formal cleanroom certification not visually verified"),
         )
