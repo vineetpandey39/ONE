@@ -36,8 +36,8 @@
   "resolve": {
     "segmented": true,
     "segmented_work_root": "F:/PLANEXIUM-agent/segments",
-    "server": "C:\\Users\\pc\\Documents\\Codex\\2026-10-16\\mission-planexium-floor-12-architecture-discovery\\work\\resolve-mcp\\src\\server.py",
-    "python": "C:\\Users\\pc\\Documents\\Codex\\2026-10-16\\mission-planexium-floor-12-architecture-discovery\\work\\resolve-mcp\\venv\\Scripts\\python.exe",
+    "server": "E:\\ONE-Suite\\tools\\resolve-mcp\\src\\server.py",
+    "python": "E:\\ONE-Suite\\tools\\resolve-mcp\\venv\\Scripts\\python.exe",
     "work_root": "C:/Users/pc/Movies/PLANEXIUM-agent",
     "timeout": 14400,
     "minimum_free_bytes": 17179869184,
