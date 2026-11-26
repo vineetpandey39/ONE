@@ -7593,6 +7593,10 @@ def _vista_schedule_origin(job: dict[str, Any], payload: dict[str, Any],
         fallback_of = str(payload.get("fallback_of") or "").strip()
         if fallback_of:
             return fallback_of
+    if is_vista_short and payload.get("stage") == "trigger_recovery":
+        recovery_of = str(payload.get("recovery_of") or "").strip()
+        if recovery_of:
+            return recovery_of
     return current
 
 

@@ -22,6 +22,7 @@ import importlib
 import ast
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -457,7 +458,30 @@ def _resume_checkpoint_uncoordinated(connect: Connect, job_id: str, *, fresh_cod
         child = _downstream_for(connect, job_id)
         if child:
             return f"HELIOS retry not needed; downstream checkpoint {child} already exists"
-        new_id = _queue_copy(connect, previous)
+        task = str(previous.get("task") or "")
+        recovery_task = task
+        # A copied scheduled VISTA head job has a new queue id, but standing
+        # publish authority belongs to the scheduler's immutable fire receipt
+        # on the original id.  Preserve that receipt owner explicitly across
+        # a pre-handoff dependency recovery.  The downstream VISTA gate still
+        # calls _job_fired_by_trigger, so a forged/unknown recovery_of fails
+        # closed exactly as before.
+        vista = re.search(
+            r"\[vista-short\s+slot=(0900|1300|1800)\s+lane=([a-z_]+)\]",
+            task,
+            re.I,
+        )
+        if vista:
+            from openjarvis.one_agents import runtime
+            trigger_id = f"daily-vista-short-{vista.group(1)}"
+            if runtime._job_fired_by_trigger(trigger_id, job_id):
+                recovery_task = json.dumps({
+                    "brand": "sonia_travel_vlogs",
+                    "request": task,
+                    "stage": "trigger_recovery",
+                    "recovery_of": job_id,
+                }, ensure_ascii=False)
+        new_id = _queue_copy(connect, previous, task=recovery_task)
         return f"queued HELIOS resume {new_id} before any duplicate worker handoff"
 
     if agent == "fabula":

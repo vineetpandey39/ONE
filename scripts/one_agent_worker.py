@@ -1,8 +1,41 @@
+import importlib
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+
+def ensure_rpds_exports(import_module=importlib.import_module):
+    """Recover rpds' public exports when a cache cleanup drops __init__.py.
+
+    ``rpds-py`` keeps its compiled implementation in ``rpds.rpds`` and a
+    tiny ``rpds/__init__.py`` re-exports those names.  A partial environment
+    cleanup on 2026-11-26 removed only that tiny file while leaving the wheel,
+    metadata and compiled extension intact.  Python then treated ``rpds`` as
+    an empty namespace package and every jsonschema import failed before a
+    scheduled VISTA job could reach its worker.
+
+    Repair the in-process namespace from the installed extension before any
+    OpenJarvis import.  This is deterministic, needs no network and fails
+    closed if the compiled dependency itself is unavailable.
+    """
+    root = import_module("rpds")
+    if getattr(root, "HashTrieMap", None) is not None:
+        return False
+    extension = import_module("rpds.rpds")
+    exports = tuple(getattr(extension, "__all__", ()))
+    for name in exports:
+        setattr(root, name, getattr(extension, name))
+    if getattr(root, "HashTrieMap", None) is None:
+        raise ImportError("rpds compiled extension has no HashTrieMap export")
+    root.__all__ = list(exports)
+    root.__doc__ = getattr(extension, "__doc__", None)
+    return True
+
+
+# Must run before credentials/runtime import jsonschema (which imports rpds).
+ensure_rpds_exports()
 
 from openjarvis.core.credentials import inject_credentials
 from openjarvis.one_agents.runtime import run_worker
