@@ -17,9 +17,13 @@ _GENERIC_SCIENCE_WORDS = {
 }
 _MIN_VOLUME_SCORE = 20.0
 _MIN_MONTHLY_SEARCH = 1000
-_STRONG_SUBJECTS = {
-    'asteroid', 'asteroids', 'artemis', 'curiosity', 'jupiter', 'mars', 'moon',
-    'saturn', 'spacex', 'webb', 'jwst', 'voyager', 'exoplanet', 'exoplanets',
+_BROAD_DEMAND_WORDS = {
+    'earth', 'jupiter', 'mars', 'moon', 'planet', 'planets', 'saturn',
+    'solar', 'system',
+}
+_SPECIFIC_ENTITY_ANCHORS = {
+    'artemis', 'asteroid', 'asteroids', 'curiosity', 'dart', 'falcon', 'iss',
+    'jwst', 'spacex', 'starship', 'voyager', 'webb',
 }
 _OFFICIAL_EVERGREEN = (
     {'topic': 'Why NASA studies asteroids and what they reveal about the solar system',
@@ -97,7 +101,12 @@ def demand_support(receipt, candidate, keyword):
         haystack = _terms(' '.join([str(video.get('videoTitle') or ''),
                                     ' '.join(str(tag) for tag in video.get('videoTags') or [])]))
         overlap = sorted(target & haystack)
-        if len(overlap) >= 2 or any(word in _STRONG_SUBJECTS for word in overlap):
+        distinctive = set(overlap) - _BROAD_DEMAND_WORDS
+        # A single celestial body is not an angle.  This previously allowed a
+        # planet-size simulation tagged ``mars`` to validate a Curiosity
+        # sampling episode, and a generic Moon video to validate Artemis.
+        if ((len(overlap) >= 2 and distinctive)
+                or bool(set(overlap) & _SPECIFIC_ENTITY_ANCHORS)):
             support.append({'video_id': video.get('videoId'), 'title': video.get('videoTitle'),
                             'vph': float(video.get('vph') or 0), 'matched_terms': overlap})
     return sorted(support, key=lambda row: row['vph'], reverse=True)
@@ -117,19 +126,21 @@ def grounded_keyword(selection, receipt):
     matched = []
     for row in rows:
         overlap = terms & _terms(row['keyword'])
-        if _measured(row) and (len(overlap) >= 2 or any(word in _STRONG_SUBJECTS for word in overlap)):
+        distinctive = overlap - _BROAD_DEMAND_WORDS
+        if (_measured(row) and ((len(overlap) >= 2 and distinctive)
+                or bool(overlap & _SPECIFIC_ENTITY_ANCHORS))):
             matched.append((row, overlap))
     if matched:
         # A broad phrase such as "solar system" may have more volume, but it
         # must not displace the recognizable subject that earned the trend
         # match (for example "asteroids").
         chosen, overlap = max(matched, key=lambda item: (
-            any(word in _STRONG_SUBJECTS for word in item[1]),
+            bool(item[1] & _SPECIFIC_ENTITY_ANCHORS),
             len(item[1]), item[0]['volume'], item[0]['monthly']))
         return {**selection, 'original_search_keyword': seed, 'search_keyword': chosen['keyword'],
                 'keyword_validation': {'validated': True, 'mode': 'topic-bound-related',
                 'estimated_monthly_search': chosen['monthly'], 'volume_score': chosen['volume'],
-                'note': 'Measured related phrase sharing at least two distinctive topic terms'}}
+                'note': 'Measured related phrase bound to the same entity and angle'}}
     return {**selection, 'keyword_validation': {'validated': False,
             'note': 'No measured candidate-bound phrase met the minimum demand floor'}}
 

@@ -16,6 +16,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from urllib.parse import urlencode
 from dataclasses import replace, asdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -43,6 +44,36 @@ SOURCE_ALIASES = {
     "https://www.nasa.gov/international-space-station/":
         "https://www.nasa.gov/international-space-station/space-station-facts-and-figures/",
 }
+
+YT_ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"
+
+
+def _channel_analytics(module, access: str, scopes: set[str], now: datetime) -> dict:
+    """Read owned reach/retention telemetry without inventing CTR from design scores."""
+    if YT_ANALYTICS_SCOPE not in scopes:
+        return {"available": False, "reason": "oauth_scope_missing",
+                "required_scope": YT_ANALYTICS_SCOPE}
+    params = {
+        "ids": "channel==MINE",
+        "startDate": (now - timedelta(days=90)).date().isoformat(),
+        "endDate": (now - timedelta(days=1)).date().isoformat(),
+        "metrics": ",".join(("views", "estimatedMinutesWatched", "averageViewDuration",
+                             "averageViewPercentage", "videoThumbnailImpressions",
+                             "videoThumbnailImpressionsClickRate")),
+        "dimensions": "video",
+        "sort": "-views",
+        "maxResults": 50,
+    }
+    try:
+        report = module._json("https://youtubeanalytics.googleapis.com/v2/reports?" +
+                              urlencode(params), headers={"Authorization": f"Bearer {access}"})
+        columns = [row["name"] for row in report.get("columnHeaders") or []]
+        rows = [dict(zip(columns, row)) for row in report.get("rows") or []]
+        return {"available": True, "source": "youtube_analytics_api_owned_channel",
+                "observed_at": now.isoformat(), "rows": rows}
+    except Exception as exc:
+        return {"available": False, "reason": "analytics_api_unavailable",
+                "error_class": type(exc).__name__, "required_scope": YT_ANALYTICS_SCOPE}
 
 
 def load_config(path: Path | None = None) -> dict:
@@ -102,6 +133,8 @@ def channel_performance_snapshot(config: dict, destination: Path) -> dict:
         videos = module._json(
             "https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,status,contentDetails&id=" + ",".join(ids),
             headers=headers).get("items") or []
+        analytics = _channel_analytics(module, access, set(scopes), datetime.now(timezone.utc))
+        analytics_by_video = {str(row.get("video")): row for row in analytics.get("rows") or []}
 
         def seconds(value):
             match = re.fullmatch(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", value or "")
@@ -118,7 +151,9 @@ def channel_performance_snapshot(config: dict, destination: Path) -> dict:
             views = int(video.get("statistics", {}).get("viewCount") or 0)
             rows.append({"video_id": video["id"], "title": video["snippet"]["title"],
                          "published_at": published.isoformat(), "age_hours": round(age_hours, 1),
-                         "views": views, "views_per_day": round(views / max(age_hours / 24, 1), 2)})
+                         "views": views, "views_per_day": round(views / max(age_hours / 24, 1), 2),
+                         **({"analytics": analytics_by_video[video["id"]]}
+                            if video["id"] in analytics_by_video else {})})
         recent = rows[:20]
         mature = [row for row in recent if row["age_hours"] >= 48]
         ordered = sorted(mature, key=lambda row: row["views"], reverse=True)
@@ -129,8 +164,10 @@ def channel_performance_snapshot(config: dict, destination: Path) -> dict:
                     "subscriber_count": int(channel.get("statistics", {}).get("subscriberCount") or 0),
                     "recent_longform": recent, "median_mature_views": median,
                     "winners": ordered[:5], "underperformers": list(reversed(ordered[-5:])),
-                    "ctr_analytics_available": "https://www.googleapis.com/auth/yt-analytics.readonly" in scopes,
-                    "limitations": "Views are a topic prior; impressions, CTR and retention are unavailable in this OAuth grant."}
+                    "ctr_analytics_available": analytics.get("available") is True,
+                    "analytics": analytics,
+                    "limitations": (None if analytics.get("available") else
+                        "Views are a topic prior; impressions, CTR and retention require the owned-channel Analytics grant.")}
         _write(destination, snapshot)
         return snapshot
     except Exception as exc:

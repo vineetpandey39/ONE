@@ -8,6 +8,16 @@ _THUMBNAIL_FILLER = {
     'OF', 'TO', 'FOR', 'WITH',
 }
 
+_GENERIC_PROMISE_WORDS = {
+    'a', 'an', 'and', 'are', 'does', 'for', 'from', 'here', 'how', 'in', 'is',
+    'it', 'of', 'on', 'the', 'this', 'to', 'what', 'why', 'with',
+}
+
+
+def _promise_words(text):
+    return {word for word in re.findall(r'[a-z0-9]+', str(text).casefold())
+            if word not in _GENERIC_PROMISE_WORDS}
+
 
 def _compact_thumbnail_hook(text):
     """Reduce a model-authored hook to the validator's three-word contract.
@@ -125,7 +135,7 @@ def validate_packaging(value, science):
     aliases = {'mins': 'minutes', 'min': 'minute'}
     episode_words = {aliases.get(word, word) for word in episode_words}
     generic = {'the','and','why','how','where','what','times','every','one','does','this'}
-    for concept in concepts:
+    for index, concept in enumerate(concepts):
         concept['text'] = readable_thumbnail_hook(concept.get('text', ''))
         hook_words = {aliases.get(word, word) for word in re.findall(r'[a-z0-9]+', concept['text'].casefold())
                       if not word.isdigit()} - generic
@@ -134,6 +144,14 @@ def validate_packaging(value, science):
         for field in ['name', 'visual_direction', 'composition', 'left_usp']:
             if not isinstance(concept.get(field), str) or not concept[field].strip():
                 raise ValueError('Thumbnail concepts need a subject, composition and visual direction')
+        visual_contract = ' '.join(str(concept.get(field) or '') for field in
+                                   ('composition', 'visual_direction')).casefold()
+        if re.search(r'\b(collage|contact sheet|grid of|mosaic|many tiny|small tiles)\b', visual_contract):
+            raise ValueError('Thumbnail needs one phone-readable visual sentence, not an evidence grid or collage')
+        hook_promise = _promise_words(concept['text'])
+        title_promise = _promise_words(titles[index])
+        if hook_promise and hook_promise <= title_promise:
+            raise ValueError('Thumbnail hook must complement its title instead of repeating the same promise')
     for field in ['name', 'composition', 'visual_direction', 'text']:
         if len({c[field].casefold().strip() for c in concepts}) != 3:
             raise ValueError('Color/style-only thumbnail variants are insufficient')
