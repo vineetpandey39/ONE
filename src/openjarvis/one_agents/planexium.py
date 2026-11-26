@@ -85,6 +85,11 @@ def load_config(path: Path | None = None) -> dict:
         raise ValueError("Provider execution requires an explicit boolean setting")
     if config.get("channel_id") and not re.fullmatch(r"UC[A-Za-z0-9_-]{22}", config["channel_id"]):
         raise ValueError("Channel ID is not a verified YouTube channel identifier")
+    resolve = config.get("resolve") or {}
+    for key in ("server", "python"):
+        configured = str(resolve.get(key) or "").replace("/", "\\").casefold()
+        if "\\documents\\codex\\" in configured:
+            raise ValueError("PLANEXIUM Resolve runtime must not depend on an ephemeral Codex workspace")
     return config
 
 
