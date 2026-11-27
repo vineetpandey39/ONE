@@ -63,6 +63,21 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def source_input_args(path, offset):
+    """Choose FFmpeg input looping from file bytes, not a misleading suffix."""
+    path = Path(path)
+    if path.suffix.casefold() not in {'.jpg', '.jpeg', '.png'}:
+        return ['-ss', f'{offset:.3f}']
+    with path.open('rb') as handle:
+        magic = handle.read(6)
+    # Article CDNs sometimes serve an animated GIF at a cached .jpg URL.
+    # image2's ``-loop 1`` can crash on that stream; loop the demuxed GIF
+    # instead and let the existing fps/frame-budget filters normalize it.
+    if magic in {b'GIF87a', b'GIF89a'}:
+        return ['-stream_loop', '-1']
+    return ['-loop', '1']
+
+
 def source_credit(shot):
     """On-screen attribution only for government-sourced media; provenance stays internal."""
     from urllib.parse import urlparse
@@ -570,8 +585,7 @@ def render(root, tools, *, resolve_settings=None):
                     from openjarvis.one_agents.youtube_science_overlays import explanatory_filter
                     overlay,kind=explanatory_filter(directory,ordinal,science['scenes'][shot['scene']-1]['narration'],seconds)
                     filters+=overlay
-                image_source=Path(shot['asset']['path']).suffix.lower() in {'.jpg','.jpeg','.png'}
-                source_args=['-loop','1'] if image_source else ['-ss',f'{offset:.3f}']
+                source_args=source_input_args(shot['asset']['path'], offset)
                 if ordinal in shared_specs and not resolve_settings:
                     shared.render(shared_specs[ordinal],filters,[*source_args,'-i',shot['asset']['path']],target)
                 else:
