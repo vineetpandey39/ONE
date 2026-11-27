@@ -566,7 +566,9 @@ def preflight(root, settings):
     request = {**settings, "directory": str(directory), "preflight": True}
     path = directory/"request.json"
     write(path, request)
-    with (Path(root)/"edit/resolve-preflight.log").open("a", encoding="utf-8") as log:
+    log_path = Path(root)/"edit/resolve-preflight.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as log:
         result = subprocess.run([settings["python"], str(Path(__file__).resolve()), str(path)],
             stdout=log, stderr=subprocess.STDOUT, timeout=300, env=isolated_environment(settings))
     if result.returncode:
