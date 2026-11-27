@@ -174,6 +174,28 @@ def grounded_entity_title(package, science, hook):
     return title if len(title) <= 100 and title_matches_thumbnail_promise(title, hook) else None
 
 
+def grounded_reviewed_hook_title(package, hook):
+    """Prefix a short non-numeric hook only when reviewed copy grounds every term."""
+    hook_words = re.findall(r"[a-z]+", str(hook).casefold())
+    if not 2 <= len(hook_words) <= 4 or re.search(r"\d", str(hook)):
+        return None
+    strategy = package.get("thumbnail_strategy", {})
+    reviewed = " ".join([
+        str(strategy.get("viewer_question") or ""),
+        str(strategy.get("description_opening") or ""),
+        " ".join(str(title) for title in strategy.get("titles", [])),
+    ])
+    topic_aliases = {"martian": "mars"}
+    reviewed_tokens = {topic_aliases.get(word, word)
+                       for word in re.findall(r"[a-z]+", reviewed.casefold())}
+    grounded_words = {topic_aliases.get(word, word) for word in hook_words}
+    if not grounded_words.issubset(reviewed_tokens):
+        return None
+    base = str(package.get("recommended_title") or "").strip()
+    title = " ".join(word.title() for word in hook_words) + ": " + base
+    return title if base and len(title) <= 100 and title_matches_thumbnail_promise(title, hook) else None
+
+
 def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=None):
     prompt = (
         "You are ARES, the SEO agent for The Planexium science YouTube channel. "
@@ -215,6 +237,8 @@ def generate(package, science, *, job_id, llm=ollama_json, editorial_feedback=No
                        if title_matches_thumbnail_promise(str(t), preferred_hook)] if preferred_hook else []
     if preferred_hook and not required_titles:
         grounded = grounded_entity_title(package, science, preferred_hook)
+        if not grounded:
+            grounded = grounded_reviewed_hook_title(package, preferred_hook)
         if grounded:
             required_titles = [grounded]
     thumbnails = [{"name": v["name"], "text": concepts[v["name"]].get("text"),
