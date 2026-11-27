@@ -5919,7 +5919,8 @@ def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[st
         time.sleep(poll_seconds)
         job_recovery.heartbeat(_connect, job["id"])
         probe = tool.execute(action="status", process_name=process_name,
-                             scope="production", job_id=lao_job_id)
+                             scope="production", job_id=lao_job_id,
+                             include_logs=brief.get("creative_bible") == "V10")
         if not probe.success:
             continue
         try:
@@ -9318,6 +9319,12 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
             (f"{verb} “{headline[:70]}” · LAO {status} · {elapsed}m" if headline
              else f"LAO job {status} · {elapsed}m"),
             lao_job=lao_job_id, lao_process=process_name)
+        if brief.get("creative_bible") == "V10":
+            from openjarvis.one_agents.imagineindia_progress import describe
+            detail, progress = describe(last)
+            stages.set_stage("muse", stages.EXECUTING, f"{detail} · {elapsed}m", lao_job=lao_job_id, lao_process=process_name)
+            with _connect() as db:
+                db.execute("UPDATE jobs SET progress = ? WHERE id = ? AND status = 'running'", (progress, job["id"]))
         if status in terminal:
             break
     else:
