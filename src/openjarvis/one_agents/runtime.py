@@ -766,10 +766,11 @@ def mark_blocked(job_id: str, result: dict[str, Any]) -> None:
     """
     reason = str(result.get("blocked_reason") or "Required capability unavailable")[:2000]
     safe_review = job_id.startswith("chandan-") and result.get("status") in {"review_required", "awaiting_identity_review", "identity_review_required"}
+    progress = 95 if result.get("external_reconciled") and result.get("status") == "publication_blocked" else 0
     with _connect() as db:
         db.execute(
-            "UPDATE jobs SET status = ?, progress = 0, result = ?, error = ?, updated_at = ? WHERE id = ?",
-            ("review_required" if safe_review else "blocked", json.dumps(result, ensure_ascii=True), "" if safe_review else reason, _now(), job_id),
+            "UPDATE jobs SET status = ?, progress = ?, result = ?, error = ?, updated_at = ? WHERE id = ?",
+            ("review_required" if safe_review else "blocked", progress, json.dumps(result, ensure_ascii=True), "" if safe_review else reason, _now(), job_id),
         )
     job = get_job(job_id)
     if job:

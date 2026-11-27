@@ -9,6 +9,11 @@ def describe(payload):
     logs = payload.get('logs') or []
     if not isinstance(logs, list):
         return f'LAO {status}', 5
+    latest = max(logs, key=lambda row: str(row.get('created_at', '')), default={})
+    review = re.search(r'V10 visual review (clip|image) (\d)/5', str(latest.get('message', '')))
+    if review:
+        n = int(review.group(2))
+        return f'Visual review: {review.group(1)} {n}/5', (55+(n-1)*6 if review.group(1)=='clip' else 20+(n-1)*7)
     steps = [row for row in logs if re.match(r'Step \d+: ', str(row.get('message', '')))]
     if not steps:
         return f'LAO {status}', 5

@@ -11,6 +11,10 @@ $dataRoot = Join-Path $oneRoot "data"
 $venvPython = Join-Path $sourceRoot ".venv\Scripts\python.exe"
 $basePython = Join-Path $oneRoot ".python\cpython-3.12.13-windows-x86_64-none\python.exe"
 $pythonExe = if (Test-Path $venvPython) { $venvPython } else { $basePython }
+$dailyGovernorLauncher = Join-Path $oneRoot 'start-governor.ps1'
+if (Test-Path -LiteralPath $dailyGovernorLauncher) {
+    try { & $dailyGovernorLauncher } catch { Write-Warning "Daily governor launch failed: $($_.Exception.Message)" }
+}
 $ollama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
 $pidFile = Join-Path $oneRoot "one-server.pid"
 $workerPidFile = Join-Path $oneRoot "one-worker.pid"

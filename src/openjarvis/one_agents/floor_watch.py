@@ -691,6 +691,19 @@ def watch_floor(
     proposed: list[dict[str, str]] = []
 
     for finding in findings:
+        # The company governor owns today's obligations while its service is live.
+        # Avoid concurrent legacy repair/requeue; stale service automatically falls back.
+        if finding.job_id:
+            try:
+                from openjarvis.one_agents.daily_governor import owns_job
+                if owns_job(finding.job_id):
+                    proposed.append({"agent": finding.agent_id, "code": finding.code,
+                                     "summary": finding.summary,
+                                     "diagnosis": "Current-day obligation owned by daily governor"})
+                    _log({"head": head_id, "outcome": "governor_owned", **asdict(finding)})
+                    continue
+            except (OSError, ValueError, ImportError):
+                pass
         action = apply_fix(connect, finding)
         pending_self_heal = False
         if finding.auto_fix == "helios_self_heal":

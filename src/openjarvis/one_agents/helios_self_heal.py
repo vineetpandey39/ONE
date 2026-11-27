@@ -1358,6 +1358,15 @@ def repair_with_cli(evidence: dict[str, Any], *, timeout: int = 900) -> dict[str
                 test_env = os.environ.copy()
                 if repo.resolve() == REPO_ROOT.resolve():
                     test_env["PYTHONPATH"] = str(workspace / "src")
+                elif repo.resolve() == VISTA_REPO.resolve():
+                    # A detached VISTA worktree has no yatra-edit sibling. Supply
+                    # its deployed shared grammar as a dependency, not a test bypass.
+                    grammar = VISTA_REPO.parent / "yatra-edit" / "motion_v3"
+                    if not (grammar / "layout_grammar.py").is_file():
+                        raise RuntimeError("VISTA shared motion grammar is unavailable")
+                    test_env["PYTHONPATH"] = os.pathsep.join(
+                        [str(workspace), str(grammar), test_env.get("PYTHONPATH", "")]
+                    )
                 check = subprocess.run(
                     _repair_test_command(repo), cwd=workspace, env=test_env,
                     capture_output=True, text=True, encoding="utf-8",
