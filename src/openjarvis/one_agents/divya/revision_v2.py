@@ -185,9 +185,16 @@ class Revision(Motion):
 
 def frame_sequence(fn,start,count):
     """Bound frame buffers and CPU workers inside the one admitted render job."""
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        for offset in range(0,count,12):
-            yield from pool.map(fn,(start+n/30 for n in range(offset,min(count,offset+12))))
+    # A 1080p frame passes through several float32 working buffers.  Keeping
+    # twelve frames in flight can exhaust RAM when the production tower is
+    # also hosting models and Chrome sessions.  The environment override lets
+    # an idle tower scale up, while the safe default remains resumable.
+    import os
+    batch=max(1,int(os.environ.get('DIVYA_RENDER_FRAME_BATCH','2')))
+    workers=max(1,min(batch,int(os.environ.get('DIVYA_RENDER_WORKERS','2'))))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for offset in range(0,count,batch):
+            yield from pool.map(fn,(start+n/30 for n in range(offset,min(count,offset+batch))))
 
 _NVENC_AVAILABLE=None
 
