@@ -1964,7 +1964,7 @@ def _ia_peek_pick_from_zone(zone_name: str, manifest: dict, today, cooldown_days
     entries = manifest.get("zones", {}).get(zone_name, [])
     # V10: exclude religious sites before every tier/fallback selection.
     entries = [e for e in entries if not e.get("sacred") and not re.search(
-        '\\b(temples?|mandir|mosque|masjid|church|gurdwara|gurudwara|monastery|shrine|dargah|pilgrim|ghat|basilica|cathedral|stupa|tirupati|vaishno)\\b', str(e.get("name", "")) + " " + str(e.get("type", "")), re.I)]
+        '\\b(temples?|mandir|mosque|masjid|church|gurdwara|gurudwara|monastery|shrine|dargah|pilgrim|ghat|basilica|cathedral|stupa|tirupati|vaishno|tombs?|mausoleum|cemetery|imambara|ashram|taj mahal|humayun|gol gumbaz|charminar|qutub|minar|ajanta|ellora|undavalli|nalanda|fatehpur sikri|unakoti|laxman jhula)\\b', str(e.get("name", "")) + " " + str(e.get("type", "")), re.I)]
     state_last_used: dict[str, str] = {}
     for entry in entries:
         used_date = entry.get("used_date")
@@ -2119,6 +2119,7 @@ def _peek_next_ia_location(manifest_path: str, *, cooldown_days: int = 7) -> dic
                 (zone_name, entry)
                 for zone_name in zone_order
                 for entry in manifest.get("zones", {}).get(zone_name, [])
+                if not entry.get("sacred") and not re.search('\\b(temples?|mandir|mosque|masjid|church|gurdwara|gurudwara|monastery|shrine|dargah|pilgrim|ghat|basilica|cathedral|stupa|tirupati|vaishno|tombs?|mausoleum|cemetery|imambara|ashram|taj mahal|humayun|gol gumbaz|charminar|qutub|minar|ajanta|ellora|undavalli|nalanda|fatehpur sikri|unakoti|laxman jhula)\\b', str(entry.get("name", "")) + " " + str(entry.get("type", "")), re.I)
             ]
             if not all_entries:
                 return None
