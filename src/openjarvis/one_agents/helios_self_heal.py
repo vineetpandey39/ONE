@@ -498,7 +498,15 @@ def _resume_checkpoint_uncoordinated(connect: Connect, job_id: str, *, fresh_cod
         before_voice = (
             payload.get("stage") != "narration"
             and bool(previous.get("external_job"))
-            and ("narration was not started" in error or "no voice credits were spent" in error)
+            and (
+                "narration was not started" in error
+                or "no voice credits were spent" in error
+                # Acquisition-plan parsing is part of the pre-voice contract
+                # check. A parser repair can safely reattach to the same LAO
+                # checkpoint; no narration request has happened yet.
+                or "lacks v2 stock verification rows" in error
+                or "stock row lacks explicit verify_mode" in error
+            )
         )
         if before_voice:
             new_id = _queue_copy(connect, previous)
