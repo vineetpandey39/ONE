@@ -11790,8 +11790,11 @@ def _run_planexium(job: dict[str, Any]) -> dict[str, Any]:
             report = enqueue_job("lyra", json.dumps({"brand": "planexium", "stage": "package", "mission_id": result["mission_id"]}),
                                  mode="execute", dedupe_key=f"planexium:{result['mission_id']}:packaging")
             result["handed_to"] = {"agent": "LYRA", "job_id": report["id"]}
-            deferred = enqueue_deferred_commission(result, enqueue=enqueue_job)
-            if deferred:result["next_daily_job"] = deferred["id"]
+        # The deferred daily commission is independent of who owns the older
+        # episode's packaging (including an ARES handoff or completed upload).
+        deferred = enqueue_deferred_commission(result, enqueue=enqueue_job)
+        if deferred:
+            result["next_daily_job"] = deferred["id"]
         return result
     finally:
         stages.clear_stage("planexium")
