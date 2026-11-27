@@ -92,6 +92,22 @@ STALE_HEARTBEAT_SECONDS = 300.0
 _TERMINAL_LAO_OK = {"Successful"}
 
 
+def _external_delivery_collected(connect, external_job: str) -> bool:
+    """A returned partial result is collected even if a platform remains blocked."""
+    if not external_job:
+        return False
+    with closing(connect()) as db:
+        rows = db.execute("SELECT result FROM jobs WHERE external_job = ? AND status IN ('blocked', 'completed')", (external_job,)).fetchall()
+    for row in rows:
+        try:
+            receipt = json.loads(row["result"] or "{}")
+        except (ValueError, TypeError):
+            continue
+        if receipt.get("external_reconciled") is True and receipt.get("lao_job") == external_job:
+            return True
+    return False
+
+
 def _lao_output_is_collectable(error: str) -> bool:
     """False when LAO succeeded but ONE deliberately rejected its output."""
     rejected = ("YATRA preproduction contract is incomplete", "Reel rendered;", "V10 clip ", "V10 image ")
@@ -373,6 +389,8 @@ def scan(
         if status == "failed" and external_job and _lao_output_is_collectable(error):
             lao_status, successor = _lao_reconcile(external_job)
             if lao_status in _TERMINAL_LAO_OK:
+                if _external_delivery_collected(connect, external_job):
+                    continue
                 findings.append(Finding(
                     code="D1",
                     agent_id=agent_id,
@@ -386,6 +404,8 @@ def scan(
                 ))
                 continue
             if successor:
+                if _external_delivery_collected(connect, successor):
+                    continue
                 findings.append(Finding(
                     code="D1",
                     agent_id=agent_id,

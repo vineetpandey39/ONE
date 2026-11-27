@@ -264,12 +264,13 @@ def finish_batch(rid, batch, response, cli):
 
 def cli_commands(output):
     commands=[]
-    codex=shutil.which('codex')
+    standalone=Path.home()/'AppData/Local/Programs/OpenAI/Codex/bin/codex.exe'
+    codex=str(standalone) if standalone.is_file() else shutil.which('codex')
     if not codex:
         candidates = sorted(Path('C:/Program Files/WindowsApps').glob('OpenAI.Codex_*/app/resources/codex.exe'), key=lambda p:p.stat().st_mtime, reverse=True)
         codex = str(candidates[0]) if candidates else None
     if codex:
-        commands.append(('codex',[codex,'exec','--approve-for-me','--ephemeral','--cd',str(ROOT/'src'),
+        commands.append(('codex',[codex,'exec','--approve-for-me','--ephemeral','-c','features.prefer_mxc=true','--cd',str(ROOT/'src'),
              '--add-dir',str(ROOT/'one-company'),'--add-dir',str(DATA),
              '--add-dir',str(Path('C:/Users/pc/Documents/LAO')),'--output-last-message',str(output),'-']))
     claude=shutil.which('claude')
