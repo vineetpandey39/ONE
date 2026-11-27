@@ -9386,7 +9386,7 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         run_dir = str((out.get("final_video_with_audio") or {}).get("path") or reel.get("run_dir") or reel.get("output_dir") or "")
         title = str((out.get("chosen_location") or {}).get("name") or reel.get("title") or reel.get("location") or headline or "")
         meta = out.get("meta_publish_result") or {}
-        published = bool(meta.get("status") == "published" and (meta.get("results") or {}).get("instagram") and (meta.get("results") or {}).get("facebook") and not (meta.get("results") or {}).get("warnings"))
+        published = bool(meta.get("status") == "published" and (meta.get("results") or {}).get("instagram") and (meta.get("results") or {}).get("facebook") and not meta.get("warnings") and not (meta.get("results") or {}).get("warnings"))
 
     publish_receipt: dict[str, Any] = {}
     publish_target = str(brief.get("publish_target") or "").strip().lower()
@@ -9400,10 +9400,12 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         if not published:
             raise RuntimeError("Facebook delivery did not return verified publication evidence")
     if bool(brief.get("publish_authorized")) and not published:
-        raise RuntimeError(
+        from .imagineindia_progress import publication_issue
+        detail = publication_issue(out)
+        raise RuntimeError(detail or (
             f"MUSE cannot complete: requested {publish_target or 'social'} publication "
             "has no verified provider receipt"
-        )
+        ))
 
     if not title:
         # LAO said Successful but told us nothing identifiable -- report the

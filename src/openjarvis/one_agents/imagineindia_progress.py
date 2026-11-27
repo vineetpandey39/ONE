@@ -31,3 +31,24 @@ def describe(payload):
     if action in {'save_meta_publish_manifest','meta_publish_reel'}:
         return 'Video ready; reconciling platform publication', 95
     return 'Planning V10 location, five frames and narration', 15
+
+
+def publication_issue(output):
+    """Describe partial delivery without exposing raw provider responses or secrets."""
+    meta = output.get('meta_publish_result') or {}
+    results = meta.get('results') or {}
+    warnings = meta.get('warnings') or results.get('warnings') or {}
+    if not results and not warnings:
+        return ''
+    parts = []
+    for platform in ('facebook', 'instagram'):
+        receipt = results.get(platform) or {}
+        state = str(receipt.get('status') or '')
+        if state in {'published', 'published_page_video', 'already_published'}:
+            parts.append(f'{platform.title()}: published')
+        else:
+            error = str(warnings.get(platform) or '').lower()
+            reason = 'token expired' if 'expired' in error else 'publication not verified'
+            parts.append(f'{platform.title()}: {reason}')
+    ready = bool((output.get('final_video_with_audio') or {}).get('path'))
+    return ('Reel rendered; ' if ready else 'Publication incomplete; ') + '; '.join(parts)
