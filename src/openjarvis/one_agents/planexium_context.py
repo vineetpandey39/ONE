@@ -40,6 +40,8 @@ PIPELINE_LABELS = {
     'Illustrative laboratory rock-sample analysis; meteorite origin not visually verified',
     'Illustrative laboratory mineral/rock sample analysis; meteorite origin not visually verified',
     'Illustrative laboratory spectrophotometer; not Curiosity instrument footage',
+    ('Illustrative clean-laboratory isolation chamber; '
+     'formal cleanroom certification not visually verified'),
 }
 
 PIPELINE_LABEL_ALIASES = {
