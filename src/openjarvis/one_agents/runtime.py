@@ -8812,6 +8812,9 @@ def _iris_report(job: dict[str, Any]) -> dict[str, Any]:
            "is configured to do; I have not touched it by hand.")
     )
 
+    if payload.get("creative_bible") == "V10" and payload.get("status_summary"):
+        message = (f"MUSE returned the V10 production result.\n\n{payload['status_summary']}\n"
+                   f"Output: {run_dir}\nLAO job: {payload.get('lao_job', '')}")
     output_dir = _home() / "agent_outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{job['id']}.md"
@@ -9241,6 +9244,11 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
             else {"trendBrief": str(angle or "")[:400]} if is_before_after
             else {}
         )
+        if brief.get("creative_bible") == "V10":
+            research_path = str(brief.get("brief_path") or "")
+            if not research_path or not Path(research_path).is_file():
+                raise RuntimeError("V10 research handoff is missing; no production job started")
+            lao_input_args["researchBriefPath"] = research_path
         started = tool.execute(
             action="start", mode="dry_run", process_name=process_name,
             scope="production",
@@ -9335,6 +9343,10 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
             f"(last status: {status})"
         )
 
+    if status != "Successful" and brief.get("creative_bible") == "V10":
+        from .imagineindia_v10 import return_delivery
+        return return_delivery(job, sys.modules[__name__], lao_job_id, {}, "production_blocked",
+                               f"V10 production {status}; saved checkpoints need review. LAO job {lao_job_id}")
     if status != "Successful":
         stages.clear_stage("muse")
         stages.clear_stage("ia")
@@ -9388,7 +9400,7 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         meta = out.get("meta_publish_result") or {}
         published = bool(meta.get("status") == "published" and (meta.get("results") or {}).get("instagram") and (meta.get("results") or {}).get("facebook") and not meta.get("warnings") and not (meta.get("results") or {}).get("warnings"))
 
-    publish_receipt: dict[str, Any] = {}
+    publish_receipt: dict[str, Any] = {"platforms": (out.get("meta_publish_result") or {}).get("results") or {}}
     publish_target = str(brief.get("publish_target") or "").strip().lower()
     if (is_before_after and bool(brief.get("publish_authorized"))
             and publish_target == "facebook" and not published):
@@ -9402,6 +9414,10 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     if bool(brief.get("publish_authorized")) and not published:
         from .imagineindia_progress import publication_issue
         detail = publication_issue(out)
+        if brief.get("creative_bible") == "V10":
+            from .imagineindia_v10 import return_delivery
+            return return_delivery(job, sys.modules[__name__], lao_job_id, out, "publication_blocked",
+                                   detail or "Reel rendered; publication not verified")
         raise RuntimeError(detail or (
             f"MUSE cannot complete: requested {publish_target or 'social'} publication "
             "has no verified provider receipt"

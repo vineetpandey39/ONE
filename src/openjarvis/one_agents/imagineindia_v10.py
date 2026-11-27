@@ -8,6 +8,7 @@ def commission(job, runtime):
     location = runtime._peek_next_ia_location(runtime.IA_LOCATIONS_MANIFEST_PATH)
     if not location:
         raise RuntimeError('V10 has no eligible non-religious location')
+    runtime.stages.set_stage('ia', runtime.stages.RESEARCHING, f"Researching V10 place: {location['name']}")
     evidence = []
     research_error = ''
     research = runtime._sanjeevani_research()
@@ -41,14 +42,38 @@ def commission(job, runtime):
     path.parent.mkdir(parents=True,exist_ok=True)
     path.write_text(json.dumps(document,ensure_ascii=False,indent=2),encoding='utf-8')
     runtime._require_active_job(job,'commission the V10 restoration concept')
-    child=runtime.enqueue_job('muse',json.dumps({
+    brief={
         'brand':'imagineindia','content_type':'reel','creative_bible':'V10',
         'brief_path':str(path),'origin_job':job['id'],
         'priority':'V10 five-frame whole-precinct restoration',
         'angle':'Visible littering followed by earned engineering and completed masterpiece',
         'topic':'ImagineIndia V10 evergreen non-religious civic-restoration concept',
         'publish_authorized':True,
-    }),mode='execute',tier='fast',dedupe_key=f"imagineindia:v10:{job['id']}")
-    runtime.stages.clear_stage('ia')
+    }
+    child=runtime.stages.head_briefs_worker(
+        'ia','muse', carrying_detail='Taking verified V10 research to MUSE',
+        briefing_detail='Five frames; continuous physical construction; mandatory visual review',
+        awaiting_detail='MUSE is producing the V10 Reel',
+        enqueue=lambda: runtime.enqueue_job('muse',json.dumps(brief),mode='execute',tier='fast',
+                                           dedupe_key=f"imagineindia:v10:{job['id']}"))
     return {'agent':'IRIS','creative_bible':'V10','research_receipt':str(path),
             'handed_to':{'agent':'MUSE','job_id':child['id']},'published':False}
+
+
+def return_delivery(job, runtime, lao_job_id, output, status, summary):
+    """Return partial or rejected production to IRIS instead of losing the hand-back."""
+    meta=output.get('meta_publish_result') or {}
+    payload={'brand':'imagineindia','content_type':'reel','creative_bible':'V10',
+             'run_dir':(output.get('final_video_with_audio') or {}).get('path',''),
+             'title':(output.get('chosen_location') or {}).get('name','V10 Reel'),
+             'published':False,'lao_job':lao_job_id,'delivery_status':status,
+             'status_summary':summary,'publish_receipt':{'platforms':meta.get('results') or {},
+                                                        'warnings':meta.get('warnings') or {}}}
+    runtime.stages.set_stage('muse',runtime.stages.CARRYING_TO_HEAD,summary)
+    report=runtime.enqueue_job('ia',json.dumps(payload),mode='report',tier='fast',
+                              dedupe_key=f'imagineindia:v10:delivery:{lao_job_id}')
+    runtime.stages.clear_stage('muse')
+    return {'agent':'MUSE','_blocked':True,'status':status,'published':False,
+            'external_reconciled':True,'lao_job':lao_job_id,'run_dir':payload['run_dir'],
+            'content':summary,'blocked_reason':summary,'publish_receipt':payload['publish_receipt'],
+            'handed_to':{'agent':'IRIS','job_id':report['id']}}

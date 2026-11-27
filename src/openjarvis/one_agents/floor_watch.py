@@ -94,7 +94,8 @@ _TERMINAL_LAO_OK = {"Successful"}
 
 def _lao_output_is_collectable(error: str) -> bool:
     """False when LAO succeeded but ONE deliberately rejected its output."""
-    return "YATRA preproduction contract is incomplete" not in (error or "")
+    rejected = ("YATRA preproduction contract is incomplete", "Reel rendered;", "V10 clip ", "V10 image ")
+    return not any(marker in (error or "") for marker in rejected)
 
 
 def _home() -> Path:
