@@ -9206,7 +9206,9 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         # process has no Leonardo credential or Kling step. A Leonardo capacity block used to stop this independent
         # workflow before LAO created a job, so the 13:00 post failed every day at 5% even though its own providers
         # were healthy. Keep the paid-provider gate for reel/spotlight/news-hook workflows that actually consume it.
-        if not is_before_after:
+        # V10 production begins with an authenticated, read-only capacity preflight.
+        # Let that fresh check resolve an old hold before any image/video generation.
+        if not is_before_after and brief.get("creative_bible") != "V10":
             provider_capacity.require_available("leonardo")
         # LAO integration wiring (governance approval
         # 61c59bc2-15ae-4deb-bc2f-c65a984bcbb8, decided_by=olympus) was tried
@@ -9373,9 +9375,10 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         published = str((out.get("meta_publish_result") or {}).get("status") or "") == "published"
     else:
         reel = out.get("reel") or out.get("meta_publish") or {}
-        run_dir = str(reel.get("run_dir") or reel.get("output_dir") or "")
-        title = str(reel.get("title") or reel.get("location") or headline or "")
-        published = bool(reel.get("published") or reel.get("permalink"))
+        run_dir = str((out.get("final_video_with_audio") or {}).get("path") or reel.get("run_dir") or reel.get("output_dir") or "")
+        title = str((out.get("chosen_location") or {}).get("name") or reel.get("title") or reel.get("location") or headline or "")
+        meta = out.get("meta_publish_result") or {}
+        published = bool(meta.get("status") == "published" and (meta.get("results") or {}).get("instagram") and (meta.get("results") or {}).get("facebook") and not (meta.get("results") or {}).get("warnings"))
 
     publish_receipt: dict[str, Any] = {}
     publish_target = str(brief.get("publish_target") or "").strip().lower()
