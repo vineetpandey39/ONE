@@ -240,7 +240,8 @@ def validate_evidence(key, day, evidence):
 def finish_batch(rid, batch, response, cli):
     if not isinstance(response, dict):
         response = {'error':'CLI result was not an object'}
-    reports = {r.get('key'):r for r in response.get('obligations', []) if isinstance(r,dict)}
+    results = response.get('obligations')
+    reports = {r.get('key'):r for r in (results if isinstance(results,list) else []) if isinstance(r,dict)}
     with store() as db:
         for item in batch:
             result = reports.get(item['key'], {})
@@ -264,6 +265,9 @@ def finish_batch(rid, batch, response, cli):
 def cli_commands(output):
     commands=[]
     codex=shutil.which('codex')
+    if not codex:
+        candidates = sorted(Path('C:/Program Files/WindowsApps').glob('OpenAI.Codex_*/app/resources/codex.exe'), key=lambda p:p.stat().st_mtime, reverse=True)
+        codex = str(candidates[0]) if candidates else None
     if codex:
         commands.append(('codex',[codex,'exec','--approve-for-me','--ephemeral','--cd',str(ROOT/'src'),
              '--add-dir',str(ROOT/'one-company'),'--add-dir',str(DATA),

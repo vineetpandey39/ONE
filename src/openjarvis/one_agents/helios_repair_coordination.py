@@ -38,12 +38,17 @@ def ensure_operator_store(config: Path) -> Path:
         try:
             configured = Path(json.loads(config.read_text(encoding="utf-8"))["operator_db"])
         except (OSError, ValueError, KeyError, TypeError):
-            configured = None
+            raise RepairDeferred("configured external repair store unavailable or invalid")
     unstable = (configured is None or not configured.is_absolute()
                 or "\\documents\\codex\\" in str(configured).replace("/", "\\").casefold())
     path = _stable_operator_db() if unstable else configured
     if path != _stable_operator_db() and not path.exists():
         raise RepairDeferred("configured external repair store unavailable or invalid")
+    if path.exists():
+        with sqlite3.connect(path.as_uri() + '?mode=rw', uri=True) as existing:
+            columns = {row[1] for row in existing.execute('PRAGMA table_info(queue)')}
+            if not {'key', 'status', 'token', 'lease_until'} <= columns:
+                raise RepairDeferred("configured external repair store unavailable or invalid")
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as db:
         db.executescript("""
