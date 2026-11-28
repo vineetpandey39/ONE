@@ -4,11 +4,21 @@ import re
 
 def describe(payload):
     status = str((payload.get('job') or {}).get('status') or 'Pending')
+    if status in {'Failed','Stopped','Cancelled','Faulted'}:
+        error = str((payload.get('job') or {}).get('error_message') or '')
+        reason = ('Full prompt delivery check failed' if 'COMPLETE intended prompt' in error or 'submitted user message' in error
+                  else 'Location eligibility rejected' if 'eligibility' in error.lower()
+                  else 'Visual quality review failed' if 'rejected after' in error
+                  else 'Production stopped' if status in {'Stopped','Cancelled'}
+                  else 'Production failed; inspect job evidence')
+        return reason + '; returned to IRIS', 0
+    if status == 'Successful':
+        return 'Production finished; verifying publication receipts', 95
     if status == 'Pending':
         return 'Waiting for a production worker', 5
     logs = payload.get('logs') or []
     if not isinstance(logs, list):
-        return f'LAO {status}', 5
+        return 'Production active; detailed step unavailable', 5
     latest = max(logs, key=lambda row: str(row.get('created_at', '')), default={})
     review = re.search(r'V10 visual review (clip|image) (\d)/5', str(latest.get('message', '')))
     if review:
@@ -16,7 +26,7 @@ def describe(payload):
         return f'Visual review: {review.group(1)} {n}/5', (55+(n-1)*6 if review.group(1)=='clip' else 20+(n-1)*7)
     steps = [row for row in logs if re.match(r'Step \d+: ', str(row.get('message', '')))]
     if not steps:
-        return f'LAO {status}', 5
+        return 'Production active; detailed step unavailable', 5
     line = max(steps, key=lambda row: str(row.get('created_at', ''))).get('message', '')
     action = re.match(r'Step \d+: (\w+)', line).group(1)
     if action == 'generate_and_download_chatgpt_image':

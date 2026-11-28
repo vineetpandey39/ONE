@@ -9294,7 +9294,8 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         # long healthy poll looks exactly like an orphan.
         job_recovery.heartbeat(_connect, job["id"])
         probe = tool.execute(action="status", process_name=process_name,
-                             scope="production", job_id=lao_job_id)
+                             scope="production", job_id=lao_job_id,
+                             include_logs=brief.get("creative_bible") == "V10")
         if not probe.success:
             consecutive_probe_failures += 1
             stages.set_stage(
@@ -9331,7 +9332,8 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
         if brief.get("creative_bible") == "V10":
             from openjarvis.one_agents.imagineindia_progress import describe
             detail, progress = describe(last)
-            stages.set_stage("muse", stages.EXECUTING, f"{detail} · {elapsed}m", lao_job=lao_job_id, lao_process=process_name)
+            stages.set_stage("muse", stages.EXECUTING, f"ImagineIndia · {detail} · {elapsed}m", lao_job=lao_job_id, lao_process=process_name)
+            stages.set_stage("ia", stages.AWAITING_WORKER, f"MUSE → {detail}", worker="muse", worker_job=job["id"], lao_job=lao_job_id)
             with _connect() as db:
                 db.execute("UPDATE jobs SET progress = ? WHERE id = ? AND status = 'running'", (progress, job["id"]))
         if status in terminal:
@@ -9347,7 +9349,7 @@ def _run_muse(job: dict[str, Any]) -> dict[str, Any]:
     if status != "Successful" and brief.get("creative_bible") == "V10":
         from .imagineindia_v10 import return_delivery
         return return_delivery(job, sys.modules[__name__], lao_job_id, {}, "production_blocked",
-                               f"V10 production {status}; saved checkpoints need review. LAO job {lao_job_id}")
+                               f"V10 {detail}; LAO job {lao_job_id}")
     if status != "Successful":
         stages.clear_stage("muse")
         stages.clear_stage("ia")
