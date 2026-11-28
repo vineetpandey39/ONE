@@ -14,6 +14,7 @@ _GENERIC_SCIENCE_WORDS = {
     'a', 'an', 'and', 'apod', 'astronomy', 'at', 'for', 'from', 'how', 'image',
     'in', 'is', 'nasa', 'new', 'november', 'of', 'on', 'science', 'space',
     'star', 'the', 'to', 'universe', 'what', 'why', 'with', '2026',
+    'launch', 'launches', 'mission', 'missions', 'research', 'studies',
 }
 _MIN_VOLUME_SCORE = 20.0
 _MIN_MONTHLY_SEARCH = 1000
@@ -237,9 +238,14 @@ def select_topic(root, recent, *, client=None, synthesize=None, read=space_resea
             missing.append({'tool':name,'reason':str(exc)})
     if not receipts:
         raise ResearchUnavailable('No usable vidIQ science demand evidence; no paid production started')
-    rows = candidates(recent, read)
-    rows = _eligible_candidates(rows, receipts, client, missing)
+    candidate_rows = candidates(recent, read)
+    rows = _eligible_candidates(candidate_rows, receipts, client, missing)
     if not rows:
+        (root/'rejected-candidates.json').write_text(json.dumps({
+            'candidates': candidate_rows, 'receipts': receipts,
+            'unavailable_metrics': missing,
+            'reason': 'No candidate-bound current demand; no production authorized',
+        }, ensure_ascii=False, indent=2), encoding='utf-8')
         raise ResearchUnavailable('No official candidate has candidate-bound current demand; preserve research for the next run')
     evidence = {'official_candidates': rows,
                 'demand': [{'id': f'vidiq-{i}', 'data': evidence_text(r)} for i,r in enumerate(receipts)],

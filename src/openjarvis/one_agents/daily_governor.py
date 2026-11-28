@@ -206,7 +206,8 @@ def choose_batch(now=None):
             (day,candidate['head'],now))]
         # One agent per batch; historical siblings stay expandable, not unrelated repair targets.
         target=obligation_agent(batch[0])
-        batch=[item for item in batch if obligation_agent(item)==target][:8]
+        batch=([batch[0]] if batch[0]['kind']=='manual' else
+               [item for item in batch if obligation_agent(item)==target][:8])
         rid = uuid.uuid4().hex
         db.execute('INSERT INTO runs(id,head,started,status,keys_json) VALUES(?,?,?,?,?)',
                    (rid,candidate['head'],now,'running',json.dumps([r['key'] for r in batch])))
