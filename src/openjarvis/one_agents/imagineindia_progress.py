@@ -19,11 +19,17 @@ def describe(payload):
     logs = payload.get('logs') or []
     if not isinstance(logs, list):
         return 'Production active; detailed step unavailable', 5
-    latest = max(logs, key=lambda row: str(row.get('created_at', '')), default={})
+    events = [row for row in logs if re.match(r'Step \d+: |V10 visual review |V10 generating ', str(row.get('message','')))]
+    latest = max(events, key=lambda row: str(row.get('created_at', '')), default={})
     review = re.search(r'V10 visual review (clip|image) (\d)/5', str(latest.get('message', '')))
     if review:
         n = int(review.group(2))
         return f'Visual review: {review.group(1)} {n}/5', (55+(n-1)*6 if review.group(1)=='clip' else 20+(n-1)*7)
+    generation = re.search(r'V10 generating (clip|image) (\d)/5.*attempt (\d)', str(latest.get('message','')))
+    if generation:
+        kind, number, attempt = generation.group(1), int(generation.group(2)), int(generation.group(3))
+        label = 'Generating' if attempt == 1 else 'Correcting'
+        return f'{label} {kind} {number}/5' + (f' · attempt {attempt}/2' if attempt > 1 else ''), (55+(number-1)*6 if kind=='clip' else 20+(number-1)*7)
     steps = [row for row in logs if re.match(r'Step \d+: ', str(row.get('message', '')))]
     if not steps:
         return 'Production active; detailed step unavailable', 5
