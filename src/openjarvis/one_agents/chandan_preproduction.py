@@ -269,6 +269,24 @@ Close chapter {end} so the next numbered chapter follows naturally. End with {fi
     return prompt, begin, finish
 
 
+def _pack_chunk(text, begin, finish):
+    """Recover only a complete three-chapter payload missing its outer closers."""
+    try:
+        return _marked_json(text, begin, finish)
+    except json.JSONDecodeError:
+        if begin not in text or finish not in text:
+            raise
+        body = text.rsplit(begin, 1)[1].split(finish, 1)[0].strip()
+        # Do not repair strings, missing shots, or arbitrary malformed JSON.
+        if not body.startswith('{"chapters":[') or not body.endswith('}]}'):
+            raise
+        recovered = json.loads(body + ']}')
+        chapters = recovered.get('chapters', [])
+        if len(chapters) != 3 or any(len(c.get('shots', [])) != 5 for c in chapters):
+            raise ValueError('Incomplete preproduction chunk; outer closure repair refused')
+        return recovered
+
+
 def generate(path: Path) -> dict:
     manifest = pipeline.read(path / "mission.json")
     brief = pipeline.read(path / "research/commission-brief.json")
@@ -294,7 +312,7 @@ def generate(path: Path) -> dict:
     outputs, provider_job = provider.run(f"Origin to Ovation - {manifest['subject']} - preproduction", steps, {}, receipt, timeout=900)
     chapters = []
     for key, begin, finish in chunks:
-        chunk = _marked_json(outputs.get(key, ""), begin, finish)
+        chunk = _pack_chunk(outputs.get(key, ""), begin, finish)
         chapters.extend(chunk.get("chapters") or [])
     pack = {"title": brief.get("working_title") or f"{manifest['subject']}: The Full Journey",
             "central_dramatic_question": brief["central_dramatic_question"],
