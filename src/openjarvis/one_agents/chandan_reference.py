@@ -70,6 +70,24 @@ def reference_prompt(manifest, brief):
     adult_stages=[stage for stage in stages if int(stage['age']) >= 18]
     if len(adult_stages) < 2:
         raise ValueError('At least two sourced adult reference stages required')
+    if subject_id == 'yuvraj-singh':
+        # This commissioned subject is absent from the legacy sport profiles.
+        # Preserve the actual brief instead of silently generating a generic athlete.
+        era_rows = ' '.join(
+            f"Age {int(stage['age'])}, year {stage['year']}: {stage['appearance']}; "
+            f"context: {stage['place']}; period equipment: {stage['equipment']}."
+            for stage in adult_stages
+        )
+        return (
+            "Generate one cinematic CGI editorial character-design sheet for the cricketer Yuvraj Singh. "
+            "Show a recognisable, age-appropriate editorial interpretation, clearly CGI artwork rather than "
+            "a photograph or archival record. Use one row per sourced adult era, each with front, "
+            "three-quarter and true side-profile head-and-shoulders views of the same subject. "
+            + era_rows +
+            " Keep framing dignified, anatomy natural, and clothing unbranded and era-appropriate. "
+            "No invented medical scenes, logos, sponsors, signatures, watermarks, flags, trophies or readable text. "
+            "Output only the single image."
+        )
     for stage in adult_stages:
         age = int(stage['age'])
         life_stage = "young adult" if age < 21 else ("adult" if age < 32 else "mature adult")
