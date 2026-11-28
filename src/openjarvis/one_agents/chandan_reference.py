@@ -83,6 +83,10 @@ def reference_prompt(manifest, brief):
             "Show a recognisable, age-appropriate editorial interpretation, clearly CGI artwork rather than "
             "a photograph or archival record. Use one row per sourced adult era, each with front, "
             "three-quarter and true side-profile head-and-shoulders views of the same subject. "
+            "Portrait grid only: exactly three columns per era row. No action panels, bats, balls, "
+            "hands or full-body poses. Treat equipment as period context, not a request for action. "
+            "Preserve each era's sourced hair, headwear and facial-hair differences; do not repeat "
+            "one contemporary hairstyle across every row. "
             + era_rows +
             " Keep framing dignified, anatomy natural, and clothing unbranded and era-appropriate. "
             "No invented medical scenes, logos, sponsors, signatures, watermarks, flags, trophies or readable text. "
