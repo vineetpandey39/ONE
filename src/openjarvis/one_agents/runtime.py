@@ -11585,20 +11585,24 @@ def _yatra_capture_semantic_state(path: Path, *, required_any: Any = (),
         if not frames:
             return {"ok": False, "detail": "semantic check produced no capture frames"}
         texts = [kdp_cover_qc.read_text(frame) for frame in frames]
-        if not any(text.strip() for text in texts):
-            # A blank readout can also come from Windows OCR/frame cadence.
-            # Probe the same source pixels at the recorder's explicit sample
-            # offsets before treating a saved capture as unreadable.
-            for at in (2, 9, 16):
-                frame = Path(temporary) / f"retry-{at:02d}.png"
-                retry = subprocess.run(
-                    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", str(at),
-                     "-i", str(path), "-frames:v", "1", "-update", "1", "-y", str(frame)],
-                    capture_output=True, text=True, timeout=60,
-                )
-                if retry.returncode == 0 and frame.is_file():
-                    texts.append(kdp_cover_qc.read_text(frame))
     normalized = " ".join(" ".join(texts).split()).casefold()
+    if not normalized:
+        # The recorder sees the same file through an independent sampling
+        # path. A blank cover-OCR result must not erase a readable capture,
+        # but the fallback still reads pixels and enforces the same terms.
+        probe = _yatra_run_tool(
+            _YATRA_TOOLS / "yatra-capture" / "record_briefs.py",
+            ["--evidence-probe", str(path),
+             json.dumps({"requiredAny": required_any, "requiredAll": required_all})],
+            minutes=4,
+        )
+        if probe.get("ok"):
+            try:
+                evidence = json.loads(str(probe["detail"]).splitlines()[-1])
+                if evidence.get("samples", 0) > 0 and len(evidence.get("text_sha256", "")) == 64:
+                    return {**evidence, "ocr_path": "capture_controller"}
+            except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+                pass
     verdict = _yatra_capture_semantic_verdict(
         normalized, required_any=required_any, required_all=required_all)
     return {**verdict, "samples": len(texts),
