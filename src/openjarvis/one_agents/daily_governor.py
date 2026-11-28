@@ -140,7 +140,7 @@ def public_status():
         items = [dict(r) for r in db.execute('SELECT key,day,head,kind,state,attempts,next_at,updated,reason,evidence FROM obligations WHERE day=?', (day,))]
         runs = [dict(r) for r in db.execute('SELECT * FROM runs ORDER BY started DESC LIMIT 12')]
     return {'business_date': day, 'updated_at': datetime.now(IST).isoformat(),
-            'pid': os.getpid(), 'interval_seconds': 300, 'counts': dict(Counter(i['state'] for i in items)),
+            'pid': os.getpid(), 'interval_seconds': 60, 'counts': dict(Counter(i['state'] for i in items)),
             'obligations': items, 'runs': runs,
             'completion_rule': 'Verified output evidence, never CLI exit status or parent dispatch alone.'}
 

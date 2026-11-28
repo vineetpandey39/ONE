@@ -74,8 +74,12 @@ def select_topic(root, recent, *, reusable=None, synthesize=None, read=None,
             evidence = support(pack.get('primary_signals') or [], candidate)
             if evidence:
                 # Primary-source availability is independent of audience interest.
-                pages = [{'url': u, 'text': read(space_research.validate_url(u))[:24000]}
-                         for u in candidate['sources']]
+                pages = []
+                for u in candidate['sources']:
+                    content = read(space_research.validate_url(u))
+                    if isinstance(content, bytes):
+                        content = content.decode('utf-8', 'replace')
+                    pages.append({'url': u, 'text': content[:24000]})
                 if all(len(p['text'].strip()) >= 200 for p in pages):
                     eligible.append({**candidate, 'support': evidence, 'primary_pages': pages})
         except Exception as exc:
