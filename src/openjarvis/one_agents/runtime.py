@@ -5920,8 +5920,7 @@ def _scribe_cover_refresh(job: dict[str, Any], brief: dict[str, Any]) -> dict[st
         time.sleep(poll_seconds)
         job_recovery.heartbeat(_connect, job["id"])
         probe = tool.execute(action="status", process_name=process_name,
-                             scope="production", job_id=lao_job_id,
-                             include_logs=brief.get("creative_bible") == "V10")
+                             scope="production", job_id=lao_job_id)
         if not probe.success:
             continue
         try:
@@ -11586,6 +11585,19 @@ def _yatra_capture_semantic_state(path: Path, *, required_any: Any = (),
         if not frames:
             return {"ok": False, "detail": "semantic check produced no capture frames"}
         texts = [kdp_cover_qc.read_text(frame) for frame in frames]
+        if not any(text.strip() for text in texts):
+            # A blank readout can also come from Windows OCR/frame cadence.
+            # Probe the same source pixels at the recorder's explicit sample
+            # offsets before treating a saved capture as unreadable.
+            for at in (2, 9, 16):
+                frame = Path(temporary) / f"retry-{at:02d}.png"
+                retry = subprocess.run(
+                    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", str(at),
+                     "-i", str(path), "-frames:v", "1", "-update", "1", "-y", str(frame)],
+                    capture_output=True, text=True, timeout=60,
+                )
+                if retry.returncode == 0 and frame.is_file():
+                    texts.append(kdp_cover_qc.read_text(frame))
     normalized = " ".join(" ".join(texts).split()).casefold()
     verdict = _yatra_capture_semantic_verdict(
         normalized, required_any=required_any, required_all=required_all)
