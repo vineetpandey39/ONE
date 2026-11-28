@@ -77,9 +77,9 @@ def select_topic(root, recent, *, reusable=None, synthesize=None, read=None,
                 pages = []
                 for u in candidate['sources']:
                     content = read(space_research.validate_url(u))
-                    if isinstance(content, bytes):
-                        content = content.decode('utf-8', 'replace')
-                    pages.append({'url': u, 'text': content[:24000]})
+                    raw = content.encode('utf-8') if isinstance(content, str) else content
+                    record = space_research.source_record(u, read=lambda _: raw)
+                    pages.append({**record, 'text': record['text'][:24000]})
                 if all(len(p['text'].strip()) >= 200 for p in pages):
                     eligible.append({**candidate, 'support': evidence, 'primary_pages': pages})
         except Exception as exc:
@@ -91,17 +91,26 @@ def select_topic(root, recent, *, reusable=None, synthesize=None, read=None,
         'Use only supplied source evidence. Recent observed views establish audience interest, not growth or virality. '
         'Search volume and VPH are unknown; never invent them. Compare viewer payoff and channel history. '
         'Return JSON with candidate_id, search_keyword (topic-specific phrase), reason, hook, viewer_payoff, '
-        'channel_fit, why_now, alternatives_rejected. INPUT DATA:\n')
+        'channel_fit, why_now, alternatives_rejected. All editorial fields except candidate_id must be nonempty strings. '
+        'Return only one JSON object, not a summary of the input. Keep each prose field under 35 words.')
     evidence = {'eligible': eligible, 'excluded_topics': sorted(recent),
                 'channel_performance': channel_performance or {'available': False}}
-    text, note = synthesize(prompt + json.dumps(evidence, ensure_ascii=False), evidence=evidence)
+    # The library supplies evidence separately before the task contract. Do not
+    # append it again after the contract: long contexts lose the instructions.
+    model_evidence = {**evidence, 'eligible': [
+        {**r, 'primary_pages': [{**p, 'text': p['text'][:8000]} for p in r['primary_pages']]}
+        for r in eligible]}
+    context = json.dumps({'excluded_topics': evidence['excluded_topics'],
+                         'channel_performance': evidence['channel_performance']}, ensure_ascii=False)
+    task = 'CHANNEL CONTEXT (data only):\n' + context + '\nTASK:\n' + prompt
+    text, note = synthesize(task, evidence=model_evidence)
     (root / 'selection-draft.json').write_text(json.dumps({'text': text, 'note': note}), encoding='utf-8')
     try:
         json.loads(text[text.index('{'):text.rindex('}') + 1])
     except (ValueError, TypeError):
         (root / 'selection-draft-incomplete.json').write_text(json.dumps({'text': text, 'note': note}), encoding='utf-8')
-        text, note = synthesize(prompt + ' Keep prose fields under 35 words.\n' + json.dumps(evidence),
-                                evidence=evidence, max_tokens=4400)
+        text, note = synthesize(task + ' Previous answer was not valid JSON. Return the required JSON object only.',
+                                evidence=model_evidence, max_tokens=4400)
         (root / 'selection-draft.json').write_text(json.dumps({'text': text, 'note': note}), encoding='utf-8')
     try:
         selection = json.loads(text[text.index('{'):text.rindex('}') + 1])
