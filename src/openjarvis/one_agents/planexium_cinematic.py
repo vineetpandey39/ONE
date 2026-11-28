@@ -206,6 +206,27 @@ def music_overlay_failure(receipt):
             and 'intercepts pointer events' in error)
 
 
+def music_preflight_navigation_failure(draft, receipt):
+    """Authorize one retry only with live provider proof of a step-one failure."""
+    if not receipt.is_file():
+        return False
+    saved = json.loads(receipt.read_text(encoding='utf-8'))
+    error = 'Locator.count: Execution context was destroyed, most likely because of a navigation'
+    if saved.get('terminal_status') != 'Failed' or saved.get('provider_error') != error:
+        return False
+    probe = draft.tool.execute(action='status', job_id=saved['job_id'], process_name='', include_logs=True)
+    if not probe.success:
+        return False
+    payload = probe.metadata or json.loads(probe.content)
+    job = payload.get('job') or {}
+    messages = [row.get('message', '') for row in payload.get('logs', [])]
+    return (job.get('id') == saved['job_id'] and job.get('status') == 'Failed'
+            and job.get('error_message') == error and not job.get('output_result')
+            and any(message.startswith('Step 1: open_browser ') for message in messages)
+            and 'Step 1 failed: ' + error in messages
+            and not any(re.match(r'Step ([2-9]|[1-9][0-9]+):', message) for message in messages))
+
+
 def download_music(draft, steps, query, context, *, failure_limit=10):
     """Advance only past confirmed pre-download failures, preserving receipts."""
     limit=max(1,int(failure_limit))
@@ -229,6 +250,12 @@ def download_music(draft, steps, query, context, *, failure_limit=10):
         # One persistent retry only for proven failure before asset selection.
         # In-flight and ambiguous download receipts must never be replaced.
         selected_steps = steps
+        if music_preflight_navigation_failure(draft, receipt):
+            receipt = receipt.with_name(receipt.stem + '-preflight-navigation-recovery.json')
+            # The failure happened before selection/download. Give the browser
+            # redirect time to settle; retain one stable recovery checkpoint.
+            if not receipt.exists():
+                time.sleep(10)
         if music_overlay_failure(receipt):
             receipt = receipt.with_name(receipt.stem + '-overlay-recovery.json')
             selected_steps = dismiss_music_search_overlay(steps)
