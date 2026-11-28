@@ -264,6 +264,20 @@ def select_topic(root, recent, *, client=None, synthesize=None, read=space_resea
     # silently discard our IDs and return an empty commission.
     text, note = synthesize(prompt + '\nINPUT DATA:\n' + json.dumps(evidence,ensure_ascii=False), evidence=evidence)
     (root/'selection-draft.json').write_text(json.dumps({'text':text,'note':note},indent=2),encoding='utf-8')
+    # A truncated local response is a transport/format failure, not new demand.
+    # Retry only syntax, once, using the same captured evidence and no provider
+    # research replay. Semantic admission below remains authoritative.
+    try:
+        json.loads(text[text.index('{'):text.rindex('}')+1])
+    except (ValueError, TypeError):
+        (root/'selection-draft-incomplete.json').write_text(
+            json.dumps({'text':text,'note':note},indent=2),encoding='utf-8')
+        text, note = synthesize(
+            prompt + '\nKeep each prose field under 35 words. Return a complete JSON object.'
+            + '\nINPUT DATA:\n' + json.dumps(evidence,ensure_ascii=False),
+            evidence=evidence, max_tokens=4400)
+        (root/'selection-draft.json').write_text(
+            json.dumps({'text':text,'note':note},indent=2),encoding='utf-8')
     try:
         selection = json.loads(text[text.index('{'):text.rindex('}')+1])
         chosen = next(r for r in rows if r['id']==str(selection['candidate_id']))
