@@ -22,18 +22,31 @@ def commission_next(job):
     guesses an athlete from prose and never reuses somebody already present in
     the permanent content calendar.
     """
-    queue_path = ROOT / "commission-queue.json"
-    if not queue_path.is_file():
-        queue_path = Path(__file__).with_name("origin_to_ovation_commission_queue.json")
-    if not queue_path.is_file():
+    queue_paths = [ROOT / "commission-queue.json",
+                   Path(__file__).with_name("origin_to_ovation_commission_queue.json")]
+    queue_paths = [p for p in queue_paths if p.is_file()]
+    if not queue_paths:
         raise ValueError("Origin to Ovation commission queue is missing")
-    queue = read(queue_path)
-    candidates = queue.get("candidates") or []
     calendar_path = ROOT / "content-calendar.json"
     calendar = read(calendar_path) if calendar_path.is_file() else {"episodes": []}
     used = {str(row.get("subject_id") or "") for row in calendar.get("episodes", [])}
-    candidate = next((row for row in candidates if row.get("status", "ready") == "ready"
-                      and row.get("subject_id") not in used), None)
+    # A live queue can outlast its last candidate. Keep researched repository
+    # additions reachable, while local entries (including explicit holds) win.
+    candidates, seen = [], set()
+    for source in queue_paths:
+        for row in read(source).get("candidates") or []:
+            subject_id = row.get("subject_id")
+            if subject_id not in seen:
+                candidates.append((row, source))
+                seen.add(subject_id)
+    # A mission can exist before the calendar reservation/export succeeds.
+    # Never commission it again under a different date after a partial run.
+    for manifest_path in (ROOT / "missions").glob("*/mission.json"):
+        used.add(str(read(manifest_path).get("subject_id") or ""))
+    selected = next(((row, source) for row, source in candidates
+                     if row.get("status", "ready") == "ready"
+                     and row.get("subject_id") not in used), None)
+    candidate, queue_path = selected if selected else (None, None)
     if candidate is None:
         raise ValueError("No evidence-backed, duplicate-safe canonical subject remains in the commission queue")
     required = ("subject_id", "subject", "selection", "working_title",

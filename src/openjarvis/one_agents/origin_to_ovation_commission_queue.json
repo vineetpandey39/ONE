@@ -1,4 +1,36 @@
 {
   "schema": "one.origin-to-ovation.commission-queue/v1",
-  "candidates": []
+  "candidates": [{
+    "status": "ready",
+    "subject_id": "yuvraj-singh",
+    "subject": "Yuvraj Singh",
+    "selection": "ICC and BCCI document the 2007 six sixes, 2011 World Cup role, treatment and 2012 return. A distinct unused cricket comeback story, not a claim of measured audience demand.",
+    "working_title": "Yuvraj Singh: The Comeback Beyond the World Cup",
+    "opening_hook": "Six balls could make him famous. Returning to the field would ask something very different of Yuvraj Singh.",
+    "central_dramatic_question": "How did Yuvraj Singh rebuild his international cricket career after cancer treatment?",
+    "sources": {
+      "career": "https://www.icc-cricket.com/news/yuvraj-singh-announces-retirement-from-international-cricket-ipl?appview=true",
+      "return": "https://www.icc-cricket.com/news/yuvraj-makes-long-awaited-return",
+      "treatment": "https://www.bcci.tv/news/article/yuvraj-back-home-after-cancer-treatment",
+      "selection": "https://www.icc-cricket.com/news/yuvraj-in-indias-icc-world-t20-squad"
+    },
+    "reference_stages": [
+      {"age": 25, "year": 2007, "place": "South African cricket ground atmosphere", "appearance": "Era-accurate young adult Yuvraj identity", "equipment": "Unbranded blue cricket kit, helmet, gloves and bat; left-handed batting", "source_urls": ["https://www.icc-cricket.com/news/yuvraj-in-indias-icc-world-t20-squad"]},
+      {"age": 29, "year": 2011, "place": "Indian cricket ground atmosphere", "appearance": "Recognisable 2011 adult identity; source-reviewed hair and face", "equipment": "Unbranded cricket kit and left-handed batting equipment", "source_urls": ["https://www.bcci.tv/news/article/yuvraj-back-home-after-cancer-treatment"]},
+      {"age": 30, "year": 2012, "place": "International cricket return atmosphere", "appearance": "Recognisable post-treatment identity; source-reviewed hair, no invented medical scene", "equipment": "Unbranded cricket kit, left-handed batting and left-arm bowling", "source_urls": ["https://www.icc-cricket.com/news/yuvraj-makes-long-awaited-return"]}
+    ],
+    "direction_requirements": {
+      "sport": "cricket",
+      "identity_lock": "Approve and hash-lock era-specific reference before character scenes.",
+      "anatomy_gate": "Left-handed batting and left-arm bowling; correct grip, crease, stumps and pitch geometry.",
+      "animation_system": "Cricket ball trajectories, field geometry and sourced milestones; transparent overlays must not cover the subject.",
+      "packaging": "Story-specific title and thumbnail; reject earlier channel headlines."
+    },
+    "factual_guardrails": [
+      "Verify all statistics, dates and milestones in a linked claim ledger before scripting.",
+      "Do not invent medical prognosis, private dialogue, motives or treatment scenes.",
+      "The 2011 World Cup preceded treatment and the 2012 return; do not reverse that chronology.",
+      "Label original CGI reconstructions and do not clone the athlete voice."
+    ]
+  }]
 }
