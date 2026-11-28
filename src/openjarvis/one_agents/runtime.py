@@ -9596,11 +9596,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                     "content": "Sonia Travel Vlogs stopped: Sanjeevani is unavailable.",
                     "blocked_reason": "Sanjeevani unavailable", "handed_to": None}
         try:
-            # vidIQ supplies demand evidence for both normal commissioning and
-            # rejected-topic fallbacks. Sanjeevani and preproduction QC still
-            # verify factual claims; MCP failure cannot silently become a
-            # news-only commission or trigger paid narration.
-            from openjarvis.one_agents.vidiq_research import validate_keyword, research_label
+            # Sanjeevani is the sole research provider.
             if is_vista_short:
                 from openjarvis.one_agents.vista_research import commission
                 # Read-only research may resume under the original schedule
@@ -9635,7 +9631,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                 )
             no_news_reason = story.get("reason", "") if story["status"] == "none" else ""
             travel_query = "Indian travellers international trip visa flight hotel"
-            if story["status"] in {"picked", "vidiq", "sanjeevani"}:
+            if story["status"] in {"picked", "sanjeevani"}:
                 eligible = story["evidence"]
                 synthesis_prompt = story["prompt"]
                 synthesis_evidence = story["synthesis_evidence"]
@@ -9776,15 +9772,6 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
                     "rejected_brief_path": str(rejection_file),
                     "handed_to": None,
                 }
-            if story["status"] == "vidiq":
-                keyword_receipt = story.get("_keyword_receipt") or validate_keyword(brief)
-                from openjarvis.one_agents.vidiq_research import evidence_text
-                brief += ("\n\n## vidIQ MCP research receipt\n"
-                          + story["ranking_path"] + "\n"
-                          + evidence_text(keyword_receipt)
-                          + "\nDemand evidence is not official travel-rule evidence. "
-                            "Verify volatile facts with official sources before paid narration.\n")
-                video_language = "hinglish"
             if story["status"] == "picked":
                 # The model never saw the (very long) news URLs; attach the real ones and the scoring receipt so
                 # the brief that travels on to the script writer carries its own proof.
@@ -9847,7 +9834,7 @@ def _iris_dispatch_brand(job: dict[str, Any], brand: dict[str, Any], *,
             evidence_file = output_dir / f"{job['id']}-{'vista-slot' if is_vista_short else 'yatra-trend'}-brief.md"
             evidence_file.write_text(
                 f"# {head_name} -> {'VISTA SlotBrief' if is_vista_short else 'YATRA TrendBrief'}\n\nRequest: {task}\n\n"
-                f"Researched by: {research_label(story)}\n\n"
+                f"Researched by: Sanjeevani / verified source evidence\n\n"
                 + (f"Research attempts: {story['fallback_receipt']}\n\n"
                    if story.get("fallback_receipt") else "")
                 + f"{grounded_angle}\n", encoding="utf-8")

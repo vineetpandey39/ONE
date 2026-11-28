@@ -43,11 +43,8 @@ def commission_longform(job_id, prior, *, reusable, synthesize, pick_story,
                         unique=None):
     """Choose one sourced long-form topic through Sanjeevani only.
 
-    Each provider attempt is persisted. vidIQ still gets first use and its
-    selected keyword still has to validate. Any provider/cap/selection/
-    validation failure then reaches Sanjeevani's scored travel discovery and
-    bounded public-search packs. Production remains blocked if those sources
-    cannot produce a unique, cited topic.
+    Each bounded Sanjeevani attempt is persisted. Production remains blocked
+    unless the sources support a unique, cited topic.
     """
     path = Path(output_dir) / f"{job_id}-yatra-research-attempts.json"
     path.parent.mkdir(parents=True, exist_ok=True)

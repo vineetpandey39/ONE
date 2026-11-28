@@ -866,7 +866,7 @@ def run_job(job: dict) -> dict:
                 sort_keys=True, ensure_ascii=False).encode()).hexdigest()
             commission["topic_lineage"] = {
                 "locked": True, "selected_at": datetime.now(timezone.utc).isoformat(),
-                "selection_sha256": selection_sha, "source": "vidiq_plus_planexium_channel_history",
+                "selection_sha256": selection_sha, "source": "sanjeevani_plus_planexium_channel_history",
                 "requested_topic": None,
             }
         _write(commission_path, commission)

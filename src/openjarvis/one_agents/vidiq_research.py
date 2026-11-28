@@ -42,36 +42,7 @@ class ResearchUnavailable(RuntimeError):
 
 
 def rpc(method: str, params: dict) -> dict:
-    token = load_credentials().get("custom", {}).get("VIDIQ_API_KEY", "")
-    if not token.startswith("vidiq") or any(c.isspace() for c in token):
-        raise ResearchUnavailable("vidIQ read-only key is not configured in ONE vault")
-    request_id = "one-research"
-    try:
-        with httpx.Client(timeout=35, follow_redirects=False) as client:
-            with client.stream("POST", ENDPOINT, headers={
-                "Authorization": "Bearer " + token,
-                "Accept": "application/json, text/event-stream",
-            }, json={"jsonrpc": "2.0", "id": request_id,
-                     "method": method, "params": params}) as response:
-                response.raise_for_status()
-                if "text/event-stream" in response.headers.get("content-type", ""):
-                    result = None
-                    for line in response.iter_lines():
-                        if line.startswith("data:"):
-                            candidate = json.loads(line[5:].strip())
-                            if candidate.get("id") == request_id:
-                                result = candidate
-                                break
-                    if result is None:
-                        raise ResearchUnavailable("vidIQ returned no matching MCP result")
-                else:
-                    result = json.loads(response.read())
-    except (httpx.HTTPError, ValueError) as exc:
-        # Exception bodies/headers must not leak the credential to job logs.
-        raise ResearchUnavailable(f"vidIQ MCP transport failed: {type(exc).__name__}") from None
-    if result.get("error"):
-        raise ResearchUnavailable("vidIQ MCP returned an RPC error")
-    return result.get("result", {})
+    raise ResearchUnavailable("vidIQ retired by owner 2026-11-28; use Sanjeevani only")
 
 
 class ResearchClient:
