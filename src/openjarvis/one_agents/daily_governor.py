@@ -290,6 +290,21 @@ def cli_commands(output):
     return commands
 
 
+def completed_response(output, batch):
+    """A final result file is usable only when every requested key is accounted for."""
+    try:
+        response=json.loads(output.read_text(encoding='utf-8'))
+        reports=response['obligations']
+        keys=[r['key'] for r in reports]
+        if len(keys)!=len(set(keys)) or set(keys)!={r['key'] for r in batch}:
+            return None
+        if any(r.get('state') not in {'verified','superseded','waiting','blocked'} for r in reports):
+            return None
+        return response
+    except (OSError,ValueError,KeyError,TypeError):
+        return None
+
+
 def run_batch(rid, head, batch):
     run_dir=STATE/'runs'/rid
     run_dir.mkdir(parents=True)
@@ -312,12 +327,31 @@ def run_batch(rid, head, batch):
                 proc=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=log,stderr=subprocess.STDOUT,
                     cwd=ROOT/'src',text=True,encoding='utf-8',errors='replace',
                     creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+                final_response=None
+                deadline=time.monotonic()+1200
                 try:
-                    proc.communicate(prompt,timeout=1200)
+                    proc.communicate(prompt,timeout=5)
                 except subprocess.TimeoutExpired:
-                    proc.kill(); proc.wait()
-                    response={'error':name+' timed out; inspect child processes and receipts before replay'}
-                    break  # Uncertain execution must not immediately replay through another CLI.
+                    while proc.poll() is None and time.monotonic()<deadline:
+                        # Codex may linger during shutdown after writing its final message.
+                        # Stop only that CLI after a stable complete receipt; detached production remains alive.
+                        if name=='codex' and output.exists() and time.time()-output.stat().st_mtime>=30:
+                            final_response=completed_response(output,batch)
+                            if final_response is not None:
+                                log.write('\nGovernor: final receipt stable; releasing lingering CLI process only.\n');log.flush()
+                                proc.terminate()
+                                try: proc.wait(timeout=5)
+                                except subprocess.TimeoutExpired: proc.kill();proc.wait()
+                                break
+                        try: proc.wait(timeout=5)
+                        except subprocess.TimeoutExpired: pass
+                    if proc.poll() is None:
+                        proc.kill(); proc.wait()
+                        response={'error':name+' timed out; inspect child processes and receipts before replay'}
+                        break  # Uncertain execution must not immediately replay through another CLI.
+            if final_response is not None:
+                response=final_response
+                break  # finish_batch still validates every claimed successful outcome.
             raw=output.read_text(encoding='utf-8') if name=='codex' and output.exists() else (run_dir/(name+'.log')).read_text(encoding='utf-8')
             if proc.returncode:
                 response={'error':name+' CLI failed; see '+str(run_dir/(name+'.log'))}
